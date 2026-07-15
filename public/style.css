@@ -1,0 +1,178 @@
+/* wrp — a proper browser chrome for iOS 6 WebKit (-webkit-box flexbox,
+   no CSS variables). Tokens: chassis #0e0f11, panel #191b1e, field #101215,
+   raised #24262a, hairline #2c2e33, text #eceded, muted #8f939a,
+   gold #d9a441 (the only accent: progress, star, focus). Type: Avenir Next
+   (ships on the device). Signature: page-load progress fills the address
+   field, the way Safari did in 2012. */
+
+* { -webkit-box-sizing: border-box; box-sizing: border-box; -webkit-tap-highlight-color: rgba(0,0,0,0); }
+html, body { margin: 0; padding: 0; height: 100%; background: #0e0f11; overflow: hidden;
+  font-family: "Avenir Next", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  -webkit-user-select: none; color: #eceded; }
+button { font-family: inherit; }
+
+/* ---- toolbar ---- */
+#bar { position: absolute; left: 0; right: 0; top: 0; height: 50px; padding: 8px 6px;
+  background: #191b1e; border-bottom: 1px solid #2c2e33; z-index: 10;
+  display: -webkit-box; -webkit-box-orient: horizontal; -webkit-box-align: center; }
+.btn { display: block; height: 34px; min-width: 38px; margin: 0 2px; padding: 0 4px;
+  font-size: 19px; line-height: 34px; text-align: center; color: #eceded;
+  background: transparent; border: 0; border-radius: 8px; }
+.btn:active { background: #24262a; }
+.btn[disabled] { color: #4a4d53; }
+.btn[disabled]:active { background: transparent; }
+.btn.nav { font-size: 24px; font-weight: 500; }
+#dotcom { font-size: 12px; font-weight: 600; letter-spacing: 0.3px; }
+#kbd.pulse { color: #d9a441;
+  -webkit-animation: pulse 0.9s ease-in-out infinite alternate; }
+@-webkit-keyframes pulse { from { opacity: 1; } to { opacity: 0.45; } }
+
+/* ---- omnibox ---- */
+#omnibox { -webkit-box-flex: 1; position: relative; height: 34px; margin: 0 4px;
+  background: #101215; border: 1px solid #2c2e33; border-radius: 9px;
+  display: -webkit-box; -webkit-box-orient: horizontal; -webkit-box-align: center; }
+#omnibox.focus { border-color: #d9a441; }
+#progress { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 8px;
+  background: rgba(217,164,65,0.22); opacity: 0;
+  -webkit-transition: width 0.25s linear, opacity 0.3s linear; }
+#siteicon { position: relative; width: 16px; height: 16px; margin: 0 0 0 10px; border: 0; display: none; }
+#urlform { -webkit-box-flex: 1; position: relative; margin: 0; padding: 0; height: 32px; }
+#url { display: block; width: 100%; height: 32px; padding: 0 8px 0 10px; font-size: 15px;
+  font-family: inherit; color: #eceded; background: transparent; border: 0;
+  -webkit-appearance: none; -webkit-user-select: text; }
+#url:focus { outline: none; }
+.inbtn { position: relative; display: block; width: 32px; height: 32px; padding: 0;
+  font-size: 17px; line-height: 32px; text-align: center;
+  color: #8f939a; background: transparent; border: 0; border-radius: 7px; }
+.inbtn:active { color: #eceded; }
+#star.on { color: #d9a441; }
+
+/* ---- suggestions (anchored to the omnibox) ---- */
+#sugg { position: absolute; left: -1px; right: -1px; top: 38px; z-index: 30; display: none;
+  background: #191b1e; border: 1px solid #2c2e33; border-radius: 10px; overflow: hidden;
+  -webkit-box-shadow: 0 8px 24px rgba(0,0,0,0.5); box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+#sugg .item { padding: 9px 14px; border-bottom: 1px solid #232529; }
+#sugg .item:active { background: #24262a; }
+#sugg .item .t { display: block; font-size: 14px; color: #eceded; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+#sugg .item .u { display: block; font-size: 12px; color: #8f939a; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- tab bar (below the toolbar, Safari-iPad style) ---- */
+#tabs { position: absolute; left: 0; right: 0; top: 50px; height: 36px; padding: 5px 6px 0;
+  background: #0e0f11; border-bottom: 1px solid #2c2e33; white-space: nowrap;
+  overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; z-index: 9; }
+.tab { display: inline-block; height: 31px; line-height: 29px; margin: 0 3px 0 0; padding: 0 2px 0 10px;
+  max-width: 220px; font-size: 13px; color: #8f939a; background: transparent;
+  border: 1px solid transparent; border-bottom: 0;
+  border-radius: 8px 8px 0 0; vertical-align: top; overflow: hidden; }
+.tab:active { background: #191b1e; }
+.tab.on { color: #eceded; background: #24262a; border-color: #2c2e33; }
+.tab .fav { width: 14px; height: 14px; margin: 8px 6px 0 0; vertical-align: top; border: 0; }
+.tab .lbl { display: inline-block; max-width: 150px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; vertical-align: top; }
+.tab .x { display: inline-block; width: 28px; height: 29px; text-align: center;
+  color: #8f939a; font-size: 16px; vertical-align: top; }
+.tab .x:active { color: #eceded; }
+#newtab { display: inline-block; width: 34px; height: 31px; line-height: 29px; margin: 0;
+  text-align: center; font-size: 19px; color: #8f939a; background: transparent;
+  border-radius: 8px 8px 0 0; vertical-align: top; }
+#newtab:active { background: #191b1e; color: #eceded; }
+
+/* ---- screen ---- */
+#wrap { position: absolute; left: 0; right: 0; top: 86px; bottom: 0; overflow: hidden;
+  text-align: center; background: #000; }
+#screen { display: inline-block; -webkit-transform: translateZ(0); }
+body.fs #bar, body.fs #tabs { display: none; }
+body.fs #wrap { top: 0; }
+#fsdot { position: absolute; right: 10px; top: 10px; width: 34px; height: 34px; z-index: 25;
+  display: none; background: rgba(25,27,30,0.8); border: 1px solid #2c2e33;
+  border-radius: 17px; color: #8f939a; font-size: 15px; line-height: 32px; text-align: center; }
+body.fs #fsdot { display: block; }
+
+/* ---- find bar (replaces the toolbar while open) ---- */
+#findbar { position: absolute; left: 0; right: 0; top: 0; height: 50px; padding: 8px 6px;
+  background: #191b1e; border-bottom: 1px solid #d9a441; z-index: 12; display: none; }
+#findbar.show { display: -webkit-box; -webkit-box-orient: horizontal; -webkit-box-align: center; }
+#findq { -webkit-box-flex: 1; display: block; height: 34px; margin: 0 4px; padding: 0 10px;
+  font-size: 15px; font-family: inherit; color: #eceded; background: #101215;
+  border: 1px solid #2c2e33; border-radius: 9px; -webkit-appearance: none; -webkit-user-select: text; }
+#findq:focus { border-color: #d9a441; outline: none; }
+#findclose { font-size: 14px; font-weight: 600; }
+
+/* ---- popover (the ⋯ menu) ---- */
+#catcher { position: absolute; left: 0; right: 0; top: 0; bottom: 0; z-index: 38; display: none; }
+#catcher.show { display: block; }
+#popover { position: absolute; right: 46px; top: 54px; width: 250px; z-index: 39; display: none;
+  background: #191b1e; border: 1px solid #2c2e33; border-radius: 11px;
+  -webkit-box-shadow: 0 10px 30px rgba(0,0,0,0.55); box-shadow: 0 10px 30px rgba(0,0,0,0.55); }
+#popover.show { display: block; }
+#popover .caret { position: absolute; top: -7px; right: 18px; width: 12px; height: 12px;
+  background: #191b1e; border-left: 1px solid #2c2e33; border-top: 1px solid #2c2e33;
+  -webkit-transform: rotate(45deg); }
+#popover .mi { display: block; width: 100%; padding: 12px 16px; font-size: 15px; text-align: left;
+  color: #eceded; background: transparent; border: 0; border-bottom: 1px solid #232529; }
+#popover .mi:first-of-type { border-radius: 11px 11px 0 0; }
+#popover .mi:last-of-type { border-bottom: 0; border-radius: 0 0 11px 11px; }
+#popover .mi:active { background: #24262a; }
+#popover .mi.dim { color: #8f939a; }
+
+/* ---- sheets (downloads / history / copy / paste) ---- */
+#shade { position: absolute; left: 0; right: 0; top: 0; bottom: 0; z-index: 40;
+  background: rgba(0,0,0,0.55); display: none; }
+#shade.show { display: block; }
+#panel { position: absolute; left: 50%; top: 64px; width: 440px; margin-left: -220px;
+  max-height: 74%; overflow: auto; -webkit-overflow-scrolling: touch; display: none;
+  background: #191b1e; border: 1px solid #2c2e33; border-radius: 12px; z-index: 41;
+  -webkit-box-shadow: 0 14px 40px rgba(0,0,0,0.6); box-shadow: 0 14px 40px rgba(0,0,0,0.6); }
+#panel.show { display: block; }
+#panel .hd { display: -webkit-box; -webkit-box-orient: horizontal; -webkit-box-align: center;
+  padding: 12px 10px 12px 16px; border-bottom: 1px solid #2c2e33; }
+#panel .hd h2 { -webkit-box-flex: 1; margin: 0; font-size: 16px; font-weight: 600; }
+#panel .hd .done { display: block; height: 30px; padding: 0 14px; font-size: 14px; font-weight: 600;
+  line-height: 30px; color: #d9a441; background: transparent; border: 0; border-radius: 8px; }
+#panel .hd .done:active { background: #24262a; }
+#panel .mi { display: block; width: 100%; padding: 12px 16px; font-size: 15px; text-align: left;
+  color: #eceded; background: transparent; border: 0; border-bottom: 1px solid #232529; }
+#panel .mi:active { background: #24262a; }
+#panel .mi .sub { display: block; font-size: 12px; color: #8f939a; margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#panel .sec { padding: 12px 16px 4px; font-size: 11px; font-weight: 600; color: #8f939a;
+  text-transform: uppercase; letter-spacing: 1.2px; }
+#panel textarea { display: block; width: 100%; height: 130px; padding: 12px 14px; font-size: 15px;
+  font-family: inherit; color: #eceded; background: #101215; border: 0;
+  border-bottom: 1px solid #2c2e33; -webkit-appearance: none; -webkit-user-select: text; resize: none; }
+#panel textarea:focus { outline: none; }
+#panel .row { display: -webkit-box; -webkit-box-orient: horizontal; padding: 10px; }
+#panel .row .act { display: block; -webkit-box-flex: 1; height: 42px; margin: 0 4px;
+  font-size: 15px; font-weight: 500; line-height: 42px; text-align: center;
+  color: #eceded; background: #24262a; border: 0; border-radius: 9px; }
+#panel .row .act:active { background: #2c2e33; }
+#panel .row .act.pri { background: #d9a441; color: #17140c; font-weight: 600; }
+#panel .row .act.pri:active { background: #c2913a; }
+#panel .empty { padding: 20px 16px; color: #8f939a; font-size: 14px; line-height: 1.5; }
+
+/* ---- touch feedback ---- */
+.fleck { position: absolute; width: 28px; height: 28px; z-index: 24; pointer-events: none;
+  border: 2px solid rgba(217,164,65,0.9); border-radius: 16px;
+  -webkit-animation: fleck 0.35s ease-out forwards; }
+@-webkit-keyframes fleck {
+  from { opacity: 0.9; -webkit-transform: scale(0.5); }
+  to { opacity: 0; -webkit-transform: scale(1.5); }
+}
+#dragring { position: absolute; width: 40px; height: 40px; z-index: 24; display: none;
+  pointer-events: none; border: 2px solid rgba(217,164,65,0.85);
+  background: rgba(217,164,65,0.15); border-radius: 22px; }
+#dragring.show { display: block; }
+
+/* ---- hidden keyboard input ---- */
+#hidden { position: absolute; left: -1000px; top: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; }
+
+/* ---- hint toast + debug ---- */
+#hint { position: absolute; left: 50%; bottom: 18px; width: 280px; margin-left: -140px; padding: 10px 0;
+  text-align: center; color: #eceded; font-size: 13px; background: rgba(25,27,30,0.95);
+  border: 1px solid #2c2e33; border-radius: 10px; z-index: 50; }
+#debug { position: absolute; left: 6px; right: 6px; top: 92px; max-height: 46%; overflow: auto;
+  z-index: 20; background: rgba(0,0,0,0.86); color: #79c979; padding: 8px 10px; border-radius: 8px;
+  font: 12px/1.45 Menlo, Courier, monospace; white-space: pre-wrap; word-break: break-all; }
+.off { display: none !important; }

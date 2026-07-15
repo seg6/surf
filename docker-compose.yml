@@ -1,0 +1,30 @@
+services:
+  rbrowser:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - PORT=8080
+      - START_URL=https://duckduckgo.com
+      - PROFILE=/data/profile   # persistent Chrome profile (logins/cookies survive restarts)
+      - VW=1024                 # frame width (match the iPad mini screen)
+      - VH=768                  # frame height
+      - QUALITY=55              # jpeg quality; lower = smaller/faster frames
+      # - ADBLOCK=0             # uncomment to disable the built-in ad/tracker blocking
+    expose:
+      - "8080"
+    shm_size: "1g"             # headful Chrome + multiple tabs want a roomy /dev/shm
+    volumes:
+      - rbrowser_profile:/data/profile
+      - rbrowser_downloads:/data/downloads
+    networks:
+      - web
+
+volumes:
+  rbrowser_profile:
+  rbrowser_downloads:
+
+networks:
+  web:
+    external: true
