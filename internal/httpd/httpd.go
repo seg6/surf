@@ -19,12 +19,12 @@ import (
 )
 
 type Server struct {
-	cfg    *config.Config
-	auth   *auth.Auth
-	hub    *ws.Hub
-	pub    fs.FS
-	index  []byte
-	extra  map[string]http.HandlerFunc // feature routes (downloads, tabicons)
+	cfg   *config.Config
+	auth  *auth.Auth
+	hub   *ws.Hub
+	pub   fs.FS
+	index []byte
+	extra map[string]http.HandlerFunc // feature routes (downloads, tabicons)
 }
 
 func New(cfg *config.Config, a *auth.Auth, hub *ws.Hub) (*Server, error) {
@@ -56,13 +56,13 @@ func (s *Server) Handler() http.Handler {
 }
 
 var iconPaths = map[string]string{
-	"/icon.png":                        "icon.png",
-	"/apple-touch-icon.png":            "icon.png",
+	"/icon.png":                         "icon.png",
+	"/apple-touch-icon.png":             "icon.png",
 	"/apple-touch-icon-precomposed.png": "icon.png",
-	"/icon-57.png":                     "icon-57.png",
-	"/icon-72.png":                     "icon-72.png",
-	"/icon-114.png":                    "icon-114.png",
-	"/icon-144.png":                    "icon-144.png",
+	"/icon-57.png":                      "icon-57.png",
+	"/icon-72.png":                      "icon-72.png",
+	"/icon-114.png":                     "icon-114.png",
+	"/icon-144.png":                     "icon-144.png",
 }
 
 var staticAssets = map[string]string{
@@ -105,6 +105,10 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		s.serveEmbedded(w, strings.TrimPrefix(p, "/"), ct, "public, max-age=31536000")
 		return
 	}
+	if p == "/native-config" {
+		s.handleNativeConfig(w, r)
+		return
+	}
 	for pattern, h := range s.extra {
 		if p == pattern || (strings.HasSuffix(pattern, "/") && strings.HasPrefix(p, pattern)) {
 			h(w, r)
@@ -135,13 +139,26 @@ func (s *Server) serveEmbedded(w http.ResponseWriter, name, contentType, cache s
 // connection to the hub.
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	if q.Get("k") != s.auth.Token || q.Get("v") != config.ClientVersion {
-		log.Printf("ws rejected: bad token or version %q (want %s) from %s", q.Get("v"), config.ClientVersion, r.RemoteAddr)
+	native := q.Get("nv") != ""
+	versionOK := q.Get("v") == config.ClientVersion || q.Get("nv") == config.NativeVersion
+	if q.Get("k") != s.auth.Token || !versionOK {
+		log.Printf("ws rejected: bad token or version v=%q nv=%q (want v=%s nv=%s) from %s", q.Get("v"), q.Get("nv"), config.ClientVersion, config.NativeVersion, r.RemoteAddr)
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	log.Printf("ws connected from %s", r.RemoteAddr)
-	s.hub.Serve(w, r)
+	if native {
+		log.Printf("ws connected native nv=%s from %s", q.Get("nv"), r.RemoteAddr)
+	} else {
+		log.Printf("ws connected web v=%s from %s", q.Get("v"), r.RemoteAddr)
+	}
+	s.hub.Serve(w, r, native)
+}
+
+func (s *Server) handleNativeConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	fmt.Fprintf(w, `{"token":%q,"vw":%d,"vh":%d,"nv":%q,"host":%q}`,
+		s.auth.Token, s.cfg.ViewW, s.cfg.ViewH, config.NativeVersion, r.Host)
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {

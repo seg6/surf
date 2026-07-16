@@ -1,5 +1,3 @@
-.git
-*.md
 native/buildenv/sdk/
 native/iphoneosstuff/
 native/client/.theos/

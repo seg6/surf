@@ -40,7 +40,7 @@ offset  size  field
 
 | type | name | payload | audience | notes |
 |---|---|---|---|---|
-| 1 | Full JPEG | JPEG, whole viewport | web + native | Existing. `w/h` are *encoded pixel* dims (may be half-res during motion — display scaled to fit; never trust them to equal viewport CSS size) |
+| 1 | Full JPEG | JPEG, whole viewport | web + native | Existing. `w/h` are *encoded pixel* dims (web-only sessions may be half-res during motion; native sessions request full-res motion frames) |
 | 2 | Region JPEG | JPEG of a sub-rect | native only | **Reserved, not implemented yet.** `rectX/rectY` (viewport CSS px) + `w/h` = paste position/size. Future typing-crispness lane; defined now so headers never need renegotiation |
 | 3 | H.264 access unit | one complete AU, Annex-B byte stream (start codes intact) | native, video mode | `seq` = AU index. flags bit0 = 1 if AU contains an IDR. `rectX/rectY/scrollX/scrollY` = 0. `w/h` = coded size (constant per encoder run; changes only after a `video` restart) |
 | 4 | Audio chunk | PCM s16le mono (phase 3b; sample rate in the `video-config` JSON below) | native, audio on | `seq` = chunk index; ~50–100ms per chunk |
@@ -96,6 +96,6 @@ All coordinates are **fractions of the viewport (0..1)**. Full field union: `pro
 
 ## 5. Wire examples
 
-Type-1 frame during motion (half-res): `RBR1 | 01 | 00 | 0020 | seq | 0000 0000 | w=0200 (512) | h=0180 (384) | len | scrollX | scrollY | <jpeg>` — client scales 512×384 to the full view.
+Type-1 frame during web-only motion may be half-res: `RBR1 | 01 | 00 | 0020 | seq | 0000 0000 | w=0200 (512) | h=0180 (384) | len | scrollX | scrollY | <jpeg>` — clients scale encoded dims to the full view. Native clients request full-res motion frames.
 
 Type-3 IDR AU: `RBR1 | 03 | 01 | 0020 | seq | 0000 0000 | w=0400 | h=0300 | len | 00000000 | 00000000 | 00 00 00 01 09 … 00 00 00 01 67(SPS) … 68(PPS) … 65(IDR) …`

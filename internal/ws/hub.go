@@ -68,6 +68,17 @@ func (h *Hub) ClientCount() int {
 	return len(h.clients)
 }
 
+func (h *Hub) HasNativeClient() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for c := range h.clients {
+		if c.Native {
+			return true
+		}
+	}
+	return false
+}
+
 type outMsg struct {
 	msgType int
 	data    []byte
@@ -86,15 +97,16 @@ type Client struct {
 	mu       sync.Mutex
 	inflight int
 	pending  *protocol.Frame
+	Native   bool
 }
 
 // Serve upgrades the request and runs the read loop until disconnect.
-func (h *Hub) Serve(w http.ResponseWriter, r *http.Request) {
+func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, native bool) {
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
-	c := &Client{hub: h, conn: conn, out: make(chan outMsg, 32), done: make(chan struct{})}
+	c := &Client{hub: h, conn: conn, out: make(chan outMsg, 32), done: make(chan struct{}), Native: native}
 	h.mu.Lock()
 	h.clients[c] = struct{}{}
 	h.mu.Unlock()

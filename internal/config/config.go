@@ -11,22 +11,28 @@ import (
 // agree, so a stale cached client can never talk a mismatched protocol.
 const ClientVersion = "20260715-5"
 
+// NativeVersion gates the Objective-C client handshake separately from the web
+// client so native-only protocol additions do not force web cache churn.
+const NativeVersion = "20260716-1"
+
 type Config struct {
-	Port          int
-	ChromePath    string
-	StartURL      string
-	Profile       string
-	ViewW         int
-	ViewH         int
-	Quality       int     // steady-state screencast JPEG quality
-	MotionQuality int     // quality while scrolling/typing (cheap frames, low latency)
-	MotionScale   float64 // resolution factor during motion; smaller = faster decode
-	SharpQuality  int // quality of the post-settle captureScreenshot
-	SettleMS      int // how long after the last input before we consider motion over
-	AuthHash      string
-	AuthDays      int
-	Adblock       bool
-	DownloadsDir  string
+	Port                int
+	ChromePath          string
+	StartURL            string
+	Profile             string
+	ViewW               int
+	ViewH               int
+	Quality             int     // steady-state screencast JPEG quality
+	NativeQuality       int     // native-client screencast JPEG quality
+	NativeMotionQuality int     // native-client JPEG quality during motion
+	MotionQuality       int     // quality while scrolling/typing (cheap frames, low latency)
+	MotionScale         float64 // resolution factor during motion; smaller = faster decode
+	SharpQuality        int     // quality of the post-settle captureScreenshot
+	SettleMS            int     // how long after the last input before we consider motion over
+	AuthHash            string
+	AuthDays            int
+	Adblock             bool
+	DownloadsDir        string
 }
 
 func envInt(key string, def int) int {
@@ -52,20 +58,22 @@ func envFloat(key string, def float64) float64 {
 
 func Load() *Config {
 	return &Config{
-		Port:          envInt("PORT", 8080),
-		ChromePath:    envStr("CHROME", "/usr/bin/chromium"),
-		StartURL:      envStr("START_URL", "https://duckduckgo.com"),
-		Profile:       envStr("PROFILE", "/data/profile"),
-		ViewW:         envInt("VW", 1024),
-		ViewH:         envInt("VH", 768),
-		Quality:       envInt("QUALITY", 60),
-		MotionQuality: envInt("MOTION_QUALITY", 40),
-		MotionScale:   envFloat("MOTION_SCALE", 0.5),
-		SharpQuality:  envInt("SHARP_QUALITY", 82),
-		SettleMS:      envInt("SETTLE_MS", 180),
-		AuthHash:      envStr("AUTH_HASH", "$2a$14$U0M6mD3WVZ.GAYHuIKepPepFBSmm5zh.0JGhumvs6Fk6w8maxJcea"),
-		AuthDays:      envInt("AUTH_DAYS", 180),
-		Adblock:       os.Getenv("ADBLOCK") != "0",
-		DownloadsDir:  envStr("DOWNLOADS", "/data/downloads"),
+		Port:                envInt("PORT", 8080),
+		ChromePath:          envStr("CHROME", "/usr/bin/chromium"),
+		StartURL:            envStr("START_URL", "https://duckduckgo.com"),
+		Profile:             envStr("PROFILE", "/data/profile"),
+		ViewW:               envInt("VW", 1024),
+		ViewH:               envInt("VH", 768),
+		Quality:             envInt("QUALITY", 60),
+		NativeQuality:       envInt("NATIVE_QUALITY", 100),
+		NativeMotionQuality: envInt("NATIVE_MOTION_QUALITY", 85),
+		MotionQuality:       envInt("MOTION_QUALITY", 40),
+		MotionScale:         envFloat("MOTION_SCALE", 0.5),
+		SharpQuality:        envInt("SHARP_QUALITY", 82),
+		SettleMS:            envInt("SETTLE_MS", 180),
+		AuthHash:            envStr("AUTH_HASH", "$2a$14$U0M6mD3WVZ.GAYHuIKepPepFBSmm5zh.0JGhumvs6Fk6w8maxJcea"),
+		AuthDays:            envInt("AUTH_DAYS", 180),
+		Adblock:             os.Getenv("ADBLOCK") != "0",
+		DownloadsDir:        envStr("DOWNLOADS", "/data/downloads"),
 	}
 }

@@ -1,6 +1,6 @@
-# 04 — The Objective-C client (iOS 6.0+, iPad, landscape)
+# 04 — The Objective-C client (iOS 6.0+, iPad, portrait + landscape)
 
-Style: plain UIKit, no storyboards/xibs (theos-friendly, reviewable diffs), no third-party deps. ARC per docs/01 §3. Every class prefixed `RB`. Target look: the web client's graphite/gold design language translated to native (flat, hairline borders, Avenir Next — it's a native iOS 6 font).
+Style: plain UIKit, no storyboards/xibs (theos-friendly, reviewable diffs), no third-party deps. ARC per docs/01 §3. Every class prefixed `RB`. Target look: **native iOS 6 Safari** — gradient toolbar + tab strip, unified omnibox with in-field progress fill, all icons drawn in CoreGraphics (decision log 2026-07-16; the graphite/gold language stays web-client-only).
 
 ## 1. Class map
 
@@ -66,7 +66,7 @@ Mirrors the web client's semantics exactly — the server's 3-deep inflight wind
 
 1. Net thread parses a type-1 frame → `RBFrameQueue.offer(frame)`: a **single pending slot**; if occupied, the old frame is replaced (coalesce) and — critical — **an ack is sent for the replaced frame too**. One `{"t":"ready"}` per received frame, no exceptions, or the pipeline stalls at 3.
 2. Decode queue (if idle) takes the slot: `CGImageSourceCreateWithData` → `CGImageSourceCreateImageAtIndex` → force decompression *on this queue* by drawing into a `CGBitmapContext` (device RGB, `kCGImageAlphaNoneSkipFirst|kCGBitmapByteOrder32Little`) sized to the image. iOS 6 has no `kCGImageSourceShouldCacheImmediately`; drawing once is the reliable decompress-off-main trick. Keep exactly one scratch context per size (frames alternate 1024×768 / 512×384 during motion — cache both).
-3. Main thread: `streamView.baseLayer.contents = (id)cgImage` (CATransaction with actions disabled — no implicit fades), aspect-scale via `contentsGravity` = resize (the layer is always viewport-shaped; half-res frames stretch, matching web behavior). Send `ready` *after* handing off to the layer (paced acks = server-side pacing, same as web).
+3. Main thread: `streamView.baseLayer.contents = (id)cgImage` (CATransaction with actions disabled — no implicit fades), aspect-scale via `contentsGravity` = resize (the layer is always viewport-shaped). Native clients request full-res motion JPEGs; web-only sessions may still receive half-res motion frames. Send `ready` *after* handing off to the layer (paced acks = server-side pacing, same as web).
 4. `poke` watchdog & `hello` resync: on `hello`, send `{"t":"size", w:1024, h:768}` once, reset seq expectations.
 
 Budget check (device gate): decode+draw of a 1024×768 q60 JPEG on A5 should land ~20–35ms on the decode queue; overlay shows it. If >60ms sustained, don't optimize blindly — that's the video lane's job.
@@ -76,7 +76,7 @@ Budget check (device gate): decode+draw of a 1024×768 q60 JPEG on A5 should lan
 All coordinates sent as **fractions** of RBStreamView's bounds. Recognizers on the stream view:
 
 - **Tap** → `{"t":"click", x, y}` + small gold fleck animation (design parity). Server may reply `editable`.
-- **Pan** (1 finger) → stream of `{"t":"wheel", x:anchorX, y:anchorY, dx, dy}` where anchor = touch-down point (fixed for the whole gesture — the web client learned this the hard way; a moving anchor crosses scrollable regions) and `dx = -translationDelta.x / viewW`, etc. (**negated** finger delta, matching `app.js` `sendScroll`). Send at recognizer callback rate; the server's motion/half-res machinery handles the load.
+- **Pan** (1 finger) → stream of `{"t":"wheel", x:anchorX, y:anchorY, dx, dy}` where anchor = touch-down point (fixed for the whole gesture — the web client learned this the hard way; a moving anchor crosses scrollable regions) and `dx = -translationDelta.x / viewW`, etc. (**negated** finger delta, matching `app.js` `sendScroll`). Send at recognizer callback rate; native clients get full-resolution motion frames.
 - **Inertia**: on pan end, take `velocityInView`, run a CADisplayLink-driven decay `v *= pow(0.998, dtMs)` emitting wheel messages until `|v| < 40 pt/s`; cancel instantly on any new touch. Identical constants to app.js — feel parity, and NO local content movement (PLAN.md rule 10).
 - **Pinch** (2 finger): live local preview — `streamView` transform scaled about the pinch centroid (pure visual); on end, send `{"t":"zoom", scale, cx, cy}` (centroid as fractions), keep the preview transform until the next frame arrives, then reset it in the same transaction the frame lands (web client's trick — avoids the double-jump).
 - **Long-press** (0.5s): `lpdown` at point; subsequent moves → `lpmove` (drag: sliders, maps, text selection); on release → `lpup` with `sel: !moved`. Server replies `copytext` when a selection was made → §6 clipboard. Show the web client's drag-ring affordance equivalent (a subtle ring under the finger).
@@ -96,7 +96,7 @@ All coordinates sent as **fractions** of RBStreamView's bounds. Recognizers on t
 
 ## 7. Chrome (RBChromeController + RBTabStrip + sheets)
 
-Layout (landscape 1024×768): top bar 44pt — [back][fwd] [omnibox: siteicon | url/progress | star | reload-or-stop] [menu]; tab strip 32pt below; stream view fills the rest (1024×692 visible). **Fullscreen**: menu action hides both bars (stream view gets 1024×768 — matching the server viewport 1:1, the ideal); a 24pt translucent dot bottom-right restores. Send `size` only if we choose per-mode viewport sizes later — v1 keeps 1024×768 always and letterboxes the chromed mode via aspect fit (simpler; revisit in Phase 4).
+Layout: v1 supports portrait and landscape by sending the stream view's current pixel size on connect and rotation. Landscape starts at 1024×768; portrait starts at 768×1024. Top bar/chrome layouts adapt around that viewport rather than letterboxing.
 
 - **Omnibox**: UITextField styled flat graphite; while loading, a gold progress fill behind the text driven by the server's progress messages (same source app.js uses); editing state swaps to full-URL + Go keyboard button → `{"t":"nav", url}`. Suggestions: `{"t":"suggest", q}` per keystroke (250ms debounce) → dropdown table of results.
 - **Star** toggles bookmark (server message per `features.go`); filled gold when `url{starred:true}`.

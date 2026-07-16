@@ -15,7 +15,7 @@ Goal: a **Docker build environment** (`native/buildenv/`) that any agent can run
 | ldid | pseudo-signing (SHA1 CodeDirectory is fine for iOS 6 AMFI-patched kernels) | github.com/sbingner/ldid or distro `ldid` |
 | theos | build system, `iphone/application` template, .deb packaging | github.com/theos/theos (Linux install is first-class) |
 | iPhoneOS6.1.sdk | headers + libs + frameworks | **user-provided**, see §2 |
-| libarclite_iphoneos.a | ARC runtime shim for deployment targets < iOS 7 | **user-provided**, same archive as the SDK, see §3 |
+| libarclite_iphoneos.a | Optional ARC runtime shim for deployment targets < iOS 7 | **user-provided if needed**, same archive as the SDK, see §3 |
 | dpkg-deb, fakeroot, perl, git | packaging plumbing | apt |
 
 Build entrypoint: `docker run --rm -v <repo>:/src wrp-buildenv make -C /src/native/client package` → emits `native/client/packages/*.deb`.
@@ -54,13 +54,14 @@ Options, in order of preference:
    On a modern Mac the dmg mounts fine; the .app just won't run (don't need it to).
 2. Community SDK archives (e.g. the well-known `iOS-SDKs` GitHub mirrors). Same directory lands in the same place.
 
-Also extract from the *same* Xcode: `.../usr/lib/arc/libarclite_iphoneos.a` → `native/buildenv/sdk/libarclite_iphoneos.a`.
+If available, also extract from the *same* Xcode: `.../usr/lib/arc/libarclite_iphoneos.a` → `native/buildenv/sdk/libarclite_iphoneos.a`. This is optional for the Phase 0 app because forcing a newer libarclite archive can introduce Objective-C runtime symbols absent from iOS 6.
 
 ## 3. ARC vs MRC (risk R1)
 
 We want ARC. Deployment target < iOS 7 requires `libarclite` for a handful of runtime entry points; modern toolchains no longer ship it.
 
-- **Primary path:** vendor `libarclite_iphoneos.a` (§2) and add `-force_load $(SDK_ROOT)/libarclite_iphoneos.a` (or `-larclite_iphoneos` with `-L`) to LDFLAGS.
+- **Primary path:** compile ARC without force-loading `libarclite`; the Phase 0 app links cleanly against the iOS 6.1 SDK this way. The device ARC smoke test remains the real gate.
+- **If the device smoke test exposes missing ARC runtime support:** retry with a known-good Xcode 4.6.3-era `libarclite_iphoneos.a`, not a newer archive. Newer archives can reference `_objc_loadClassref` / `_objc_readClassPair`, which are not exported by the iOS 6 SDK runtime.
 - **Phase 0 gate includes an ARC smoke test**: an app that allocates in loops, uses `__weak` (legal on iOS 5+), blocks capturing self, autorelease pools, container literals `@[] @{}` — runs 60s on device without crash or leak growth.
 - **Fallback (record in PLAN.md decision log if taken):** compile MRC (`-fno-objc-arc`) with strict rules — every `alloc`/`copy`/`retain` paired in `dealloc`, properties `retain`/`assign` only, no blocks capturing self without a `__block` dance. Agents writing MRC must run the mental "who releases this" check in every method; prefer autorelease at creation.
 
@@ -80,7 +81,7 @@ CFBundleExecutable      WRP
 CFBundleDisplayName     WRP
 UIDeviceFamily          <array><integer>2</integer></array>       <!-- iPad only -->
 UISupportedInterfaceOrientations
-                        LandscapeLeft + LandscapeRight            <!-- v1 landscape-only -->
+                        Portrait + PortraitUpsideDown + LandscapeLeft + LandscapeRight
 UIStatusBarHidden       true
 CFBundleIconFiles       icon-72.png, icon-144.png                 <!-- from tools/icon -->
 UIPrerenderedIcon       true                                      <!-- no iOS-6 gloss on our flat icon -->

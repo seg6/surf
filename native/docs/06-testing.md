@@ -62,7 +62,7 @@ nativeprobe is also the **protocol conformance record**: when Phase 2 says "the 
 
 **Phase 0**
 - [ ] Icon on SpringBoard after `uicache`; correct artwork, no gloss
-- [ ] App launches to the hello screen; rotating between the two landscapes doesn't crash
+- [ ] App launches to the hello screen; rotating through portrait and landscape doesn't crash
 - [ ] ARC smoke button: 60s run, no crash; RSS in label stays flat-ish
 - [ ] wrp.log retrievable over ssh
 

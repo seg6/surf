@@ -29,6 +29,12 @@ func clampQuality(q, def int) int {
 // motion state: cheap low-res frames while the user interacts (4x faster to
 // decode on the iPad), full resolution when still. b.mu held by caller.
 func (b *Browser) desiredCastLocked(t *Tab) (q, maxW, maxH int) {
+	if b.hub.HasNativeClient() {
+		if t.motion {
+			return clampQuality(b.cfg.NativeMotionQuality, 85), b.viewW, b.viewH
+		}
+		return clampQuality(b.cfg.NativeQuality, 100), b.viewW, b.viewH
+	}
 	if t.motion {
 		s := b.cfg.MotionScale
 		return clampQuality(b.cfg.MotionQuality, 40),
@@ -82,6 +88,7 @@ func (b *Browser) startCast(t *Tab, q, maxW, maxH int) bool {
 	var lastErr error
 	for i := 0; i < 15; i++ {
 		if _, err := b.cdp.Call(s, "Page.startScreencast", opts); err == nil {
+			log.Printf("cast tab %d started q=%d max=%dx%d native=%t motion=%t", t.ID, q, maxW, maxH, b.hub.HasNativeClient(), t.motion)
 			b.mu.Lock()
 			t.casting = true
 			t.castQuality = q

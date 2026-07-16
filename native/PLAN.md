@@ -130,10 +130,14 @@ Decode-time adaptive quality (client reports, server adapts fps/bitrate), jetsam
 | 2026-07-15 | No local pan prediction in the native client | Empirically failed in the web client for protocol-inherent reasons; video lane obsoletes it |
 | 2026-07-15 | Hand-rolled WebSocket over CFStream instead of SocketRocket | Plain-HTTP ws only (no TLS on iOS 6 path anyway); ~400 controlled lines beats dependency archaeology on a 2013 library |
 | 2026-07-15 | Linux Docker build environment, not host Xcode | Modern Xcode cannot target armv7/iOS 6; container is reproducible and lets agents actually run the build |
-| 2026-07-15 | v1 forces landscape orientation | Server viewport is 1024×768; rotation support = live viewport resize churn; revisit in Phase 4 |
+| 2026-07-16 | Phase 0 ARC build does not force-load libarclite | The available archive referenced Objective-C runtime symbols absent from iOS 6; the app links cleanly without it, with the device ARC smoke test as the gate |
+| 2026-07-16 | v1 supports portrait and landscape | User wants orientation support day one; native client sends current viewport size on connect/rotation |
+| 2026-07-16 | Native clients get full-resolution motion JPEGs | Device testing showed native JPEG path is good enough to avoid low-res motion frames; web-only sessions keep the old low-res motion path |
+| 2026-07-16 | Audio removed from native scope | User does not need audio; keep the product focused on fast browsing, clipboard, and optionally video-only later |
+| 2026-07-16 | Video lane deferred behind polished JPEG client | Private iOS 6 VideoToolbox is high-risk; current pass prioritizes q100 settled JPEG, full-res q85 motion, accurate viewport resize, and native UX polish |
+| 2026-07-16 | Native chrome targets the iOS 6 Safari look, not graphite/gold | User wants "Safari UI, remote backend"; native gradient bars + tab strip + unified omnibox read as a real browser on the device. The graphite/gold language stays web-client-only. Supersedes the docs/04 design-language line |
+| 2026-07-16 | Client 0.0.2: full chrome rewrite, wire protocol untouched | Tab strip w/ favicons, omnibox w/ suggest+progress, pinch/double-tap zoom, UIMenuController copy, popover surfaces, settings screen. No new server messages, so NativeVersion stays 20260716-1 (no lockstep deploy needed) |
 
 ## Open decisions (user input wanted, none blocking Phase 0–1)
 
-- **Portrait support** (Phase 4?): needs `size` renegotiation on rotate; server already clamps 320–1600 so it's possible, just churn.
-- **Audio codec**: PCM first (trivial, ~384kbps on Wi-Fi) then AAC-LC if bandwidth ever matters. Plan assumes PCM-first.
 - **App name/bundle id**: plan uses `WRP` / `space.seg6.wrp`. Say if you want something else before Phase 0 bakes it in.
