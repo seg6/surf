@@ -12,6 +12,7 @@
 #import "RBSuggestPanel.h"
 #import "RBTabStrip.h"
 #import "RBTheme.h"
+#import "RBVideoDecoder.h"
 
 #import <ImageIO/ImageIO.h>
 #import <QuartzCore/QuartzCore.h>
@@ -26,7 +27,7 @@ static UIImage *RBDecodeJPEG(NSData *data);
 
 @interface RBRootViewController () <UITextFieldDelegate, RBSessionDelegate, RBChromeBarDelegate,
                                     RBOmniboxDelegate, RBTabStripDelegate, RBSuggestPanelDelegate,
-                                    RBFindBarDelegate, RBSettingsDelegate,
+                                    RBFindBarDelegate, RBSettingsDelegate, RBVideoDecoderDelegate,
                                     UIDocumentInteractionControllerDelegate, UIPopoverControllerDelegate>
 // Views
 @property(nonatomic, strong) RBStreamView *streamView;
@@ -81,6 +82,18 @@ static UIImage *RBDecodeJPEG(NSData *data);
 @property(nonatomic, assign) CGPoint pinchCentroid;
 @property(nonatomic, assign) BOOL pinchActive;
 @property(nonatomic, assign) BOOL zoomPreviewPending;
+@property(nonatomic, assign) CGAffineTransform pinchTransform;
+// Video lane
+@property(nonatomic, strong) RBVideoDecoder *videoDecoder;
+@property(nonatomic, assign) BOOL videoActive;   // server confirmed video-config ok
+@property(nonatomic, assign) BOOL videoRequested; // we sent video:on this connection
+@property(nonatomic, assign) NSUInteger videoAUs;
+// Keyboard avoidance (editable rect, viewport fractions)
+@property(nonatomic, assign) CGRect editableRect;
+@property(nonatomic, assign) BOOL editableHasRect;
+@property(nonatomic, assign) BOOL keyboardVisible;
+@property(nonatomic, assign) CGFloat keyboardTop;
+@property(nonatomic, assign) CGFloat keyboardShift;
 @end
 
 @implementation RBRootViewController
@@ -91,6 +104,12 @@ static UIImage *RBDecodeJPEG(NSData *data);
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor blackColor];
     self.serverZoom = 1.0;
+    self.pinchTransform = CGAffineTransformIdentity;
+
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillShow:)
+                                                 name:UIKeyboardWillShowNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillHide:)
+                                                 name:UIKeyboardWillHideNotification object:nil];
 
     self.streamView = [[RBStreamView alloc] initWithFrame:CGRectZero];
     [self.view addSubview:self.streamView];
@@ -271,6 +290,7 @@ static UIImage *RBDecodeJPEG(NSData *data);
 - (void)connectToURL:(NSString *)url password:(NSString *)password {
     self.pendingServerURL = url;
     self.pendingPassword = password;
+    [self leaveVideoMode];
     [self.session shutdown];
     self.session = [[RBSession alloc] initWithBaseURL:url];
     self.session.delegate = self;
@@ -326,20 +346,80 @@ static UIImage *RBDecodeJPEG(NSData *data);
     switch (state) {
         case RBSessionStateOpen:
             self.connectionPill.hidden = YES;
+            [self maybeEnableVideo];
             break;
         case RBSessionStateConnecting:
             self.connectionPill.hidden = NO;
             self.connectionPill.text = @"Connecting…";
+            [self leaveVideoMode];
             break;
         case RBSessionStateRetrying:
             self.connectionPill.hidden = NO;
             self.connectionPill.text = @"Reconnecting…";
+            [self leaveVideoMode];
             break;
         case RBSessionStateIdle:
             self.connectionPill.hidden = NO;
             self.connectionPill.text = @"Disconnected";
+            [self leaveVideoMode];
             break;
     }
+}
+
+// ------------------------------------------------------------- video lane
+
+- (void)maybeEnableVideo {
+    NSNumber *want = [[NSUserDefaults standardUserDefaults] objectForKey:RBDefaultsVideoKey];
+    BOOL enabled = want == nil || [want boolValue];
+    if (!enabled || ![RBVideoDecoder available]) return;
+    self.videoRequested = YES;
+    [self.session sendMessage:@{@"t": @"video", @"on": @YES}];
+}
+
+// Local-only teardown (reconnects, server switches): the server side is
+// cleaned up by its own disconnect path.
+- (void)leaveVideoMode {
+    if (!self.videoActive && !self.videoRequested) return;
+    self.videoActive = NO;
+    self.videoRequested = NO;
+    self.streamView.videoActive = NO;
+    [self.videoDecoder reset];
+}
+
+- (void)handleVideoConfig:(NSDictionary *)message {
+    BOOL ok = [[message objectForKey:@"ok"] boolValue];
+    if (!ok) {
+        BOOL hadLane = self.videoActive;
+        [self leaveVideoMode];
+        if (hadLane) [self showToast:@"Video lane lost — using JPEG"];
+        else if (self.videoRequested) [self showToast:@"Video unavailable — using JPEG"];
+        return;
+    }
+    if (!self.videoDecoder) {
+        self.videoDecoder = [[RBVideoDecoder alloc] init];
+        self.videoDecoder.delegate = self;
+    }
+    self.videoDecoder.codedWidth = [[message objectForKey:@"w"] intValue] ?: 1024;
+    self.videoDecoder.codedHeight = [[message objectForKey:@"h"] intValue] ?: 768;
+    [self.videoDecoder reset];
+    self.videoActive = YES;
+    self.streamView.videoActive = YES;
+    self.videoAUs = 0;
+    RBLog(@"video: lane up %dx%d", self.videoDecoder.codedWidth, self.videoDecoder.codedHeight);
+}
+
+- (void)videoDecoder:(RBVideoDecoder *)decoder didDecodeImage:(CGImageRef)image {
+    if (!self.videoActive) return;
+    [self.streamView displayVideoImage:image];
+    self.framesDisplayed++;
+    self.lastFrameAt = CACurrentMediaTime();
+}
+
+- (void)videoDecoderDidFail:(RBVideoDecoder *)decoder {
+    RBLog(@"video: decoder gave up, dropping to JPEG lane");
+    [self.session sendMessage:@{@"t": @"video", @"on": @NO}];
+    [self leaveVideoMode];
+    [self showToast:@"Video decode failed — using JPEG"];
 }
 
 - (void)session:(RBSession *)session status:(NSString *)status {
@@ -354,6 +434,14 @@ static UIImage *RBDecodeJPEG(NSData *data);
     if (!frame) {
         RBLog(@"bad frame: %@", error);
         [self.session sendReady];
+        return;
+    }
+    if (frame.type == 3) {
+        // H.264 AU: not acked (flow control is IDR-drop based, server side).
+        if (self.videoActive) {
+            self.videoAUs++;
+            [self.videoDecoder feedAU:frame.payload idr:(frame.flags & 1) != 0];
+        }
         return;
     }
     if (frame.type != 1) return;
@@ -382,7 +470,8 @@ static UIImage *RBDecodeJPEG(NSData *data);
                 if (self.zoomPreviewPending && !self.pinchActive) {
                     // Clear the pinch preview in the same transaction the
                     // (zoomed) frame lands — the web client's double-jump fix.
-                    self.streamView.transform = CGAffineTransformIdentity;
+                    self.pinchTransform = CGAffineTransformIdentity;
+                    [self applyStreamTransform];
                     self.zoomPreviewPending = NO;
                 }
                 [self.streamView displayImage:image width:frame.width height:frame.height];
@@ -442,8 +531,16 @@ static UIImage *RBDecodeJPEG(NSData *data) {
         self.loading = [[message objectForKey:@"on"] boolValue];
         [self.chromeBar.omnibox setLoading:self.loading];
     } else if ([t isEqualToString:@"editable"]) {
-        if ([[message objectForKey:@"on"] boolValue]) [self showKeyboard];
-        else if ([self.hiddenInput isFirstResponder]) [self.hiddenInput resignFirstResponder];
+        if ([[message objectForKey:@"on"] boolValue]) {
+            [self configureKeyboardForKind:[message objectForKey:@"kind"] rect:[message objectForKey:@"rect"]];
+            [self showKeyboard];
+        } else {
+            self.editableHasRect = NO;
+            if ([self.hiddenInput isFirstResponder]) [self.hiddenInput resignFirstResponder];
+            [self updateKeyboardAvoidance];
+        }
+    } else if ([t isEqualToString:@"video-config"]) {
+        [self handleVideoConfig:message];
     } else if ([t isEqualToString:@"copytext"]) {
         NSString *text = [message objectForKey:@"text"] ?: @"";
         if ([text length]) [self showCopyMenuForText:text];
@@ -499,6 +596,7 @@ static UIImage *RBDecodeJPEG(NSData *data) {
     }
     [self stopInertia];
     [self hideCopyMenu];
+    [self.streamView hideSharpOverlay];
     CGPoint f = [self fractionForPoint:[tap locationInView:self.streamView]];
     [self.session sendClickX:f.x y:f.y];
 }
@@ -506,6 +604,7 @@ static UIImage *RBDecodeJPEG(NSData *data) {
 - (void)doubleTapped:(UITapGestureRecognizer *)tap {
     if (tap.state != UIGestureRecognizerStateEnded) return;
     [self stopInertia];
+    [self.streamView hideSharpOverlay];
     CGPoint f = [self fractionForPoint:[tap locationInView:self.streamView]];
     CGFloat target = self.serverZoom > 1.05 ? 1.0 : 2.0;
     [self.session sendMessage:@{@"t": @"zoom",
@@ -518,6 +617,7 @@ static UIImage *RBDecodeJPEG(NSData *data) {
     CGPoint p = [pan locationInView:self.streamView];
     if (pan.state == UIGestureRecognizerStateBegan) {
         [self stopInertia];
+        [self.streamView hideSharpOverlay];
         self.panAnchor = [self fractionForPoint:p];
         self.inertiaAnchor = self.panAnchor;
         self.lastPanPoint = p;
@@ -567,6 +667,7 @@ static UIImage *RBDecodeJPEG(NSData *data) {
 - (void)pinched:(UIPinchGestureRecognizer *)pinch {
     if (pinch.state == UIGestureRecognizerStateBegan) {
         [self stopInertia];
+        [self.streamView hideSharpOverlay];
         self.pinchActive = YES;
         self.pinchCentroid = [pinch locationInView:self.streamView];
         self.pinchPreviewScale = 1.0;
@@ -584,7 +685,8 @@ static UIImage *RBDecodeJPEG(NSData *data) {
         CGAffineTransform t = CGAffineTransformMakeTranslation(dx, dy);
         t = CGAffineTransformScale(t, s, s);
         t = CGAffineTransformTranslate(t, -dx, -dy);
-        self.streamView.transform = t;
+        self.pinchTransform = t;
+        [self applyStreamTransform];
         return;
     }
     if (pinch.state == UIGestureRecognizerStateEnded || pinch.state == UIGestureRecognizerStateCancelled) {
@@ -606,6 +708,7 @@ static UIImage *RBDecodeJPEG(NSData *data) {
     CGPoint f = [self fractionForPoint:p];
     if (longPress.state == UIGestureRecognizerStateBegan) {
         [self stopInertia];
+        [self.streamView hideSharpOverlay];
         self.longPressStart = p;
         self.longPressMoved = NO;
         [self.session sendMessage:@{@"t": @"lpdown", @"x": [NSNumber numberWithFloat:f.x], @"y": [NSNumber numberWithFloat:f.y]}];
@@ -916,6 +1019,74 @@ static NSString *RBFormatSize(long long bytes) {
 - (void)showKeyboard {
     self.hiddenInput.text = @" ";
     [self.hiddenInput becomeFirstResponder];
+    [self updateKeyboardAvoidance];
+}
+
+// configureKeyboardForKind maps the server's editable kind onto the shadow
+// field: right keyboard layout, secure entry for passwords, and remembers
+// the focused element's rect (viewport fractions) for keyboard avoidance.
+- (void)configureKeyboardForKind:(NSString *)kind rect:(id)rectValue {
+    UIKeyboardType type = UIKeyboardTypeDefault;
+    BOOL secure = NO;
+    if ([kind isEqualToString:@"password"]) secure = YES;
+    else if ([kind isEqualToString:@"email"]) type = UIKeyboardTypeEmailAddress;
+    else if ([kind isEqualToString:@"number"]) type = UIKeyboardTypeNumbersAndPunctuation;
+    else if ([kind isEqualToString:@"url"]) type = UIKeyboardTypeURL;
+
+    if (self.hiddenInput.keyboardType != type || self.hiddenInput.secureTextEntry != secure) {
+        BOOL wasFirst = [self.hiddenInput isFirstResponder];
+        if (wasFirst) [self.hiddenInput resignFirstResponder];
+        self.hiddenInput.keyboardType = type;
+        self.hiddenInput.secureTextEntry = secure;
+        if (wasFirst) [self.hiddenInput becomeFirstResponder];
+    }
+
+    NSArray *rect = [rectValue isKindOfClass:[NSArray class]] ? rectValue : nil;
+    if ([rect count] == 4) {
+        self.editableRect = CGRectMake([[rect objectAtIndex:0] floatValue], [[rect objectAtIndex:1] floatValue],
+                                       [[rect objectAtIndex:2] floatValue], [[rect objectAtIndex:3] floatValue]);
+        self.editableHasRect = YES;
+    } else {
+        self.editableHasRect = NO;
+    }
+}
+
+// ---- keyboard avoidance: slide the stream up when the keyboard would cover
+// the focused field. Visual-only (a transform); input math is unaffected
+// because gesture coordinates are taken in the stream view's own space.
+
+- (void)keyboardWillShow:(NSNotification *)note {
+    NSValue *frameValue = [[note userInfo] objectForKey:UIKeyboardFrameEndUserInfoKey];
+    CGRect kf = [self.view convertRect:[frameValue CGRectValue] fromView:nil];
+    self.keyboardTop = kf.origin.y;
+    self.keyboardVisible = YES;
+    [self updateKeyboardAvoidance];
+}
+
+- (void)keyboardWillHide:(NSNotification *)note {
+    self.keyboardVisible = NO;
+    [self updateKeyboardAvoidance];
+}
+
+- (void)updateKeyboardAvoidance {
+    CGFloat shift = 0.0;
+    if (self.keyboardVisible && self.editableHasRect && [self.hiddenInput isFirstResponder]) {
+        CGSize s = self.streamView.bounds.size;
+        // center is unaffected by the transform, so this is the unshifted top.
+        CGFloat streamTop = self.streamView.center.y - s.height / 2.0;
+        CGFloat fieldBottom = streamTop + (self.editableRect.origin.y + self.editableRect.size.height) * s.height;
+        CGFloat limit = self.keyboardTop - 12.0;
+        if (fieldBottom > limit) shift = MIN(fieldBottom - limit, s.height * 0.6);
+    }
+    if (shift == self.keyboardShift) return;
+    self.keyboardShift = shift;
+    [UIView animateWithDuration:0.22 animations:^{ [self applyStreamTransform]; }];
+}
+
+- (void)applyStreamTransform {
+    CGAffineTransform t = CGAffineTransformConcat(self.pinchTransform,
+                                                  CGAffineTransformMakeTranslation(0.0, -self.keyboardShift));
+    self.streamView.transform = t;
 }
 
 - (BOOL)textFieldShouldReturn:(UITextField *)textField {
@@ -974,8 +1145,13 @@ static NSString *RBFormatSize(long long bytes) {
     }
     if (!self.debugVisible) return;
     CGSize s = self.streamView.bounds.size;
-    self.debugLabel.text = [NSString stringWithFormat:@"WRP %@\nrx:%u shown:%u pending:%@\ndecode: %.1f ms avg %.1f ms\nview: %.0fx%.0f zoom: %.2f age: %.1fs\n%@",
+    NSString *lane = self.videoActive
+        ? [NSString stringWithFormat:@"video (AUs:%u dec:%u err:%u)",
+           (unsigned)self.videoAUs, (unsigned)self.videoDecoder.decodedFrames, (unsigned)self.videoDecoder.decodeErrors]
+        : @"jpeg";
+    self.debugLabel.text = [NSString stringWithFormat:@"WRP %@  lane: %@\nrx:%u shown:%u pending:%@\ndecode: %.1f ms avg %.1f ms\nview: %.0fx%.0f zoom: %.2f age: %.1fs\n%@",
         RBNativeVersion,
+        lane,
         self.framesReceived,
         self.framesDisplayed,
         self.pendingFrame ? @"yes" : @"no",

@@ -10,8 +10,9 @@ ARCHS := armv7
 include $(THEOS)/makefiles/common.mk
 
 APPLICATION_NAME := WRP
-WRP_FILES := $(wildcard Classes/*.m)
-WRP_FRAMEWORKS := UIKit CoreGraphics QuartzCore ImageIO Security
+WRP_FILES := $(wildcard Classes/*.m) $(wildcard Classes/*.c)
+# VideoToolbox is intentionally absent: private on iOS 6, resolved via dlopen.
+WRP_FRAMEWORKS := UIKit CoreGraphics QuartzCore ImageIO Security CoreMedia CoreVideo
 WRP_CFLAGS := -fobjc-arc -Wall -Werror=return-type -Wno-deprecated-declarations
 
 include $(THEOS_MAKE_PATH)/application.mk

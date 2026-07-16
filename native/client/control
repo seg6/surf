@@ -1,6 +1,6 @@
 Package: space.seg6.wrp
 Name: WRP
-Version: 0.0.2
+Version: 0.0.3
 Architecture: iphoneos-arm
 Description: Native rbrowser client
 Maintainer: null <null@example.invalid>

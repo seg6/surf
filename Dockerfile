@@ -13,6 +13,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
       chromium \
       xvfb \
+      ffmpeg \
       ca-certificates \
       fonts-liberation fonts-noto-core fonts-noto-color-emoji \
       libnss3 libatk-bridge2.0-0 libatk1.0-0 libcups2 libdrm2 \

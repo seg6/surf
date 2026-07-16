@@ -9,6 +9,8 @@
 @property(nonatomic, copy) NSString *initialPassword;
 @property(nonatomic, strong) UITextField *urlField;
 @property(nonatomic, strong) UITextField *passwordField;
+@property(nonatomic, strong) UILabel *videoLabel;
+@property(nonatomic, strong) UISwitch *videoSwitch;
 @property(nonatomic, strong) UIButton *connectButton;
 @property(nonatomic, strong) UIButton *cancelButton;
 @property(nonatomic, strong) UILabel *statusLabel;
@@ -85,6 +87,14 @@
     self.passwordField.text = self.initialPassword;
     [self.card addSubview:self.passwordField];
 
+    self.videoLabel = [self formLabel:@"VIDEO STREAMING (H.264)"];
+    [self.card addSubview:self.videoLabel];
+    self.videoSwitch = [[UISwitch alloc] initWithFrame:CGRectZero];
+    NSNumber *videoDefault = [[NSUserDefaults standardUserDefaults] objectForKey:RBDefaultsVideoKey];
+    self.videoSwitch.on = videoDefault == nil || [videoDefault boolValue];
+    [self.videoSwitch addTarget:self action:@selector(videoToggled:) forControlEvents:UIControlEventValueChanged];
+    [self.card addSubview:self.videoSwitch];
+
     self.connectButton = [UIButton buttonWithType:UIButtonTypeCustom];
     self.connectButton.backgroundColor = [UIColor colorWithRed:0.28 green:0.42 blue:0.62 alpha:1.0];
     self.connectButton.layer.cornerRadius = 6.0;
@@ -124,7 +134,7 @@
     CGFloat w = self.view.bounds.size.width;
     CGFloat h = self.view.bounds.size.height;
     CGFloat cardW = MIN(420.0, w - 40.0);
-    CGFloat cardH = 330.0;
+    CGFloat cardH = 384.0;
     self.card.frame = CGRectMake((w - cardW) / 2.0, MAX(16.0, (h - cardH) / 2.0 - 30.0), cardW, cardH);
 
     CGFloat pad = 24.0;
@@ -137,9 +147,11 @@
     self.urlField.frame = CGRectMake(pad, 80.0, fw, 36.0);
     passwordLabel.frame = CGRectMake(pad, 128.0, fw, 16.0);
     self.passwordField.frame = CGRectMake(pad, 146.0, fw, 36.0);
-    self.connectButton.frame = CGRectMake(pad, 200.0, fw, 42.0);
-    self.statusLabel.frame = CGRectMake(pad, 248.0, fw, 36.0);
-    self.cancelButton.frame = CGRectMake(pad, 286.0, fw, 30.0);
+    self.videoLabel.frame = CGRectMake(pad, 198.0, fw - 90.0, 28.0);
+    self.videoSwitch.frame = CGRectMake(cardW - pad - 79.0, 194.0, 79.0, 27.0);
+    self.connectButton.frame = CGRectMake(pad, 236.0, fw, 42.0);
+    self.statusLabel.frame = CGRectMake(pad, 284.0, fw, 36.0);
+    self.cancelButton.frame = CGRectMake(pad, 322.0, fw, 30.0);
     self.cancelButton.hidden = !self.allowsCancel;
     self.versionLabel.frame = CGRectMake(0.0, h - 26.0, w, 16.0);
 }
@@ -162,6 +174,12 @@
     [self.passwordField resignFirstResponder];
     [self setStatusText:@"Connecting…" isError:NO];
     [self.delegate settings:self connectToURL:url password:password];
+}
+
+- (void)videoToggled:(id)sender {
+    [[NSUserDefaults standardUserDefaults] setObject:[NSNumber numberWithBool:self.videoSwitch.on]
+                                              forKey:RBDefaultsVideoKey];
+    [[NSUserDefaults standardUserDefaults] synchronize];
 }
 
 - (void)cancelTapped:(id)sender {

@@ -18,6 +18,7 @@ import (
 	"rbrowser/internal/cdp"
 	"rbrowser/internal/config"
 	"rbrowser/internal/protocol"
+	"rbrowser/internal/stream"
 	"rbrowser/internal/ws"
 )
 
@@ -61,6 +62,10 @@ type Browser struct {
 
 	dlMu    sync.Mutex
 	dlNames map[string]string // download guid -> final filename
+
+	streamer  *stream.Streamer
+	videoMu   sync.Mutex
+	videoSubs map[*ws.Client]*stream.Sub
 }
 
 func New(cfg *config.Config, hub *ws.Hub) *Browser {
@@ -74,6 +79,8 @@ func New(cfg *config.Config, hub *ws.Hub) *Browser {
 		icons:        map[string]*favicon{},
 		iconFetching: map[string]bool{},
 		dlNames:      map[string]string{},
+		streamer:     stream.New(streamConfig(cfg)),
+		videoSubs:    map[*ws.Client]*stream.Sub{},
 	}
 }
 

@@ -36,6 +36,7 @@ const (
 // Handler is implemented by the browser side.
 type Handler interface {
 	ClientConnected(c *Client)
+	ClientDisconnected(c *Client)
 	HandleMessage(c *Client, m *protocol.ClientMessage)
 }
 
@@ -79,6 +80,24 @@ func (h *Hub) HasNativeClient() bool {
 	return false
 }
 
+// HasCastClient reports whether anyone still consumes the JPEG screencast —
+// when every connected client is in video mode (or none are connected), the
+// cast can stop and give its CPU to x264.
+func (h *Hub) HasCastClient() bool {
+	h.mu.Lock()
+	targets := make([]*Client, 0, len(h.clients))
+	for c := range h.clients {
+		targets = append(targets, c)
+	}
+	h.mu.Unlock()
+	for _, c := range targets {
+		if !c.VideoMode() {
+			return true
+		}
+	}
+	return false
+}
+
 type outMsg struct {
 	msgType int
 	data    []byte
@@ -94,10 +113,37 @@ type Client struct {
 	out  chan outMsg
 	done chan struct{}
 
-	mu       sync.Mutex
-	inflight int
-	pending  *protocol.Frame
-	Native   bool
+	mu        sync.Mutex
+	inflight  int
+	pending   *protocol.Frame
+	videoMode bool
+	Native    bool
+}
+
+// SetVideoMode flips the client between the JPEG cast lane and the H.264
+// lane. In video mode the client receives no cast frames — only type-3 AUs
+// plus the sharp settle JPEG (Frame.Sharp).
+func (c *Client) SetVideoMode(on bool) {
+	c.mu.Lock()
+	c.videoMode = on
+	// The ack window belongs to the JPEG lane; entering/leaving video mode
+	// resets it so a stale window can't wedge the sharp-frame path.
+	c.inflight = 0
+	c.pending = nil
+	c.mu.Unlock()
+}
+
+func (c *Client) VideoMode() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.videoMode
+}
+
+// SendBinary enqueues a pre-encoded binary message (type-3/4 frames) on the
+// shared outbox, bypassing the type-1 ack window. Never blocks; an error
+// means the outbox was full and the message was dropped.
+func (c *Client) SendBinary(data []byte) error {
+	return c.write(websocket.BinaryMessage, data)
 }
 
 // Serve upgrades the request and runs the read loop until disconnect.
@@ -141,6 +187,9 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, native bool) {
 	delete(h.clients, c)
 	h.mu.Unlock()
 	_ = conn.Close()
+	if h.handler != nil {
+		h.handler.ClientDisconnected(c)
+	}
 }
 
 // writeLoop is the only goroutine touching the write side of the socket.
@@ -259,6 +308,12 @@ func (h *Hub) QueueFrame(f *protocol.Frame, only *Client) {
 	}
 	h.mu.Unlock()
 	for _, c := range targets {
+		// Video-mode clients get no cast JPEGs; the sharp settle frame is the
+		// one exception (docs/03 §3). Directed sends (only != nil) always go
+		// through — they answer this client's own poke/size request.
+		if only == nil && !f.Sharp && c.VideoMode() {
+			continue
+		}
 		c.queue(f)
 	}
 }

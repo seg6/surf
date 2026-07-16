@@ -61,6 +61,19 @@ func (b *Browser) ensureCast(t *Tab) {
 			b.mu.Unlock()
 		}()
 		for i := 0; i < 6; i++ { // bounded: motion state flapping can't spin us forever
+			// Nobody consuming JPEG (all clients in video mode, or none at
+			// all): park the cast and give its CPU to x264. ClientConnected /
+			// video-off call ensureCast again to bring it back.
+			if !b.hub.HasCastClient() {
+				b.mu.Lock()
+				casting := t.casting
+				b.mu.Unlock()
+				if casting {
+					b.stopCast(t)
+					log.Printf("cast tab %d parked: no JPEG consumers", t.ID)
+				}
+				return
+			}
 			b.mu.Lock()
 			q, maxW, maxH := b.desiredCastLocked(t)
 			done := t.casting && t.castQuality == q && t.castMaxW == maxW
@@ -198,7 +211,9 @@ func (b *Browser) sendFreshFrame(only *ws.Client, quality int) {
 	if err != nil {
 		return
 	}
-	b.hub.QueueFrame(&protocol.Frame{W: w, H: h, ScrollX: sx, ScrollY: sy, Data: buf}, only)
+	// Sharp marks this as the settle frame — the one JPEG that still reaches
+	// video-mode clients (their crisp-text overlay).
+	b.hub.QueueFrame(&protocol.Frame{W: w, H: h, ScrollX: sx, ScrollY: sy, Data: buf, Sharp: true}, only)
 }
 
 func clampScroll(v float64) uint32 {

@@ -9,11 +9,13 @@ import (
 
 // ClientVersion gates the WS handshake: the served client and the server must
 // agree, so a stale cached client can never talk a mismatched protocol.
-const ClientVersion = "20260715-5"
+// 20260716-1: editable gained kind+rect (additive; bumped per docs/02 §4).
+const ClientVersion = "20260716-1"
 
 // NativeVersion gates the Objective-C client handshake separately from the web
 // client so native-only protocol additions do not force web cache churn.
-const NativeVersion = "20260716-1"
+// 20260716-2: H.264 video lane (type-3 frames, video/video-config messages).
+const NativeVersion = "20260716-2"
 
 type Config struct {
 	Port                int
@@ -33,6 +35,15 @@ type Config struct {
 	AuthDays            int
 	Adblock             bool
 	DownloadsDir        string
+
+	// H.264 lane (docs/03 §2, §6). The encoder only runs while a native
+	// video-mode client is subscribed.
+	StreamFPS      int    // STREAM_FPS
+	StreamScale    string // STREAM_SCALE, "960x720" to shrink; empty = VWxVH
+	StreamBitrateK int    // STREAM_BITRATE
+	StreamMaxrateK int    // STREAM_MAXRATE
+	StreamBufsizeK int    // STREAM_BUFSIZE
+	StreamPreset   string // STREAM_PRESET
 }
 
 func envInt(key string, def int) int {
@@ -75,5 +86,11 @@ func Load() *Config {
 		AuthDays:            envInt("AUTH_DAYS", 180),
 		Adblock:             os.Getenv("ADBLOCK") != "0",
 		DownloadsDir:        envStr("DOWNLOADS", "/data/downloads"),
+		StreamFPS:           envInt("STREAM_FPS", 15),
+		StreamScale:         envStr("STREAM_SCALE", ""),
+		StreamBitrateK:      envInt("STREAM_BITRATE", 1500),
+		StreamMaxrateK:      envInt("STREAM_MAXRATE", 2000),
+		StreamBufsizeK:      envInt("STREAM_BUFSIZE", 500),
+		StreamPreset:        envStr("STREAM_PRESET", "superfast"),
 	}
 }

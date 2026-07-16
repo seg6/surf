@@ -99,6 +99,14 @@ func Launch(chromePath, profile string, w, h int) (*Client, *exec.Cmd, error) {
 		"--metrics-recording-only", "--password-store=basic", "--use-mock-keychain",
 		"--disable-features=Translate,MediaRouter,AcceptCHFrame,OptimizationHints",
 		fmt.Sprintf("--window-size=%d,%d", w, h),
+		// Kiosk: no toolbar/omnibox on the X display, window fills the Xvfb
+		// screen exactly. Invisible to the CDP screencast (page pixels), but
+		// the video lane films the display itself — without this the encoder
+		// streams Chromium's own chrome to the client. Position must be
+		// pinned: with no WM the default window origin is (10,10), which
+		// shifts and clips the filmed page.
+		"--kiosk",
+		"--window-position=0,0",
 		"about:blank",
 	}
 	cmd := exec.Command(chromePath, args...)

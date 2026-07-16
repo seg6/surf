@@ -15,6 +15,9 @@ const (
 	FrameHeaderBytes = 32
 	FrameMagic       = "RBR1"
 	FrameTypeFull    = 1
+	// FrameTypeVideo carries one complete H.264 Annex-B access unit; sent
+	// only to native clients in video mode (docs/02 §2). flags bit0 = IDR.
+	FrameTypeVideo = 3
 )
 
 // Frame is one JPEG destined for the client canvas. ScrollX/Y are the page's
@@ -26,6 +29,10 @@ type Frame struct {
 	ScrollX uint32
 	ScrollY uint32
 	Data    []byte
+	// Sharp marks the post-settle captureScreenshot. Not on the wire; the hub
+	// uses it to route the one JPEG that video-mode clients still receive
+	// (the crisp overlay, docs/03 §3).
+	Sharp bool
 }
 
 func clamp16(v int) uint16 {
@@ -57,6 +64,24 @@ func (f *Frame) Encode() []byte {
 	return out
 }
 
+// EncodeVideoAU renders a type-3 frame around one Annex-B access unit.
+// w/h are the coded size (constant per encoder run); flags bit0 marks IDR.
+func EncodeVideoAU(seq uint32, idr bool, w, h int, au []byte) []byte {
+	out := make([]byte, FrameHeaderBytes+len(au))
+	copy(out[0:4], FrameMagic)
+	out[4] = FrameTypeVideo
+	if idr {
+		out[5] = 1
+	}
+	binary.BigEndian.PutUint16(out[6:8], FrameHeaderBytes)
+	binary.BigEndian.PutUint32(out[8:12], seq)
+	binary.BigEndian.PutUint16(out[16:18], clamp16(w))
+	binary.BigEndian.PutUint16(out[18:20], clamp16(h))
+	binary.BigEndian.PutUint32(out[20:24], uint32(len(au)))
+	copy(out[FrameHeaderBytes:], au)
+	return out
+}
+
 // ClientMessage is the union of everything the client can send; T selects
 // which fields matter. X/Y/DX/DY/CX/CY are viewport fractions (0..1).
 type ClientMessage struct {
@@ -81,6 +106,7 @@ type ClientMessage struct {
 	Q       string  `json:"q,omitempty"`   // find / suggest query
 	Dir     int     `json:"dir,omitempty"` // find direction: 1 next, -1 prev
 	Sel     bool    `json:"sel,omitempty"` // lpup: select word at point (no drag happened)
+	On      bool    `json:"on,omitempty"`  // video: enter/leave video mode
 }
 
 // TabInfo is one entry of the 'tabs' broadcast.

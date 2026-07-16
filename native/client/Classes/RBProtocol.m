@@ -41,6 +41,7 @@ static unsigned int RBReadBE32(const unsigned char *p) {
 
     RBFrame *frame = [[RBFrame alloc] init];
     frame.type = b[4];
+    frame.flags = b[5];
     frame.seq = RBReadBE32(b + 8);
     frame.width = RBReadBE16(b + 16);
     frame.height = RBReadBE16(b + 18);

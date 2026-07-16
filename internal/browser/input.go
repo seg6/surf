@@ -31,8 +31,31 @@ func NormalizeNavURL(input string) string {
 	return "https://duckduckgo.com/?q=" + url.QueryEscape(u)
 }
 
-const editableExpr = "(function(){var e=document.activeElement;if(!e)return false;var t=e.tagName;" +
-	"return t==='INPUT'||t==='TEXTAREA'||t==='SELECT'||!!e.isContentEditable;})()"
+// editableExpr reports whether focus sits in a text-entry element, plus the
+// keyboard kind and the element's bounding box in viewport fractions (divided
+// by innerWidth/Height in-page, so zoom math never leaks to the server).
+const editableExpr = `(function(){
+  var e = document.activeElement;
+  var on = false, kind = 'text';
+  if (e) {
+    var t = e.tagName;
+    if (t === 'TEXTAREA') { on = true; kind = 'textarea'; }
+    else if (t === 'SELECT') { on = true; kind = 'select'; }
+    else if (e.isContentEditable) { on = true; }
+    else if (t === 'INPUT') {
+      var ty = (e.type || 'text').toLowerCase();
+      var skip = {button:1,checkbox:1,radio:1,submit:1,reset:1,file:1,image:1,range:1,color:1,hidden:1,date:1,time:1};
+      if (!skip[ty]) {
+        on = true;
+        kind = ({password:'password',email:'email',number:'number',tel:'number',url:'url',search:'search'})[ty] || 'text';
+      }
+    }
+  }
+  if (!on) return {on:false};
+  var r = e.getBoundingClientRect();
+  var w = window.innerWidth || 1, h = window.innerHeight || 1;
+  return {on:true, kind:kind, rect:[r.left/w, r.top/h, r.width/w, r.height/h]};
+})()`
 
 // ClientConnected implements ws.Handler: greet, sync tabs/url, push a frame.
 func (b *Browser) ClientConnected(c *ws.Client) {
@@ -47,6 +70,9 @@ func (b *Browser) ClientConnected(c *ws.Client) {
 		b.mu.Unlock()
 		c.SendJSON(b.urlMessage(u))
 		b.pushNavState()
+		// The cast may be parked (all previous clients were video-mode or
+		// gone); a new JPEG consumer brings it back.
+		b.ensureCast(t)
 		go b.sendFreshFrame(c, 0)
 	}
 }
@@ -67,6 +93,9 @@ func (b *Browser) HandleMessage(c *ws.Client, m *protocol.ClientMessage) {
 		return
 	case "tab":
 		b.handleTab(m)
+		return
+	case "video":
+		b.handleVideo(c, m.On)
 		return
 	}
 
@@ -249,12 +278,26 @@ func (b *Browser) checkEditable(c *ws.Client, session string) {
 		}
 		var p struct {
 			Result struct {
-				Value bool `json:"value"`
+				Value struct {
+					On   bool      `json:"on"`
+					Kind string    `json:"kind"`
+					Rect []float64 `json:"rect"`
+				} `json:"value"`
 			} `json:"result"`
 		}
 		if json.Unmarshal(res, &p) != nil {
 			return
 		}
-		c.SendJSON(map[string]any{"t": "editable", "on": p.Result.Value})
+		v := p.Result.Value
+		msg := map[string]any{"t": "editable", "on": v.On}
+		// Additive fields (docs/02 §3): web reads only `on`, native uses kind
+		// for the keyboard type and rect for keyboard avoidance.
+		if v.On {
+			msg["kind"] = v.Kind
+			if len(v.Rect) == 4 {
+				msg["rect"] = v.Rect
+			}
+		}
+		c.SendJSON(msg)
 	})
 }
