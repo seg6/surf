@@ -2,8 +2,8 @@
 
 #define RBNativeVersion @"20260716-2"
 #define RBDefaultServerURL @"http://192.168.1.102:18080"
-#define RBLogDirectory @"/var/mobile/Library/WRP"
-#define RBLogFile @"/var/mobile/Library/WRP/wrp.log"
+#define RBLogDirectory @"/var/mobile/Library/Surf"
+#define RBLogFile @"/var/mobile/Library/Surf/surf.log"
 
 // NSUserDefaults keys (settings screen).
 #define RBDefaultsServerURLKey @"RBServerURL"

@@ -281,8 +281,15 @@ static UIImage *RBDecodeJPEG(NSData *data);
 }
 
 - (void)sendCurrentViewportSize {
+    [self sendCurrentViewportSizeForced:NO];
+}
+
+- (void)sendCurrentViewportSizeForced:(BOOL)force {
     CGSize s = self.streamView.bounds.size;
-    [self.session updateViewportWidth:(NSInteger)(s.width + 0.5) height:(NSInteger)(s.height + 0.5)];
+    if (s.width < 10.0 || s.height < 10.0) return;
+    [self.session updateViewportWidth:(NSInteger)(s.width + 0.5)
+                                height:(NSInteger)(s.height + 0.5)
+                                 force:force];
 }
 
 // ------------------------------------------------------------ connect flow
@@ -346,7 +353,11 @@ static UIImage *RBDecodeJPEG(NSData *data);
     switch (state) {
         case RBSessionStateOpen:
             self.connectionPill.hidden = YES;
-            [self maybeEnableVideo];
+            [self.view setNeedsLayout];
+            [self.view layoutIfNeeded];
+            [self sendCurrentViewportSizeForced:YES];
+            [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(maybeEnableVideo) object:nil];
+            [self performSelector:@selector(maybeEnableVideo) withObject:nil afterDelay:0.12];
             break;
         case RBSessionStateConnecting:
             self.connectionPill.hidden = NO;
@@ -439,6 +450,14 @@ static UIImage *RBDecodeJPEG(NSData *data);
     if (frame.type == 3) {
         // H.264 AU: not acked (flow control is IDR-drop based, server side).
         if (self.videoActive) {
+            if (frame.width > 0 && frame.height > 0 &&
+                (self.videoDecoder.codedWidth != frame.width || self.videoDecoder.codedHeight != frame.height)) {
+                self.videoDecoder.codedWidth = frame.width;
+                self.videoDecoder.codedHeight = frame.height;
+                [self.videoDecoder reset];
+                self.videoAUs = 0;
+                RBLog(@"video: coded size changed to %dx%d", self.videoDecoder.codedWidth, self.videoDecoder.codedHeight);
+            }
             self.videoAUs++;
             [self.videoDecoder feedAU:frame.payload idr:(frame.flags & 1) != 0];
         }
@@ -1149,7 +1168,7 @@ static NSString *RBFormatSize(long long bytes) {
         ? [NSString stringWithFormat:@"video (AUs:%u dec:%u err:%u)",
            (unsigned)self.videoAUs, (unsigned)self.videoDecoder.decodedFrames, (unsigned)self.videoDecoder.decodeErrors]
         : @"jpeg";
-    self.debugLabel.text = [NSString stringWithFormat:@"WRP %@  lane: %@\nrx:%u shown:%u pending:%@\ndecode: %.1f ms avg %.1f ms\nview: %.0fx%.0f zoom: %.2f age: %.1fs\n%@",
+	self.debugLabel.text = [NSString stringWithFormat:@"Surf %@  lane: %@\nrx:%u shown:%u pending:%@\ndecode: %.1f ms avg %.1f ms\nview: %.0fx%.0f zoom: %.2f age: %.1fs\n%@",
         RBNativeVersion,
         lane,
         self.framesReceived,

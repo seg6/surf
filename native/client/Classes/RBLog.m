@@ -56,8 +56,8 @@ void RBLog(NSString *format, ...) {
 }
 
 static void RBWriteCrashLine(const char *line) {
-    mkdir("/var/mobile/Library/WRP", 0755);
-    int fd = open("/var/mobile/Library/WRP/wrp.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
+	mkdir("/var/mobile/Library/Surf", 0755);
+	int fd = open("/var/mobile/Library/Surf/surf.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (fd >= 0) {
         write(fd, line, strlen(line));
         close(fd);

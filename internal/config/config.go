@@ -24,6 +24,8 @@ type Config struct {
 	Profile             string
 	ViewW               int
 	ViewH               int
+	DisplayW            int // X framebuffer / Chromium window size; must cover every viewport
+	DisplayH            int
 	Quality             int     // steady-state screencast JPEG quality
 	NativeQuality       int     // native-client screencast JPEG quality
 	NativeMotionQuality int     // native-client JPEG quality during motion
@@ -68,13 +70,18 @@ func envFloat(key string, def float64) float64 {
 }
 
 func Load() *Config {
+	viewW := envInt("VW", 1024)
+	viewH := envInt("VH", 768)
+	displayDefault := max(viewW, viewH)
 	return &Config{
 		Port:                envInt("PORT", 8080),
 		ChromePath:          envStr("CHROME", "/usr/bin/chromium"),
 		StartURL:            envStr("START_URL", "https://duckduckgo.com"),
 		Profile:             envStr("PROFILE", "/data/profile"),
-		ViewW:               envInt("VW", 1024),
-		ViewH:               envInt("VH", 768),
+		ViewW:               viewW,
+		ViewH:               viewH,
+		DisplayW:            envInt("XFB_W", displayDefault),
+		DisplayH:            envInt("XFB_H", displayDefault),
 		Quality:             envInt("QUALITY", 60),
 		NativeQuality:       envInt("NATIVE_QUALITY", 100),
 		NativeMotionQuality: envInt("NATIVE_MOTION_QUALITY", 85),
@@ -86,11 +93,11 @@ func Load() *Config {
 		AuthDays:            envInt("AUTH_DAYS", 180),
 		Adblock:             os.Getenv("ADBLOCK") != "0",
 		DownloadsDir:        envStr("DOWNLOADS", "/data/downloads"),
-		StreamFPS:           envInt("STREAM_FPS", 15),
+		StreamFPS:           envInt("STREAM_FPS", 24),
 		StreamScale:         envStr("STREAM_SCALE", ""),
-		StreamBitrateK:      envInt("STREAM_BITRATE", 1500),
-		StreamMaxrateK:      envInt("STREAM_MAXRATE", 2000),
-		StreamBufsizeK:      envInt("STREAM_BUFSIZE", 500),
+		StreamBitrateK:      envInt("STREAM_BITRATE", 2200),
+		StreamMaxrateK:      envInt("STREAM_MAXRATE", 3000),
+		StreamBufsizeK:      envInt("STREAM_BUFSIZE", 800),
 		StreamPreset:        envStr("STREAM_PRESET", "superfast"),
 	}
 }

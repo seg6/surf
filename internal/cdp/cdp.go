@@ -95,17 +95,18 @@ func Launch(chromePath, profile string, w, h int) (*Client, *exec.Cmd, error) {
 		"--disable-ipc-flooding-protection",
 		"--disable-breakpad", "--disable-component-update",
 		"--disable-default-apps", "--disable-prompt-on-repost",
+		"--test-type",
 		"--allow-pre-commit-input", "--force-color-profile=srgb",
 		"--metrics-recording-only", "--password-store=basic", "--use-mock-keychain",
 		"--disable-features=Translate,MediaRouter,AcceptCHFrame,OptimizationHints",
 		fmt.Sprintf("--window-size=%d,%d", w, h),
-		// Kiosk: no toolbar/omnibox on the X display, window fills the Xvfb
-		// screen exactly. Invisible to the CDP screencast (page pixels), but
-		// the video lane films the display itself — without this the encoder
-		// streams Chromium's own chrome to the client. Position must be
-		// pinned: with no WM the default window origin is (10,10), which
-		// shifts and clips the filmed page.
+		// Fullscreen/kiosk: no toolbar/omnibox/tab strip on the X display. The
+		// CDP screencast sees page pixels either way, but the video lane films
+		// Xvfb directly, so a normal browser window would stream Chromium chrome.
+		// Position must be pinned: with no WM the default window origin is (10,10),
+		// which shifts and clips the filmed page.
 		"--kiosk",
+		"--start-fullscreen",
 		"--window-position=0,0",
 		"about:blank",
 	}

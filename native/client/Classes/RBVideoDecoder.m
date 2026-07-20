@@ -117,7 +117,7 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
 - (id)init {
     self = [super init];
     if (self) {
-        self.queue = dispatch_queue_create("wrp.videodecode", DISPATCH_QUEUE_SERIAL);
+		self.queue = dispatch_queue_create("surf.videodecode", DISPATCH_QUEUE_SERIAL);
         self.waitingForIDR = YES;
     }
     return self;

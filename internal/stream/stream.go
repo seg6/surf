@@ -29,11 +29,11 @@ const (
 )
 
 type Config struct {
-	Display  string // ":99"
-	W, H     int    // coded size
-	FPS      int
+	Display                      string // ":99"
+	W, H                         int    // coded size
+	FPS                          int
 	BitrateK, MaxrateK, BufsizeK int
-	Preset   string
+	Preset                       string
 }
 
 // AU is one complete Annex-B access unit (start codes intact). W/H are the
@@ -56,6 +56,7 @@ type Sub struct {
 	dropped bool // dropping until the next IDR
 	closed  bool
 	fresh   bool // never delivered anything yet: wait for an IDR to start
+	gen     int  // encoder generation this subscriber accepts
 }
 
 type Streamer struct {
@@ -107,6 +108,9 @@ func (s *Streamer) SetSize(w, h int) {
 		s.stopLocked()
 		s.startLocked()
 	}
+	for sub := range s.subs {
+		sub.resetForGen(s.gen)
+	}
 }
 
 // Subscribe registers a consumer and starts the encoder if it isn't running.
@@ -124,6 +128,9 @@ func (s *Streamer) Subscribe() *Sub {
 	if !s.running {
 		s.startLocked()
 	}
+	if _, ok := s.subs[sub]; ok {
+		sub.resetForGen(s.gen)
+	}
 	return sub
 }
 
@@ -133,6 +140,21 @@ func (sub *Sub) ForceResync() {
 	sub.mu.Lock()
 	sub.dropped = true
 	sub.mu.Unlock()
+}
+
+func (sub *Sub) resetForGen(gen int) {
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+	sub.gen = gen
+	sub.dropped = true
+	sub.fresh = true
+	for {
+		select {
+		case <-sub.C:
+		default:
+			return
+		}
+	}
 }
 
 func (sub *Sub) Close() {
@@ -163,10 +185,10 @@ func (sub *Sub) Close() {
 
 // offer delivers one AU without ever blocking the splitter. Channel full →
 // drop this and everything until the next IDR, then resume from that IDR.
-func (sub *Sub) offer(au AU) {
+func (sub *Sub) offer(au AU, gen int) {
 	sub.mu.Lock()
 	defer sub.mu.Unlock()
-	if sub.closed {
+	if sub.closed || gen != sub.gen {
 		return
 	}
 	if sub.dropped && !au.IDR {
@@ -299,7 +321,7 @@ func (s *Streamer) readLoop(r io.Reader, cmd *exec.Cmd, gen int) {
 				break
 			}
 			for _, au := range aus {
-				s.broadcast(au)
+				s.broadcast(au, gen)
 			}
 		}
 		if err != nil {
@@ -343,8 +365,12 @@ func (s *Streamer) readLoop(r io.Reader, cmd *exec.Cmd, gen int) {
 	})
 }
 
-func (s *Streamer) broadcast(au AU) {
+func (s *Streamer) broadcast(au AU, gen int) {
 	s.mu.Lock()
+	if gen != s.gen || !s.running {
+		s.mu.Unlock()
+		return
+	}
 	s.seq++
 	au.Seq = s.seq
 	au.W, au.H = s.cfg.W, s.cfg.H
@@ -354,7 +380,7 @@ func (s *Streamer) broadcast(au AU) {
 	}
 	s.mu.Unlock()
 	for _, sub := range targets {
-		sub.offer(au)
+		sub.offer(au, gen)
 	}
 }
 

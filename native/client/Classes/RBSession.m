@@ -142,12 +142,16 @@ static NSString *RBURLEscape(NSString *s) {
 - (void)sendReady { [self sendMessage:@{@"t": @"ready"}]; }
 
 - (void)updateViewportWidth:(NSInteger)width height:(NSInteger)height {
+    [self updateViewportWidth:width height:height force:NO];
+}
+
+- (void)updateViewportWidth:(NSInteger)width height:(NSInteger)height force:(BOOL)force {
     if (width <= 0 || height <= 0) return;
-    if (self.viewWidth == width && self.viewHeight == height) return;
+    if (!force && self.viewWidth == width && self.viewHeight == height) return;
     self.viewWidth = width;
     self.viewHeight = height;
     if (self.socketOpen) {
-        RBLog(@"viewport update %dx%d", (int)width, (int)height);
+        RBLog(@"viewport update %dx%d%@", (int)width, (int)height, force ? @" forced" : @"");
         [self sendMessage:@{@"t": @"size", @"w": [NSNumber numberWithInteger:width], @"h": [NSNumber numberWithInteger:height]}];
     }
 }
@@ -159,9 +163,9 @@ static NSString *RBURLEscape(NSString *s) {
 
 - (void)socketDidOpen:(RBSocket *)socket {
     self.socketOpen = YES;
+    [self sendMessage:@{@"t": @"size", @"w": [NSNumber numberWithInteger:self.viewWidth], @"h": [NSNumber numberWithInteger:self.viewHeight]}];
     [self moveToState:RBSessionStateOpen];
     [self.delegate session:self status:@"websocket open"];
-    [self sendMessage:@{@"t": @"size", @"w": [NSNumber numberWithInteger:self.viewWidth], @"h": [NSNumber numberWithInteger:self.viewHeight]}];
 }
 
 - (void)socket:(RBSocket *)socket didCloseWithError:(NSString *)error {

@@ -63,7 +63,7 @@
     self.card.layer.borderColor = [[UIColor colorWithWhite:0.72 alpha:1.0] CGColor];
     [self.view addSubview:self.card];
 
-    UILabel *title = [self formLabel:@"WRP — Remote Browser"];
+	UILabel *title = [self formLabel:@"Surf — Remote Browser"];
     title.font = [RBTheme fontOfSize:19.0 bold:YES];
     title.textColor = [UIColor colorWithWhite:0.15 alpha:1.0];
     title.tag = 100;

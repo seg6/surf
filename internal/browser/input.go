@@ -209,6 +209,7 @@ func (b *Browser) handleSize(c *ws.Client, m *protocol.ClientMessage) {
 	}
 	b.stopCast(t)
 	b.applyView(t)
+	go b.syncVideoSurface(w, h)
 	b.mu.Lock()
 	t.motion = false
 	b.mu.Unlock()

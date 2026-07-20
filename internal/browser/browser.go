@@ -64,6 +64,7 @@ type Browser struct {
 	dlNames map[string]string // download guid -> final filename
 
 	streamer  *stream.Streamer
+	screenMu  sync.Mutex
 	videoMu   sync.Mutex
 	videoSubs map[*ws.Client]*stream.Sub
 }
@@ -87,7 +88,7 @@ func New(cfg *config.Config, hub *ws.Hub) *Browser {
 // Start launches Chromium and wires target discovery; it returns once the
 // browser is ready to serve clients.
 func (b *Browser) Start() error {
-	client, cmd, err := cdp.Launch(b.cfg.ChromePath, b.cfg.Profile, b.cfg.ViewW, b.cfg.ViewH)
+	client, cmd, err := cdp.Launch(b.cfg.ChromePath, b.cfg.Profile, b.cfg.DisplayW, b.cfg.DisplayH)
 	if err != nil {
 		return err
 	}
@@ -101,7 +102,7 @@ func (b *Browser) Start() error {
 		return err
 	}
 	b.setupDownloads()
-	log.Printf("browser ready, view %dx%d q%d (headful, profile %s)", b.viewW, b.viewH, b.cfg.Quality, b.cfg.Profile)
+	log.Printf("browser ready, view %dx%d display %dx%d q%d (headful, profile %s)", b.viewW, b.viewH, b.cfg.DisplayW, b.cfg.DisplayH, b.cfg.Quality, b.cfg.Profile)
 	return nil
 }
 
@@ -303,7 +304,7 @@ func (b *Browser) targetInfoChanged(info targetInfo) {
 
 	if urlChanged && active {
 		b.hub.BroadcastJSON(b.urlMessage(url))
-	b.pushNavState()
+		b.pushNavState()
 	}
 	if titleChanged || urlChanged {
 		b.broadcastTabs()
@@ -327,7 +328,7 @@ func (b *Browser) tabNavigated(session, url string) {
 	b.mu.Unlock()
 	if active {
 		b.hub.BroadcastJSON(b.urlMessage(url))
-	b.pushNavState()
+		b.pushNavState()
 	}
 	b.broadcastTabs()
 	go b.onURLChanged(t, url)

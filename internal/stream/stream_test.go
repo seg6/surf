@@ -67,28 +67,32 @@ func TestSplitterCutsOnAUD(t *testing.T) {
 
 func TestSubBackpressureResyncsOnIDR(t *testing.T) {
 	s := New(Config{W: 64, H: 64, FPS: 15, Preset: "superfast", BitrateK: 100, MaxrateK: 100, BufsizeK: 50})
-	sub := &Sub{C: make(chan AU, 2), s: s, fresh: true, dropped: true}
+	sub := &Sub{C: make(chan AU, 2), s: s, fresh: true, dropped: true, gen: 1}
 
 	// Fresh sub: P-frames before the first IDR are skipped.
-	sub.offer(AU{Seq: 1, IDR: false})
+	sub.offer(AU{Seq: 1, IDR: false}, 1)
 	if len(sub.C) != 0 {
 		t.Fatal("fresh sub accepted a P-frame")
 	}
-	sub.offer(AU{Seq: 2, IDR: true})
-	sub.offer(AU{Seq: 3, IDR: false})
+	sub.offer(AU{Seq: 2, IDR: true}, 1)
+	sub.offer(AU{Seq: 3, IDR: false}, 1)
 	if len(sub.C) != 2 {
 		t.Fatalf("want 2 queued, got %d", len(sub.C))
 	}
 	// Queue full: drop everything until the next IDR.
-	sub.offer(AU{Seq: 4, IDR: false})
-	sub.offer(AU{Seq: 5, IDR: true}) // still full → stays dropped
+	sub.offer(AU{Seq: 4, IDR: false}, 1)
+	sub.offer(AU{Seq: 5, IDR: true}, 1) // still full → stays dropped
 	<-sub.C
 	<-sub.C
-	sub.offer(AU{Seq: 6, IDR: false}) // dropped: waiting for IDR
+	sub.offer(AU{Seq: 6, IDR: false}, 1) // dropped: waiting for IDR
 	if len(sub.C) != 0 {
 		t.Fatal("P-frame delivered while waiting for IDR")
 	}
-	sub.offer(AU{Seq: 7, IDR: true})
+	sub.offer(AU{Seq: 7, IDR: true}, 0)
+	if len(sub.C) != 0 {
+		t.Fatal("stale generation delivered")
+	}
+	sub.offer(AU{Seq: 7, IDR: true}, 1)
 	if got := <-sub.C; got.Seq != 7 || !got.IDR {
 		t.Fatalf("resync frame = %+v, want IDR seq 7", got)
 	}

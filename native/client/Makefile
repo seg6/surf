@@ -9,16 +9,16 @@ ARCHS := armv7
 
 include $(THEOS)/makefiles/common.mk
 
-APPLICATION_NAME := WRP
-WRP_FILES := $(wildcard Classes/*.m) $(wildcard Classes/*.c)
+APPLICATION_NAME := Surf
+Surf_FILES := $(wildcard Classes/*.m) $(wildcard Classes/*.c)
 # VideoToolbox is intentionally absent: private on iOS 6, resolved via dlopen.
-WRP_FRAMEWORKS := UIKit CoreGraphics QuartzCore ImageIO Security CoreMedia CoreVideo
-WRP_CFLAGS := -fobjc-arc -Wall -Werror=return-type -Wno-deprecated-declarations
+Surf_FRAMEWORKS := UIKit CoreGraphics QuartzCore ImageIO Security CoreMedia CoreVideo
+Surf_CFLAGS := -fobjc-arc -Wall -Werror=return-type -Wno-deprecated-declarations
 
 include $(THEOS_MAKE_PATH)/application.mk
 
 after-stage::
-	@mkdir -p $(THEOS_STAGING_DIR)/Applications/WRP.app
-	@cp ../../public/icon-72.png $(THEOS_STAGING_DIR)/Applications/WRP.app/icon-72.png
-	@cp ../../public/icon-144.png $(THEOS_STAGING_DIR)/Applications/WRP.app/icon-144.png
-	@chmod 0755 $(THEOS_STAGING_DIR)/Applications/WRP.app/WRP
+	@mkdir -p $(THEOS_STAGING_DIR)/Applications/Surf.app
+	@cp Resources/icon-72.png $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-72.png
+	@cp Resources/icon-144.png $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-144.png
+	@chmod 0755 $(THEOS_STAGING_DIR)/Applications/Surf.app/Surf

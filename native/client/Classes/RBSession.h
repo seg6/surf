@@ -32,6 +32,7 @@ typedef enum {
 // Stops reconnecting and closes the socket; used when switching servers.
 - (void)shutdown;
 - (void)updateViewportWidth:(NSInteger)width height:(NSInteger)height;
+- (void)updateViewportWidth:(NSInteger)width height:(NSInteger)height force:(BOOL)force;
 - (void)sendMessage:(NSDictionary *)message;
 - (void)sendReady;
 - (void)sendClickX:(CGFloat)x y:(CGFloat)y;
