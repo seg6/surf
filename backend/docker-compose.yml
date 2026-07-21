@@ -1,0 +1,38 @@
+services:
+  surf-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - PORT=8080
+      - START_URL=https://www.google.com
+      - PROFILE=/data/profile   # persistent Chrome profile (logins/cookies survive restarts)
+      - VW=1024                 # frame width (match the iPad mini screen)
+      - VH=768                  # frame height
+      - QUALITY=55              # jpeg quality; lower = smaller/faster frames
+      - STREAM_FPS=30           # LAN/native H.264 target
+      - STREAM_SCALE=800x800    # downscale after full-viewport capture for A5 decode
+      - STREAM_BITRATE=2800
+      - STREAM_MAXRATE=3600
+      - STREAM_BUFSIZE=900
+      - STREAM_PRESET=ultrafast
+      - AUTH_HASH=${AUTH_HASH:?set AUTH_HASH to the bcrypt password hash; ./start.sh can generate it from SURF_PASSWORD}
+    ports:
+      - "18080:8080"
+    expose:
+      - "8080"
+    shm_size: "1g"             # headful Chrome + multiple tabs want a roomy /dev/shm
+    volumes:
+      - surf_backend_profile:/data/profile
+      - surf_backend_downloads:/data/downloads
+    networks:
+      - web
+
+volumes:
+  surf_backend_profile:
+  surf_backend_downloads:
+
+networks:
+  web:
+    external: true
