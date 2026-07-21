@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Test
+        run: make test
+
+      - name: Build backend image
+        run: make backend-docker
+
+  native:
+    name: Native package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download native SDK
+        run: make native-sdk
+
+      - name: Build native build environment
+        run: docker build -t surf-buildenv native/buildenv
+
+      - name: Build package
+        run: make native-package
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: surf-native-deb
+          path: native/client/packages/*.deb

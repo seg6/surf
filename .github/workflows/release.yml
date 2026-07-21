@@ -1,0 +1,99 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - v*
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, for example v0.3.0
+        required: true
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    name: Build release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Release metadata
+        id: meta
+        shell: bash
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+          if [ -z "$tag" ]; then
+            echo "release tag is required" >&2
+            exit 1
+          fi
+          version="$(tr -d '[:space:]' < VERSION)"
+          protocol_version="$(tr -d '[:space:]' < PROTOCOL_VERSION)"
+          if [ "$tag" != "v$version" ]; then
+            echo "release tag $tag does not match VERSION $version" >&2
+            exit 1
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "protocol_version=${protocol_version}" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/surf-backend" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Test backend
+        run: make test
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build backend image
+        run: |
+          docker build --network host \
+            --build-arg VERSION="${{ steps.meta.outputs.version }}" \
+            --build-arg PROTOCOL_VERSION="${{ steps.meta.outputs.protocol_version }}" \
+            -t "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}" \
+            -t "${{ steps.meta.outputs.image }}:latest" \
+            backend
+
+      - name: Push backend image
+        run: |
+          docker push "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}"
+          docker push "${{ steps.meta.outputs.image }}:latest"
+
+      - name: Download native SDK
+        run: make native-sdk
+
+      - name: Build native build environment
+        run: docker build -t surf-buildenv native/buildenv
+
+      - name: Build native package
+        run: make native-package
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: surf-native-${{ steps.meta.outputs.tag }}
+          path: native/client/packages/*.deb
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Surf ${{ steps.meta.outputs.tag }}
+          generate_release_notes: true
+          body: |
+            Backend image:
+
+            ```text
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+            ```
+          files: native/client/packages/*.deb
