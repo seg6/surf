@@ -22,7 +22,7 @@ func Doctor(cfg *config.Config) []Check {
 	if cfg.ManageDisplay {
 		checks = append(checks, checkTool("Xvfb", cfg.XvfbPath, true))
 	}
-	checks = append(checks, checkTool("xrandr", cfg.XrandrPath, false))
+	checks = append(checks, checkTool("xrandr", cfg.XrandrPath, true))
 	if cfg.ManagePulse {
 		checks = append(checks, checkTool("pulseaudio", cfg.PulseaudioPath, true), checkTool("pactl", cfg.PactlPath, true))
 	} else if cfg.EnsurePulseSink {

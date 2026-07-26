@@ -2,7 +2,7 @@ package browser
 
 // webauthnShim disables passkey prompts inside the remote Chromium: sites
 // would otherwise try to use a platform authenticator that doesn't exist in
-// the container and dead-end the login flow. Ported verbatim from server.js.
+// the backend browser and dead-end the login flow. Ported verbatim from server.js.
 const webauthnShim = `
 (function () {
   function notAllowed() {

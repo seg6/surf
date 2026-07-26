@@ -6,7 +6,7 @@ import (
 	"surf-backend/internal/config"
 )
 
-func TestDoctorMarksXrandrOptional(t *testing.T) {
+func TestDoctorRequiresXrandr(t *testing.T) {
 	checks := Doctor(&config.Config{
 		ChromePath:     "missing-chromium",
 		FFmpegPath:     "missing-ffmpeg",
@@ -21,8 +21,8 @@ func TestDoctorMarksXrandrOptional(t *testing.T) {
 	for _, check := range checks {
 		if check.Name == "xrandr" {
 			found = true
-			if check.Required {
-				t.Fatal("xrandr should be optional")
+			if !check.Required {
+				t.Fatal("xrandr should be required")
 			}
 		}
 	}

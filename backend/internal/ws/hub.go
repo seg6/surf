@@ -150,7 +150,7 @@ func (c *Client) SendBinary(data []byte) error {
 //
 // No explicit TCP_NODELAY here: the underlying net.Conn is a bare
 // *net.TCPConn (this server speaks plain HTTP; TLS, if any, is terminated
-// externally — see docker-compose.yml), and Go's net package defaults
+// by a reverse proxy), and Go's net package defaults
 // TCP_NODELAY to true for every TCPConn (net/tcpsock.go: newTCPConn calls
 // setNoDelay(fd, true)). Nagle is already off on this side; the client's
 // hand-rolled socket (native/client/Classes/RBSocket.m) is the one that

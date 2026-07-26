@@ -8,7 +8,7 @@ import (
 )
 
 // syncScreen best-effort resizes the live X screen (RANDR) to the client
-// viewport. Xvfb also starts on an oversized canvas (start.sh), so the video
+// viewport. Xvfb also starts on an oversized canvas, so the video
 // lane can still grab the correctly-sized top-left viewport even when this X
 // server refuses custom RANDR modes.
 //
