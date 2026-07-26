@@ -225,6 +225,9 @@ func (b *Browser) sendFreshFrame(only *ws.Client, quality int) {
 	if err != nil {
 		return
 	}
+	if !b.isActiveSession(s) {
+		return
+	}
 	// Sharp marks this as the settle frame — the one JPEG that still reaches
 	// video-mode clients (their crisp-text overlay).
 	b.hub.QueueFrame(&protocol.Frame{W: w, H: h, ScrollX: sx, ScrollY: sy, Data: buf, Sharp: true}, only)

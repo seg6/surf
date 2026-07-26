@@ -506,6 +506,9 @@ func (b *Browser) pushNavState() {
 		if json.Unmarshal(res, &h) != nil {
 			return
 		}
+		if !b.isActiveSession(s) {
+			return
+		}
 		b.hub.BroadcastJSON(map[string]any{
 			"t": "histstate", "back": h.CurrentIndex > 0, "fwd": h.CurrentIndex < len(h.Entries)-1,
 		})
@@ -516,6 +519,16 @@ func (b *Browser) active() *Tab {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.tabs[b.activeID]
+}
+
+func (b *Browser) isActiveSession(session string) bool {
+	if session == "" {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	t := b.tabs[b.activeID]
+	return t != nil && t.Session == session
 }
 
 func (b *Browser) switchActive(id int) {
