@@ -49,8 +49,12 @@ func run() error {
 				log.Printf("doctor: ok %s=%s", check.Name, check.Path)
 				continue
 			}
-			failed = true
-			log.Printf("doctor: missing %s=%s: %v", check.Name, check.Path, check.Err)
+			if check.Required {
+				failed = true
+				log.Printf("doctor: missing %s=%s: %v", check.Name, check.Path, check.Err)
+				continue
+			}
+			log.Printf("doctor: optional missing %s=%s: %v", check.Name, check.Path, check.Err)
 		}
 		if failed {
 			return fmt.Errorf("doctor failed")
