@@ -67,7 +67,7 @@ func TestSplitterCutsOnAUD(t *testing.T) {
 }
 
 func TestSubBackpressureResyncsOnIDR(t *testing.T) {
-	s := New(Config{W: 64, H: 64, FPS: 15, Preset: "superfast", BitrateK: 100, MaxrateK: 100, BufsizeK: 50})
+	s := New(Config{W: 64, H: 64, FPS: 15, BitrateK: 100, MaxrateK: 100, BufsizeK: 50})
 	sub := &Sub{C: make(chan AU, 2), s: s, fresh: true, dropped: true, gen: 1}
 
 	// Fresh sub: P-frames before the first IDR are skipped.

@@ -98,9 +98,6 @@ func (b *Browser) HandleMessage(c *ws.Client, m *protocol.ClientMessage) {
 	case "video":
 		b.handleVideo(c, m.On)
 		return
-	case "stream":
-		b.handleStreamProfile(c, m.Profile)
-		return
 	case "audio":
 		b.handleAudio(c, m.On)
 		return

@@ -378,17 +378,6 @@ static const CGFloat kRBFindBarHeight = 44.0;
     [self.session sendMessage:@{@"t": @"clear", @"what": what ?: @""}];
 }
 
-- (void)settingsStreamChanged:(RBSettingsController *)settings {
-    [self sendCurrentStreamProfile];
-    BOOL wantVideo = [[[NSUserDefaults standardUserDefaults] objectForKey:RBDefaultsVideoKey] boolValue] ||
-                     [[NSUserDefaults standardUserDefaults] objectForKey:RBDefaultsVideoKey] == nil;
-    if (self.videoActive || self.videoRequested) {
-        [self.session sendMessage:@{@"t": @"video", @"on": @NO}];
-        [self leaveVideoMode];
-    }
-    if (wantVideo) [self performSelector:@selector(maybeEnableVideo) withObject:nil afterDelay:0.2];
-}
-
 - (void)settings:(RBSettingsController *)settings setDiagnosticsVisible:(BOOL)visible {
     [self setDebugVisible:visible];
 }
@@ -475,30 +464,9 @@ static const CGFloat kRBFindBarHeight = 44.0;
 // ------------------------------------------------------------- video lane
 
 - (void)maybeEnableVideo {
-    NSNumber *want = [[NSUserDefaults standardUserDefaults] objectForKey:RBDefaultsVideoKey];
-    BOOL enabled = want == nil || [want boolValue];
-    if (!enabled || ![RBVideoDecoder available]) return;
-    [self sendCurrentStreamProfile];
+    if (![RBVideoDecoder available]) return;
     self.videoRequested = YES;
     [self.session sendMessage:@{@"t": @"video", @"on": @YES}];
-}
-
-- (NSString *)currentStreamProfile {
-    NSString *p = [[NSUserDefaults standardUserDefaults] stringForKey:RBDefaultsStreamProfileKey];
-    return [p length] ? p : @"balanced";
-}
-
-- (NSString *)titleForStreamProfile:(NSString *)profile {
-    if ([profile isEqualToString:@"sharp"]) return @"Sharp 30";
-    if ([profile isEqualToString:@"smooth"]) return @"Smooth 60";
-    if ([profile isEqualToString:@"fast"]) return @"Fast 45";
-    if ([profile isEqualToString:@"potato"]) return @"Low Data";
-    if ([profile isEqualToString:@"max"]) return @"Max 60";
-    return @"Balanced 30";
-}
-
-- (void)sendCurrentStreamProfile {
-    [self.session sendMessage:@{@"t": @"stream", @"profile": [self currentStreamProfile]}];
 }
 
 // Local-only teardown (reconnects, server switches): the server side is
@@ -1720,7 +1688,7 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
     self.debugLabel.text = [NSString stringWithFormat:@" %@ %@ %@\n %@\n view %.0fx%.0f age %.1fs rtt %.0fms %@",
                             RBNativeVersion,
                             state,
-                            [self titleForStreamProfile:[self currentStreamProfile]],
+                            self.videoActive ? @"h264" : @"jpeg",
                             summary,
                             self.streamView.bounds.size.width,
                             self.streamView.bounds.size.height,

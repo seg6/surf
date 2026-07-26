@@ -8,15 +8,11 @@
 enum {
     RBSectionServer = 0,
     RBSectionSaved,
-    RBSectionStream,
     RBSectionData,
     RBSectionAbout,
     RBSectionCount
 };
 
-static NSString *const kProfiles[] = {@"sharp", @"smooth", @"balanced", @"fast", @"potato", @"max"};
-static NSString *const kProfileTitles[] = {@"Sharp 30", @"Smooth 60", @"Balanced 30", @"Fast 45", @"Low Data", @"Max 60"};
-static const int kProfileCount = 6;
 static const NSInteger kEditServerAlertTag = 1001;
 
 @interface RBSettingsController () <UITextFieldDelegate, UIAlertViewDelegate, NSNetServiceBrowserDelegate, NSNetServiceDelegate>
@@ -24,7 +20,6 @@ static const NSInteger kEditServerAlertTag = 1001;
 @property(nonatomic, copy) NSString *initialPassword;
 @property(nonatomic, strong) UITextField *urlField;
 @property(nonatomic, strong) UITextField *passwordField;
-@property(nonatomic, strong) UISwitch *videoSwitch;
 @property(nonatomic, strong) UISwitch *diagSwitch;
 @property(nonatomic, copy) NSString *statusText;
 @property(nonatomic, assign) BOOL statusIsError;
@@ -59,11 +54,6 @@ static const NSInteger kEditServerAlertTag = 1001;
     self.passwordField = [self fieldWithPlaceholder:@"password" text:self.initialPassword];
     self.passwordField.secureTextEntry = YES;
     self.passwordField.returnKeyType = UIReturnKeyGo;
-
-    self.videoSwitch = [[UISwitch alloc] initWithFrame:CGRectZero];
-    NSNumber *videoDefault = [[NSUserDefaults standardUserDefaults] objectForKey:RBDefaultsVideoKey];
-    self.videoSwitch.on = videoDefault == nil || [videoDefault boolValue];
-    [self.videoSwitch addTarget:self action:@selector(videoToggled:) forControlEvents:UIControlEventValueChanged];
 
     self.diagSwitch = [[UISwitch alloc] initWithFrame:CGRectZero];
     self.diagSwitch.on = self.diagnosticsVisible;
@@ -171,25 +161,11 @@ static const NSInteger kEditServerAlertTag = 1001;
     [self.delegate settings:self connectToURL:url password:self.passwordField.text ?: @""];
 }
 
-- (void)videoToggled:(id)sender {
-    [[NSUserDefaults standardUserDefaults] setObject:[NSNumber numberWithBool:self.videoSwitch.on]
-                                              forKey:RBDefaultsVideoKey];
-    [[NSUserDefaults standardUserDefaults] synchronize];
-    if ([self.delegate respondsToSelector:@selector(settingsStreamChanged:)]) {
-        [self.delegate settingsStreamChanged:self];
-    }
-}
-
 - (void)diagToggled:(id)sender {
     self.diagnosticsVisible = self.diagSwitch.on;
     if ([self.delegate respondsToSelector:@selector(settings:setDiagnosticsVisible:)]) {
         [self.delegate settings:self setDiagnosticsVisible:self.diagSwitch.on];
     }
-}
-
-- (NSString *)currentProfile {
-    NSString *p = [[NSUserDefaults standardUserDefaults] stringForKey:RBDefaultsStreamProfileKey];
-    return [p length] ? p : @"balanced";
 }
 
 // ---- discovery -----------------------------------------------------------
@@ -249,7 +225,6 @@ static const NSInteger kEditServerAlertTag = 1001;
     switch (section) {
         case RBSectionServer: return [self.statusText length] ? 4 : 3; // url, password, connect, (status)
         case RBSectionSaved: return (NSInteger)[self.savedServers count] + 1; // + Find Local Surf
-        case RBSectionStream: return 1 + kProfileCount; // video switch + profiles
         case RBSectionData: return 3;
         case RBSectionAbout: return 2; // version, diagnostics
     }
@@ -260,7 +235,6 @@ static const NSInteger kEditServerAlertTag = 1001;
     switch (section) {
         case RBSectionServer: return @"Server";
         case RBSectionSaved: return @"Saved Servers";
-        case RBSectionStream: return @"Stream";
         case RBSectionData: return @"Data";
         case RBSectionAbout: return @"About";
     }
@@ -336,21 +310,6 @@ static const NSInteger kEditServerAlertTag = 1001;
         return cell;
     }
 
-    if (s == RBSectionStream) {
-        if (r == 0) {
-            UITableViewCell *cell = [self cellWithID:@"video" style:UITableViewCellStyleDefault];
-            cell.selectionStyle = UITableViewCellSelectionStyleNone;
-            cell.textLabel.text = @"H.264 Video";
-            cell.accessoryView = self.videoSwitch;
-            return cell;
-        }
-        UITableViewCell *cell = [self cellWithID:@"profile" style:UITableViewCellStyleDefault];
-        cell.textLabel.text = kProfileTitles[r - 1];
-        cell.accessoryType = [[self currentProfile] isEqualToString:kProfiles[r - 1]]
-            ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
-        return cell;
-    }
-
     if (s == RBSectionData) {
         UITableViewCell *cell = [self cellWithID:@"data" style:UITableViewCellStyleDefault];
         static NSString *const titles[] = {@"Clear History", @"Clear Cookies", @"Clear Cache"};
@@ -393,16 +352,6 @@ static const NSInteger kEditServerAlertTag = 1001;
         [self setStatusText:@"Server selected — edit above or tap Connect" isError:NO];
         [tableView reloadSections:[NSIndexSet indexSetWithIndex:RBSectionSaved]
                  withRowAnimation:UITableViewRowAnimationNone];
-        return;
-    }
-    if (s == RBSectionStream && r > 0) {
-        [[NSUserDefaults standardUserDefaults] setObject:kProfiles[r - 1] forKey:RBDefaultsStreamProfileKey];
-        [[NSUserDefaults standardUserDefaults] synchronize];
-        [tableView reloadSections:[NSIndexSet indexSetWithIndex:RBSectionStream]
-                 withRowAnimation:UITableViewRowAnimationNone];
-        if ([self.delegate respondsToSelector:@selector(settingsStreamChanged:)]) {
-            [self.delegate settingsStreamChanged:self];
-        }
         return;
     }
     if (s == RBSectionData && self.connected) {

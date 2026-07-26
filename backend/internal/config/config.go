@@ -54,7 +54,6 @@ type Config struct {
 	StreamBitrateK int    // STREAM_BITRATE
 	StreamMaxrateK int    // STREAM_MAXRATE
 	StreamBufsizeK int    // STREAM_BUFSIZE
-	StreamPreset   string // STREAM_PRESET
 }
 
 func envInt(key string, def int) int {
@@ -101,7 +100,6 @@ func Load() (*Config, error) {
 		StreamBitrateK: envInt("STREAM_BITRATE", 2800),
 		StreamMaxrateK: envInt("STREAM_MAXRATE", 3600),
 		StreamBufsizeK: envInt("STREAM_BUFSIZE", 900),
-		StreamPreset:   envStr("STREAM_PRESET", "ultrafast"),
 	}
 	if cfg.AuthHash == "" {
 		return nil, fmt.Errorf("AUTH_HASH is required; generate one with surf-backend -hash-password")
