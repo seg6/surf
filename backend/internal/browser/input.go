@@ -384,6 +384,9 @@ func (b *Browser) mouse(session, typ string, x, y float64, clicks int) {
 // (so it can raise the iOS keyboard). Waits 180ms for focus to settle.
 func (b *Browser) checkEditable(c *ws.Client, session string) {
 	time.AfterFunc(180*time.Millisecond, func() {
+		if !b.isActiveSession(session) {
+			return
+		}
 		res, err := b.cdp.Call(session, "Runtime.evaluate", map[string]any{
 			"expression": editableExpr, "returnByValue": true,
 		})
@@ -400,6 +403,9 @@ func (b *Browser) checkEditable(c *ws.Client, session string) {
 			} `json:"result"`
 		}
 		if json.Unmarshal(res, &p) != nil {
+			return
+		}
+		if !b.isActiveSession(session) {
 			return
 		}
 		v := p.Result.Value

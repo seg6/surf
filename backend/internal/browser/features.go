@@ -62,15 +62,18 @@ func (b *Browser) refreshFavicon(t *Tab) {
 	pageURL := t.URL
 	s := t.Session
 	b.mu.Unlock()
-	u, err := url.Parse(pageURL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+	origin := pageOrigin(pageURL)
+	if origin == "" {
 		return
 	}
-	origin := u.Scheme + "://" + u.Host
 
 	b.mu.Lock()
 	cached := b.icons[origin] != nil
 	if cached {
+		if b.tabs[t.ID] != t || pageOrigin(t.URL) != origin {
+			b.mu.Unlock()
+			return
+		}
 		changed := t.IconKey != origin
 		t.IconKey = origin
 		b.mu.Unlock()
@@ -113,10 +116,24 @@ func (b *Browser) refreshFavicon(t *Tab) {
 		}
 		b.mu.Lock()
 		b.icons[origin] = ic
-		t.IconKey = origin
+		notify := false
+		if b.tabs[t.ID] == t && pageOrigin(t.URL) == origin {
+			t.IconKey = origin
+			notify = true
+		}
 		b.mu.Unlock()
-		b.broadcastTabs()
+		if notify {
+			b.broadcastTabs()
+		}
 	}()
+}
+
+func pageOrigin(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 func fetchIcon(href string) *favicon {

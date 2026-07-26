@@ -360,11 +360,16 @@ func (b *Browser) handleReader(c *ws.Client, t *Tab, session string) {
 	b.mu.Lock()
 	u := t.URL
 	b.mu.Unlock()
+	if !b.isActiveSession(session) {
+		return
+	}
 	res, err := b.cdp.Call(session, "Runtime.evaluate", map[string]any{
 		"expression": readerExpr, "returnByValue": true,
 	})
 	if err != nil {
-		c.SendJSON(map[string]any{"t": "reader", "ok": false})
+		if b.isActiveSession(session) {
+			c.SendJSON(map[string]any{"t": "reader", "ok": false})
+		}
 		return
 	}
 	var p struct {
@@ -375,6 +380,9 @@ func (b *Browser) handleReader(c *ws.Client, t *Tab, session string) {
 	var article struct {
 		Title string `json:"title"`
 		HTML  string `json:"html"`
+	}
+	if !b.isActiveSession(session) {
+		return
 	}
 	if json.Unmarshal(res, &p) != nil || json.Unmarshal([]byte(p.Result.Value), &article) != nil || strings.TrimSpace(article.HTML) == "" {
 		c.SendJSON(map[string]any{"t": "reader", "ok": false})
