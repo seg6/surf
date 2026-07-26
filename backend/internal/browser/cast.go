@@ -1,8 +1,6 @@
 package browser
 
 import (
-	"encoding/base64"
-	"encoding/json"
 	"log"
 	"strconv"
 	"strings"
@@ -187,43 +185,24 @@ func (b *Browser) sendFreshFrame(only *ws.Client, quality int) {
 	// Scroll offset first (cheap), then the pixels; a tiny race between the
 	// two is invisible next to frame latency.
 	var sx, sy uint32
-	if res, err := b.cdp.Call(s, "Runtime.evaluate", map[string]any{
-		"expression": "''+window.pageXOffset+','+window.pageYOffset", "returnByValue": true,
-	}); err == nil {
-		var p struct {
-			Result struct {
-				Value string `json:"value"`
-			} `json:"result"`
-		}
-		if json.Unmarshal(res, &p) == nil {
-			if i := strings.IndexByte(p.Result.Value, ','); i > 0 {
-				fx, err1 := strconv.ParseFloat(p.Result.Value[:i], 64)
-				fy, err2 := strconv.ParseFloat(p.Result.Value[i+1:], 64)
-				if err1 == nil && err2 == nil {
-					sx, sy = clampScroll(fx), clampScroll(fy)
-				}
+	if v, err := b.cdp.EvaluateString(s, "''+window.pageXOffset+','+window.pageYOffset"); err == nil {
+		if i := strings.IndexByte(v, ','); i > 0 {
+			fx, err1 := strconv.ParseFloat(v[:i], 64)
+			fy, err2 := strconv.ParseFloat(v[i+1:], 64)
+			if err1 == nil && err2 == nil {
+				sx, sy = clampScroll(fx), clampScroll(fy)
 			}
 		}
 	}
 
 	started := time.Now()
-	res, err := b.cdp.Call(s, "Page.captureScreenshot", map[string]any{"format": "jpeg", "quality": q})
+	buf, err := b.cdp.CaptureJPEG(s, q)
 	if err != nil {
 		log.Printf("captureScreenshot tab %d failed after %.1fs: %v", t.ID, time.Since(started).Seconds(), err)
 		return
 	}
 	if d := time.Since(started); d > 2*time.Second {
 		log.Printf("captureScreenshot tab %d slow: %.1fs", t.ID, d.Seconds())
-	}
-	var p struct {
-		Data string `json:"data"`
-	}
-	if json.Unmarshal(res, &p) != nil {
-		return
-	}
-	buf, err := base64.StdEncoding.DecodeString(p.Data)
-	if err != nil {
-		return
 	}
 	if !b.isActiveSession(s) {
 		return

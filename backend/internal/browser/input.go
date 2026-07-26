@@ -351,17 +351,8 @@ func (b *Browser) handleTab(m *protocol.ClientMessage) {
 }
 
 func (b *Browser) navigateHistory(session string, back bool) {
-	res, err := b.cdp.Call(session, "Page.getNavigationHistory", nil)
+	h, err := b.cdp.NavigationHistory(session)
 	if err != nil {
-		return
-	}
-	var h struct {
-		CurrentIndex int `json:"currentIndex"`
-		Entries      []struct {
-			ID int `json:"id"`
-		} `json:"entries"`
-	}
-	if json.Unmarshal(res, &h) != nil {
 		return
 	}
 	i := h.CurrentIndex + 1
@@ -369,7 +360,7 @@ func (b *Browser) navigateHistory(session string, back bool) {
 		i = h.CurrentIndex - 1
 	}
 	if i >= 0 && i < len(h.Entries) {
-		_, _ = b.cdp.Call(session, "Page.navigateToHistoryEntry", map[string]any{"entryId": h.Entries[i].ID})
+		_ = b.cdp.NavigateToHistoryEntry(session, h.Entries[i].ID)
 	}
 }
 
