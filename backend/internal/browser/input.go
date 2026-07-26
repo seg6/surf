@@ -180,7 +180,9 @@ func (b *Browser) HandleMessage(c *ws.Client, m *protocol.ClientMessage) {
 	case "key":
 		b.beginMotion(t)
 		if m.Text != "" {
-			b.cdp.Send(s, "Input.dispatchKeyEvent", map[string]any{"type": "char", "text": m.Text})
+			// Key messages must stay ordered. cdp.Send launches a goroutine per
+			// command, which can race rapid typing before Chromium sees it.
+			_, _ = b.cdp.Call(s, "Input.insertText", map[string]any{"text": m.Text})
 		} else {
 			typ := "keyUp"
 			if m.Down {
@@ -198,7 +200,7 @@ func (b *Browser) HandleMessage(c *ws.Client, m *protocol.ClientMessage) {
 				params["text"] = "\r"
 				params["unmodifiedText"] = "\r"
 			}
-			b.cdp.Send(s, "Input.dispatchKeyEvent", params)
+			_, _ = b.cdp.Call(s, "Input.dispatchKeyEvent", params)
 		}
 	default:
 		b.handleFeatureMessage(c, t, s, m)

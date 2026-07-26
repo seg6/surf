@@ -1257,8 +1257,14 @@ static UIImage *RBDecodeJPEG(NSData *data) {
 
 // ----------------------------------------------------------- keyboard shim
 
-- (void)showKeyboard {
+- (void)resetHiddenInput {
     self.hiddenInput.text = @" ";
+    UITextPosition *end = [self.hiddenInput endOfDocument];
+    if (end) self.hiddenInput.selectedTextRange = [self.hiddenInput textRangeFromPosition:end toPosition:end];
+}
+
+- (void)showKeyboard {
+    [self resetHiddenInput];
     [self.hiddenInput becomeFirstResponder];
     [self updateKeyboardAvoidance];
 }
@@ -1353,7 +1359,7 @@ static UIImage *RBDecodeJPEG(NSData *data) {
     } else {
         [self.session sendMessage:@{@"t": @"key", @"text": string}];
     }
-    self.hiddenInput.text = @" ";
+    [self resetHiddenInput];
     return NO;
 }
 
