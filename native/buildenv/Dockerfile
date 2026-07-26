@@ -1,7 +1,10 @@
 FROM debian:bookworm-slim
 
 ARG THEOS_REPO=https://github.com/theos/theos.git
-ARG THEOS_REF=master
+ARG THEOS_REF=16362d3aa83a0acd56df4493d575d34306d42478
+ARG TOOLCHAIN_TAG=test-210562a
+ARG TOOLCHAIN_SHA256_X86_64=a72a7a577e2fbe2838b6b5e9c72034fa7d114af96f0e1d4b016f18730ce4056e
+ARG TOOLCHAIN_SHA256_AARCH64=9051e9d531de5e511f0fab40d925d625bc6efe7ed9dce821d179c09de9bc690b
 
 ENV DEBIAN_FRONTEND=noninteractive \
     THEOS=/opt/theos \
@@ -12,20 +15,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       make perl rsync sudo xz-utils zip \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone --recursive "$THEOS_REPO" "$THEOS" \
+RUN git clone "$THEOS_REPO" "$THEOS" \
     && cd "$THEOS" \
-    && git checkout "$THEOS_REF" \
+    && git checkout --detach "$THEOS_REF" \
     && git submodule update --init --recursive
 
 RUN set -eux; \
     arch="$(uname -m)"; \
     case "$arch" in \
-      aarch64|x86_64) toolchain_arch="$arch" ;; \
+      aarch64) toolchain_arch="$arch"; toolchain_sha="$TOOLCHAIN_SHA256_AARCH64" ;; \
+      x86_64) toolchain_arch="$arch"; toolchain_sha="$TOOLCHAIN_SHA256_X86_64" ;; \
       *) echo "unsupported build arch: $arch" >&2; exit 1 ;; \
     esac; \
     mkdir -p "$THEOS/toolchain"; \
-    curl -fsSL "https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-${toolchain_arch}.tar.xz" \
-      | tar -xJ -C "$THEOS/toolchain"; \
+    toolchain="/tmp/iOSToolchain-${toolchain_arch}.tar.xz"; \
+    curl -fsSL "https://github.com/L1ghtmann/llvm-project/releases/download/${TOOLCHAIN_TAG}/iOSToolchain-${toolchain_arch}.tar.xz" -o "$toolchain"; \
+    printf '%s  %s\n' "$toolchain_sha" "$toolchain" | sha256sum -c -; \
+    tar -xJf "$toolchain" -C "$THEOS/toolchain"; \
+    rm -f "$toolchain"; \
     test -x "$THEOS/toolchain/linux/iphone/bin/clang"
 
 COPY build.sh /usr/local/bin/surf-build
