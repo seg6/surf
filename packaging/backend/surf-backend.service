@@ -1,0 +1,12 @@
+[Unit]
+Description=Surf backend
+After=network-online.target
+
+[Service]
+EnvironmentFile=%h/.config/surf-backend/env
+ExecStart=%h/.local/bin/surf-backend serve
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

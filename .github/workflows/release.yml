@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: write
-  packages: write
 
 jobs:
   release:
@@ -39,7 +38,6 @@ jobs:
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "protocol_version=${protocol_version}" >> "$GITHUB_OUTPUT"
-          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/surf-backend" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-go@v5
         with:
@@ -49,22 +47,13 @@ jobs:
       - name: Test backend
         run: make test
 
-      - name: Log in to GHCR
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build backend tarball
+        run: make backend-dist
 
-      - name: Build backend image
-        run: |
-          docker build --network host \
-            --build-arg VERSION="${{ steps.meta.outputs.version }}" \
-            --build-arg PROTOCOL_VERSION="${{ steps.meta.outputs.protocol_version }}" \
-            -t "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}" \
-            -t "${{ steps.meta.outputs.image }}:latest" \
-            backend
-
-      - name: Push backend image
-        run: |
-          docker push "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}"
-          docker push "${{ steps.meta.outputs.image }}:latest"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: surf-backend-${{ steps.meta.outputs.tag }}
+          path: dist/surf-backend-*.tar.gz
 
       - name: Download native SDK
         run: make native-sdk
@@ -87,9 +76,7 @@ jobs:
           name: Surf ${{ steps.meta.outputs.tag }}
           generate_release_notes: true
           body: |
-            Backend image:
-
-            ```text
-            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
-            ```
-          files: native/client/packages/*.deb
+            Native package and standalone Linux backend tarball attached.
+          files: |
+            native/client/packages/*.deb
+            dist/surf-backend-*.tar.gz

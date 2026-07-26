@@ -26,12 +26,11 @@ type Runtime struct {
 
 func Start(cfg *config.Config) (*Runtime, error) {
 	r := &Runtime{}
-	if cfg.RuntimeMode != "host" {
-		cfg.RefreshChildEnv()
-		return r, nil
-	}
 	if runtime.GOOS != "linux" {
-		return nil, fmt.Errorf("host runtime is currently implemented only on Linux")
+		return nil, fmt.Errorf("surf-backend standalone runtime is currently implemented only on Linux")
+	}
+	if _, err := exec.LookPath(cfg.XrandrPath); err != nil {
+		return nil, fmt.Errorf("xrandr is required: %w", err)
 	}
 	for _, dir := range []string{cfg.Profile, cfg.DownloadsDir, cfg.UploadsDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {

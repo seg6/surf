@@ -141,7 +141,7 @@ func (b *Browser) Start() error {
 		return err
 	}
 	b.setupDownloads()
-	log.Printf("browser ready, view %dx%d display %dx%d q%d (headful, profile %s)", b.viewW, b.viewH, b.cfg.DisplayW, b.cfg.DisplayH, b.cfg.Quality, b.cfg.Profile)
+	log.Printf("browser ready, view %dx%d display %s %dx%d q%d (headful, profile %s)", b.viewW, b.viewH, b.cfg.Display, b.cfg.DisplayW, b.cfg.DisplayH, b.cfg.Quality, b.cfg.Profile)
 	return nil
 }
 

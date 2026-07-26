@@ -11,7 +11,10 @@ import (
 )
 
 func TestHealthStatsRequiresAuth(t *testing.T) {
-	a := auth.New(t.TempDir(), "unused", 1)
+	a, err := auth.New(t.TempDir(), "test-password", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	srv, err := New(&config.Config{}, a, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +45,10 @@ func TestHealthStatsRequiresAuth(t *testing.T) {
 }
 
 func TestNativeConfigReturnsWSTicket(t *testing.T) {
-	a := auth.New(t.TempDir(), "unused", 1)
+	a, err := auth.New(t.TempDir(), "test-password", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	srv, err := New(&config.Config{ViewW: 1024, ViewH: 768}, a, nil)
 	if err != nil {
 		t.Fatal(err)

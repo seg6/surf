@@ -21,8 +21,8 @@ jobs:
       - name: Test
         run: make test
 
-      - name: Build backend image
-        run: make backend-docker
+      - name: Build backend tarball
+        run: make backend-dist
 
   native:
     name: Native package

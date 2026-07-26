@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -26,40 +25,70 @@ func main() {
 }
 
 func run() error {
-	hashPassword := flag.String("hash-password", "", "print a bcrypt hash for a Surf password and exit")
-	doctor := flag.Bool("doctor", false, "check configured host-mode runtime tools and exit")
-	flag.Parse()
-	if *hashPassword != "" {
-		hash, err := auth.HashPassword(*hashPassword)
-		if err != nil {
-			return fmt.Errorf("hash password: %w", err)
-		}
-		fmt.Println(hash)
-		return nil
+	if len(os.Args) < 2 {
+		printUsage()
+		return fmt.Errorf("missing command")
 	}
+	cmd, args := os.Args[1], os.Args[2:]
+	switch cmd {
+	case "serve":
+		if len(args) != 0 {
+			return fmt.Errorf("serve takes no arguments")
+		}
+		return serve()
+	case "doctor":
+		if len(args) != 0 {
+			return fmt.Errorf("doctor takes no arguments")
+		}
+		return doctor()
+	case "version":
+		if len(args) != 0 {
+			return fmt.Errorf("version takes no arguments")
+		}
+		fmt.Printf("surf-backend %s\nprotocol %s\n", config.AppVersion, config.NativeVersion)
+		return nil
+	default:
+		printUsage()
+		return fmt.Errorf("unknown command %q", cmd)
+	}
+}
 
-	cfg, err := config.Load()
+func printUsage() {
+	fmt.Fprint(os.Stderr, `Usage:
+  surf-backend serve
+  surf-backend doctor
+  surf-backend version
+`)
+}
+
+func doctor() error {
+	cfg, err := config.LoadForDiagnostics()
 	if err != nil {
 		return err
 	}
-	if *doctor {
-		failed := false
-		for _, check := range runenv.Doctor(cfg) {
-			if check.OK {
-				log.Printf("doctor: ok %s=%s", check.Name, check.Path)
-				continue
-			}
-			if check.Required {
-				failed = true
-				log.Printf("doctor: missing %s=%s: %v", check.Name, check.Path, check.Err)
-				continue
-			}
-			log.Printf("doctor: optional missing %s=%s: %v", check.Name, check.Path, check.Err)
+	failed := false
+	for _, check := range runenv.Doctor(cfg) {
+		if check.OK {
+			log.Printf("doctor: ok %s=%s", check.Name, check.Path)
+			continue
 		}
-		if failed {
-			return fmt.Errorf("doctor failed")
+		if check.Required {
+			failed = true
+			log.Printf("doctor: missing %s=%s: %v", check.Name, check.Path, check.Err)
+			continue
 		}
-		return nil
+		log.Printf("doctor: optional missing %s=%s: %v", check.Name, check.Path, check.Err)
+	}
+	if failed {
+		return fmt.Errorf("doctor failed")
+	}
+	return nil
+}
+
+func serve() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
 	}
 
 	rt, err := runenv.Start(cfg)
@@ -68,7 +97,10 @@ func run() error {
 	}
 	defer rt.Shutdown()
 
-	a := auth.New(cfg.Profile, cfg.AuthHash, cfg.AuthDays)
+	a, err := auth.New(cfg.Profile, cfg.SurfPassword, cfg.AuthDays)
+	if err != nil {
+		return fmt.Errorf("auth: %w", err)
+	}
 	hub := ws.NewHub()
 	b := browser.New(cfg, hub)
 	hub.SetHandler(b)
@@ -77,7 +109,7 @@ func run() error {
 	if err := b.Start(); err != nil {
 		return err
 	}
-	if os.Getenv("SURF_ADVERTISE") == "1" {
+	if os.Getenv("SURF_ADVERTISE") != "0" {
 		advertisePort := cfg.Port
 		if v, err := strconv.Atoi(os.Getenv("SURF_ADVERTISE_PORT")); err == nil && v > 0 {
 			advertisePort = v
@@ -98,7 +130,7 @@ func run() error {
 	srv.SetHealthCheck(b.Health)
 	srv.SetStats(b.Stats)
 	b.RegisterRoutes(srv)
-	log.Printf("surf-backend listening on %s:%d runtime=%s", cfg.BindAddr, cfg.Port, cfg.RuntimeMode)
+	log.Printf("surf-backend listening on %s:%d", cfg.BindAddr, cfg.Port)
 
 	serverErr := make(chan error, 1)
 	go func() { serverErr <- httpd.Listen(cfg.BindAddr, cfg.Port, srv.Handler()) }()

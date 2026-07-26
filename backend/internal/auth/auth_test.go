@@ -7,17 +7,15 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 func newTestAuth(t *testing.T) *Auth {
 	t.Helper()
-	hash, err := bcrypt.GenerateFromPassword([]byte("hunter2"), bcrypt.MinCost)
+	a, err := New(t.TempDir(), "hunter2", 180)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return New(t.TempDir(), string(hash), 180)
+	return a
 }
 
 func requestWithCookie(v string) *http.Request {
@@ -60,8 +58,14 @@ func TestCookieTamperAndExpiry(t *testing.T) {
 
 func TestSecretsPersistAcrossRestart(t *testing.T) {
 	dir := t.TempDir()
-	a1 := New(dir, "x", 1)
-	a2 := New(dir, "x", 1)
+	a1, err := New(dir, "hunter2", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a2, err := New(dir, "hunter2", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if a1.sign(42) != a2.sign(42) {
 		t.Fatal("auth secret not persistent")
 	}

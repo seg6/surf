@@ -1,53 +1,21 @@
 # Backend
 
-The backend is named `surf-backend`. It runs Chromium inside Docker, captures
-the X display with ffmpeg, and streams H.264/audio/control messages to the
-native client.
+The backend is named `surf-backend`. It runs Chromium directly on Linux,
+captures a private Xvfb display with FFmpeg, and streams video, audio, and
+control messages to the native client.
 
-## Local LAN Launcher
+## Dependencies
 
-From `backend/`, `./start.sh` builds the Docker image, hashes required
-`SURF_PASSWORD`, starts the container with host networking, and enables Bonjour
-discovery. It refuses to start when `SURF_PASSWORD` is unset.
+Install the host runtime tools before starting the backend:
 
-Configuration is read from `backend/.env`:
-
-```sh
-SURF_PASSWORD=change-me
-PORT=18080
-```
-
-## Docker Compose
-
-`backend/docker-compose.yml` defines a `surf-backend` service for deployments
-where you want to provide `AUTH_HASH` yourself.
-
-Generate a hash with:
-
-```sh
-cd backend
-docker build -t surf-backend:lan .
-docker run --rm --entrypoint /app/surf-backend surf-backend:lan -hash-password 'your-password'
-```
-
-## Important Ports
-
-- `18080`: default LAN port used by `./start.sh`.
-- `8080`: default internal container port in compose deployments.
-
-## Experimental Linux Host Mode
-
-`surf-backend` can also run directly on Linux without Docker. Host mode expects
-runtime tools to be installed on the machine:
-
-- Chromium (`chromium` or set `CHROME`).
+- Chromium (`chromium`, or set `CHROME`).
 - Xvfb (`Xvfb`).
-- xrandr (`xrandr`, optional; resize falls back when missing).
+- xrandr (`xrandr`).
 - FFmpeg (`ffmpeg`).
-- PulseAudio and pactl (`pulseaudio`, `pactl`), or PipeWire's PulseAudio
-  compatibility service with `pactl`.
+- `pactl` with PulseAudio or PipeWire Pulse compatibility.
+- `pulseaudio` when no existing PulseAudio-compatible server is available.
 
-Example dependency installs:
+Example package installs:
 
 ```sh
 # Debian/Ubuntu package names vary by release.
@@ -60,67 +28,90 @@ sudo dnf install chromium xorg-x11-server-Xvfb xrandr ffmpeg pulseaudio-utils pu
 sudo pacman -S chromium xorg-server-xvfb xorg-xrandr ffmpeg pulseaudio
 ```
 
-Build the binary from the repo root:
+## Quick Start
+
+Download the `surf-backend-*-linux-*.tar.gz` archive from GitHub Releases, then:
+
+```sh
+tar xf surf-backend-*-linux-*.tar.gz
+cd surf-backend-*-linux-*
+./surf-backend doctor
+SURF_PASSWORD='change-me' ./surf-backend serve
+```
+
+Use a strong password before exposing Surf beyond local testing. Press `Ctrl-C`
+to stop the foreground backend.
+
+The default LAN URL is:
+
+```text
+http://YOUR_COMPUTER_IP:18080
+```
+
+## Build From Source
+
+From the repo root:
 
 ```sh
 make backend-binary
+SURF_PASSWORD='change-me' ./backend/surf-backend serve
 ```
 
-Generate a password hash and start host mode:
+Press `Ctrl-C` to stop the foreground backend.
+
+## Useful Commands
 
 ```sh
-AUTH_HASH="$(./backend/surf-backend -hash-password 'your-password')" \
-SURF_RUNTIME=host \
-PORT=18080 \
-./backend/surf-backend
+make backend-binary      # build backend/surf-backend
+make backend-dist        # build dist/surf-backend-*.tar.gz
 ```
 
-Check whether the configured host tools are present:
+Run the binary directly:
 
 ```sh
-SURF_RUNTIME=host ./backend/surf-backend -doctor
+make backend-binary
+SURF_PASSWORD='change-me' ./backend/surf-backend serve
 ```
 
-Host mode stores data under `~/.surf/` by default and starts private Xvfb and
-PulseAudio processes for Chromium. Docker remains the safest path until host
-mode is smoke-tested on your target Linux system.
+## Runtime Behavior
 
-Wayland desktops still use this private Xvfb path; Surf does not need to attach
-to the user's compositor. Install Xvfb even on Wayland systems.
+Surf starts a private Xvfb display for Chromium. Wayland desktops still use this
+path; Surf does not need to attach to the visible compositor. Child processes
+force X11 and clear Wayland display variables so Chromium stays inside Xvfb.
 
-On systems using PipeWire instead of the `pulseaudio` daemon, tell Surf to use
-the existing PulseAudio-compatible server. Surf will create the `surf_output`
-null sink with `pactl` and unload it on shutdown:
+For audio, Surf first checks whether `pactl info` can reach an existing
+PulseAudio-compatible server. On common PipeWire desktops this succeeds, so Surf
+creates a `surf_output` null sink there and unloads it on shutdown. If no server
+is available, Surf starts its own PulseAudio process.
 
-```sh
-AUTH_HASH="$(./backend/surf-backend -hash-password 'your-password')" \
-SURF_RUNTIME=host \
-SURF_MANAGE_PULSE=0 \
-PORT=18080 \
-./backend/surf-backend
-```
+Data is stored under `~/.surf/` by default:
 
-When `PULSE_SERVER` is unset in this mode, Chromium and ffmpeg use the default
-PulseAudio/PipeWire socket for the current user. `PULSE_SINK=surf_output` keeps
-Chromium's audio off the host speakers. Set `SURF_ENSURE_PULSE_SINK=0` only if
-you already created the sink yourself.
+- `~/.surf/profile`: Chromium profile.
+- `~/.surf/downloads`: browser downloads.
+- `~/.surf/uploads`: temporary upload files.
 
-If you run host mode as root on a VPS, Chromium may require
-`CHROME_NO_SANDBOX=1`. Prefer running as a normal user when possible.
+## Configuration
 
-Useful host-mode overrides:
+Common overrides:
 
-- `CHROME`, `FFMPEG`, `XVFB`, `XRANDR`, `PULSEAUDIO`, `PACTL`: tool paths.
-- `SURF_HOME`: data root; defaults to `~/.surf`.
+- `SURF_PASSWORD`: required login password.
+- `PORT`: listen port; defaults to `18080`.
 - `BIND_ADDR`: listen address; defaults to `0.0.0.0`.
+- `SURF_HOME`: data root; defaults to `~/.surf`.
+- `CHROME`, `FFMPEG`, `XVFB`, `XRANDR`, `PULSEAUDIO`, `PACTL`: tool paths.
 - `SURF_MANAGE_DISPLAY=0`: use an existing `DISPLAY` or `SURF_DISPLAY`.
-- `SURF_MANAGE_PULSE=0`: use an existing `PULSE_SERVER`.
+- `SURF_MANAGE_PULSE=1`: force Surf to start a private PulseAudio process.
 - `SURF_ENSURE_PULSE_SINK=0`: do not create `PULSE_SINK` automatically when
-  using an existing Pulse/PipeWire server.
+  using an existing PulseAudio/PipeWire server.
 - `PULSE_SINK`: sink Chromium should use; defaults to `surf_output`.
-- `AUDIO_SOURCE`: source ffmpeg captures; defaults to `surf_output.monitor`.
+- `AUDIO_SOURCE`: source FFmpeg captures; defaults to `surf_output.monitor`.
+- `SURF_ADVERTISE=0`: disable LAN discovery advertisement.
+
+If you run the backend as root on a VPS, Chromium usually requires
+`CHROME_NO_SANDBOX=1`. Surf enables this by default for root, but running as a
+normal user is preferred.
 
 ## Security
 
-Do not expose a weak-password backend to the public internet. For VPS usage,
-put it behind HTTPS and use a strong password.
+Do not expose a weak-password backend to the public internet. For VPS usage, put
+it behind HTTPS and use a strong password.

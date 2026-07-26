@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -13,6 +14,9 @@ import (
 // so a stale client can never talk a mismatched protocol. Release builds inject
 // this from PROTOCOL_VERSION with Go linker flags.
 var NativeVersion = "dev"
+
+// AppVersion is injected from VERSION in release builds.
+var AppVersion = "dev"
 
 // Caps enumerates optional server capabilities for /native-config. The client
 // feature-gates on these instead of parsing version strings, so server and app
@@ -32,7 +36,6 @@ var Caps = []string{
 }
 
 type Config struct {
-	RuntimeMode   string // docker (default) or host
 	BindAddr      string
 	Port          int
 	ChromePath    string
@@ -46,7 +49,7 @@ type Config struct {
 	MotionQuality int // JPEG quality while scrolling/typing (cheap frames, low latency)
 	SharpQuality  int // quality of the post-settle captureScreenshot
 	SettleMS      int // how long after the last input before we consider motion over
-	AuthHash      string
+	SurfPassword  string
 	AuthDays      int
 	DownloadsDir  string
 	UploadsDir    string
@@ -77,7 +80,15 @@ type Config struct {
 }
 
 func (c *Config) RefreshChildEnv() {
-	env := []string{"DISPLAY=" + c.Display}
+	env := []string{
+		"DISPLAY=" + c.Display,
+		"WAYLAND_DISPLAY=",
+		"XDG_SESSION_TYPE=x11",
+		"GDK_BACKEND=x11",
+		"QT_QPA_PLATFORM=xcb",
+		"SDL_VIDEODRIVER=x11",
+		"CLUTTER_BACKEND=x11",
+	}
 	if c.PulseServer != "" {
 		env = append(env, "PULSE_SERVER="+c.PulseServer)
 	}
@@ -126,43 +137,42 @@ func surfHome() string {
 	return ".surf"
 }
 
-func authHash() string {
-	return os.Getenv("AUTH_HASH")
+var pulseServerAvailable = func(pactlPath string) bool {
+	cmd := exec.Command(pactlPath, "info")
+	cmd.Env = os.Environ()
+	return cmd.Run() == nil
 }
 
 func Load() (*Config, error) {
-	runtimeMode := strings.ToLower(envStr("SURF_RUNTIME", "docker"))
-	if runtimeMode != "host" {
-		runtimeMode = "docker"
-	}
+	return load(true)
+}
+
+func LoadForDiagnostics() (*Config, error) {
+	return load(false)
+}
+
+func load(requireAuth bool) (*Config, error) {
 	home := surfHome()
-	profileDefault := "/data/profile"
-	downloadsDefault := "/data/downloads"
-	uploadsDefault := "/data/uploads"
-	chromeDefault := "/usr/bin/chromium"
-	if runtimeMode == "host" {
-		profileDefault = filepath.Join(home, "profile")
-		downloadsDefault = filepath.Join(home, "downloads")
-		uploadsDefault = filepath.Join(home, "uploads")
-		chromeDefault = "chromium"
-	}
 	viewW := envInt("VW", 1024)
 	viewH := envInt("VH", 768)
 	displayDefault := max(viewW, viewH)
 	pulseSink := envStr("PULSE_SINK", "surf_output")
-	manageDisplay := envBool("SURF_MANAGE_DISPLAY", runtimeMode == "host")
-	managePulse := envBool("SURF_MANAGE_PULSE", runtimeMode == "host")
-	pulseServerDefault := "unix:/tmp/pulse/native"
-	if runtimeMode == "host" && !managePulse {
-		pulseServerDefault = ""
+	pactlPath := envStr("PACTL", "pactl")
+	managePulseDefault := true
+	if os.Getenv("PULSE_SERVER") != "" || (os.Getenv("SURF_MANAGE_PULSE") == "" && pulseServerAvailable(pactlPath)) {
+		managePulseDefault = false
+	}
+	managePulse := envBool("SURF_MANAGE_PULSE", managePulseDefault)
+	pulseServerDefault := ""
+	if managePulse {
+		pulseServerDefault = "unix:/tmp/pulse/native"
 	}
 	cfg := &Config{
-		RuntimeMode:     runtimeMode,
 		BindAddr:        envStr("BIND_ADDR", "0.0.0.0"),
-		Port:            envInt("PORT", 8080),
-		ChromePath:      envStr("CHROME", chromeDefault),
+		Port:            envInt("PORT", 18080),
+		ChromePath:      envStr("CHROME", "chromium"),
 		StartURL:        envStr("START_URL", "https://www.google.com"),
-		Profile:         envStr("PROFILE", profileDefault),
+		Profile:         envStr("PROFILE", filepath.Join(home, "profile")),
 		ViewW:           viewW,
 		ViewH:           viewH,
 		DisplayW:        envInt("XFB_W", displayDefault),
@@ -171,10 +181,10 @@ func Load() (*Config, error) {
 		MotionQuality:   envInt("MOTION_QUALITY", 85),
 		SharpQuality:    envInt("SHARP_QUALITY", 82),
 		SettleMS:        envInt("SETTLE_MS", 180),
-		AuthHash:        authHash(),
+		SurfPassword:    os.Getenv("SURF_PASSWORD"),
 		AuthDays:        envInt("AUTH_DAYS", 180),
-		DownloadsDir:    envStr("DOWNLOADS", downloadsDefault),
-		UploadsDir:      envStr("UPLOADS", uploadsDefault),
+		DownloadsDir:    envStr("DOWNLOADS", filepath.Join(home, "downloads")),
+		UploadsDir:      envStr("UPLOADS", filepath.Join(home, "uploads")),
 		Display:         envStr("SURF_DISPLAY", envStr("DISPLAY", ":99")),
 		XOutput:         envStr("X_OUTPUT", "screen"),
 		PulseServer:     envStr("PULSE_SERVER", pulseServerDefault),
@@ -184,19 +194,19 @@ func Load() (*Config, error) {
 		XvfbPath:        envStr("XVFB", "Xvfb"),
 		XrandrPath:      envStr("XRANDR", "xrandr"),
 		PulseaudioPath:  envStr("PULSEAUDIO", "pulseaudio"),
-		PactlPath:       envStr("PACTL", "pactl"),
-		ManageDisplay:   manageDisplay,
+		PactlPath:       pactlPath,
+		ManageDisplay:   envBool("SURF_MANAGE_DISPLAY", true),
 		ManagePulse:     managePulse,
-		EnsurePulseSink: envBool("SURF_ENSURE_PULSE_SINK", runtimeMode == "host" && !managePulse),
-		ChromeNoSandbox: envBool("CHROME_NO_SANDBOX", runtimeMode == "docker"),
+		EnsurePulseSink: envBool("SURF_ENSURE_PULSE_SINK", !managePulse),
+		ChromeNoSandbox: envBool("CHROME_NO_SANDBOX", os.Geteuid() == 0),
 		StreamFPS:       envInt("STREAM_FPS", 30),
 		StreamScale:     envStr("STREAM_SCALE", "800x800"),
 		StreamBitrateK:  envInt("STREAM_BITRATE", 2800),
 		StreamMaxrateK:  envInt("STREAM_MAXRATE", 3600),
 		StreamBufsizeK:  envInt("STREAM_BUFSIZE", 900),
 	}
-	if cfg.AuthHash == "" {
-		return nil, fmt.Errorf("AUTH_HASH is required; generate one with surf-backend -hash-password")
+	if requireAuth && cfg.SurfPassword == "" {
+		return nil, fmt.Errorf("SURF_PASSWORD is required")
 	}
 	cfg.RefreshChildEnv()
 	return cfg, nil

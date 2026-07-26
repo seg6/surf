@@ -6,7 +6,7 @@ obsolete system WebKit.
 
 The native app provides the touch-first browser UI, input handling, H.264 video
 decoding, audio playback, tabs, downloads, uploads, and device integration. The
-backend, `surf-backend`, runs Chromium in Docker, captures the browser display,
+backend, `surf-backend`, runs Chromium on Linux, captures the browser display,
 and streams it to the device over WebSocket.
 
 The result is closer to a purpose-built remote browser than a remote desktop:
@@ -21,9 +21,8 @@ still experimental.
 The main test target is the original iPad mini on iOS 6.1.3. Other iOS 6 iPads,
 iPhones, and iPods may work, but layout and performance are less tested.
 
-The recommended backend path currently runs through Docker. An experimental
-Linux host mode exists for standalone-backend development; see
-`docs/backend.md` for details.
+The backend runs directly on Linux with host-installed Chromium, Xvfb, FFmpeg,
+and PulseAudio/PipeWire tools. See `docs/backend.md` for details.
 
 ## AI Disclosure
 
@@ -44,7 +43,9 @@ code, test your setup, and assume there are rough edges.
 - A jailbroken iOS device.
 - iOS 6 is the primary target.
 - Filza, iFile, OpenSSH, or another way to install `.deb` packages.
-- Docker on a computer or server for `surf-backend`.
+- A Linux computer or server for `surf-backend`.
+- Host backend tools: Chromium, Xvfb, xrandr, FFmpeg, and `pactl` with
+  PulseAudio or PipeWire Pulse compatibility.
 - A low-latency network between the device and backend. LAN is best.
 
 You do not need to build the native app yourself if a `.deb` is available in
@@ -70,31 +71,37 @@ not appear after installation, run `uicache` again or respring.
 
 ## Start The Backend
 
-On the computer or server that will run Chromium:
+On the Linux computer or server that will run Chromium, download the
+`surf-backend-*-linux-*.tar.gz` archive from GitHub Releases, then:
 
 ```sh
-cd backend
-cp .env.example .env
-./start.sh
+tar xf surf-backend-*-linux-*.tar.gz
+cd surf-backend-*-linux-*
+./surf-backend doctor
+SURF_PASSWORD='change-me' ./surf-backend serve
 ```
 
-The first run builds the Docker image, so it can take a few minutes.
+Use a strong password before exposing Surf beyond local testing.
 
-By default, `./start.sh`:
+To build from source instead:
 
-- Builds the `surf-backend:lan` Docker image.
-- Starts a container named `surf-backend-lan`.
+```sh
+make backend-binary
+SURF_PASSWORD='change-me' ./backend/surf-backend serve
+```
+
+By default, `surf-backend serve`:
+
 - Listens on port `18080`.
 - Advertises the backend on the local network for Surf discovery.
-- Reads required `SURF_PASSWORD` from `.env`.
+- Reads required `SURF_PASSWORD` from the environment.
 
-The example password is:
+To run the binary directly:
 
-```text
-securepassword
+```sh
+make backend-binary
+SURF_PASSWORD='change-me' ./backend/surf-backend serve
 ```
-
-Change it in `.env`; `./start.sh` refuses to start without `SURF_PASSWORD`.
 
 ## Connect From Surf
 
@@ -105,7 +112,7 @@ The easiest path is local discovery:
 1. Open Settings in Surf.
 2. Tap `Find Local Surf`.
 3. Select the discovered backend.
-4. Enter the password from `.env`.
+4. Enter the password from `SURF_PASSWORD`.
 5. Tap `Connect`.
 
 If discovery does not find the backend, enter the URL manually:
@@ -120,8 +127,8 @@ Example:
 http://192.168.1.50:18080
 ```
 
-Use the LAN IP address of the computer running Docker, not the IP address of the
-iOS device.
+Use the LAN IP address of the computer running `surf-backend`, not the IP
+address of the iOS device.
 
 ## Firewall Notes
 
@@ -134,13 +141,12 @@ For Linux systems using `ufw`:
 sudo ufw allow from 192.168.0.0/16 to any port 18080 proto tcp
 ```
 
-On macOS or Windows, allow Docker or TCP port `18080` through the system
-firewall.
+If you use another firewall, allow inbound TCP port `18080`.
 
 ## What Surf Is
 
 - A native client for legacy jailbroken iOS devices.
-- A Dockerized Chromium backend named `surf-backend`.
+- A standalone Linux Chromium backend named `surf-backend`.
 - A touch-first remote browser, not a generic remote desktop.
 - Intended for LAN use, with VPS deployment possible if latency is acceptable.
 
@@ -182,7 +188,6 @@ prebuilt `.deb` from Releases.
 ## More Docs
 
 - `docs/backend.md`: backend configuration and deployment notes.
-- `docs/standalone-backend.md`: standalone backend plan and progress.
 - `docs/native-build.md`: building the iOS `.deb`.
 - `docs/troubleshooting.md`: common connection and install issues.
 

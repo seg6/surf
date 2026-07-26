@@ -53,13 +53,17 @@ func readOrCreateSecret(file string, bytes int) string {
 	return v
 }
 
-func New(profile, bcryptHash string, days int) *Auth {
+func New(profile, password string, days int) (*Auth, error) {
+	bcryptHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
 	return &Auth{
-		hash:     bcryptHash,
+		hash:     string(bcryptHash),
 		secret:   []byte(readOrCreateSecret(filepath.Join(profile, ".authsecret"), 32)),
 		days:     max(1, days),
 		attempts: map[string][]time.Time{},
-	}
+	}, nil
 }
 
 func randomHex(bytes int) string {
@@ -68,14 +72,6 @@ func randomHex(bytes int) string {
 		panic(err)
 	}
 	return hex.EncodeToString(buf)
-}
-
-func HashPassword(password string) (string, error) {
-	b, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
 }
 
 func (a *Auth) sign(exp int64) string {

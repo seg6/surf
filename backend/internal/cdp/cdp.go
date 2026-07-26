@@ -93,6 +93,7 @@ func (cfg LaunchConfig) Args() []string {
 		// Chromium treats the Xvfb window as backgrounded/occluded and stops
 		// producing compositor frames (dead screencast, multi-second
 		// screenshots).
+		"--ozone-platform=x11",
 		// Wheel scrolls must apply instantly: the client predicts scroll
 		// locally and reconciles against frame scroll offsets — an animated
 		// scroll makes the server look permanently behind.
