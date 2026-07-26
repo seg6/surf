@@ -38,7 +38,7 @@ func TestLoadDockerDefaults(t *testing.T) {
 	if !cfg.ChromeNoSandbox || cfg.ManageDisplay || cfg.ManagePulse {
 		t.Fatalf("docker flags noSandbox=%t manageDisplay=%t managePulse=%t", cfg.ChromeNoSandbox, cfg.ManageDisplay, cfg.ManagePulse)
 	}
-	if !reflect.DeepEqual(cfg.ChildEnv, []string{"DISPLAY=:99", "PULSE_SERVER=unix:/tmp/pulse/native"}) {
+	if !reflect.DeepEqual(cfg.ChildEnv, []string{"DISPLAY=:99", "PULSE_SERVER=unix:/tmp/pulse/native", "PULSE_SINK=surf_output"}) {
 		t.Fatalf("ChildEnv=%v", cfg.ChildEnv)
 	}
 }
@@ -60,6 +60,19 @@ func TestLoadHostDefaults(t *testing.T) {
 	}
 	if cfg.ChromeNoSandbox || !cfg.ManageDisplay || !cfg.ManagePulse {
 		t.Fatalf("host flags noSandbox=%t manageDisplay=%t managePulse=%t", cfg.ChromeNoSandbox, cfg.ManageDisplay, cfg.ManagePulse)
+	}
+}
+
+func TestHostExistingPulseDoesNotForcePulseServer(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("SURF_RUNTIME", "host")
+	t.Setenv("SURF_MANAGE_PULSE", "0")
+	cfg := Load()
+	if cfg.PulseServer != "" {
+		t.Fatalf("PulseServer=%q, want empty", cfg.PulseServer)
+	}
+	if !reflect.DeepEqual(cfg.ChildEnv, []string{"DISPLAY=:99", "PULSE_SINK=surf_output"}) {
+		t.Fatalf("ChildEnv=%v", cfg.ChildEnv)
 	}
 }
 
