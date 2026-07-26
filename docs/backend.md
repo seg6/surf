@@ -61,6 +61,12 @@ PORT=18080 \
 ./backend/surf-backend
 ```
 
+Check whether the configured host tools are present:
+
+```sh
+SURF_RUNTIME=host ./backend/surf-backend -doctor
+```
+
 Host mode stores data under `~/.surf/` by default and starts private Xvfb and
 PulseAudio processes for Chromium. Docker remains the recommended path until
 the managed runtime bundle is implemented.
