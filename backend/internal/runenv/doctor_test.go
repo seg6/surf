@@ -30,3 +30,25 @@ func TestDoctorMarksXrandrOptional(t *testing.T) {
 		t.Fatal("doctor did not include xrandr")
 	}
 }
+
+func TestDoctorRequiresPactlWhenEnsuringExternalSink(t *testing.T) {
+	checks := Doctor(&config.Config{
+		ChromePath:      "missing-chromium",
+		FFmpegPath:      "missing-ffmpeg",
+		XrandrPath:      "missing-xrandr",
+		PactlPath:       "missing-pactl",
+		EnsurePulseSink: true,
+	})
+	found := false
+	for _, check := range checks {
+		if check.Name == "pactl" {
+			found = true
+			if !check.Required {
+				t.Fatal("pactl should be required when creating an external sink")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("doctor did not include pactl")
+	}
+}

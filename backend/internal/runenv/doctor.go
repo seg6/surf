@@ -25,6 +25,8 @@ func Doctor(cfg *config.Config) []Check {
 	checks = append(checks, checkTool("xrandr", cfg.XrandrPath, false))
 	if cfg.ManagePulse {
 		checks = append(checks, checkTool("pulseaudio", cfg.PulseaudioPath, true), checkTool("pactl", cfg.PactlPath, true))
+	} else if cfg.EnsurePulseSink {
+		checks = append(checks, checkTool("pactl", cfg.PactlPath, true))
 	}
 	return checks
 }
