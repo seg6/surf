@@ -51,13 +51,18 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case p == "/health":
+		wantStats := r.URL.Query().Get("stats") == "1" && s.stats != nil
+		if wantStats && !s.auth.Valid(r) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 		if s.health != nil {
 			if err := s.health(); err != nil {
 				http.Error(w, err.Error(), http.StatusServiceUnavailable)
 				return
 			}
 		}
-		if r.URL.Query().Get("stats") == "1" && s.stats != nil {
+		if wantStats {
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			_ = json.NewEncoder(w).Encode(s.stats())
 			return
