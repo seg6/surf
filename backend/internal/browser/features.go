@@ -405,19 +405,9 @@ func (b *Browser) finishLongpress(c *ws.Client, t *Tab, session string, x, y flo
 		b.mouse(session, "mousePressed", x, y, 2)
 		b.mouse(session, "mouseReleased", x, y, 2)
 	}
-	res, err := b.cdp.Call(session, "Runtime.evaluate", map[string]any{
-		"expression": "String(window.getSelection())", "returnByValue": true,
-	})
 	text := ""
-	if err == nil {
-		var p struct {
-			Result struct {
-				Value string `json:"value"`
-			} `json:"result"`
-		}
-		if json.Unmarshal(res, &p) == nil {
-			text = p.Result.Value
-		}
+	if v, err := b.cdp.EvaluateString(session, "String(window.getSelection())"); err == nil {
+		text = v
 	}
 	// A drag that selected nothing was a drag, not a copy attempt.
 	if !selectWord && text == "" {
@@ -433,20 +423,9 @@ func (b *Browser) handleFind(c *ws.Client, t *Tab, session string, m *protocol.C
 	}
 	back := m.Dir < 0
 	q, _ := json.Marshal(m.Q)
-	res, err := b.cdp.Call(session, "Runtime.evaluate", map[string]any{
-		"expression":    fmt.Sprintf("window.find(%s,false,%t,true,false,true,false)", q, back),
-		"returnByValue": true,
-	})
-	found := false
-	if err == nil {
-		var p struct {
-			Result struct {
-				Value bool `json:"value"`
-			} `json:"result"`
-		}
-		if json.Unmarshal(res, &p) == nil {
-			found = p.Result.Value
-		}
+	found, err := b.cdp.EvaluateBool(session, fmt.Sprintf("window.find(%s,false,%t,true,false,true,false)", q, back))
+	if err != nil {
+		found = false
 	}
 	c.SendJSON(map[string]any{"t": "found", "on": found})
 	go b.sendSharpFrame(nil, t)

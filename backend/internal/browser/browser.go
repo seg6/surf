@@ -493,24 +493,15 @@ func (b *Browser) pushNavState() {
 	s := t.Session
 	b.mu.Unlock()
 	go func() {
-		res, err := b.cdp.Call(s, "Page.getNavigationHistory", nil)
+		h, err := b.cdp.NavigationHistory(s)
 		if err != nil {
-			return
-		}
-		var h struct {
-			CurrentIndex int `json:"currentIndex"`
-			Entries      []struct {
-				ID int `json:"id"`
-			} `json:"entries"`
-		}
-		if json.Unmarshal(res, &h) != nil {
 			return
 		}
 		if !b.isActiveSession(s) {
 			return
 		}
 		b.hub.BroadcastJSON(map[string]any{
-			"t": "histstate", "back": h.CurrentIndex > 0, "fwd": h.CurrentIndex < len(h.Entries)-1,
+			"t": "histstate", "back": h.CanGoBack(), "fwd": h.CanGoForward(),
 		})
 	}()
 }
@@ -575,9 +566,7 @@ func (b *Browser) applyView(t *Tab) {
 	h := int(float64(b.viewH)/z + 0.5)
 	s := t.Session
 	b.mu.Unlock()
-	if _, err := b.cdp.Call(s, "Emulation.setDeviceMetricsOverride", map[string]any{
-		"width": w, "height": h, "deviceScaleFactor": z, "mobile": false,
-	}); err != nil {
+	if err := b.cdp.SetDeviceMetrics(s, w, h, z); err != nil {
 		log.Printf("setDeviceMetricsOverride tab %d (%dx%d z%.2f): %v", t.ID, w, h, z, err)
 	}
 }
