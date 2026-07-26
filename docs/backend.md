@@ -35,6 +35,47 @@ docker run --rm --entrypoint /app/surf-backend surf-backend:lan -hash-password '
 - `18080`: default LAN port used by `./start.sh`.
 - `8080`: default internal container port in compose deployments.
 
+## Experimental Linux Host Mode
+
+`surf-backend` can also run directly on Linux without Docker. This first
+standalone step still expects host-installed runtime tools:
+
+- Chromium (`chromium` or set `CHROME`).
+- Xvfb (`Xvfb`).
+- xrandr (`xrandr`).
+- FFmpeg (`ffmpeg`).
+- PulseAudio and pactl (`pulseaudio`, `pactl`).
+
+Build the binary from the repo root:
+
+```sh
+make backend-binary
+```
+
+Generate a password hash and start host mode:
+
+```sh
+AUTH_HASH="$(./backend/surf-backend -hash-password 'your-password')" \
+SURF_RUNTIME=host \
+PORT=18080 \
+./backend/surf-backend
+```
+
+Host mode stores data under `~/.surf/` by default and starts private Xvfb and
+PulseAudio processes for Chromium. Docker remains the recommended path until
+the managed runtime bundle is implemented.
+
+If you run host mode as root on a VPS, Chromium may require
+`CHROME_NO_SANDBOX=1`. Prefer running as a normal user when possible.
+
+Useful host-mode overrides:
+
+- `CHROME`, `FFMPEG`, `XVFB`, `XRANDR`, `PULSEAUDIO`, `PACTL`: tool paths.
+- `SURF_HOME`: data root; defaults to `~/.surf`.
+- `BIND_ADDR`: listen address; defaults to `0.0.0.0`.
+- `SURF_MANAGE_DISPLAY=0`: use an existing `DISPLAY` or `SURF_DISPLAY`.
+- `SURF_MANAGE_PULSE=0`: use an existing `PULSE_SERVER`.
+
 ## Security
 
 Do not expose a weak-password backend to the public internet. For VPS usage,

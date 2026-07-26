@@ -19,6 +19,7 @@ import (
 	"surf-backend/internal/audio"
 	"surf-backend/internal/cdp"
 	"surf-backend/internal/config"
+	"surf-backend/internal/proc"
 	"surf-backend/internal/protocol"
 	"surf-backend/internal/stream"
 	"surf-backend/internal/ws"
@@ -108,7 +109,7 @@ func New(cfg *config.Config, hub *ws.Hub) *Browser {
 		dialogSessions: map[string]bool{},
 		dlLastPush:     map[string]time.Time{},
 		streamer:       stream.New(streamConfig(cfg)),
-		audio:          audio.New(),
+		audio:          audio.New(audioConfig(cfg)),
 		videoSubs:      map[*ws.Client]*stream.Sub{},
 		audioSubs:      map[*ws.Client]*audio.Sub{},
 		perfCounts:     map[string]int{},
@@ -118,7 +119,14 @@ func New(cfg *config.Config, hub *ws.Hub) *Browser {
 // Start launches Chromium and wires target discovery; it returns once the
 // browser is ready to serve clients.
 func (b *Browser) Start() error {
-	client, cmd, err := cdp.Launch(b.cfg.ChromePath, b.cfg.Profile, b.cfg.DisplayW, b.cfg.DisplayH)
+	client, cmd, err := cdp.Launch(cdp.LaunchConfig{
+		ChromePath: b.cfg.ChromePath,
+		Profile:    b.cfg.Profile,
+		W:          b.cfg.DisplayW,
+		H:          b.cfg.DisplayH,
+		Env:        b.cfg.ChildEnv,
+		NoSandbox:  b.cfg.ChromeNoSandbox,
+	})
 	if err != nil {
 		return err
 	}
@@ -135,6 +143,21 @@ func (b *Browser) Start() error {
 	b.setupDownloads()
 	log.Printf("browser ready, view %dx%d display %dx%d q%d (headful, profile %s)", b.viewW, b.viewH, b.cfg.DisplayW, b.cfg.DisplayH, b.cfg.Quality, b.cfg.Profile)
 	return nil
+}
+
+func (b *Browser) Shutdown() {
+	if b.streamer != nil {
+		b.streamer.Shutdown()
+	}
+	if b.audio != nil {
+		b.audio.Shutdown()
+	}
+	if b.cdp != nil {
+		b.cdp.Close()
+	}
+	if b.cmd != nil && b.cmd.Process != nil {
+		proc.Kill(b.cmd)
+	}
 }
 
 // Died signals that the Chromium connection is gone (supervisor restarts us).

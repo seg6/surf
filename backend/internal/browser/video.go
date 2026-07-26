@@ -140,6 +140,7 @@ func streamConfig(cfg *config.Config) stream.Config {
 		}
 	}
 	return stream.Config{
+		Display: cfg.Display, FFmpegPath: cfg.FFmpegPath, Env: cfg.ChildEnv,
 		W: cfg.ViewW, H: cfg.ViewH,
 		CaptureW: cfg.ViewW, CaptureH: cfg.ViewH,
 		ScaleMaxW: maxW, ScaleMaxH: maxH,

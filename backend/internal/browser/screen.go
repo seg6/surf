@@ -3,6 +3,7 @@ package browser
 import (
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 )
 
@@ -14,16 +15,28 @@ import (
 // Blocking (three tiny X round-trips); call off the WS read goroutine unless
 // at startup. Failure is non-fatal: the JPEG lane doesn't care, the video
 // lane just keeps its previous framing.
-func syncScreen(w, h int) bool {
+func syncScreen(xrandrPath, output string, env []string, w, h int) bool {
+	if xrandrPath == "" {
+		xrandrPath = "xrandr"
+	}
+	if output == "" {
+		output = "screen"
+	}
 	name := fmt.Sprintf("%dx%d", w, h)
 	ht, vt := w+64, h+16
 	clock := float64(ht) * float64(vt) * 60.0 / 1e6 // ~60Hz; Xvfb doesn't care
 	// Create + attach the mode; both fail harmlessly when it already exists.
-	_ = exec.Command("xrandr", "--newmode", name, fmt.Sprintf("%.2f", clock),
+	cmd := exec.Command(xrandrPath, "--newmode", name, fmt.Sprintf("%.2f", clock),
 		fmt.Sprint(w), fmt.Sprint(w+16), fmt.Sprint(w+32), fmt.Sprint(ht),
-		fmt.Sprint(h), fmt.Sprint(h+3), fmt.Sprint(h+6), fmt.Sprint(vt)).Run()
-	_ = exec.Command("xrandr", "--addmode", "screen", name).Run()
-	if err := exec.Command("xrandr", "--output", "screen", "--mode", name).Run(); err != nil {
+		fmt.Sprint(h), fmt.Sprint(h+3), fmt.Sprint(h+6), fmt.Sprint(vt))
+	cmd.Env = append(os.Environ(), env...)
+	_ = cmd.Run()
+	cmd = exec.Command(xrandrPath, "--addmode", output, name)
+	cmd.Env = append(os.Environ(), env...)
+	_ = cmd.Run()
+	cmd = exec.Command(xrandrPath, "--output", output, "--mode", name)
+	cmd.Env = append(os.Environ(), env...)
+	if err := cmd.Run(); err != nil {
 		return false
 	}
 	log.Printf("screen: X display resized to %s", name)
@@ -40,7 +53,7 @@ func (b *Browser) syncVideoSurface(w, h int) {
 	if !current {
 		return
 	}
-	syncScreen(w, h)
+	syncScreen(b.cfg.XrandrPath, b.cfg.XOutput, b.cfg.ChildEnv, w, h)
 	b.mu.Lock()
 	current = w == b.viewW && h == b.viewH
 	b.mu.Unlock()

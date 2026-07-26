@@ -21,9 +21,9 @@ still experimental.
 The main test target is the original iPad mini on iOS 6.1.3. Other iOS 6 iPads,
 iPhones, and iPods may work, but layout and performance are less tested.
 
-The backend currently runs through Docker. I am exploring ways to remove that
-dependency and make `surf-backend` a standalone binary you can start directly on
-your computer or VPS.
+The recommended backend path currently runs through Docker. An experimental
+Linux host mode exists for standalone-backend development; see
+`docs/backend.md` for details.
 
 ## AI Disclosure
 
@@ -182,6 +182,7 @@ prebuilt `.deb` from Releases.
 ## More Docs
 
 - `docs/backend.md`: backend configuration and deployment notes.
+- `docs/standalone-backend.md`: standalone backend plan and progress.
 - `docs/native-build.md`: building the iOS `.deb`.
 - `docs/troubleshooting.md`: common connection and install issues.
 

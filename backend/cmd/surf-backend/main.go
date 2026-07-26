@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 
 	"github.com/grandcat/zeroconf"
 
@@ -13,32 +15,46 @@ import (
 	"surf-backend/internal/browser"
 	"surf-backend/internal/config"
 	"surf-backend/internal/httpd"
+	"surf-backend/internal/runenv"
 	"surf-backend/internal/ws"
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	hashPassword := flag.String("hash-password", "", "print a bcrypt hash for a Surf password and exit")
 	flag.Parse()
 	if *hashPassword != "" {
 		hash, err := auth.HashPassword(*hashPassword)
 		if err != nil {
-			log.Fatalf("hash password: %v", err)
+			return fmt.Errorf("hash password: %w", err)
 		}
 		fmt.Println(hash)
-		return
+		return nil
 	}
 
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("fatal: %v", err)
+		return err
 	}
+	rt, err := runenv.Start(cfg)
+	if err != nil {
+		return err
+	}
+	defer rt.Shutdown()
+
 	a := auth.New(cfg.Profile, cfg.AuthHash, cfg.AuthDays)
 	hub := ws.NewHub()
 	b := browser.New(cfg, hub)
 	hub.SetHandler(b)
+	defer b.Shutdown()
 
 	if err := b.Start(); err != nil {
-		log.Fatalf("fatal: %v", err)
+		return err
 	}
 	if os.Getenv("SURF_ADVERTISE") == "1" {
 		advertisePort := cfg.Port
@@ -54,19 +70,26 @@ func main() {
 			log.Printf("bonjour advertised Surf on _surf._tcp port %d", advertisePort)
 		}
 	}
-	go func() {
-		<-b.Died()
-		// Chromium (or its DevTools socket) is gone; die and let Docker restart us.
-		log.Fatal("chromium connection lost")
-	}()
-
 	srv, err := httpd.New(cfg, a, hub)
 	if err != nil {
-		log.Fatalf("fatal: %v", err)
+		return err
 	}
 	srv.SetHealthCheck(b.Health)
 	srv.SetStats(b.Stats)
 	b.RegisterRoutes(srv)
-	log.Printf("surf-backend listening on %d", cfg.Port)
-	log.Fatal(httpd.Listen(cfg.Port, srv.Handler()))
+	log.Printf("surf-backend listening on %s:%d runtime=%s", cfg.BindAddr, cfg.Port, cfg.RuntimeMode)
+
+	serverErr := make(chan error, 1)
+	go func() { serverErr <- httpd.Listen(cfg.BindAddr, cfg.Port, srv.Handler()) }()
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	select {
+	case err := <-serverErr:
+		return err
+	case <-b.Died():
+		return fmt.Errorf("chromium connection lost")
+	case s := <-sig:
+		log.Printf("received %s, shutting down", s)
+		return nil
+	}
 }
