@@ -424,7 +424,8 @@ static const CGFloat kRBFindBarHeight = 44.0;
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     NSArray *old = [defaults arrayForKey:RBDefaultsServersKey] ?: @[];
     NSMutableArray *servers = [NSMutableArray arrayWithCapacity:MIN(8, [old count] + 1)];
-    [servers addObject:@{@"title": [[NSURL URLWithString:url] host] ?: url, @"url": url, @"password": password ?: @""}];
+    NSString *title = [url isEqualToString:RBDefaultServerURL] ? @"Surf VPS" : ([[NSURL URLWithString:url] host] ?: url);
+    [servers addObject:@{@"title": title, @"url": url, @"password": password ?: @""}];
     for (NSDictionary *entry in old) {
         NSString *u = [entry objectForKey:@"url"];
         if (![u length] || [u isEqualToString:url]) continue;
