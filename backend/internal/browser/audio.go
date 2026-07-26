@@ -14,14 +14,14 @@ func (b *Browser) handleAudio(c *ws.Client, on bool) {
 		b.stopAudio(c)
 		return
 	}
-	b.videoMu.Lock()
+	b.mediaMu.Lock()
 	if _, exists := b.audioSubs[c]; exists {
-		b.videoMu.Unlock()
+		b.mediaMu.Unlock()
 		return
 	}
 	sub := b.audio.Subscribe()
 	b.audioSubs[c] = sub
-	b.videoMu.Unlock()
+	b.mediaMu.Unlock()
 	log.Printf("audio: client subscribed")
 	c.SendJSON(map[string]any{"t": "audio-config", "ok": true, "rate": 16000, "channels": 1})
 	go b.pumpAudio(c, sub)
@@ -39,10 +39,10 @@ func (b *Browser) pumpAudio(c *ws.Client, sub *audio.Sub) {
 }
 
 func (b *Browser) stopAudio(c *ws.Client) {
-	b.videoMu.Lock()
+	b.mediaMu.Lock()
 	sub := b.audioSubs[c]
 	delete(b.audioSubs, c)
-	b.videoMu.Unlock()
+	b.mediaMu.Unlock()
 	if sub == nil {
 		return
 	}

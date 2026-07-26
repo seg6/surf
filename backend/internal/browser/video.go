@@ -52,14 +52,14 @@ func (b *Browser) handleVideo(c *ws.Client, on bool) {
 		b.stopVideo(c, true)
 		return
 	}
-	b.videoMu.Lock()
+	b.mediaMu.Lock()
 	if _, exists := b.videoSubs[c]; exists {
-		b.videoMu.Unlock()
+		b.mediaMu.Unlock()
 		return
 	}
 	sub := b.streamer.Subscribe()
 	b.videoSubs[c] = sub
-	b.videoMu.Unlock()
+	b.mediaMu.Unlock()
 	log.Printf("video: client subscribed")
 	go b.pumpVideo(c, sub)
 }
@@ -114,10 +114,10 @@ func (b *Browser) videoFailed(c *ws.Client) {
 // stopVideo tears down the client's subscription. restoreCast also brings the
 // JPEG lane back and pushes a fresh frame so the screen never goes stale.
 func (b *Browser) stopVideo(c *ws.Client, restoreCast bool) {
-	b.videoMu.Lock()
+	b.mediaMu.Lock()
 	sub := b.videoSubs[c]
 	delete(b.videoSubs, c)
-	b.videoMu.Unlock()
+	b.mediaMu.Unlock()
 	if sub == nil {
 		return
 	}
@@ -135,12 +135,12 @@ func (b *Browser) stopVideo(c *ws.Client, restoreCast bool) {
 // ClientDisconnected implements ws.Handler: release the video subscription
 // (idle-stop then kills the encoder) and let the cast converge.
 func (b *Browser) ClientDisconnected(c *ws.Client) {
-	b.videoMu.Lock()
+	b.mediaMu.Lock()
 	sub := b.videoSubs[c]
 	delete(b.videoSubs, c)
 	audioSub := b.audioSubs[c]
 	delete(b.audioSubs, c)
-	b.videoMu.Unlock()
+	b.mediaMu.Unlock()
 	if sub != nil {
 		sub.Close()
 		log.Printf("video: client disconnected, unsubscribed")
