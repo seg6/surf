@@ -63,6 +63,7 @@ type Config struct {
 	PactlPath       string
 	ManageDisplay   bool
 	ManagePulse     bool
+	EnsurePulseSink bool
 	ChromeNoSandbox bool
 	ChildEnv        []string
 
@@ -186,6 +187,7 @@ func Load() (*Config, error) {
 		PactlPath:       envStr("PACTL", "pactl"),
 		ManageDisplay:   manageDisplay,
 		ManagePulse:     managePulse,
+		EnsurePulseSink: envBool("SURF_ENSURE_PULSE_SINK", runtimeMode == "host" && !managePulse),
 		ChromeNoSandbox: envBool("CHROME_NO_SANDBOX", runtimeMode == "docker"),
 		StreamFPS:       envInt("STREAM_FPS", 30),
 		StreamScale:     envStr("STREAM_SCALE", "800x800"),

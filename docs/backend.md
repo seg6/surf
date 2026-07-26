@@ -88,24 +88,22 @@ mode is smoke-tested on your target Linux system.
 Wayland desktops still use this private Xvfb path; Surf does not need to attach
 to the user's compositor. Install Xvfb even on Wayland systems.
 
-On systems using PipeWire instead of the `pulseaudio` daemon, create a null sink
-on the existing PulseAudio-compatible server and tell Surf not to start its own
-PulseAudio process:
+On systems using PipeWire instead of the `pulseaudio` daemon, tell Surf to use
+the existing PulseAudio-compatible server. Surf will create the `surf_output`
+null sink with `pactl` and unload it on shutdown:
 
 ```sh
-pactl load-module module-null-sink sink_name=surf_output sink_properties=device.description=Surf
 AUTH_HASH="$(./backend/surf-backend -hash-password 'your-password')" \
 SURF_RUNTIME=host \
 SURF_MANAGE_PULSE=0 \
-PULSE_SINK=surf_output \
-AUDIO_SOURCE=surf_output.monitor \
 PORT=18080 \
 ./backend/surf-backend
 ```
 
 When `PULSE_SERVER` is unset in this mode, Chromium and ffmpeg use the default
 PulseAudio/PipeWire socket for the current user. `PULSE_SINK=surf_output` keeps
-Chromium's audio off the host speakers.
+Chromium's audio off the host speakers. Set `SURF_ENSURE_PULSE_SINK=0` only if
+you already created the sink yourself.
 
 If you run host mode as root on a VPS, Chromium may require
 `CHROME_NO_SANDBOX=1`. Prefer running as a normal user when possible.
@@ -117,6 +115,8 @@ Useful host-mode overrides:
 - `BIND_ADDR`: listen address; defaults to `0.0.0.0`.
 - `SURF_MANAGE_DISPLAY=0`: use an existing `DISPLAY` or `SURF_DISPLAY`.
 - `SURF_MANAGE_PULSE=0`: use an existing `PULSE_SERVER`.
+- `SURF_ENSURE_PULSE_SINK=0`: do not create `PULSE_SINK` automatically when
+  using an existing Pulse/PipeWire server.
 - `PULSE_SINK`: sink Chromium should use; defaults to `surf_output`.
 - `AUDIO_SOURCE`: source ffmpeg captures; defaults to `surf_output.monitor`.
 

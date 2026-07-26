@@ -17,8 +17,11 @@ import (
 )
 
 type Runtime struct {
-	children []*exec.Cmd
-	tempDirs []string
+	children     []*exec.Cmd
+	tempDirs     []string
+	pulseModules []string
+	pactlPath    string
+	pactlEnv     []string
 }
 
 func Start(cfg *config.Config) (*Runtime, error) {
@@ -65,11 +68,22 @@ func Start(cfg *config.Config) (*Runtime, error) {
 			r.Shutdown()
 			return nil, err
 		}
+	} else if cfg.EnsurePulseSink {
+		if err := r.ensurePulseSink(cfg); err != nil {
+			r.Shutdown()
+			return nil, err
+		}
 	}
 	return r, nil
 }
 
 func (r *Runtime) Shutdown() {
+	for i := len(r.pulseModules) - 1; i >= 0; i-- {
+		// Best effort: the user's Pulse/PipeWire server may already be gone.
+		cmd := exec.Command(r.pactlPath, "unload-module", r.pulseModules[i])
+		cmd.Env = append(os.Environ(), r.pactlEnv...)
+		_ = cmd.Run()
+	}
 	for i := len(r.children) - 1; i >= 0; i-- {
 		proc.Kill(r.children[i])
 	}
@@ -164,6 +178,47 @@ func (r *Runtime) startPulse(cfg *config.Config) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 	return fmt.Errorf("pulseaudio did not create %s", socket)
+}
+
+func (r *Runtime) ensurePulseSink(cfg *config.Config) error {
+	if cfg.PulseSink == "" {
+		return nil
+	}
+	r.pactlPath = cfg.PactlPath
+	r.pactlEnv = append([]string(nil), cfg.ChildEnv...)
+	if r.pulseSinkExists(cfg) {
+		log.Printf("runtime: PulseAudio sink %s already exists", cfg.PulseSink)
+		return nil
+	}
+	args := []string{"load-module", "module-null-sink", "sink_name=" + cfg.PulseSink, "sink_properties=device.description=Surf"}
+	cmd := exec.Command(cfg.PactlPath, args...)
+	cmd.Env = append(os.Environ(), cfg.ChildEnv...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("pactl %s failed: %w %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	moduleID := strings.TrimSpace(string(out))
+	if moduleID != "" {
+		r.pulseModules = append(r.pulseModules, moduleID)
+	}
+	log.Printf("runtime: created PulseAudio null sink %s", cfg.PulseSink)
+	return nil
+}
+
+func (r *Runtime) pulseSinkExists(cfg *config.Config) bool {
+	cmd := exec.Command(cfg.PactlPath, "list", "short", "sinks")
+	cmd.Env = append(os.Environ(), cfg.ChildEnv...)
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[1] == cfg.PulseSink {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Runtime) runPactl(cfg *config.Config, args ...string) {

@@ -61,6 +61,9 @@ func TestLoadHostDefaults(t *testing.T) {
 	if cfg.ChromeNoSandbox || !cfg.ManageDisplay || !cfg.ManagePulse {
 		t.Fatalf("host flags noSandbox=%t manageDisplay=%t managePulse=%t", cfg.ChromeNoSandbox, cfg.ManageDisplay, cfg.ManagePulse)
 	}
+	if cfg.EnsurePulseSink {
+		t.Fatal("managed PulseAudio host mode should not also ensure an external sink")
+	}
 }
 
 func TestHostExistingPulseDoesNotForcePulseServer(t *testing.T) {
@@ -71,8 +74,22 @@ func TestHostExistingPulseDoesNotForcePulseServer(t *testing.T) {
 	if cfg.PulseServer != "" {
 		t.Fatalf("PulseServer=%q, want empty", cfg.PulseServer)
 	}
+	if !cfg.EnsurePulseSink {
+		t.Fatal("expected Surf to create a null sink on the existing Pulse/PipeWire server")
+	}
 	if !reflect.DeepEqual(cfg.ChildEnv, []string{"DISPLAY=:99", "PULSE_SINK=surf_output"}) {
 		t.Fatalf("ChildEnv=%v", cfg.ChildEnv)
+	}
+}
+
+func TestHostExistingPulseCanSkipSinkCreation(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("SURF_RUNTIME", "host")
+	t.Setenv("SURF_MANAGE_PULSE", "0")
+	t.Setenv("SURF_ENSURE_PULSE_SINK", "0")
+	cfg := Load()
+	if cfg.EnsurePulseSink {
+		t.Fatal("EnsurePulseSink=true")
 	}
 }
 
