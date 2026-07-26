@@ -409,7 +409,7 @@ static const CGFloat kRBFindBarHeight = 44.0;
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     [defaults setObject:self.pendingServerURL forKey:RBDefaultsServerURLKey];
     [defaults setObject:self.pendingPassword forKey:RBDefaultsPasswordKey];
-    [self saveServerURL:self.pendingServerURL];
+    [self saveServerURL:self.pendingServerURL password:self.pendingPassword];
     [defaults synchronize];
     if (self.settingsController) {
         [self.settingsController setStatusText:@"Connected" isError:NO];
@@ -419,12 +419,12 @@ static const CGFloat kRBFindBarHeight = 44.0;
     }
 }
 
-- (void)saveServerURL:(NSString *)url {
+- (void)saveServerURL:(NSString *)url password:(NSString *)password {
     if (![url length]) return;
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     NSArray *old = [defaults arrayForKey:RBDefaultsServersKey] ?: @[];
     NSMutableArray *servers = [NSMutableArray arrayWithCapacity:MIN(8, [old count] + 1)];
-    [servers addObject:@{@"title": [[NSURL URLWithString:url] host] ?: url, @"url": url}];
+    [servers addObject:@{@"title": [[NSURL URLWithString:url] host] ?: url, @"url": url, @"password": password ?: @""}];
     for (NSDictionary *entry in old) {
         NSString *u = [entry objectForKey:@"url"];
         if (![u length] || [u isEqualToString:url]) continue;

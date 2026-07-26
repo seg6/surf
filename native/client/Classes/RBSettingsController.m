@@ -17,8 +17,9 @@ enum {
 static NSString *const kProfiles[] = {@"sharp", @"smooth", @"balanced", @"fast", @"potato", @"max"};
 static NSString *const kProfileTitles[] = {@"Sharp 30", @"Smooth 60", @"Balanced 30", @"Fast 45", @"Low Data", @"Max 60"};
 static const int kProfileCount = 6;
+static const NSInteger kEditServerAlertTag = 1001;
 
-@interface RBSettingsController () <UITextFieldDelegate, NSNetServiceBrowserDelegate, NSNetServiceDelegate>
+@interface RBSettingsController () <UITextFieldDelegate, UIAlertViewDelegate, NSNetServiceBrowserDelegate, NSNetServiceDelegate>
 @property(nonatomic, copy) NSString *initialURL;
 @property(nonatomic, copy) NSString *initialPassword;
 @property(nonatomic, strong) UITextField *urlField;
@@ -29,7 +30,8 @@ static const int kProfileCount = 6;
 @property(nonatomic, assign) BOOL statusIsError;
 @property(nonatomic, strong) NSNetServiceBrowser *serviceBrowser;
 @property(nonatomic, strong) NSMutableArray *services;
-@property(nonatomic, strong) NSArray *savedServers; // RBListItem-free: [{title,url}]
+@property(nonatomic, strong) NSArray *savedServers; // [{title,url,password?}], first row is built-in default
+@property(nonatomic, assign) NSInteger editingServerRow;
 @end
 
 @implementation RBSettingsController
@@ -40,6 +42,7 @@ static const int kProfileCount = 6;
         self.initialURL = serverURL;
         self.initialPassword = password;
         self.title = @"Settings";
+        self.editingServerRow = -1;
     }
     return self;
 }
@@ -91,6 +94,33 @@ static const int kProfileCount = 6;
         [items addObject:entry];
     }
     self.savedServers = items;
+}
+
+- (NSString *)normalizedServerURL:(NSString *)raw {
+    NSString *url = [raw stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (![url length]) return @"";
+    if ([url rangeOfString:@"://"].location == NSNotFound) url = [@"http://" stringByAppendingString:url];
+    return url;
+}
+
+- (NSString *)titleForServerURL:(NSString *)url {
+    NSString *host = [[NSURL URLWithString:url] host];
+    return [host length] ? host : url;
+}
+
+- (NSDictionary *)serverEntryWithURL:(NSString *)url password:(NSString *)password {
+    return @{ @"title": [self titleForServerURL:url] ?: url, @"url": url ?: @"", @"password": password ?: @"" };
+}
+
+- (BOOL)isEditableSavedRow:(NSInteger)row {
+    return row > 0 && row < (NSInteger)[self.savedServers count];
+}
+
+- (void)applySavedServer:(NSDictionary *)entry {
+    NSString *url = [entry objectForKey:@"url"];
+    if ([url length]) self.urlField.text = url;
+    id password = [entry objectForKey:@"password"];
+    if ([password isKindOfClass:[NSString class]]) self.passwordField.text = password;
 }
 
 - (void)doneTapped:(id)sender {
@@ -243,7 +273,10 @@ static const int kProfileCount = 6;
             UITextField *field = r == 0 ? self.urlField : self.passwordField;
             field.frame = CGRectMake(15.0, 8.0, cell.contentView.bounds.size.width - 30.0, 28.0);
             field.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-            if (!field.superview) [cell.contentView addSubview:field];
+            if (field.superview != cell.contentView) {
+                [field removeFromSuperview];
+                [cell.contentView addSubview:field];
+            }
             return cell;
         }
         if (r == 2) {
@@ -274,8 +307,12 @@ static const int kProfileCount = 6;
         cell.textLabel.text = [entry objectForKey:@"title"] ?: [entry objectForKey:@"url"];
         cell.detailTextLabel.text = [entry objectForKey:@"url"];
         NSString *current = [self.urlField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        cell.accessoryType = [current isEqualToString:[entry objectForKey:@"url"]]
-            ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+        if ([self isEditableSavedRow:r]) {
+            cell.accessoryType = UITableViewCellAccessoryDetailDisclosureButton;
+        } else {
+            cell.accessoryType = [current isEqualToString:[entry objectForKey:@"url"]]
+                ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+        }
         return cell;
     }
 
@@ -332,8 +369,8 @@ static const int kProfileCount = 6;
             [self startDiscovery];
             return;
         }
-        self.urlField.text = [[self.savedServers objectAtIndex:(NSUInteger)r] objectForKey:@"url"];
-        [self setStatusText:@"Server selected — tap Connect" isError:NO];
+        [self applySavedServer:[self.savedServers objectAtIndex:(NSUInteger)r]];
+        [self setStatusText:@"Server selected — edit above or tap Connect" isError:NO];
         [tableView reloadSections:[NSIndexSet indexSetWithIndex:RBSectionSaved]
                  withRowAnimation:UITableViewRowAnimationNone];
         return;
@@ -355,6 +392,92 @@ static const int kProfileCount = 6;
         }
         return;
     }
+}
+
+- (void)tableView:(UITableView *)tableView accessoryButtonTappedForRowWithIndexPath:(NSIndexPath *)indexPath {
+    if (indexPath.section != RBSectionSaved || ![self isEditableSavedRow:indexPath.row]) return;
+    NSDictionary *entry = [self.savedServers objectAtIndex:(NSUInteger)indexPath.row];
+    self.editingServerRow = indexPath.row;
+    UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"Edit Server"
+                                                    message:@"Update the saved URL and password."
+                                                   delegate:self
+                                          cancelButtonTitle:@"Cancel"
+                                          otherButtonTitles:@"Save", nil];
+    alert.tag = kEditServerAlertTag;
+    alert.alertViewStyle = UIAlertViewStyleLoginAndPasswordInput;
+    UITextField *urlField = [alert textFieldAtIndex:0];
+    urlField.placeholder = @"http://server";
+    urlField.text = [entry objectForKey:@"url"] ?: @"";
+    urlField.keyboardType = UIKeyboardTypeURL;
+    urlField.autocorrectionType = UITextAutocorrectionTypeNo;
+    urlField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    UITextField *passwordField = [alert textFieldAtIndex:1];
+    passwordField.placeholder = @"password";
+    passwordField.secureTextEntry = YES;
+    passwordField.text = [entry objectForKey:@"password"] ?: @"";
+    [alert show];
+}
+
+- (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath {
+    return indexPath.section == RBSectionSaved && [self isEditableSavedRow:indexPath.row];
+}
+
+- (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle
+forRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (editingStyle != UITableViewCellEditingStyleDelete || indexPath.section != RBSectionSaved || ![self isEditableSavedRow:indexPath.row]) return;
+    NSString *deleteURL = [[self.savedServers objectAtIndex:(NSUInteger)indexPath.row] objectForKey:@"url"];
+    NSMutableArray *servers = [NSMutableArray array];
+    for (NSDictionary *entry in [[NSUserDefaults standardUserDefaults] arrayForKey:RBDefaultsServersKey] ?: @[]) {
+        NSString *url = [entry objectForKey:@"url"];
+        if (![url length] || [url isEqualToString:deleteURL]) continue;
+        [servers addObject:entry];
+    }
+    [[NSUserDefaults standardUserDefaults] setObject:servers forKey:RBDefaultsServersKey];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+    [self reloadSavedServers];
+    [self setStatusText:@"Saved server removed" isError:NO];
+    [tableView reloadSections:[NSIndexSet indexSetWithIndex:RBSectionSaved]
+             withRowAnimation:UITableViewRowAnimationAutomatic];
+}
+
+- (void)alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex {
+    if (alertView.tag != kEditServerAlertTag) return;
+    NSInteger row = self.editingServerRow;
+    self.editingServerRow = -1;
+    if (buttonIndex == alertView.cancelButtonIndex || ![self isEditableSavedRow:row]) return;
+
+    NSString *oldURL = [[self.savedServers objectAtIndex:(NSUInteger)row] objectForKey:@"url"];
+    NSString *url = [self normalizedServerURL:[alertView textFieldAtIndex:0].text ?: @""];
+    NSString *password = [alertView textFieldAtIndex:1].text ?: @"";
+    if (![url length]) {
+        [self setStatusText:@"Server URL is required" isError:YES];
+        return;
+    }
+
+    NSDictionary *updated = [self serverEntryWithURL:url password:password];
+    NSMutableArray *servers = [NSMutableArray array];
+    BOOL replaced = NO;
+    for (NSDictionary *entry in [[NSUserDefaults standardUserDefaults] arrayForKey:RBDefaultsServersKey] ?: @[]) {
+        NSString *entryURL = [entry objectForKey:@"url"];
+        if (![entryURL length] || [entryURL isEqualToString:RBDefaultServerURL]) continue;
+        if (!replaced && [entryURL isEqualToString:oldURL]) {
+            [servers addObject:updated];
+            replaced = YES;
+            continue;
+        }
+        if ([entryURL isEqualToString:url]) continue;
+        [servers addObject:entry];
+    }
+    if (!replaced) [servers insertObject:updated atIndex:0];
+    [[NSUserDefaults standardUserDefaults] setObject:servers forKey:RBDefaultsServersKey];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+
+    self.urlField.text = url;
+    self.passwordField.text = password;
+    [self reloadSavedServers];
+    [self setStatusText:@"Server updated — tap Connect" isError:NO];
+    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:RBSectionSaved]
+                   withRowAnimation:UITableViewRowAnimationNone];
 }
 
 // ---- text fields ----------------------------------------------------------
