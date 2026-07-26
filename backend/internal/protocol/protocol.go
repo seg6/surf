@@ -118,16 +118,15 @@ type ClientMessage struct {
 	Scale   float64 `json:"scale,omitempty"` // zoom
 	CX      float64 `json:"cx,omitempty"`    // zoom center (fraction)
 	CY      float64 `json:"cy,omitempty"`
-	Q       string  `json:"q,omitempty"`       // find / suggest / history query
-	Dir     int     `json:"dir,omitempty"`     // find direction: 1 next, -1 prev
-	Sel     bool    `json:"sel,omitempty"`     // lpup: select word at point (no drag happened)
-	On      bool    `json:"on,omitempty"`      // video/audio/reader: enter/leave
-	Profile string  `json:"profile,omitempty"` // stream profile: sharp/balanced/fast/potato
-	Accept  bool    `json:"accept,omitempty"`  // dialogreply: OK (true) / Cancel
-	Offset  int     `json:"offset,omitempty"`  // history: paging offset
-	What    string  `json:"what,omitempty"`    // clear: history|cookies|cache
-	TS      int64   `json:"ts,omitempty"`      // histdel: entry timestamp
-	Name    string  `json:"name,omitempty"`    // dldel: download filename
+	Q       string  `json:"q,omitempty"`      // find / suggest / history query
+	Dir     int     `json:"dir,omitempty"`    // find direction: 1 next, -1 prev
+	Sel     bool    `json:"sel,omitempty"`    // lpup: select word at point (no drag happened)
+	On      bool    `json:"on,omitempty"`     // video/audio/reader: enter/leave
+	Accept  bool    `json:"accept,omitempty"` // dialogreply: OK (true) / Cancel
+	Offset  int     `json:"offset,omitempty"` // history: paging offset
+	What    string  `json:"what,omitempty"`   // clear: history|cookies|cache
+	TS      int64   `json:"ts,omitempty"`     // histdel: entry timestamp
+	Name    string  `json:"name,omitempty"`   // dldel: download filename
 }
 
 // TabInfo is one entry of the 'tabs' broadcast.

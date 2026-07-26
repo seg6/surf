@@ -17,11 +17,13 @@ import (
 )
 
 const (
+	x264Speed = "ultrafast"
+
 	// subQueueCap bounds how far a slow subscriber may lag before it is
 	// dropped to the next IDR (~2s of AUs at 15fps).
 	subQueueCap = 30
-	// lingerStop delays encoder shutdown after the last unsubscribe so fast
-	// video off/on toggles don't cycle the process.
+	// lingerStop delays encoder shutdown after the last unsubscribe so quick
+	// reconnects don't cycle the process.
 	lingerStop = 5 * time.Second
 	// maxAUBytes caps the splitter's assembly buffer; a runaway means we lost
 	// sync with the byte stream and the process is restarted.
@@ -39,7 +41,6 @@ type Config struct {
 	ScaleMaxW, ScaleMaxH         int    // optional coded-size bounding box
 	FPS                          int
 	BitrateK, MaxrateK, BufsizeK int
-	Preset                       string
 }
 
 // AU is one complete Annex-B access unit (start codes intact). W/H are the
@@ -131,42 +132,6 @@ func (s *Streamer) SetSize(w, h int) {
 	}
 }
 
-// Configure changes encoder knobs live. The current capture size is preserved;
-// coded size is recomputed from the new scale box and subscribers resync on
-// the next IDR after the restart.
-func (s *Streamer) Configure(fps, maxW, maxH, bitrateK, maxrateK, bufsizeK int, preset string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if fps >= 10 && fps <= 60 {
-		s.cfg.FPS = fps
-	}
-	if maxW >= 64 && maxH >= 64 {
-		s.cfg.ScaleMaxW, s.cfg.ScaleMaxH = maxW, maxH
-	}
-	if bitrateK >= 300 {
-		s.cfg.BitrateK = bitrateK
-	}
-	if maxrateK >= s.cfg.BitrateK {
-		s.cfg.MaxrateK = maxrateK
-	}
-	if bufsizeK >= 100 {
-		s.cfg.BufsizeK = bufsizeK
-	}
-	if preset != "" {
-		s.cfg.Preset = preset
-	}
-	s.cfg.W, s.cfg.H = s.cfg.codedSize(s.cfg.CaptureW, s.cfg.CaptureH)
-	log.Printf("stream: configured capture=%dx%d coded=%dx%d@%dfps %dk/%dk buf=%dk preset=%s",
-		s.cfg.CaptureW, s.cfg.CaptureH, s.cfg.W, s.cfg.H, s.cfg.FPS, s.cfg.BitrateK, s.cfg.MaxrateK, s.cfg.BufsizeK, s.cfg.Preset)
-	if s.running {
-		s.stopLocked()
-		s.startLocked()
-	}
-	for sub := range s.subs {
-		sub.resetForGen(s.gen)
-	}
-}
-
 func even(v int) int {
 	if v < 2 {
 		return 2
@@ -220,7 +185,7 @@ func (sub *Sub) ForceResync() {
 // zmq/sendcmd filter). A freshly spawned x264 process's first output frame is
 // always an IDR regardless of keyint. This is a single-active-viewer product,
 // so a restart affecting every subscriber is an acceptable, already-
-// precedented tradeoff — SetSize/Configure restart the encoder for the same
+// precedented tradeoff — SetSize restarts the encoder for the same
 // reason. Cooldown-guarded so a resync storm can't thrash the process.
 func (s *Streamer) RequestKeyframe() {
 	s.mu.Lock()
@@ -333,7 +298,7 @@ func (s *Streamer) args() []string {
 	args = append(args,
 		"-c:v", "libx264",
 		"-profile:v", "baseline", "-level", c.h264Level(),
-		"-preset", c.Preset,
+		"-preset", x264Speed,
 		"-tune", "zerolatency",
 		"-x264-params", fmt.Sprintf("keyint=%d:min-keyint=%d:scenecut=0:repeat-headers=1:aud=1", keyint, keyint),
 		"-b:v", fmt.Sprintf("%dk", c.BitrateK),
@@ -378,8 +343,8 @@ func (s *Streamer) startLocked() {
 	s.running = true
 	s.gen++
 	gen := s.gen
-	log.Printf("stream: encoder started pid=%d capture=%dx%d coded=%dx%d@%dfps %dk preset=%s",
-		cmd.Process.Pid, s.cfg.CaptureW, s.cfg.CaptureH, s.cfg.W, s.cfg.H, s.cfg.FPS, s.cfg.BitrateK, s.cfg.Preset)
+	log.Printf("stream: encoder started pid=%d capture=%dx%d coded=%dx%d@%dfps %dk x264=%s",
+		cmd.Process.Pid, s.cfg.CaptureW, s.cfg.CaptureH, s.cfg.W, s.cfg.H, s.cfg.FPS, s.cfg.BitrateK, x264Speed)
 	if stderr != nil {
 		go logStderr(stderr)
 	}

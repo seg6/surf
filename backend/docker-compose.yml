@@ -16,7 +16,6 @@ services:
       - STREAM_BITRATE=2800
       - STREAM_MAXRATE=3600
       - STREAM_BUFSIZE=900
-      - STREAM_PRESET=ultrafast
       - AUTH_HASH=${AUTH_HASH:?set AUTH_HASH to the bcrypt password hash; ./start.sh can generate it from SURF_PASSWORD}
     ports:
       - "18080:8080"

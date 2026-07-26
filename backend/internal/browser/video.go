@@ -11,36 +11,6 @@ import (
 	"surf-backend/internal/ws"
 )
 
-type streamProfile struct {
-	fps                      int
-	maxW, maxH               int
-	bitrateK, maxrateK, bufK int
-	preset                   string
-	label                    string
-}
-
-var streamProfiles = map[string]streamProfile{
-	"sharp":    {fps: 30, maxW: 1024, maxH: 1024, bitrateK: 6000, maxrateK: 8000, bufK: 1800, preset: "ultrafast", label: "Sharp 30"},
-	"smooth":   {fps: 60, maxW: 800, maxH: 800, bitrateK: 6000, maxrateK: 8000, bufK: 1200, preset: "ultrafast", label: "Smooth 60"},
-	"balanced": {fps: 30, maxW: 800, maxH: 800, bitrateK: 3200, maxrateK: 4500, bufK: 900, preset: "ultrafast", label: "Balanced 30"},
-	"fast":     {fps: 45, maxW: 720, maxH: 720, bitrateK: 4500, maxrateK: 6500, bufK: 900, preset: "ultrafast", label: "Fast 45"},
-	"potato":   {fps: 20, maxW: 640, maxH: 640, bitrateK: 1200, maxrateK: 1800, bufK: 500, preset: "ultrafast", label: "Low Data 20"},
-	"max":      {fps: 60, maxW: 1024, maxH: 1024, bitrateK: 8000, maxrateK: 10000, bufK: 1800, preset: "ultrafast", label: "Max 60"},
-}
-
-func (b *Browser) handleStreamProfile(c *ws.Client, profile string) {
-	if profile == "" {
-		profile = "balanced"
-	}
-	p, ok := streamProfiles[profile]
-	if !ok {
-		c.SendJSON(map[string]any{"t": "toast", "text": "unknown stream profile"})
-		return
-	}
-	b.streamer.Configure(p.fps, p.maxW, p.maxH, p.bitrateK, p.maxrateK, p.bufK, p.preset)
-	c.SendJSON(map[string]any{"t": "toast", "text": "stream: " + p.label})
-}
-
 // firstAUWait bounds how long a fresh subscriber waits for its first
 // (IDR) access unit: process spawn + one 2s IDR interval + margin.
 const firstAUWait = 6 * time.Second
@@ -175,7 +145,6 @@ func streamConfig(cfg *config.Config) stream.Config {
 		ScaleMaxW: maxW, ScaleMaxH: maxH,
 		FPS:      cfg.StreamFPS,
 		BitrateK: cfg.StreamBitrateK, MaxrateK: cfg.StreamMaxrateK, BufsizeK: cfg.StreamBufsizeK,
-		Preset: cfg.StreamPreset,
 	}
 }
 

@@ -8,15 +8,13 @@
 @optional
 // DATA section: what = history|cookies|cache. Only offered while connected.
 - (void)settings:(RBSettingsController *)settings clearData:(NSString *)what;
-// STREAM section changed (video toggle or profile): re-negotiate the lane.
-- (void)settingsStreamChanged:(RBSettingsController *)settings;
 // ABOUT section: diagnostics overlay switch.
 - (void)settings:(RBSettingsController *)settings setDiagnosticsVisible:(BOOL)visible;
 @end
 
 // App configuration as a real grouped settings screen (chrome rethink):
 // SERVER (url/password/connect + saved servers + Bonjour discovery),
-// STREAM (video + profile), DATA (clear), ABOUT (version, diagnostics).
+// DATA (clear), ABOUT (version, diagnostics).
 // Present wrapped in a UINavigationController form sheet.
 @interface RBSettingsController : UITableViewController
 @property(nonatomic, assign) id<RBSettingsDelegate> delegate;
