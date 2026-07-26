@@ -200,10 +200,10 @@ func load(requireAuth bool) (*Config, error) {
 		EnsurePulseSink: envBool("SURF_ENSURE_PULSE_SINK", !managePulse),
 		ChromeNoSandbox: envBool("CHROME_NO_SANDBOX", os.Geteuid() == 0),
 		StreamFPS:       envInt("STREAM_FPS", 30),
-		StreamScale:     envStr("STREAM_SCALE", "800x800"),
-		StreamBitrateK:  envInt("STREAM_BITRATE", 2800),
-		StreamMaxrateK:  envInt("STREAM_MAXRATE", 3600),
-		StreamBufsizeK:  envInt("STREAM_BUFSIZE", 900),
+		StreamScale:     envStr("STREAM_SCALE", "1024x1024"),
+		StreamBitrateK:  envInt("STREAM_BITRATE", 6000),
+		StreamMaxrateK:  envInt("STREAM_MAXRATE", 8000),
+		StreamBufsizeK:  envInt("STREAM_BUFSIZE", 1800),
 	}
 	if requireAuth && cfg.SurfPassword == "" {
 		return nil, fmt.Errorf("SURF_PASSWORD is required")
