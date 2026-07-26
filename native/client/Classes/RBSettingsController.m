@@ -30,7 +30,7 @@ static const NSInteger kEditServerAlertTag = 1001;
 @property(nonatomic, assign) BOOL statusIsError;
 @property(nonatomic, strong) NSNetServiceBrowser *serviceBrowser;
 @property(nonatomic, strong) NSMutableArray *services;
-@property(nonatomic, strong) NSArray *savedServers; // [{title,url,password?}], first row is built-in default
+@property(nonatomic, strong) NSArray *savedServers; // [{title,url,password?}]
 @property(nonatomic, assign) NSInteger editingServerRow;
 @end
 
@@ -87,10 +87,9 @@ static const NSInteger kEditServerAlertTag = 1001;
 
 - (void)reloadSavedServers {
     NSMutableArray *items = [NSMutableArray array];
-    [items addObject:@{@"title": @"Surf VPS", @"url": RBDefaultServerURL}];
     for (NSDictionary *entry in [[NSUserDefaults standardUserDefaults] arrayForKey:RBDefaultsServersKey] ?: @[]) {
         NSString *url = [entry objectForKey:@"url"];
-        if (![url length] || [url isEqualToString:RBDefaultServerURL]) continue;
+        if (![url length]) continue;
         [items addObject:entry];
     }
     self.savedServers = items;
@@ -104,23 +103,44 @@ static const NSInteger kEditServerAlertTag = 1001;
 }
 
 - (NSString *)titleForServerURL:(NSString *)url {
+    if ([url isEqualToString:RBDefaultServerURL]) return @"Surf VPS";
     NSString *host = [[NSURL URLWithString:url] host];
     return [host length] ? host : url;
+}
+
+- (NSString *)titleForServerEntry:(NSDictionary *)entry {
+    NSString *url = [entry objectForKey:@"url"];
+    if ([url isEqualToString:RBDefaultServerURL]) return @"Surf VPS";
+    NSString *title = [entry objectForKey:@"title"];
+    return [title length] ? title : [self titleForServerURL:url];
 }
 
 - (NSDictionary *)serverEntryWithURL:(NSString *)url password:(NSString *)password {
     return @{ @"title": [self titleForServerURL:url] ?: url, @"url": url ?: @"", @"password": password ?: @"" };
 }
 
+- (NSString *)passwordForServerEntry:(NSDictionary *)entry {
+    id password = [entry objectForKey:@"password"];
+    if ([password isKindOfClass:[NSString class]]) return password;
+    NSString *url = [entry objectForKey:@"url"];
+    NSString *currentURL = [self normalizedServerURL:self.urlField.text ?: @""];
+    if ([url isEqualToString:currentURL]) return self.passwordField.text ?: @"";
+    if ([url isEqualToString:RBDefaultServerURL]) return RBDefaultPassword;
+    return @"";
+}
+
 - (BOOL)isEditableSavedRow:(NSInteger)row {
-    return row > 0 && row < (NSInteger)[self.savedServers count];
+    return row >= 0 && row < (NSInteger)[self.savedServers count];
+}
+
+- (BOOL)isDeletableSavedRow:(NSInteger)row {
+    return [self isEditableSavedRow:row];
 }
 
 - (void)applySavedServer:(NSDictionary *)entry {
     NSString *url = [entry objectForKey:@"url"];
     if ([url length]) self.urlField.text = url;
-    id password = [entry objectForKey:@"password"];
-    if ([password isKindOfClass:[NSString class]]) self.passwordField.text = password;
+    self.passwordField.text = [self passwordForServerEntry:entry];
 }
 
 - (void)doneTapped:(id)sender {
@@ -304,7 +324,7 @@ static const NSInteger kEditServerAlertTag = 1001;
             return cell;
         }
         NSDictionary *entry = [self.savedServers objectAtIndex:(NSUInteger)r];
-        cell.textLabel.text = [entry objectForKey:@"title"] ?: [entry objectForKey:@"url"];
+        cell.textLabel.text = [self titleForServerEntry:entry];
         cell.detailTextLabel.text = [entry objectForKey:@"url"];
         NSString *current = [self.urlField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         if ([self isEditableSavedRow:r]) {
@@ -414,17 +434,17 @@ static const NSInteger kEditServerAlertTag = 1001;
     UITextField *passwordField = [alert textFieldAtIndex:1];
     passwordField.placeholder = @"password";
     passwordField.secureTextEntry = YES;
-    passwordField.text = [entry objectForKey:@"password"] ?: @"";
+    passwordField.text = [self passwordForServerEntry:entry];
     [alert show];
 }
 
 - (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath {
-    return indexPath.section == RBSectionSaved && [self isEditableSavedRow:indexPath.row];
+    return indexPath.section == RBSectionSaved && [self isDeletableSavedRow:indexPath.row];
 }
 
 - (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle
 forRowAtIndexPath:(NSIndexPath *)indexPath {
-    if (editingStyle != UITableViewCellEditingStyleDelete || indexPath.section != RBSectionSaved || ![self isEditableSavedRow:indexPath.row]) return;
+    if (editingStyle != UITableViewCellEditingStyleDelete || indexPath.section != RBSectionSaved || ![self isDeletableSavedRow:indexPath.row]) return;
     NSString *deleteURL = [[self.savedServers objectAtIndex:(NSUInteger)indexPath.row] objectForKey:@"url"];
     NSMutableArray *servers = [NSMutableArray array];
     for (NSDictionary *entry in [[NSUserDefaults standardUserDefaults] arrayForKey:RBDefaultsServersKey] ?: @[]) {
@@ -435,9 +455,9 @@ forRowAtIndexPath:(NSIndexPath *)indexPath {
     [[NSUserDefaults standardUserDefaults] setObject:servers forKey:RBDefaultsServersKey];
     [[NSUserDefaults standardUserDefaults] synchronize];
     [self reloadSavedServers];
-    [self setStatusText:@"Saved server removed" isError:NO];
-    [tableView reloadSections:[NSIndexSet indexSetWithIndex:RBSectionSaved]
-             withRowAnimation:UITableViewRowAnimationAutomatic];
+    self.statusText = @"Saved server removed";
+    self.statusIsError = NO;
+    [tableView reloadData];
 }
 
 - (void)alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex {
@@ -459,7 +479,7 @@ forRowAtIndexPath:(NSIndexPath *)indexPath {
     BOOL replaced = NO;
     for (NSDictionary *entry in [[NSUserDefaults standardUserDefaults] arrayForKey:RBDefaultsServersKey] ?: @[]) {
         NSString *entryURL = [entry objectForKey:@"url"];
-        if (![entryURL length] || [entryURL isEqualToString:RBDefaultServerURL]) continue;
+        if (![entryURL length]) continue;
         if (!replaced && [entryURL isEqualToString:oldURL]) {
             [servers addObject:updated];
             replaced = YES;
