@@ -6,3 +6,4 @@ native/buildenv/sdk/
 /backend/surf-backend
 /backend/.env
 .env
+.local/
