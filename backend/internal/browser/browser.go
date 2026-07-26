@@ -73,7 +73,7 @@ type Browser struct {
 	streamer  *stream.Streamer
 	audio     *audio.Streamer
 	screenMu  sync.Mutex
-	videoMu   sync.Mutex
+	mediaMu   sync.Mutex // guards client media subscriptions below
 	videoSubs map[*ws.Client]*stream.Sub
 	audioSubs map[*ws.Client]*audio.Sub
 
@@ -156,9 +156,9 @@ func (b *Browser) Stats() map[string]any {
 	}
 	vw, vh := b.viewW, b.viewH
 	b.mu.Unlock()
-	b.videoMu.Lock()
+	b.mediaMu.Lock()
 	vsubs, asubs := len(b.videoSubs), len(b.audioSubs)
-	b.videoMu.Unlock()
+	b.mediaMu.Unlock()
 	b.perfMu.Lock()
 	counts := map[string]int{}
 	for k, v := range b.perfCounts {
