@@ -23,7 +23,13 @@ The default source is:
 https://github.com/GrowtopiaJaw/iPhoneOS-SDK/releases/download/v1.0/iPhoneOS6.1.sdk.zip
 ```
 
-Set `SDK_URL` to use a different archive.
+The default archive must match this SHA-256:
+
+```text
+2696df17fc48e1b6ea3f7acd346b5f2356fb5c6cc60b0f3aaca0c24522d761de
+```
+
+Set `SDK_URL` and `SDK_SHA256` together to use a different archive.
 
 ## Build Environment
 
@@ -31,6 +37,10 @@ Set `SDK_URL` to use a different archive.
 docker build -t surf-buildenv native/buildenv
 docker run --rm -v "$PWD:/src" surf-buildenv make -C /src/native/client package DEBUG=0
 ```
+
+The build environment pins Theos to commit
+`16362d3aa83a0acd56df4493d575d34306d42478` and the iOS toolchain to release
+`test-210562a`, with SHA-256 verification for each host-architecture archive.
 
 Or use the root make target:
 
