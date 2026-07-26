@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -61,11 +62,27 @@ func TestSecretsPersistAcrossRestart(t *testing.T) {
 	dir := t.TempDir()
 	a1 := New(dir, "x", 1)
 	a2 := New(dir, "x", 1)
-	if a1.Token != a2.Token {
-		t.Fatal("ws token not persistent")
-	}
 	if a1.sign(42) != a2.sign(42) {
 		t.Fatal("auth secret not persistent")
+	}
+	if !a2.VerifyWSTicket(a1.WSTicket()) {
+		t.Fatal("ws ticket did not validate after restart")
+	}
+}
+
+func TestWSTicket(t *testing.T) {
+	a := newTestAuth(t)
+	ticket := a.WSTicket()
+	if !a.VerifyWSTicket(ticket) {
+		t.Fatal("fresh ws ticket should validate")
+	}
+	if a.VerifyWSTicket(strings.Replace(ticket, "v1.", "v2.", 1)) {
+		t.Fatal("tampered ws ticket version validated")
+	}
+	past := time.Now().Add(-time.Minute).Unix()
+	expired := fmt.Sprintf("v1.%d.%s.%s", past, "nonce", a.signWSTicket(past, "nonce"))
+	if a.VerifyWSTicket(expired) {
+		t.Fatal("expired ws ticket validated")
 	}
 }
 

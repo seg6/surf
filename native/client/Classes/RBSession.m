@@ -10,7 +10,7 @@ static NSString *RBURLEscape(NSString *s);
 @property(nonatomic, strong, readwrite) NSURL *baseURL;
 @property(nonatomic, assign, readwrite) RBSessionState state;
 @property(nonatomic, strong) RBSocket *socket;
-@property(nonatomic, copy) NSString *token;
+@property(nonatomic, copy) NSString *wsTicket;
 @property(nonatomic, assign) NSInteger viewWidth;
 @property(nonatomic, assign) NSInteger viewHeight;
 @property(nonatomic, assign) BOOL socketOpen;
@@ -124,7 +124,7 @@ static NSString *RBURLEscape(NSString *s);
         if (error) *error = @"native-config was not JSON";
         return NO;
     }
-    self.token = [json objectForKey:@"token"];
+    self.wsTicket = [json objectForKey:@"ticket"];
     NSInteger serverWidth = [[json objectForKey:@"vw"] integerValue] ?: 1024;
     NSInteger serverHeight = [[json objectForKey:@"vh"] integerValue] ?: 768;
     if (self.viewWidth <= 0 || self.viewHeight <= 0) {
@@ -132,7 +132,7 @@ static NSString *RBURLEscape(NSString *s);
         self.viewHeight = serverHeight;
     }
     NSString *nv = [json objectForKey:@"nv"];
-    if (!self.token || ![nv isEqualToString:RBNativeVersion]) {
+    if (!self.wsTicket || ![nv isEqualToString:RBNativeVersion]) {
         if (error) *error = [NSString stringWithFormat:@"version mismatch app=%@ server=%@", RBNativeVersion, nv ?: @"?"];
         return NO;
     }
@@ -152,7 +152,7 @@ static NSString *RBURLEscape(NSString *s) {
     NSString *host = [self.baseURL host];
     NSInteger port = [[self.baseURL port] integerValue];
     if (port == 0) port = [[[self.baseURL scheme] lowercaseString] isEqualToString:@"https"] ? 443 : 80;
-    NSString *path = [NSString stringWithFormat:@"/ws?k=%@&nv=%@", RBURLEscape(self.token ?: @""), RBURLEscape(RBNativeVersion)];
+    NSString *path = [NSString stringWithFormat:@"/ws?ticket=%@&nv=%@", RBURLEscape(self.wsTicket ?: @""), RBURLEscape(RBNativeVersion)];
     BOOL secure = [[[self.baseURL scheme] lowercaseString] isEqualToString:@"https"];
     self.socket = [[RBSocket alloc] initWithHost:host port:port path:path secure:secure];
     self.socket.delegate = self;

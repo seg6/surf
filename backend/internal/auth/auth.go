@@ -1,7 +1,6 @@
-// Package auth implements the password gate: bcrypt-checked login, an
-// HMAC-signed expiry cookie (v1.<exp>.<hex hmac>), and the WS token that
-// only ships inside the gated page (iOS 6 Safari can't be trusted to send
-// auth headers on the WS upgrade).
+// Package auth implements the password gate: bcrypt-checked login,
+// HMAC-signed expiry cookies (v1.<exp>.<hex hmac>), and short-lived WebSocket
+// tickets for native clients that cannot send auth headers on the upgrade.
 package auth
 
 import (
@@ -22,19 +21,22 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-const CookieName = "surf_auth"
+const (
+	CookieName   = "surf_auth"
+	WSTicketTTL  = 2 * time.Minute
+	wsTicketKind = "ws"
+)
 
 type Auth struct {
 	hash     string
 	secret   []byte
-	Token    string // WS handshake token
 	days     int
 	mu       sync.Mutex
 	attempts map[string][]time.Time // login rate limit per IP
 }
 
 // readOrCreateSecret keeps secrets stable across restarts by persisting them
-// in the profile dir (same files server.js used: .wstoken / .authsecret).
+// in the profile dir.
 func readOrCreateSecret(file string, bytes int) string {
 	if b, err := os.ReadFile(file); err == nil {
 		if v := strings.TrimSpace(string(b)); v != "" {
@@ -55,10 +57,17 @@ func New(profile, bcryptHash string, days int) *Auth {
 	return &Auth{
 		hash:     bcryptHash,
 		secret:   []byte(readOrCreateSecret(filepath.Join(profile, ".authsecret"), 32)),
-		Token:    readOrCreateSecret(filepath.Join(profile, ".wstoken"), 16),
 		days:     max(1, days),
 		attempts: map[string][]time.Time{},
 	}
+}
+
+func randomHex(bytes int) string {
+	buf := make([]byte, bytes)
+	if _, err := rand.Read(buf); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(buf)
 }
 
 func HashPassword(password string) (string, error) {
@@ -73,6 +82,30 @@ func (a *Auth) sign(exp int64) string {
 	m := hmac.New(sha256.New, a.secret)
 	fmt.Fprintf(m, "%d", exp)
 	return hex.EncodeToString(m.Sum(nil))
+}
+
+func (a *Auth) signWSTicket(exp int64, nonce string) string {
+	m := hmac.New(sha256.New, a.secret)
+	fmt.Fprintf(m, "%s.%d.%s", wsTicketKind, exp, nonce)
+	return hex.EncodeToString(m.Sum(nil))
+}
+
+func (a *Auth) WSTicket() string {
+	exp := time.Now().Add(WSTicketTTL).Unix()
+	nonce := randomHex(16)
+	return fmt.Sprintf("v1.%d.%s.%s", exp, nonce, a.signWSTicket(exp, nonce))
+}
+
+func (a *Auth) VerifyWSTicket(ticket string) bool {
+	p := strings.Split(ticket, ".")
+	if len(p) != 4 || p[0] != "v1" || p[2] == "" {
+		return false
+	}
+	exp, err := strconv.ParseInt(p[1], 10, 64)
+	if err != nil || exp < time.Now().Unix() {
+		return false
+	}
+	return hmac.Equal([]byte(p[3]), []byte(a.signWSTicket(exp, p[2])))
 }
 
 func (a *Auth) cookieValue() string {

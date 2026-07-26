@@ -103,12 +103,12 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
-// handleWS verifies the token and native protocol version, then hands the
+// handleWS verifies the ticket and native protocol version, then hands the
 // connection to the hub.
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	if q.Get("k") != s.auth.Token || q.Get("nv") != config.NativeVersion {
-		log.Printf("ws rejected: bad token or version nv=%q (want %s) from %s", q.Get("nv"), config.NativeVersion, r.RemoteAddr)
+	if !s.auth.VerifyWSTicket(q.Get("ticket")) || q.Get("nv") != config.NativeVersion {
+		log.Printf("ws rejected: bad ticket or version nv=%q (want %s) from %s", q.Get("nv"), config.NativeVersion, r.RemoteAddr)
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -120,8 +120,8 @@ func (s *Server) handleNativeConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	caps, _ := json.Marshal(config.Caps)
-	fmt.Fprintf(w, `{"token":%q,"vw":%d,"vh":%d,"nv":%q,"host":%q,"caps":%s}`,
-		s.auth.Token, s.cfg.ViewW, s.cfg.ViewH, config.NativeVersion, r.Host, caps)
+	fmt.Fprintf(w, `{"ticket":%q,"vw":%d,"vh":%d,"nv":%q,"host":%q,"caps":%s}`,
+		s.auth.WSTicket(), s.cfg.ViewW, s.cfg.ViewH, config.NativeVersion, r.Host, caps)
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
