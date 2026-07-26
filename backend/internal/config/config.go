@@ -76,10 +76,14 @@ type Config struct {
 }
 
 func (c *Config) RefreshChildEnv() {
-	c.ChildEnv = []string{
-		"DISPLAY=" + c.Display,
-		"PULSE_SERVER=" + c.PulseServer,
+	env := []string{"DISPLAY=" + c.Display}
+	if c.PulseServer != "" {
+		env = append(env, "PULSE_SERVER="+c.PulseServer)
 	}
+	if c.PulseSink != "" {
+		env = append(env, "PULSE_SINK="+c.PulseSink)
+	}
+	c.ChildEnv = env
 }
 
 func envInt(key string, def int) int {
@@ -145,6 +149,12 @@ func Load() (*Config, error) {
 	viewH := envInt("VH", 768)
 	displayDefault := max(viewW, viewH)
 	pulseSink := envStr("PULSE_SINK", "surf_output")
+	manageDisplay := envBool("SURF_MANAGE_DISPLAY", runtimeMode == "host")
+	managePulse := envBool("SURF_MANAGE_PULSE", runtimeMode == "host")
+	pulseServerDefault := "unix:/tmp/pulse/native"
+	if runtimeMode == "host" && !managePulse {
+		pulseServerDefault = ""
+	}
 	cfg := &Config{
 		RuntimeMode:     runtimeMode,
 		BindAddr:        envStr("BIND_ADDR", "0.0.0.0"),
@@ -166,7 +176,7 @@ func Load() (*Config, error) {
 		UploadsDir:      envStr("UPLOADS", uploadsDefault),
 		Display:         envStr("SURF_DISPLAY", envStr("DISPLAY", ":99")),
 		XOutput:         envStr("X_OUTPUT", "screen"),
-		PulseServer:     envStr("PULSE_SERVER", "unix:/tmp/pulse/native"),
+		PulseServer:     envStr("PULSE_SERVER", pulseServerDefault),
 		PulseSink:       pulseSink,
 		AudioSource:     envStr("AUDIO_SOURCE", pulseSink+".monitor"),
 		FFmpegPath:      envStr("FFMPEG", "ffmpeg"),
@@ -174,8 +184,8 @@ func Load() (*Config, error) {
 		XrandrPath:      envStr("XRANDR", "xrandr"),
 		PulseaudioPath:  envStr("PULSEAUDIO", "pulseaudio"),
 		PactlPath:       envStr("PACTL", "pactl"),
-		ManageDisplay:   envBool("SURF_MANAGE_DISPLAY", runtimeMode == "host"),
-		ManagePulse:     envBool("SURF_MANAGE_PULSE", runtimeMode == "host"),
+		ManageDisplay:   manageDisplay,
+		ManagePulse:     managePulse,
 		ChromeNoSandbox: envBool("CHROME_NO_SANDBOX", runtimeMode == "docker"),
 		StreamFPS:       envInt("STREAM_FPS", 30),
 		StreamScale:     envStr("STREAM_SCALE", "800x800"),
