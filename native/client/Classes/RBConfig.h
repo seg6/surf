@@ -4,7 +4,7 @@
 #error RBNativeVersion must be supplied by native/client/Makefile from PROTOCOL_VERSION
 #endif
 #define RBDefaultServerURL @"https://surf.seg6.space"
-#define RBDefaultPassword @"linuxwifi"
+#define RBDefaultPassword @""
 #define RBLogDirectory @"/var/mobile/Library/Surf"
 #define RBLogFile @"/var/mobile/Library/Surf/surf.log"
 
