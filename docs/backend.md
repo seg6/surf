@@ -42,7 +42,7 @@ standalone step still expects host-installed runtime tools:
 
 - Chromium (`chromium` or set `CHROME`).
 - Xvfb (`Xvfb`).
-- xrandr (`xrandr`).
+- xrandr (`xrandr`, optional; resize falls back when missing).
 - FFmpeg (`ffmpeg`).
 - PulseAudio and pactl (`pulseaudio`, `pactl`).
 
@@ -70,6 +70,11 @@ SURF_RUNTIME=host ./backend/surf-backend -doctor
 Host mode stores data under `~/.surf/` by default and starts private Xvfb and
 PulseAudio processes for Chromium. Docker remains the recommended path until
 the managed runtime bundle is implemented.
+
+Wayland desktops still use this private Xvfb path; Surf does not need to attach
+to the user's compositor. If your host does not provide Xvfb or PulseAudio, use
+Docker for now. The standalone target is a managed runtime that supplies those
+sidecars under `~/.surf/runtime`.
 
 If you run host mode as root on a VPS, Chromium may require
 `CHROME_NO_SANDBOX=1`. Prefer running as a normal user when possible.
