@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"surf-backend/internal/auth"
 	"surf-backend/internal/config"
@@ -147,5 +148,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func Listen(port int, h http.Handler) error {
-	return http.ListenAndServe(fmt.Sprintf("0.0.0.0:%d", port), h)
+	srv := &http.Server{
+		Addr:              fmt.Sprintf("0.0.0.0:%d", port),
+		Handler:           h,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	return srv.ListenAndServe()
 }
