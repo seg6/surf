@@ -1,6 +1,7 @@
 package httpd
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -37,5 +38,36 @@ func TestHealthStatsRequiresAuth(t *testing.T) {
 	srv.Handler().ServeHTTP(authResp, authReq)
 	if authResp.Code != http.StatusOK {
 		t.Fatalf("auth stats code = %d, want %d", authResp.Code, http.StatusOK)
+	}
+}
+
+func TestNativeConfigReturnsWSTicket(t *testing.T) {
+	a := auth.New(t.TempDir(), "unused", 1)
+	srv, err := New(&config.Config{ViewW: 1024, ViewH: 768}, a, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/native-config", nil)
+	cookieResp := httptest.NewRecorder()
+	a.SetCookie(cookieResp)
+	req.AddCookie(cookieResp.Result().Cookies()[0])
+	resp := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("native-config code = %d, want %d", resp.Code, http.StatusOK)
+	}
+	var body struct {
+		Ticket string `json:"ticket"`
+		Token  string `json:"token"`
+	}
+	if err := json.NewDecoder(resp.Result().Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Token != "" {
+		t.Fatal("native-config returned legacy token")
+	}
+	if !a.VerifyWSTicket(body.Ticket) {
+		t.Fatal("native-config returned invalid ws ticket")
 	}
 }

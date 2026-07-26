@@ -248,7 +248,8 @@ static BOOL RBReadAll(int fd, void *buf, NSUInteger len) {
         if (error) *error = @"bad websocket accept";
         return NO;
     }
-    RBLog(@"websocket open %@%@:%d%@", self.secure ? @"tls " : @"", self.host, (int)self.port, self.path);
+    NSString *safePath = [[self.path componentsSeparatedByString:@"?"] objectAtIndex:0];
+    RBLog(@"websocket open %@%@:%d%@", self.secure ? @"tls " : @"", self.host, (int)self.port, safePath);
     return YES;
 }
 

@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +29,7 @@ const (
 	pingInterval = 30 * time.Second
 	pongWait     = 75 * time.Second
 	writeWait    = 20 * time.Second
+	readLimit    = 64 << 10
 
 	// maxInflight is the frame pipelining window. 3 covers ~200ms of RTT at
 	// 15fps without letting a stalled client accumulate a backlog.
@@ -54,11 +57,21 @@ func NewHub() *Hub {
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 32768,
-			// Same-origin is enforced by the token in the query string; the
-			// origin header on iOS 6 is unreliable.
-			CheckOrigin: func(*http.Request) bool { return true },
+			CheckOrigin:     checkOrigin,
 		},
 	}
+}
+
+func checkOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true // native iOS socket sends no Origin header
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	return strings.EqualFold(u.Host, r.Host)
 }
 
 func (h *Hub) SetHandler(hd Handler) { h.handler = hd }
@@ -147,6 +160,7 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	conn.SetReadLimit(readLimit)
 	c := &Client{hub: h, conn: conn, out: make(chan outMsg, 32), done: make(chan struct{})}
 	h.mu.Lock()
 	h.clients[c] = struct{}{}
