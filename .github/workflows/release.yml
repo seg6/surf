@@ -5,10 +5,6 @@ on:
     tags:
       - v*
   workflow_dispatch:
-    inputs:
-      tag:
-        description: Release tag, for example v0.3.0
-        required: true
 
 permissions:
   contents: write
@@ -25,19 +21,19 @@ jobs:
         id: meta
         shell: bash
         run: |
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            tag="${{ inputs.tag }}"
-          else
-            tag="${GITHUB_REF_NAME}"
-          fi
-          if [ -z "$tag" ]; then
-            echo "release tag is required" >&2
-            exit 1
-          fi
           version="$(tr -d '[:space:]' < VERSION)"
           protocol_version="$(tr -d '[:space:]' < PROTOCOL_VERSION)"
-          if [ "$tag" != "v$version" ]; then
-            echo "release tag $tag does not match VERSION $version" >&2
+          if [ -z "$version" ]; then
+            echo "VERSION is required" >&2
+            exit 1
+          fi
+          if [ -z "$protocol_version" ]; then
+            echo "PROTOCOL_VERSION is required" >&2
+            exit 1
+          fi
+          tag="v$version"
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "$tag" ]; then
+            echo "git tag ${GITHUB_REF_NAME} does not match VERSION $version" >&2
             exit 1
           fi
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
