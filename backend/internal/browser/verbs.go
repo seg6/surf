@@ -6,9 +6,11 @@ package browser
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,6 +21,16 @@ import (
 	"surf-backend/internal/protocol"
 	"surf-backend/internal/ws"
 )
+
+const (
+	uploadMaxRequestBytes = 65 << 20
+	uploadMaxFileBytes    = 64 << 20
+	uploadFormMemoryBytes = 8 << 20
+	// Chromium consumes accepted file paths asynchronously; keep a bounded grace window.
+	uploadCleanupDelay = 30 * time.Minute
+)
+
+var errUploadTooLarge = errors.New("upload file too large")
 
 // ---- JS dialogs (M2.1) --------------------------------------------------
 //
@@ -119,53 +131,117 @@ func (b *Browser) handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no pending file chooser", http.StatusConflict)
 		return
 	}
-	if err := r.ParseMultipartForm(64 << 20); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, uploadMaxRequestBytes)
+	if err := r.ParseMultipartForm(uploadFormMemoryBytes); err != nil {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+		if strings.Contains(err.Error(), "request body too large") {
+			http.Error(w, "upload too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "bad multipart", http.StatusBadRequest)
 		return
 	}
-	_ = os.MkdirAll(b.cfg.UploadsDir, 0o755)
-	var paths []string
 	if r.MultipartForm != nil {
-		for _, fhs := range r.MultipartForm.File {
-			for _, fh := range fhs {
-				name := unsafeName.ReplaceAllString(filepath.Base(fh.Filename), "_")
-				if name == "" || name == "." {
-					name = fmt.Sprintf("upload-%d", time.Now().UnixNano())
-				}
-				dst := filepath.Join(b.cfg.UploadsDir, fmt.Sprintf("%d-%s", time.Now().UnixNano(), name))
-				src, err := fh.Open()
-				if err != nil {
-					continue
-				}
-				out, err := os.Create(dst)
-				if err != nil {
-					_ = src.Close()
-					continue
-				}
-				_, cerr := io.Copy(out, src)
-				_ = src.Close()
-				_ = out.Close()
-				if cerr != nil {
-					_ = os.Remove(dst)
-					continue
-				}
-				paths = append(paths, dst)
-			}
-		}
+		defer r.MultipartForm.RemoveAll()
+	}
+	paths, err := saveUploadedFiles(r.MultipartForm, b.cfg.UploadsDir)
+	if errors.Is(err, errUploadTooLarge) {
+		http.Error(w, "upload too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	if err != nil {
+		log.Printf("upload: save: %v", err)
+		http.Error(w, "upload failed", http.StatusInternalServerError)
+		return
 	}
 	// Empty selection = cancel: attach nothing, page sees no change.
 	if len(paths) > 0 {
 		if _, err := b.cdp.Call(session, "DOM.setFileInputFiles", map[string]any{
 			"files": paths, "backendNodeId": node,
 		}); err != nil {
+			cleanupUploadedFiles(paths)
 			log.Printf("upload: setFileInputFiles: %v", err)
 			http.Error(w, "attach failed", http.StatusBadGateway)
 			return
 		}
+		scheduleUploadCleanup(paths)
 		log.Printf("upload: attached %d file(s)", len(paths))
 	}
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"ok":true,"n":%d}`, len(paths))
+}
+
+func saveUploadedFiles(form *multipart.Form, dir string) ([]string, error) {
+	if form == nil || len(form.File) == 0 {
+		return nil, nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, fhs := range form.File {
+		for _, fh := range fhs {
+			path, err := saveUploadedFile(fh, dir)
+			if err != nil {
+				cleanupUploadedFiles(paths)
+				return nil, err
+			}
+			paths = append(paths, path)
+		}
+	}
+	return paths, nil
+}
+
+func saveUploadedFile(fh *multipart.FileHeader, dir string) (string, error) {
+	name := unsafeName.ReplaceAllString(filepath.Base(fh.Filename), "_")
+	if name == "" || name == "." {
+		name = fmt.Sprintf("upload-%d", time.Now().UnixNano())
+	}
+	dst := filepath.Join(dir, fmt.Sprintf("%d-%s", time.Now().UnixNano(), name))
+	src, err := fh.Open()
+	if err != nil {
+		return "", err
+	}
+	defer src.Close()
+	if err := copyUploadedFile(dst, src, uploadMaxFileBytes); err != nil {
+		return "", err
+	}
+	return dst, nil
+}
+
+func copyUploadedFile(dst string, src io.Reader, maxBytes int64) error {
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	n, copyErr := io.Copy(out, io.LimitReader(src, maxBytes+1))
+	closeErr := out.Close()
+	if copyErr != nil || closeErr != nil || n > maxBytes {
+		_ = os.Remove(dst)
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		return errUploadTooLarge
+	}
+	return nil
+}
+
+func cleanupUploadedFiles(paths []string) {
+	for _, p := range paths {
+		if p != "" {
+			_ = os.Remove(p)
+		}
+	}
+}
+
+func scheduleUploadCleanup(paths []string) {
+	keep := append([]string(nil), paths...)
+	time.AfterFunc(uploadCleanupDelay, func() { cleanupUploadedFiles(keep) })
 }
 
 // ---- link hit-test (M2.4) ------------------------------------------------
