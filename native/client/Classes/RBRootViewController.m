@@ -249,7 +249,6 @@ static const CGFloat kRBFindBarHeight = 44.0;
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     NSString *url = [defaults stringForKey:RBDefaultsServerURLKey];
     NSString *password = [defaults stringForKey:RBDefaultsPasswordKey];
-    if ([password isEqualToString:@"alpine"]) password = RBDefaultPassword;
     if ([url length] && [password length]) {
         [self connectToURL:url password:password];
     } else {
@@ -361,7 +360,6 @@ static const CGFloat kRBFindBarHeight = 44.0;
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     NSString *url = [defaults stringForKey:RBDefaultsServerURLKey] ?: RBDefaultServerURL;
     NSString *password = [defaults stringForKey:RBDefaultsPasswordKey] ?: RBDefaultPassword;
-    if ([password isEqualToString:@"alpine"]) password = RBDefaultPassword;
     RBSettingsController *settings = [[RBSettingsController alloc] initWithServerURL:url password:password];
     settings.delegate = self;
     settings.allowsCancel = allowsCancel;

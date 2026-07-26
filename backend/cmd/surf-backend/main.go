@@ -28,7 +28,10 @@ func main() {
 		return
 	}
 
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("fatal: %v", err)
+	}
 	a := auth.New(cfg.Profile, cfg.AuthHash, cfg.AuthDays)
 	hub := ws.NewHub()
 	b := browser.New(cfg, hub)

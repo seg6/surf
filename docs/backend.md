@@ -6,9 +6,9 @@ native client.
 
 ## Local LAN Launcher
 
-From `backend/`, `./start.sh` builds the Docker image, hashes
+From `backend/`, `./start.sh` builds the Docker image, hashes required
 `SURF_PASSWORD`, starts the container with host networking, and enables Bonjour
-discovery.
+discovery. It refuses to start when `SURF_PASSWORD` is unset.
 
 Configuration is read from `backend/.env`:
 

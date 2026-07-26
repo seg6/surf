@@ -86,7 +86,7 @@ By default, `./start.sh`:
 - Starts a container named `surf-backend-lan`.
 - Listens on port `18080`.
 - Advertises the backend on the local network for Surf discovery.
-- Reads `SURF_PASSWORD` from `.env`.
+- Reads required `SURF_PASSWORD` from `.env`.
 
 The example password is:
 
@@ -94,8 +94,7 @@ The example password is:
 securepassword
 ```
 
-Change it in `.env` before using Surf long-term, especially if the backend is
-reachable outside your local network.
+Change it in `.env`; `./start.sh` refuses to start without `SURF_PASSWORD`.
 
 ## Connect From Surf
 

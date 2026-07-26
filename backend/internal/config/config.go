@@ -2,10 +2,9 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 // NativeVersion gates the WS handshake: the Surf app and the server must agree,
@@ -31,22 +30,22 @@ var Caps = []string{
 }
 
 type Config struct {
-	Port                int
-	ChromePath          string
-	StartURL            string
-	Profile             string
-	ViewW               int
-	ViewH               int
-	DisplayW            int // X framebuffer / Chromium window size; must cover every viewport
-	DisplayH            int
+	Port          int
+	ChromePath    string
+	StartURL      string
+	Profile       string
+	ViewW         int
+	ViewH         int
+	DisplayW      int // X framebuffer / Chromium window size; must cover every viewport
+	DisplayH      int
 	Quality       int // steady-state screencast JPEG quality
 	MotionQuality int // JPEG quality while scrolling/typing (cheap frames, low latency)
 	SharpQuality  int // quality of the post-settle captureScreenshot
 	SettleMS      int // how long after the last input before we consider motion over
-	AuthHash            string
-	AuthDays            int
-	DownloadsDir        string
-	UploadsDir          string
+	AuthHash      string
+	AuthDays      int
+	DownloadsDir  string
+	UploadsDir    string
 
 	// H.264 lane. The encoder only runs while a native video-mode client
 	// is subscribed.
@@ -73,29 +72,22 @@ func envStr(key, def string) string {
 }
 
 func authHash() string {
-	if v := os.Getenv("AUTH_HASH"); v != "" {
-		return v
-	}
-	b, err := bcrypt.GenerateFromPassword([]byte("linuxwifi"), bcrypt.DefaultCost)
-	if err != nil {
-		panic(err)
-	}
-	return string(b)
+	return os.Getenv("AUTH_HASH")
 }
 
-func Load() *Config {
+func Load() (*Config, error) {
 	viewW := envInt("VW", 1024)
 	viewH := envInt("VH", 768)
 	displayDefault := max(viewW, viewH)
-	return &Config{
-		Port:                envInt("PORT", 8080),
-		ChromePath:          envStr("CHROME", "/usr/bin/chromium"),
-		StartURL:            envStr("START_URL", "https://www.google.com"),
-		Profile:             envStr("PROFILE", "/data/profile"),
-		ViewW:               viewW,
-		ViewH:               viewH,
-		DisplayW:            envInt("XFB_W", displayDefault),
-		DisplayH:            envInt("XFB_H", displayDefault),
+	cfg := &Config{
+		Port:           envInt("PORT", 8080),
+		ChromePath:     envStr("CHROME", "/usr/bin/chromium"),
+		StartURL:       envStr("START_URL", "https://www.google.com"),
+		Profile:        envStr("PROFILE", "/data/profile"),
+		ViewW:          viewW,
+		ViewH:          viewH,
+		DisplayW:       envInt("XFB_W", displayDefault),
+		DisplayH:       envInt("XFB_H", displayDefault),
 		Quality:        envInt("QUALITY", 100),
 		MotionQuality:  envInt("MOTION_QUALITY", 85),
 		SharpQuality:   envInt("SHARP_QUALITY", 82),
@@ -111,4 +103,8 @@ func Load() *Config {
 		StreamBufsizeK: envInt("STREAM_BUFSIZE", 900),
 		StreamPreset:   envStr("STREAM_PRESET", "ultrafast"),
 	}
+	if cfg.AuthHash == "" {
+		return nil, fmt.Errorf("AUTH_HASH is required; generate one with surf-backend -hash-password")
+	}
+	return cfg, nil
 }

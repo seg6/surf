@@ -13,7 +13,10 @@ if [ -f ./.env ]; then
   set +a
 fi
 
-SURF_PASSWORD="${SURF_PASSWORD:-linuxwifi}"
+if [ -z "${SURF_PASSWORD:-}" ]; then
+  echo "SURF_PASSWORD is required. Set it in backend/.env or export it before running ./start.sh." >&2
+  exit 1
+fi
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 VERSION="$(tr -d '[:space:]' < "$SCRIPT_DIR/../VERSION")"
 PROTOCOL_VERSION="$(tr -d '[:space:]' < "$SCRIPT_DIR/../PROTOCOL_VERSION")"
@@ -50,5 +53,5 @@ docker run -d --name "$NAME" \
   "$IMAGE"
 
 echo "Surf LAN is running at http://localhost:$PORT"
-echo "Password: $SURF_PASSWORD"
+echo "Use the password configured in SURF_PASSWORD."
 echo "iPad: Settings -> Find Local Surf -> Connect"
