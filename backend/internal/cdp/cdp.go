@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"surf-backend/internal/proc"
 )
 
 type Event struct {
@@ -68,13 +70,20 @@ type envelope struct {
 
 var devtoolsRe = regexp.MustCompile(`DevTools listening on (ws://\S+)`)
 
-// Launch starts Chromium headful (Xvfb provides the display) with the same
-// flag set puppeteer was given, and returns a connected browser client.
-func Launch(chromePath, profile string, w, h int) (*Client, *exec.Cmd, error) {
+type LaunchConfig struct {
+	ChromePath string
+	Profile    string
+	W, H       int
+	Env        []string
+	NoSandbox  bool
+	ExtraArgs  []string
+}
+
+func (cfg LaunchConfig) Args() []string {
 	args := []string{
 		"--remote-debugging-port=0",
-		"--user-data-dir=" + profile,
-		"--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
+		"--user-data-dir=" + cfg.Profile,
+		"--disable-dev-shm-usage", "--disable-gpu",
 		"--disable-blink-features=AutomationControlled",
 		"--disable-popup-blocking", "--no-first-run", "--no-default-browser-check",
 		"--disable-session-crashed-bubble", "--hide-crash-restore-bubble", "--noerrdialogs",
@@ -99,7 +108,7 @@ func Launch(chromePath, profile string, w, h int) (*Client, *exec.Cmd, error) {
 		"--allow-pre-commit-input", "--force-color-profile=srgb",
 		"--metrics-recording-only", "--password-store=basic", "--use-mock-keychain",
 		"--disable-features=Translate,MediaRouter,AcceptCHFrame,OptimizationHints",
-		fmt.Sprintf("--window-size=%d,%d", w, h),
+		fmt.Sprintf("--window-size=%d,%d", cfg.W, cfg.H),
 		// Fullscreen/kiosk: no toolbar/omnibox/tab strip on the X display. The
 		// CDP screencast sees page pixels either way, but the video lane films
 		// Xvfb directly, so a normal browser window would stream Chromium chrome.
@@ -108,10 +117,20 @@ func Launch(chromePath, profile string, w, h int) (*Client, *exec.Cmd, error) {
 		"--kiosk",
 		"--start-fullscreen",
 		"--window-position=0,0",
-		"about:blank",
 	}
-	cmd := exec.Command(chromePath, args...)
-	cmd.Env = os.Environ()
+	if cfg.NoSandbox {
+		args = append(args, "--no-sandbox")
+	}
+	args = append(args, cfg.ExtraArgs...)
+	args = append(args, "about:blank")
+	return args
+}
+
+// Launch starts Chromium headful (Xvfb provides the display) with the same
+// flag set puppeteer was given, and returns a connected browser client.
+func Launch(cfg LaunchConfig) (*Client, *exec.Cmd, error) {
+	cmd := proc.Command(cfg.ChromePath, cfg.Args()...)
+	cmd.Env = append(os.Environ(), cfg.Env...)
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return nil, nil, err
@@ -134,14 +153,14 @@ func Launch(chromePath, profile string, w, h int) (*Client, *exec.Cmd, error) {
 		}
 	}()
 
-	url, err := waitForURL(wsURL, profile)
+	url, err := waitForURL(wsURL, cfg.Profile)
 	if err != nil {
-		_ = cmd.Process.Kill()
+		proc.Kill(cmd)
 		return nil, nil, err
 	}
 	c, err := Dial(url)
 	if err != nil {
-		_ = cmd.Process.Kill()
+		proc.Kill(cmd)
 		return nil, nil, err
 	}
 	return c, cmd, nil

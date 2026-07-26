@@ -3,10 +3,13 @@ package audio
 import (
 	"io"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
 	"time"
+
+	"surf-backend/internal/proc"
 )
 
 const (
@@ -17,6 +20,12 @@ const (
 	queueCap   = 20
 	lingerStop = 5 * time.Second
 )
+
+type Config struct {
+	FFmpegPath string
+	Source     string
+	Env        []string
+}
 
 type Chunk struct {
 	Seq        uint32
@@ -34,6 +43,7 @@ type Sub struct {
 }
 
 type Streamer struct {
+	cfg       Config
 	mu        sync.Mutex
 	subs      map[*Sub]struct{}
 	cmd       *exec.Cmd
@@ -42,7 +52,21 @@ type Streamer struct {
 	stopTimer *time.Timer
 }
 
-func New() *Streamer { return &Streamer{subs: map[*Sub]struct{}{}} }
+func New(cfg Config) *Streamer {
+	if cfg.FFmpegPath == "" {
+		cfg.FFmpegPath = "ffmpeg"
+	}
+	if cfg.Source == "" {
+		cfg.Source = "surf_output.monitor"
+	}
+	return &Streamer{cfg: cfg, subs: map[*Sub]struct{}{}}
+}
+
+func (s *Streamer) Config() Config {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg
+}
 
 func (s *Streamer) Subscribe() *Sub {
 	sub := &Sub{C: make(chan Chunk, queueCap), s: s}
@@ -81,9 +105,10 @@ func (sub *Sub) Close() {
 }
 
 func (s *Streamer) startLocked() {
-	cmd := exec.Command("ffmpeg", "-loglevel", "warning",
-		"-f", "pulse", "-i", "surf_output.monitor",
+	cmd := proc.Command(s.cfg.FFmpegPath, "-loglevel", "warning",
+		"-f", "pulse", "-i", s.cfg.Source,
 		"-ac", "1", "-ar", "16000", "-f", "s16le", "pipe:1")
+	cmd.Env = append(os.Environ(), s.cfg.Env...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		log.Printf("audio: stdout pipe: %v", err)
@@ -158,7 +183,7 @@ func logStderr(r io.Reader) {
 
 func (s *Streamer) stopLocked() {
 	if s.cmd != nil && s.cmd.Process != nil {
-		_ = s.cmd.Process.Kill()
+		proc.Kill(s.cmd)
 	}
 	s.running = false
 	s.cmd = nil

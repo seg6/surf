@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"surf-backend/internal/proc"
 )
 
 const (
@@ -36,9 +38,11 @@ const (
 
 type Config struct {
 	Display                      string // ":99"
-	W, H                         int    // coded size
-	CaptureW, CaptureH           int    // X grab size; defaults to coded size
-	ScaleMaxW, ScaleMaxH         int    // optional coded-size bounding box
+	FFmpegPath                   string
+	Env                          []string
+	W, H                         int // coded size
+	CaptureW, CaptureH           int // X grab size; defaults to coded size
+	ScaleMaxW, ScaleMaxH         int // optional coded-size bounding box
 	FPS                          int
 	BitrateK, MaxrateK, BufsizeK int
 }
@@ -88,6 +92,9 @@ type Streamer struct {
 }
 
 func New(cfg Config) *Streamer {
+	if cfg.FFmpegPath == "" {
+		cfg.FFmpegPath = "ffmpeg"
+	}
 	if cfg.Display == "" {
 		cfg.Display = os.Getenv("DISPLAY")
 		if cfg.Display == "" {
@@ -325,7 +332,8 @@ func macroblocksPerSecond(w, h, fps int) int {
 
 // startLocked launches ffmpeg; s.mu held by caller.
 func (s *Streamer) startLocked() {
-	cmd := exec.Command("ffmpeg", s.args()...)
+	cmd := proc.Command(s.cfg.FFmpegPath, s.args()...)
+	cmd.Env = append(os.Environ(), s.cfg.Env...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		log.Printf("stream: stdout pipe: %v", err)
@@ -371,7 +379,7 @@ func logStderr(r io.Reader) {
 // stopLocked kills the encoder; s.mu held by caller.
 func (s *Streamer) stopLocked() {
 	if s.cmd != nil && s.cmd.Process != nil {
-		_ = s.cmd.Process.Kill()
+		proc.Kill(s.cmd)
 	}
 	s.running = false
 	s.cmd = nil

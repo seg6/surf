@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -147,9 +148,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "unauthorized", http.StatusUnauthorized)
 }
 
-func Listen(port int, h http.Handler) error {
+func Listen(bindAddr string, port int, h http.Handler) error {
 	srv := &http.Server{
-		Addr:              fmt.Sprintf("0.0.0.0:%d", port),
+		Addr:              net.JoinHostPort(bindAddr, fmt.Sprint(port)),
 		Handler:           h,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       60 * time.Second,
