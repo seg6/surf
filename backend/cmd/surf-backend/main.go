@@ -27,6 +27,7 @@ func main() {
 
 func run() error {
 	hashPassword := flag.String("hash-password", "", "print a bcrypt hash for a Surf password and exit")
+	doctor := flag.Bool("doctor", false, "check configured host-mode runtime tools and exit")
 	flag.Parse()
 	if *hashPassword != "" {
 		hash, err := auth.HashPassword(*hashPassword)
@@ -41,6 +42,22 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if *doctor {
+		failed := false
+		for _, check := range runenv.Doctor(cfg) {
+			if check.OK {
+				log.Printf("doctor: ok %s=%s", check.Name, check.Path)
+				continue
+			}
+			failed = true
+			log.Printf("doctor: missing %s=%s: %v", check.Name, check.Path, check.Err)
+		}
+		if failed {
+			return fmt.Errorf("doctor failed")
+		}
+		return nil
+	}
+
 	rt, err := runenv.Start(cfg)
 	if err != nil {
 		return err
