@@ -17,3 +17,4 @@
 #define RBDefaultsServersKey @"RBServers" // [{title,url,password?}]
 #define RBDefaultsLastPasteboardKey @"RBLastPasteboard" // last URL offered from the pasteboard
 #define RBDefaultsReaderNightKey @"RBReaderNight" // NSNumber bool; reader dark mode
+#define RBDefaultsDiagnosticsKey @"RBDiagnosticsOverlay" // NSNumber bool; live performance panel
