@@ -173,8 +173,9 @@ jobs:
         run: |
           client_deb="$(find dist/packages -name '*.deb' -type f -print -quit)"
           test -n "$client_deb"
-          go run ./backend/tools/updatemanifest dist/packages "$client_deb" \
-            "${{ steps.meta.outputs.version }}" "${{ steps.meta.outputs.protocol_version }}" update.json
+          cd backend
+          go run ./tools/updatemanifest ../dist/packages "../$client_deb" \
+            "${{ steps.meta.outputs.version }}" "${{ steps.meta.outputs.protocol_version }}" ../update.json
 
       - uses: softprops/action-gh-release@v2
         with:
