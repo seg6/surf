@@ -8,6 +8,7 @@
 @optional
 // DATA section: what = history|cookies|cache. Only offered while connected.
 - (void)settings:(RBSettingsController *)settings clearData:(NSString *)what;
+- (void)settings:(RBSettingsController *)settings diagnosticsVisible:(BOOL)visible;
 @end
 
 // App configuration as a real grouped settings screen (chrome rethink):
@@ -19,6 +20,7 @@
 @property(nonatomic, assign) BOOL allowsCancel;
 // Data actions only make sense with a live session.
 @property(nonatomic, assign) BOOL connected;
+@property(nonatomic, assign) BOOL diagnosticsVisible;
 - (id)initWithServerURL:(NSString *)serverURL password:(NSString *)password;
 - (void)setStatusText:(NSString *)status isError:(BOOL)isError;
 @end

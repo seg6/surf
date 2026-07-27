@@ -141,7 +141,7 @@ schedules ordered control, drop-oldest audio, and a four-AU GOP-aware video
 queue; `AudioPipeline` owns capture and bounded fan-out. Video overflow
 requests an immediate cooldown-protected IDR instead of accumulating delay.
 
-Protocol `20260727-5` uses a 64-byte extensible binary header carrying AU and
+Protocol `20260728-1` uses a 64-byte extensible binary header carrying AU and
 source sequences, coded size, interaction ID, backend timing stamps, and
 encoder generation. The socket-write timestamp is stamped by the WebSocket
 writer immediately before the write.
