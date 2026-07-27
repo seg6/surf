@@ -30,16 +30,15 @@ jobs:
         working-directory: backend
         run: go test -race ./...
 
-      - name: Build backend tarball
-        run: make backend-dist
-
-  backend-cross:
-    name: Backend ${{ matrix.goos }}/${{ matrix.goarch }}
+  backend-packages:
+    name: Backend package ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
+          - goos: linux
+            goarch: amd64
           - goos: windows
             goarch: amd64
           - goos: darwin
@@ -54,13 +53,16 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
-      - name: Cross-build
-        working-directory: backend
-        env:
-          CGO_ENABLED: "0"
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-        run: go build -trimpath -o "$RUNNER_TEMP/surf-backend" ./cmd/surf-backend
+      - name: Build package
+        run: make backend-dist BACKEND_GOOS=${{ matrix.goos }} BACKEND_GOARCH=${{ matrix.goarch }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: surf-backend-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+          if-no-files-found: error
 
   native:
     name: Native package

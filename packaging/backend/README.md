@@ -1,10 +1,12 @@
 # Surf Backend
 
-This archive contains the standalone Linux `surf-backend` binary. On first run
-it downloads pinned Chrome for Testing and FFmpeg into `SURF_HOME/runtime`;
-it does not bundle those large runtimes.
+This archive contains a standalone `surf-backend` binary for the platform named
+in its filename. On first run it downloads pinned Chrome for Testing and FFmpeg
+into `SURF_HOME/runtime`; it does not bundle those large runtimes.
 
-## Dependencies
+Windows uses `surf-backend.exe`; Linux and macOS use `surf-backend`.
+
+## Linux Audio Dependencies
 
 Install the backend runtime tools with your distro package manager:
 
@@ -36,6 +38,14 @@ Start the backend:
 SURF_PASSWORD='change-me' ./surf-backend serve
 ```
 
+On Windows PowerShell:
+
+```powershell
+.\surf-backend.exe doctor
+$env:SURF_PASSWORD = 'change-me'
+.\surf-backend.exe serve
+```
+
 Use a strong password before exposing Surf beyond local testing. The default LAN
 URL is:
 
@@ -45,14 +55,14 @@ http://YOUR_COMPUTER_IP:18080
 
 LAN discovery is enabled by default. Disable it with `SURF_ADVERTISE=0`.
 
-## Install To User Bin
+## Install To User Bin (Linux/macOS)
 
 ```sh
 install -Dm755 surf-backend ~/.local/bin/surf-backend
 SURF_PASSWORD='change-me' ~/.local/bin/surf-backend serve
 ```
 
-## Optional User Service
+## Optional Linux User Service
 
 The included `surf-backend.service` expects the binary at
 `~/.local/bin/surf-backend` and an env file at `~/.config/surf-backend/env`.

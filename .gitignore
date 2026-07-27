@@ -4,6 +4,7 @@ native/client/control
 native/client/Resources/Info.plist
 native/buildenv/sdk/
 /backend/surf-backend
+/backend/surf-backend.exe
 /backend/.env
 /dist/
 .env

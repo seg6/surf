@@ -51,20 +51,15 @@ jobs:
           go vet ./...
           go test -race ./...
 
-      - name: Verify cross-platform backend builds
-        working-directory: backend
-        run: |
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -o "$RUNNER_TEMP/surf-backend-windows-amd64.exe" ./cmd/surf-backend
-          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -o "$RUNNER_TEMP/surf-backend-darwin-amd64" ./cmd/surf-backend
-          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -o "$RUNNER_TEMP/surf-backend-darwin-arm64" ./cmd/surf-backend
-
-      - name: Build backend tarball
-        run: make backend-dist
+      - name: Build backend packages
+        run: make backend-dist-all
 
       - uses: actions/upload-artifact@v4
         with:
           name: surf-backend-${{ steps.meta.outputs.tag }}
-          path: dist/surf-backend-*.tar.gz
+          path: |
+            dist/surf-backend-*.tar.gz
+            dist/surf-backend-*.zip
 
       - name: Download native SDK
         run: make native-sdk
@@ -87,7 +82,9 @@ jobs:
           name: Surf ${{ steps.meta.outputs.tag }}
           generate_release_notes: true
           body: |
-            Native package and standalone Linux backend tarball attached.
+            Native iOS package and managed-runtime backend archives for Linux,
+            Windows, and macOS are attached.
           files: |
             native/client/packages/*.deb
             dist/surf-backend-*.tar.gz
+            dist/surf-backend-*.zip

@@ -73,8 +73,8 @@ not appear after installation, run `uicache` again or respring.
 
 ## Start The Backend
 
-On the backend computer, download the appropriate `surf-backend` release.
-The current packaged archive is Linux x86-64:
+On the backend computer, download the matching Linux, Windows, or macOS
+`surf-backend` archive from GitHub Releases:
 
 ```sh
 tar xf surf-backend-*-linux-*.tar.gz
@@ -82,6 +82,10 @@ cd surf-backend-*-linux-*
 ./surf-backend doctor
 SURF_PASSWORD='change-me' ./surf-backend serve
 ```
+
+Windows archives contain `surf-backend.exe`. macOS archives contain the same
+CLI commands shown above and are published separately for Intel and Apple
+Silicon.
 
 Use a strong password before exposing Surf beyond local testing.
 
