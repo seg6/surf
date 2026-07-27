@@ -20,7 +20,6 @@ static const NSInteger kEditServerAlertTag = 1001;
 @property(nonatomic, copy) NSString *initialPassword;
 @property(nonatomic, strong) UITextField *urlField;
 @property(nonatomic, strong) UITextField *passwordField;
-@property(nonatomic, strong) UISwitch *diagSwitch;
 @property(nonatomic, copy) NSString *statusText;
 @property(nonatomic, assign) BOOL statusIsError;
 @property(nonatomic, strong) NSNetServiceBrowser *serviceBrowser;
@@ -54,10 +53,6 @@ static const NSInteger kEditServerAlertTag = 1001;
     self.passwordField = [self fieldWithPlaceholder:@"password" text:self.initialPassword];
     self.passwordField.secureTextEntry = YES;
     self.passwordField.returnKeyType = UIReturnKeyGo;
-
-    self.diagSwitch = [[UISwitch alloc] initWithFrame:CGRectZero];
-    self.diagSwitch.on = self.diagnosticsVisible;
-    [self.diagSwitch addTarget:self action:@selector(diagToggled:) forControlEvents:UIControlEventValueChanged];
 
     [self reloadSavedServers];
 }
@@ -161,13 +156,6 @@ static const NSInteger kEditServerAlertTag = 1001;
     [self.delegate settings:self connectToURL:url password:self.passwordField.text ?: @""];
 }
 
-- (void)diagToggled:(id)sender {
-    self.diagnosticsVisible = self.diagSwitch.on;
-    if ([self.delegate respondsToSelector:@selector(settings:setDiagnosticsVisible:)]) {
-        [self.delegate settings:self setDiagnosticsVisible:self.diagSwitch.on];
-    }
-}
-
 // ---- discovery -----------------------------------------------------------
 
 - (void)startDiscovery {
@@ -226,7 +214,7 @@ static const NSInteger kEditServerAlertTag = 1001;
         case RBSectionServer: return [self.statusText length] ? 4 : 3; // url, password, connect, (status)
         case RBSectionSaved: return (NSInteger)[self.savedServers count] + 1; // + Find Local Surf
         case RBSectionData: return 3;
-        case RBSectionAbout: return 3; // version, overlay, capture
+        case RBSectionAbout: return 1;
     }
     return 0;
 }
@@ -323,19 +311,8 @@ static const NSInteger kEditServerAlertTag = 1001;
     // About
     UITableViewCell *cell = [self cellWithID:@"about" style:UITableViewCellStyleValue1];
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    if (r == 0) {
-        cell.textLabel.text = @"Version";
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"native %@", RBNativeVersion];
-    } else if (r == 1) {
-        cell.textLabel.text = @"Diagnostics Overlay";
-        cell.detailTextLabel.text = nil;
-        self.diagSwitch.on = self.diagnosticsVisible;
-        cell.accessoryView = self.diagSwitch;
-    } else {
-        cell.textLabel.text = @"Start Diagnostics Capture";
-        cell.detailTextLabel.text = @"30 seconds";
-        cell.selectionStyle = self.connected ? UITableViewCellSelectionStyleBlue : UITableViewCellSelectionStyleNone;
-    }
+    cell.textLabel.text = @"Version";
+    cell.detailTextLabel.text = [NSString stringWithFormat:@"native %@", RBNativeVersion];
     return cell;
 }
 
@@ -363,12 +340,6 @@ static const NSInteger kEditServerAlertTag = 1001;
         if ([self.delegate respondsToSelector:@selector(settings:clearData:)]) {
             [self.delegate settings:self clearData:whats[r]];
         }
-        return;
-    }
-    if (s == RBSectionAbout && r == 2 && self.connected &&
-        [self.delegate respondsToSelector:@selector(settingsStartDiagnosticsCapture:)]) {
-        [self.delegate settingsStartDiagnosticsCapture:self];
-        [self setStatusText:@"Diagnostics capture started for 30 seconds" isError:NO];
         return;
     }
 }

@@ -35,7 +35,7 @@ func New(cfg *config.Config, a *auth.Auth, hub *ws.Hub) (*Server, error) {
 
 func (s *Server) SetHealthCheck(fn func() error) { s.health = fn }
 
-// SetStats wires the diagnostics snapshot served at /health?stats=1 (M1.1).
+// SetStats wires the runtime snapshot served at /health?stats=1.
 func (s *Server) SetStats(fn func() map[string]any) { s.stats = fn }
 
 // Gated registers an auth-required feature route (/downloads/, /tabicon/).

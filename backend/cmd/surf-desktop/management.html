@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Surf</title>
+  <link rel="icon" href="/icon.png">
+  <style>
+    :root {
+      --ink: #e7e9ed; --muted: #9ba1ab; --quiet: #737a85;
+      --bg: #17191d; --panel: #22252a;
+      --field: #181a1e; --line: #373b42; --line-strong: #4b5059;
+      --blue: #3978d6; --blue-bright: #74a7ee; --green: #55b97a; --red: #dd6b74;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink); background: var(--bg); font-synthesis: none;
+    }
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; margin: 0; }
+    body { background: var(--bg); }
+    button, input { font: inherit; }
+    button { color: inherit; }
+    .shell { min-height: 100vh; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--quiet); }
+    .dot.online { background: var(--green); }
+    main { min-width: 0; max-width: 960px; margin: 0 auto; padding: 28px 24px 48px; }
+    .page-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+    .page-brand { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; }
+    .page-brand img { width: 32px; height: 32px; border-radius: 7px; }
+    .eyebrow { display: none; }
+    h1 { font-size: 16px; line-height: 1.2; margin: 0; font-weight: 600; }
+    h2 { font-size: 14px; margin: 0; font-weight: 600; }
+    .lede { display: none; }
+    .panel, .metric { border: 1px solid var(--line); background: var(--panel); }
+    .panel { border-radius: 8px; padding: 18px; }
+    .hero {
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 18px; min-height: 0; padding: 18px;
+    }
+    .engine { display: flex; align-items: center; gap: 13px; min-width: 0; }
+    .engine-icon { width: 42px; height: 42px; }
+    .engine-icon img { display: block; width: 100%; height: 100%; border-radius: 8px; }
+    .status-line { display: flex; align-items: center; gap: 7px; margin-bottom: 3px; color: var(--green); font-size: 12px; }
+    .status-line.offline { color: var(--red); }
+    .engine-title { font-size: 15px; font-weight: 600; }
+    .endpoint { color: var(--muted); font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; margin-top: 4px; overflow-wrap: anywhere; }
+    .button {
+      border: 1px solid var(--line-strong); border-radius: 6px; padding: 7px 12px;
+      font-weight: 500; cursor: pointer; background: #30343a;
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    }
+    .button:hover { background: #393e45; }
+    .primary { background: var(--blue); border-color: #528bdc; color: #fff; }
+    .primary:hover { background: #4483df; }
+    .secondary { background: #30343a; }
+    .danger { color: #ff9da5; }
+    .small { padding: 6px 9px; font-size: 12px; }
+    .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 12px 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .metric { border: 0; border-right: 1px solid var(--line); padding: 14px 16px; }
+    .metric:last-child { border-right: 0; }
+    .metric-label { color: var(--muted); font-size: 11px; }
+    .metric-value { font-size: 20px; font-weight: 600; margin-top: 5px; }
+    .metric-unit { color: var(--quiet); font-size: 11px; margin-left: 3px; }
+    .grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 12px; }
+    .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin-bottom: 14px; }
+    .panel-copy { color: var(--muted); font-size: 12px; margin: 4px 0 0; line-height: 1.4; }
+    .credential { display: grid; gap: 6px; margin-top: 12px; }
+    .credential-label { color: var(--muted); font-size: 11px; }
+    .copy-row { display: flex; align-items: center; gap: 7px; }
+    .copy-value {
+      flex: 1; min-width: 0; padding: 8px 10px; border-radius: 5px;
+      border: 1px solid var(--line); background: var(--field);
+      color: #cdd1d7; font: 12px ui-monospace, SFMono-Regular, Consolas, monospace;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .health-list { display: grid; gap: 11px; }
+    .health-row { display: flex; justify-content: space-between; gap: 16px; color: var(--muted); font-size: 12px; }
+    .health-row strong { color: var(--ink); font-weight: 500; }
+    .form-grid { display: grid; grid-template-columns: 1fr 150px; gap: 14px; }
+    label { color: var(--muted); display: grid; gap: 6px; font-size: 12px; font-weight: 500; }
+    input {
+      width: 100%; color: var(--ink); background: var(--field);
+      border: 1px solid var(--line-strong); border-radius: 6px; outline: 0; padding: 9px 10px;
+    }
+    input:focus { border-color: var(--blue-bright); box-shadow: 0 0 0 1px var(--blue-bright); }
+    .password-field { position: relative; }
+    .password-field input { padding-right: 70px; }
+    .reveal { position: absolute; right: 8px; bottom: 7px; padding: 6px 8px; border: 0; background: transparent; color: var(--blue-bright); cursor: pointer; font-size: 11px; }
+    .form-actions { display: flex; gap: 10px; margin-top: 20px; }
+    .note { color: var(--quiet); font-size: 11px; line-height: 1.5; margin-top: 14px; }
+    details.panel { margin-top: 12px; padding: 0; }
+    details > summary {
+      cursor: pointer; padding: 14px 18px; font-size: 13px; font-weight: 600;
+      list-style: none; display: flex; align-items: center; justify-content: space-between;
+    }
+    details > summary::-webkit-details-marker { display: none; }
+    details > summary::after { content: "Show"; color: var(--muted); font-size: 11px; font-weight: 400; }
+    details[open] > summary::after { content: "Hide"; }
+    .log-body { border-top: 1px solid var(--line); padding: 14px; }
+    .log-toolbar { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+    pre {
+      margin: 0; min-height: 460px; max-height: calc(100vh - 180px); overflow: auto;
+      border: 1px solid var(--line); border-radius: 6px; padding: 12px;
+      background: #111316; color: #bdc2ca; font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+      white-space: pre-wrap; overflow-wrap: anywhere;
+    }
+    .toast {
+      position: fixed; right: 24px; bottom: 24px; z-index: 20;
+      border: 1px solid var(--line-strong); border-radius: 6px; padding: 9px 12px;
+      background: #30343a;
+      color: var(--ink); font-size: 13px; opacity: 0; transform: translateY(8px); pointer-events: none;
+      transition: 120ms ease;
+    }
+    .toast.show { opacity: 1; transform: none; }
+
+    @media (max-width: 900px) {
+      .metrics { grid-template-columns: repeat(2, 1fr); }
+      .grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 620px) {
+      main { padding: 18px 14px 36px; }
+      .hero { align-items: flex-start; flex-direction: column; }
+      .metrics { grid-template-columns: 1fr 1fr; }
+      .form-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <main>
+      <header class="page-head">
+        <div class="page-brand"><img src="/icon.png" alt="">Surf</div>
+        <h1>Backend</h1>
+      </header>
+
+      <div class="panel hero">
+          <div class="engine">
+            <div class="engine-icon"><img src="/icon.png" alt=""></div>
+            <div>
+              <div class="status-line offline" id="hero-status"><span class="dot" id="hero-dot"></span><span id="hero-status-text">Connecting…</span></div>
+              <div class="engine-title">Backend</div>
+              <div class="endpoint" id="endpoint">Loading local endpoint…</div>
+            </div>
+          </div>
+          <button class="button secondary" id="restart-overview" type="button">Restart engine</button>
+      </div>
+
+      <div class="metrics">
+          <div class="metric"><div class="metric-label">Stream rate</div><div class="metric-value"><span id="metric-fps">—</span><span class="metric-unit">fps</span></div></div>
+          <div class="metric"><div class="metric-label">Connected clients</div><div class="metric-value" id="metric-clients">—</div></div>
+          <div class="metric"><div class="metric-label">Open tabs</div><div class="metric-value" id="metric-tabs">—</div></div>
+          <div class="metric"><div class="metric-label">Media drops</div><div class="metric-value" id="metric-drops">—</div></div>
+      </div>
+
+      <div class="grid">
+        <div class="panel">
+          <div class="panel-head"><div><h2>Connection</h2></div></div>
+          <form id="settings-form">
+            <div class="credential"><div class="credential-label">Server address</div><div class="copy-row"><div class="copy-value" id="lan-address">Loading…</div><button class="button secondary small" data-copy="lan-address" type="button">Copy</button></div></div>
+            <div class="form-grid" style="margin-top:12px">
+              <label>iPad password
+                <span class="password-field"><input id="password" name="password" type="password" minlength="8" autocomplete="new-password" required><button class="reveal" id="reveal-password" type="button">Show</button></span>
+              </label>
+              <label>Port<input id="port" name="port" type="number" min="1" max="65535" required></label>
+            </div>
+            <div class="form-actions"><button class="button primary" type="submit">Save &amp; restart</button><button class="button secondary" id="copy-settings-password" type="button">Copy password</button></div>
+          </form>
+        </div>
+        <div class="panel">
+            <div class="panel-head"><div><h2>Media</h2></div></div>
+            <div class="health-list">
+              <div class="health-row"><span>Chromium capture</span><strong id="health-capture">—</strong></div>
+              <div class="health-row"><span>H.264 subscribers</span><strong id="health-video">—</strong></div>
+              <div class="health-row"><span>Audio subscribers</span><strong id="health-audio">—</strong></div>
+              <div class="health-row"><span>RTP errors</span><strong id="health-rtp">—</strong></div>
+            </div>
+        </div>
+      </div>
+
+      <details class="panel" id="logs">
+        <summary>Logs</summary>
+        <div class="log-body">
+          <div class="log-toolbar"><button class="button secondary small" id="refresh-logs">Refresh</button></div>
+          <pre id="log-output">Loading logs…</pre>
+        </div>
+      </details>
+    </main>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    let config = null, previousAU = null, previousAt = null, toastTimer = null;
+
+    function toast(message) {
+      const node = $('toast'); node.textContent = message; node.classList.add('show');
+      clearTimeout(toastTimer); toastTimer = setTimeout(() => node.classList.remove('show'), 2600);
+    }
+    async function request(path, options) {
+      const response = await fetch(path, options);
+      if (!response.ok) throw new Error((await response.text()).trim() || `HTTP ${response.status}`);
+      return response;
+    }
+    async function copy(value) {
+      try { await navigator.clipboard.writeText(value); }
+      catch {
+        const area = document.createElement('textarea'); area.value = value; document.body.appendChild(area);
+        area.select(); document.execCommand('copy'); area.remove();
+      }
+      toast('Copied to clipboard');
+    }
+    async function loadConfig() {
+      config = await (await request('/api/config')).json();
+      $('endpoint').textContent = config.baseURL;
+      $('lan-address').textContent = config.lanURL || `Port ${config.port} · no LAN address detected`;
+      $('password').value = config.password;
+      $('port').value = config.port;
+    }
+    function setOnline(online) {
+      $('hero-status').classList.toggle('offline', !online);
+      $('hero-dot').classList.toggle('online', online);
+      $('hero-status-text').textContent = online ? 'Online and ready' : 'Backend unavailable';
+    }
+    async function pollStatus() {
+      try {
+        const stats = await (await request('/api/status')).json();
+        setOnline(true);
+        const now = performance.now(), au = Number(stats.video_access_units || 0);
+        if (previousAU !== null && au >= previousAU) $('metric-fps').textContent = ((au - previousAU) * 1000 / (now - previousAt)).toFixed(1);
+        previousAU = au; previousAt = now;
+        $('metric-clients').textContent = stats.clients ?? 0;
+        $('metric-tabs').textContent = stats.tabs ?? 0;
+        $('metric-drops').textContent = Number(stats.transport_video_drops || 0) + Number(stats.transport_audio_drops || 0);
+        $('health-capture').textContent = stats.casting ? 'Active' : 'Idle';
+        $('health-video').textContent = stats.videoSubs ?? 0;
+        $('health-audio').textContent = stats.audioSubs ?? 0;
+        $('health-rtp').textContent = stats.rtp_errors ?? 0;
+      } catch { setOnline(false); }
+    }
+    async function restart() {
+      try {
+        await request('/api/restart', {method:'POST', headers:{'X-Surf-Desktop':'1'}});
+        toast('Backend restarting…'); setOnline(false); previousAU = null;
+      } catch (error) { toast(error.message); }
+    }
+    $('restart-overview').addEventListener('click', restart);
+    $('settings-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      try {
+        await request('/settings', {method:'POST', headers:{'X-Surf-Desktop':'1'}, body:new FormData(event.currentTarget)});
+        await loadConfig(); toast('Settings saved · backend restarting'); setOnline(false); previousAU = null;
+      } catch (error) { toast(error.message); }
+    });
+    $('reveal-password').addEventListener('click', () => {
+      const showing = $('password').type === 'text';
+      $('password').type = showing ? 'password' : 'text';
+      $('reveal-password').textContent = showing ? 'Show' : 'Hide';
+    });
+    $('copy-settings-password').addEventListener('click', () => copy($('password').value));
+    document.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', () => copy($(button.dataset.copy).textContent)));
+
+    async function loadLogs() {
+      try {
+        $('log-output').textContent = await (await request('/logs')).text();
+        $('log-output').scrollTop = $('log-output').scrollHeight;
+      } catch (error) { $('log-output').textContent = error.message; }
+    }
+    $('refresh-logs').addEventListener('click', loadLogs);
+    $('logs').addEventListener('toggle', () => { if ($('logs').open) loadLogs(); });
+
+    (async () => {
+      try { await loadConfig(); } catch (error) { toast(error.message); }
+      if (location.hash === '#logs') $('logs').open = true;
+      await pollStatus();
+      setInterval(pollStatus, 2000);
+    })();
+  </script>
+</body>
+</html>

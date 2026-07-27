@@ -4,7 +4,7 @@
 // Windows (Chromium in particular forks GPU/utility/renderer/crashpad
 // processes under its top-level PID). Killing just the tracked process
 // leaves that whole tree running orphaned — confirmed live: a forced kill
-// of surf-backend's own process left a dozen Chromium helper processes
+// of Surf's own process left a dozen Chromium helper processes
 // behind. taskkill /T terminates the process tree rooted at the given PID,
 // so Kill uses that instead of TerminateProcess on the single tracked PID.
 package proc

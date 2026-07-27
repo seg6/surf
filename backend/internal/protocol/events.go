@@ -45,11 +45,6 @@ type ClockEvent struct {
 	BackendSendNS uint64 `json:"s2"`
 }
 
-type CaptureStateEvent struct {
-	Type   string `json:"t"`
-	Active bool   `json:"active"`
-}
-
 type EmptyEvent struct {
 	Type string `json:"t"`
 }

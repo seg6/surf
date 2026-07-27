@@ -10,8 +10,8 @@ permissions:
   contents: write
 
 jobs:
-  desktop:
-    name: Desktop app ${{ matrix.goos }}/${{ matrix.goarch }}
+  packages:
+    name: Surf ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -37,22 +37,28 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
-      - name: Build desktop package
+      - name: Build Surf package
         shell: bash
-        run: make desktop-dist BACKEND_GOOS=${{ matrix.goos }} BACKEND_GOARCH=${{ matrix.goarch }}
+        run: make surf-dist SURF_GOOS=${{ matrix.goos }} SURF_GOARCH=${{ matrix.goarch }}
+
+      - name: Verify package
+        shell: bash
+        run: |
+          test -n "$(find dist -type f \( -name surf -o -name surf.exe \) -print -quit)"
+          test -z "$(find dist -type f \( -name surf-desktop -o -name surf-backend -o -name surf-desktop.exe -o -name surf-backend.exe \) -print -quit)"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: surf-desktop-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: surf-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
-            dist/surf-desktop-*.tar.gz
-            dist/surf-desktop-*.zip
+            dist/surf-*.tar.gz
+            dist/surf-*.zip
           if-no-files-found: error
 
   release:
     name: Build release
     runs-on: ubuntu-latest
-    needs: desktop
+    needs: packages
     steps:
       - uses: actions/checkout@v4
 
@@ -98,16 +104,6 @@ jobs:
           go vet ./...
           go test -race ./...
 
-      - name: Build backend packages
-        run: make backend-dist-all
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: surf-backend-${{ steps.meta.outputs.tag }}
-          path: |
-            dist/surf-backend-*.tar.gz
-            dist/surf-backend-*.zip
-
       - name: Download native SDK
         run: make native-sdk
 
@@ -124,8 +120,8 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          pattern: surf-desktop-*
-          path: dist/desktop
+          pattern: surf-*
+          path: dist/packages
           merge-multiple: true
 
       - uses: softprops/action-gh-release@v2
@@ -135,11 +131,10 @@ jobs:
           name: Surf ${{ steps.meta.outputs.tag }}
           generate_release_notes: true
           body: |
-            Native iOS package, desktop tray apps, and standalone backend
-            archives for Linux, Windows, and macOS are attached.
+            Native iOS package and unified Surf executables for Linux,
+            Windows, and macOS are attached. Use `surf tray` for the desktop
+            app or `surf serve` for the backend alone.
           files: |
             native/client/packages/*.deb
-            dist/desktop/surf-desktop-*.tar.gz
-            dist/desktop/surf-desktop-*.zip
-            dist/surf-backend-*.tar.gz
-            dist/surf-backend-*.zip
+            dist/packages/surf-*.tar.gz
+            dist/packages/surf-*.zip

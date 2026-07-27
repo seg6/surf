@@ -6,7 +6,7 @@ obsolete system WebKit.
 
 The native app provides the touch-first browser UI, input handling, H.264 video
 decoding, audio playback, tabs, downloads, uploads, and device integration. The
-backend, `surf-backend`, runs managed Chrome headlessly, captures compositor
+backend, `surf serve`, runs managed Chrome headlessly, captures compositor
 frames through CDP, and streams H.264 to the device over WebSocket.
 
 The result is closer to a purpose-built remote browser than a remote desktop:
@@ -45,7 +45,7 @@ code, test your setup, and assume there are rough edges.
 - A jailbroken iOS device.
 - iOS 6 is the primary target.
 - Filza, iFile, OpenSSH, or another way to install `.deb` packages.
-- A Linux, Windows, or macOS computer for `surf-backend`.
+- A Linux, Windows, or macOS computer for `surf`.
 - On Linux, `pactl` with PulseAudio or PipeWire Pulse compatibility for audio.
 - Enough disk space for the managed Chrome and FFmpeg runtimes.
 - A low-latency network between the device and backend. LAN is best.
@@ -73,52 +73,48 @@ not appear after installation, run `uicache` again or respring.
 
 ## Start The Backend
 
-For a normal desktop computer, download the matching `surf-desktop` archive
-from GitHub Releases. It includes both the tray app and backend:
+Download the matching `surf` archive from GitHub Releases:
 
-- Windows: run `surf-desktop.exe`.
-- macOS: open `Surf Desktop.app`.
-- Linux: run `./surf-desktop`.
+- Windows: run `surf.exe tray`.
+- macOS: open `Surf.app`.
+- Linux: run `./surf tray`.
 
-The tray/menu-bar menu shows the generated password and provides shortcuts for
-logs, diagnostics, restart, and quit. The password is saved under `SURF_HOME`
-so the iPad does not need to be reconfigured on every launch. The first launch
-downloads the pinned Chrome and FFmpeg runtimes.
+The tray/menu-bar menu opens Settings, restarts the backend, or quits Surf.
+The Settings window shows the
+detected LAN address and stream status, lets you change the password and port,
+and keeps logs behind a collapsed disclosure. The password is saved under
+`SURF_HOME` so the iPad does not need to be reconfigured on every launch. The
+first launch downloads the pinned Chrome and FFmpeg runtimes.
 
 The desktop app is presently unsigned, so Windows or macOS may display a
-security warning. Server and advanced users can instead use the standalone
-CLI package:
-
-On the backend computer, download the matching Linux, Windows, or macOS
-`surf-backend` archive from GitHub Releases:
+security warning. For a server or terminal-only launch, use the same archive:
 
 ```sh
-tar xf surf-backend-*-linux-*.tar.gz
-cd surf-backend-*-linux-*
-./surf-backend doctor
-SURF_PASSWORD='change-me' ./surf-backend serve
+tar xf surf-*-linux-*.tar.gz
+cd surf-*-linux-*
+./surf doctor
+SURF_PASSWORD='change-me' ./surf serve
 ```
 
-Windows archives contain `surf-backend.exe`. macOS archives contain the same
-CLI commands shown above and are published separately for Intel and Apple
-Silicon.
+Windows archives contain `surf.exe`. macOS archives are published separately
+for Intel and Apple Silicon.
 
 Use a strong password before exposing Surf beyond local testing.
 
 To build from source instead:
 
 ```sh
-make backend-binary
-SURF_PASSWORD='change-me' ./backend/surf-backend serve
+make surf-binary
+SURF_PASSWORD='change-me' ./backend/surf serve
 ```
 
 Build the native desktop package on the matching operating system with:
 
 ```sh
-make desktop-dist
+make surf-dist
 ```
 
-By default, `surf-backend serve`:
+By default, `surf serve`:
 
 - Listens on port `18080`.
 - Advertises the backend on the local network for Surf discovery.
@@ -129,8 +125,8 @@ By default, `surf-backend serve`:
 To run the binary directly:
 
 ```sh
-make backend-binary
-SURF_PASSWORD='change-me' ./backend/surf-backend serve
+make surf-binary
+SURF_PASSWORD='change-me' ./backend/surf serve
 ```
 
 ## Connect From Surf
@@ -157,7 +153,7 @@ Example:
 http://192.168.1.50:18080
 ```
 
-Use the LAN IP address of the computer running `surf-backend`, not the IP
+Use the LAN IP address of the computer running `surf serve`, not the IP
 address of the iOS device.
 
 ## Firewall Notes
@@ -176,7 +172,7 @@ If you use another firewall, allow inbound TCP port `18080`.
 ## What Surf Is
 
 - A native client for legacy jailbroken iOS devices.
-- A cross-platform remote Chromium backend named `surf-backend`.
+- A single cross-platform `surf` executable with tray and server modes.
 - A touch-first remote browser, not a generic remote desktop.
 - Intended for LAN use, with VPS deployment possible if latency is acceptable.
 

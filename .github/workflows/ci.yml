@@ -30,42 +30,8 @@ jobs:
         working-directory: backend
         run: go test -race ./...
 
-  backend-packages:
-    name: Backend package ${{ matrix.goos }}/${{ matrix.goarch }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-          - goos: windows
-            goarch: amd64
-          - goos: darwin
-            goarch: amd64
-          - goos: darwin
-            goarch: arm64
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
-
-      - name: Build package
-        run: make backend-dist BACKEND_GOOS=${{ matrix.goos }} BACKEND_GOARCH=${{ matrix.goarch }}
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: surf-backend-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: |
-            dist/*.tar.gz
-            dist/*.zip
-          if-no-files-found: error
-
-  desktop-packages:
-    name: Desktop app ${{ matrix.goos }}/${{ matrix.goarch }}
+  packages:
+    name: Surf ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -91,16 +57,22 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
-      - name: Build desktop package
+      - name: Build Surf package
         shell: bash
-        run: make desktop-dist BACKEND_GOOS=${{ matrix.goos }} BACKEND_GOARCH=${{ matrix.goarch }}
+        run: make surf-dist SURF_GOOS=${{ matrix.goos }} SURF_GOARCH=${{ matrix.goarch }}
+
+      - name: Verify package
+        shell: bash
+        run: |
+          test -n "$(find dist -type f \( -name surf -o -name surf.exe \) -print -quit)"
+          test -z "$(find dist -type f \( -name surf-desktop -o -name surf-backend -o -name surf-desktop.exe -o -name surf-backend.exe \) -print -quit)"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: surf-desktop-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: surf-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
-            dist/surf-desktop-*.tar.gz
-            dist/surf-desktop-*.zip
+            dist/surf-*.tar.gz
+            dist/surf-*.zip
           if-no-files-found: error
 
   native:

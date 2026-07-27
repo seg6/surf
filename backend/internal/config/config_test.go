@@ -154,11 +154,11 @@ func TestLoadRequiresSurfPassword(t *testing.T) {
 	}
 }
 
-func TestLoadForDiagnosticsDoesNotRequireSurfPassword(t *testing.T) {
+func TestLoadForDoctorDoesNotRequireSurfPassword(t *testing.T) {
 	clearConfigEnv(t)
 	setPulseServerAvailable(t, false)
 	t.Setenv("SURF_PASSWORD", "")
-	if _, err := LoadForDiagnostics(); err != nil {
+	if _, err := LoadForDoctor(); err != nil {
 		t.Fatal(err)
 	}
 }
