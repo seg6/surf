@@ -124,3 +124,37 @@ func TestRequestKeyframeCooldown(t *testing.T) {
 		t.Fatal("RequestKeyframe updated lastKeyframeReq despite being suppressed by cooldown")
 	}
 }
+
+func TestSubscribeFailsImmediatelyWhenCaptureArgsUnset(t *testing.T) {
+	s := New(Config{W: 64, H: 64, FPS: 15, BitrateK: 100, MaxrateK: 100, BufsizeK: 50})
+	sub := s.Subscribe()
+	select {
+	case _, ok := <-sub.C:
+		if ok {
+			t.Fatal("expected closed channel, got a value")
+		}
+	default:
+		t.Fatal("expected sub.C already closed after Subscribe")
+	}
+}
+
+// TestSubscribeFailsWhenCaptureArgsReturnsEmpty guards against a real bug: a
+// platform Handle's method value (e.g. windowsHandle{}.VideoCaptureArgs) is
+// never a nil func even when calling it always returns an empty slice, so
+// args()/startLocked must check the result, not whether CaptureArgs itself
+// is nil.
+func TestSubscribeFailsWhenCaptureArgsReturnsEmpty(t *testing.T) {
+	s := New(Config{
+		W: 64, H: 64, FPS: 15, BitrateK: 100, MaxrateK: 100, BufsizeK: 50,
+		CaptureArgs: func(string, int, int, int) []string { return nil },
+	})
+	sub := s.Subscribe()
+	select {
+	case _, ok := <-sub.C:
+		if ok {
+			t.Fatal("expected closed channel, got a value")
+		}
+	default:
+		t.Fatal("expected sub.C already closed after Subscribe")
+	}
+}

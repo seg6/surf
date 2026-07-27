@@ -110,12 +110,16 @@ func (sub *Sub) Close() {
 }
 
 func (s *Streamer) startLocked() {
-	if s.cfg.CaptureArgs == nil {
+	var captureArgs []string
+	if s.cfg.CaptureArgs != nil {
+		captureArgs = s.cfg.CaptureArgs(s.cfg.Source)
+	}
+	if len(captureArgs) == 0 {
 		log.Printf("audio: capture unsupported on this platform")
 		s.failAllLocked()
 		return
 	}
-	args := append(append([]string{}, s.cfg.CaptureArgs(s.cfg.Source)...),
+	args := append(append([]string{}, captureArgs...),
 		"-ac", "1", "-ar", "16000", "-f", "s16le", "pipe:1")
 	cmd := proc.Command(s.cfg.FFmpegPath, args...)
 	cmd.Env = append(os.Environ(), s.cfg.Env...)

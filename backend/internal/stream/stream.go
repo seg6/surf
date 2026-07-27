@@ -285,14 +285,26 @@ func (sub *Sub) offer(au AU, gen int) {
 	}
 }
 
+// args builds the full ffmpeg command line, or nil if this platform's
+// CaptureArgs is unset or reports the H.264 lane unsupported (an empty
+// slice) — checked here rather than by comparing CaptureArgs to nil,
+// because callers usually pass a bound Handle method value, which is never
+// a nil func even when the platform behind it always returns no args.
 func (s *Streamer) args() []string {
 	c := s.cfg
+	if c.CaptureArgs == nil {
+		return nil
+	}
 	captureW, captureH := c.CaptureW, c.CaptureH
 	if captureW == 0 || captureH == 0 {
 		captureW, captureH = c.W, c.H
 	}
+	capture := c.CaptureArgs(c.Display, captureW, captureH, c.FPS)
+	if len(capture) == 0 {
+		return nil
+	}
 	keyint := 2 * c.FPS
-	args := append([]string{}, c.CaptureArgs(c.Display, captureW, captureH, c.FPS)...)
+	args := append([]string{}, capture...)
 	if captureW != c.W || captureH != c.H {
 		args = append(args, "-vf", fmt.Sprintf("scale=%d:%d:flags=fast_bilinear", c.W, c.H))
 	}
@@ -326,12 +338,13 @@ func macroblocksPerSecond(w, h, fps int) int {
 
 // startLocked launches ffmpeg; s.mu held by caller.
 func (s *Streamer) startLocked() {
-	if s.cfg.CaptureArgs == nil {
+	args := s.args()
+	if args == nil {
 		log.Printf("stream: capture unsupported on this platform")
 		s.failAllLocked()
 		return
 	}
-	cmd := proc.Command(s.cfg.FFmpegPath, s.args()...)
+	cmd := proc.Command(s.cfg.FFmpegPath, args...)
 	cmd.Env = append(os.Environ(), s.cfg.Env...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
