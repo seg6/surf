@@ -8,6 +8,7 @@
 enum {
     RBSectionServer = 0,
     RBSectionSaved,
+    RBSectionDiagnostics,
     RBSectionData,
     RBSectionAbout,
     RBSectionCount
@@ -156,6 +157,16 @@ static const NSInteger kEditServerAlertTag = 1001;
     [self.delegate settings:self connectToURL:url password:self.passwordField.text ?: @""];
 }
 
+- (void)diagnosticsChanged:(UISwitch *)sender {
+    self.diagnosticsVisible = sender.on;
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    [defaults setBool:sender.on forKey:RBDefaultsDiagnosticsKey];
+    [defaults synchronize];
+    if ([self.delegate respondsToSelector:@selector(settings:diagnosticsVisible:)]) {
+        [self.delegate settings:self diagnosticsVisible:sender.on];
+    }
+}
+
 // ---- discovery -----------------------------------------------------------
 
 - (void)startDiscovery {
@@ -213,6 +224,7 @@ static const NSInteger kEditServerAlertTag = 1001;
     switch (section) {
         case RBSectionServer: return [self.statusText length] ? 4 : 3; // url, password, connect, (status)
         case RBSectionSaved: return (NSInteger)[self.savedServers count] + 1; // + Find Local Surf
+        case RBSectionDiagnostics: return 1;
         case RBSectionData: return 3;
         case RBSectionAbout: return 1;
     }
@@ -223,6 +235,7 @@ static const NSInteger kEditServerAlertTag = 1001;
     switch (section) {
         case RBSectionServer: return @"Server";
         case RBSectionSaved: return @"Saved Servers";
+        case RBSectionDiagnostics: return @"Diagnostics";
         case RBSectionData: return @"Data";
         case RBSectionAbout: return @"About";
     }
@@ -230,6 +243,7 @@ static const NSInteger kEditServerAlertTag = 1001;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    if (section == RBSectionDiagnostics) return @"Shows live video, latency, decoder, network, and audio health over the page.";
     if (section == RBSectionData && !self.connected) return @"Connect to a server to manage its data.";
     return nil;
 }
@@ -295,6 +309,17 @@ static const NSInteger kEditServerAlertTag = 1001;
             cell.accessoryType = [current isEqualToString:[entry objectForKey:@"url"]]
                 ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
         }
+        return cell;
+    }
+
+    if (s == RBSectionDiagnostics) {
+        UITableViewCell *cell = [self cellWithID:@"diagnostics" style:UITableViewCellStyleDefault];
+        cell.textLabel.text = @"Performance Overlay";
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        UISwitch *toggle = [[UISwitch alloc] initWithFrame:CGRectZero];
+        toggle.on = self.diagnosticsVisible;
+        [toggle addTarget:self action:@selector(diagnosticsChanged:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = toggle;
         return cell;
     }
 

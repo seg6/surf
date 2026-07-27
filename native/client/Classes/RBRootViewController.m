@@ -3,6 +3,7 @@
 #import "RBConfig.h"
 #import "RBClockSync.h"
 #import "RBClientUpdater.h"
+#import "RBDiagnosticsOverlay.h"
 #import "RBFindBar.h"
 #import "RBLibraryController.h"
 #import "RBListPopover.h"
@@ -48,7 +49,7 @@ static const CGFloat kRBFindBarHeight = 44.0;
 @property(nonatomic, strong) UIButton *restoreButton;
 @property(nonatomic, strong) UILabel *toastLabel;
 @property(nonatomic, strong) UILabel *connectionPill;
-@property(nonatomic, strong) UILabel *debugLabel;
+@property(nonatomic, strong) RBDiagnosticsOverlay *diagnosticsOverlay;
 @property(nonatomic, strong) UITextField *hiddenInput;
 // Controllers
 @property(nonatomic, strong) RBSession *session;
@@ -68,15 +69,12 @@ static const CGFloat kRBFindBarHeight = 44.0;
 @property(nonatomic, assign) NSUInteger perfLastVideoAUs;
 @property(nonatomic, assign) NSUInteger perfLastDecodedFrames;
 @property(nonatomic, assign) NSUInteger perfLastDecodeErrors;
-@property(nonatomic, assign) NSUInteger perfLastVideoSubmitted;
-@property(nonatomic, assign) NSUInteger perfLastVideoCallbacks;
 @property(nonatomic, assign) NSUInteger perfLastVideoDrops;
 // Page state
 @property(nonatomic, assign) BOOL loading;
 @property(nonatomic, assign) BOOL fullscreen;
 @property(nonatomic, assign) BOOL findVisible;
 @property(nonatomic, assign) BOOL debugVisible;
-@property(nonatomic, copy) NSString *debugSummary;
 @property(nonatomic, strong) NSArray *lastTabs;
 // Copy menu
 @property(nonatomic, copy) NSString *pendingCopyText;
@@ -223,16 +221,10 @@ static const CGFloat kRBFindBarHeight = 44.0;
     self.connectionPill.hidden = YES;
     [self.view addSubview:self.connectionPill];
 
-    self.debugLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    self.debugLabel.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.72];
-    self.debugLabel.textColor = [UIColor colorWithWhite:0.95 alpha:1.0];
-    self.debugLabel.numberOfLines = 0;
-    self.debugLabel.font = [UIFont fontWithName:@"Courier" size:10.0] ?: [UIFont systemFontOfSize:10.0];
-    self.debugLabel.layer.cornerRadius = 6.0;
-    self.debugLabel.layer.masksToBounds = YES;
-    self.debugLabel.hidden = YES;
-    self.debugLabel.userInteractionEnabled = NO;
-    [self.view addSubview:self.debugLabel];
+    self.diagnosticsOverlay = [[RBDiagnosticsOverlay alloc] initWithFrame:CGRectZero];
+    self.diagnosticsOverlay.hidden = YES;
+    [self.view addSubview:self.diagnosticsOverlay];
+    [self setDebugVisible:[[NSUserDefaults standardUserDefaults] boolForKey:RBDefaultsDiagnosticsKey]];
 
     [NSTimer scheduledTimerWithTimeInterval:1.0 target:self selector:@selector(watchdogTick:) userInfo:nil repeats:YES];
 
@@ -296,8 +288,10 @@ static const CGFloat kRBFindBarHeight = 44.0;
     self.restoreButton.frame = CGRectMake(w - 54.0, h - 54.0, 44.0, 44.0);
     self.toastLabel.frame = CGRectMake((w - 320.0) / 2.0, contentTop + 14.0, 320.0, 28.0);
     self.connectionPill.frame = CGRectMake(10.0, h - 34.0, 150.0, 22.0);
-    CGFloat debugW = MIN(360.0, w - 20.0);
-    self.debugLabel.frame = CGRectMake(10.0, contentTop + 8.0, debugW, 64.0);
+    CGFloat diagnosticsW = MIN(520.0, w - 20.0);
+    CGFloat diagnosticsH = MIN(270.0, streamH - 20.0);
+    self.diagnosticsOverlay.frame = CGRectMake(10.0, contentTop + 10.0,
+                                                diagnosticsW, MAX(220.0, diagnosticsH));
     [self scheduleViewportUpdate];
 }
 
@@ -364,6 +358,7 @@ static const CGFloat kRBFindBarHeight = 44.0;
     settings.delegate = self;
     settings.allowsCancel = allowsCancel;
     settings.connected = self.session.state == RBSessionStateOpen;
+    settings.diagnosticsVisible = self.debugVisible;
     self.settingsController = settings;
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:settings];
     nav.modalPresentationStyle = UIModalPresentationFormSheet;
@@ -375,6 +370,10 @@ static const CGFloat kRBFindBarHeight = 44.0;
 
 - (void)settings:(RBSettingsController *)settings clearData:(NSString *)what {
     [self.session sendMessage:@{@"t": @"clear", @"what": what ?: @""}];
+}
+
+- (void)settings:(RBSettingsController *)settings diagnosticsVisible:(BOOL)visible {
+    [self setDebugVisible:visible];
 }
 
 - (void)settings:(RBSettingsController *)settings connectToURL:(NSString *)url password:(NSString *)password {
@@ -1628,11 +1627,13 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
 
 - (void)setDebugVisible:(BOOL)debugVisible {
     _debugVisible = debugVisible;
-    self.debugLabel.hidden = !debugVisible;
+    [[NSUserDefaults standardUserDefaults] setBool:debugVisible forKey:RBDefaultsDiagnosticsKey];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+    self.diagnosticsOverlay.hidden = !debugVisible;
     if (debugVisible) {
         CFTimeInterval presented = self.streamView.lastPresentationAt;
         [self refreshDebugOverlayWithAge:(presented > 0.0 ? CACurrentMediaTime() - presented : 0.0)];
-        [self.view bringSubviewToFront:self.debugLabel];
+        [self.view bringSubviewToFront:self.diagnosticsOverlay];
     }
 }
 
@@ -1643,18 +1644,30 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
 
 - (void)refreshDebugOverlayWithAge:(double)age {
     if (!self.debugVisible) return;
-    NSString *summary = self.debugSummary ?: @"warming up metrics";
     NSString *state = self.session.state == RBSessionStateOpen ? @"open" : (self.session.state == RBSessionStateConnecting ? @"connecting" : @"idle");
-    self.debugLabel.text = [NSString stringWithFormat:@" %@ %@ %@\n %@\n view %.0fx%.0f age %.1fs rtt %.0fms i2p %.0fms",
-                            RBNativeVersion,
-                            state,
-                            self.videoActive ? @"h264" : @"video-starting",
-                            summary,
-                            self.streamView.bounds.size.width,
-                            self.streamView.bounds.size.height,
-                            age,
-                            self.clockSync.lastRTTMS,
-                            self.session.interactionTracker.lastInteractionToPresentMS];
+    NSString *lane = self.videoActive ? @"H.264 ready" : (self.videoStarting ? @"H.264 starting" : @"video idle");
+    [self.diagnosticsOverlay updateWithSnapshot:@{
+        @"version": [NSString stringWithFormat:@"%@  %@", RBNativeVersion, lane],
+        @"state": state,
+        @"presented": @(self.streamView.presentedFrames),
+        @"aus": @(self.mediaPipeline.videoAUs),
+        @"latency": @(self.session.interactionTracker.lastInteractionToPresentMS),
+        @"rtt": @(self.clockSync.lastRTTMS),
+        @"age": @(age * 1000.0),
+        @"maxGap": @(self.streamView.maximumPresentationGapMS),
+        @"queue": @(self.mediaPipeline.queuedAUs),
+        @"gaps": @(self.mediaPipeline.sequenceGaps),
+        @"overwritten": @(self.streamView.overwrittenVideoFrames),
+        @"submitMS": @(self.mediaPipeline.averageSubmitMS),
+        @"callbackMS": @(self.mediaPipeline.averageCallbackMS),
+        @"wrapMS": @(self.mediaPipeline.averageWrapMS),
+        @"errors": @(self.mediaPipeline.decodeErrors),
+        @"drops": @(self.mediaPipeline.droppedAUs),
+        @"audioQueue": @(self.mediaPipeline.audioQueuedBuffers),
+        @"audioDrops": @(self.mediaPipeline.audioDroppedPCM),
+        @"audioUnderruns": @(self.mediaPipeline.audioUnderruns),
+        @"audioRestarts": @(self.mediaPipeline.audioRestartCount)
+    }];
 }
 
 - (void)watchdogTick:(NSTimer *)timer {
@@ -1674,8 +1687,6 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
         double dt = MAX(0.001, now - self.lastPerfLogAt);
         NSUInteger decoded = self.mediaPipeline.decodedFrames;
         NSUInteger errors = self.mediaPipeline.decodeErrors;
-        NSUInteger submitted = self.mediaPipeline.submittedAUs;
-        NSUInteger callbacks = self.mediaPipeline.callbackFrames;
         NSUInteger drops = self.mediaPipeline.droppedAUs;
         NSUInteger presented = self.streamView.presentedFrames;
         double fps = presented >= self.perfLastFramesDisplayed ? (presented - self.perfLastFramesDisplayed) / dt : 0.0;
@@ -1683,29 +1694,9 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
             (self.mediaPipeline.videoAUs - self.perfLastVideoAUs) / dt : 0.0;
         double vtDone = decoded >= self.perfLastDecodedFrames ?
             (decoded - self.perfLastDecodedFrames) / dt : 0.0;
-        double vtSubmit = submitted >= self.perfLastVideoSubmitted ?
-            (submitted - self.perfLastVideoSubmitted) / dt : 0.0;
-        double vtCB = callbacks >= self.perfLastVideoCallbacks ?
-            (callbacks - self.perfLastVideoCallbacks) / dt : 0.0;
         NSUInteger dropDelta = drops >= self.perfLastVideoDrops ? drops - self.perfLastVideoDrops : drops;
         NSUInteger errDelta = errors >= self.perfLastDecodeErrors ? errors - self.perfLastDecodeErrors : errors;
         int queued = self.mediaPipeline.queuedAUs;
-        double vtCallMS = self.mediaPipeline.averageSubmitMS;
-        double vtCBMS = self.mediaPipeline.averageCallbackMS;
-        double wrapMS = self.mediaPipeline.averageWrapMS;
-        self.debugSummary = [NSString stringWithFormat:@"%@ fps %.1f au %.1f vt %.1f/%.1f/%.1f q %d d+%u e+%u ms %.1f/%.1f/%.1f",
-                             self.videoActive ? @"video" : @"starting",
-                             fps,
-                             aups,
-                             vtDone,
-                             vtSubmit,
-                             vtCB,
-                             queued,
-                             (unsigned)dropDelta,
-                             (unsigned)errDelta,
-                             vtCallMS,
-                             vtCBMS,
-                             wrapMS];
         RBLog(@"perf lane=%@ presented_fps=%.1f aups=%.1f vt_done=%.1f/s q=%d drops+%u overwritten=%u max_gap=%.1fms vt_submit=%.2fms vt_callback=%.2fms wrap=%.2fms errs+%u audio_q=%d audio_drop=%u audio_underrun=%u audio_restart=%u age=%.2fs view=%.0fx%.0f",
               self.videoActive ? @"video" : @"starting",
               fps,
@@ -1731,8 +1722,6 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
         self.perfLastVideoAUs = self.mediaPipeline.videoAUs;
         self.perfLastDecodedFrames = decoded;
         self.perfLastDecodeErrors = errors;
-        self.perfLastVideoSubmitted = submitted;
-        self.perfLastVideoCallbacks = callbacks;
         self.perfLastVideoDrops = drops;
     }
     [self refreshDebugOverlayWithAge:age];
