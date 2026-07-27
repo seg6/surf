@@ -110,7 +110,7 @@ static NSString *const RBUpdateResultPath = @"/var/mobile/Library/Surf/update-re
 }
 
 - (void)installWithHash:(NSString *)hash version:(NSString *)version {
-    NSString *helper = @"/usr/libexec/surf-update";
+    NSString *helper = @"/usr/libexec/surf-update-v2";
     if (![[NSFileManager defaultManager] isExecutableFileAtPath:helper]) {
         [self fail:@"This Surf build needs one final manual update before in-app updates are available"];
         return;
