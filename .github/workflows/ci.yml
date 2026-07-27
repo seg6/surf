@@ -13,6 +13,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Free Intel macOS package space
+        if: matrix.goos == 'darwin' && matrix.goarch == 'amd64'
+        shell: bash
+        run: |
+          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes
+          sudo rm -rf /usr/local/share/dotnet
+          rm -rf "$HOME/Library/Android" "$HOME/.gradle" "$HOME/.nuget"
+
       - uses: actions/setup-go@v5
         with:
           go-version-file: backend/go.mod
