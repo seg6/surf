@@ -31,7 +31,8 @@ Audio capture is not yet implemented on Windows and macOS.
 
 ## Quick Start
 
-Download the `surf-backend-*-linux-*.tar.gz` archive from GitHub Releases, then:
+Download the archive matching Linux x86-64, Windows x86-64, macOS Intel, or
+macOS Apple Silicon from GitHub Releases. For Linux:
 
 ```sh
 tar xf surf-backend-*-linux-*.tar.gz
@@ -64,7 +65,8 @@ Press `Ctrl-C` to stop the foreground backend.
 
 ```sh
 make backend-binary      # build backend/surf-backend
-make backend-dist        # build dist/surf-backend-*.tar.gz
+make backend-dist        # build the current host package
+make backend-dist-all    # cross-package every supported backend target
 ```
 
 Run the binary directly:
