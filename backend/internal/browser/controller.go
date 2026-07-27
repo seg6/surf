@@ -350,7 +350,10 @@ func (b *Controller) Health() error {
 	if b.cdp == nil {
 		return io.ErrClosedPipe
 	}
-	_, err := b.cdp.Call("", "Controller.getVersion", nil)
+	// Browser.getVersion is a browser-target command and is cheap enough for
+	// the desktop supervisor's two-second liveness probe. "Controller" is not
+	// a CDP domain; using it made every healthy backend report HTTP 503.
+	_, err := b.cdp.Call("", "Browser.getVersion", nil)
 	return err
 }
 
