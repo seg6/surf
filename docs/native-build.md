@@ -53,7 +53,7 @@ compiles the native protocol gate from `PROTOCOL_VERSION`. Do not edit generated
 `native/client/control` or `native/client/Resources/Info.plist` by hand.
 
 Packages from version 0.6.0 onward install the small root-owned
-`/usr/libexec/surf-update` helper. When a release backend reports an incompatible
+`/usr/libexec/surf-update-v2` helper. When a release backend reports an incompatible
 older client, the app can download the backend's embedded matching `.deb`,
 verify its size and SHA-256, validate its package identity, and install it.
 Devices running a package older than 0.6.0 need one final manual installation
