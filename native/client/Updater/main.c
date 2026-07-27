@@ -13,6 +13,31 @@ extern char **environ;
 
 static const char *source_path = "/var/mobile/Library/Surf/update.deb";
 static const char *safe_path = "/tmp/surf-update.deb";
+static const char *result_path = "/var/mobile/Library/Surf/update-result";
+static const char *result_temp_path = "/var/mobile/Library/Surf/update-result.tmp";
+
+static void write_result(const char *stage, int result, const char *version, const char *hash) {
+    unlink(result_temp_path);
+    int fd = open(result_temp_path, O_CREAT | O_EXCL | O_WRONLY | O_NOFOLLOW, 0644);
+    if (fd < 0) return;
+    char buffer[512];
+    int length = snprintf(buffer, sizeof(buffer),
+                          "schema=1\nstage=%s\nresult=%d\nversion=%s\nsha256=%s\n",
+                          stage ? stage : "unknown", result,
+                          version ? version : "", hash ? hash : "");
+    if (length > 0 && (size_t)length < sizeof(buffer)) {
+        ssize_t written = write(fd, buffer, (size_t)length);
+        if (written == length && fsync(fd) == 0) {
+            close(fd);
+            chmod(result_temp_path, 0644);
+            if (rename(result_temp_path, result_path) == 0) return;
+            unlink(result_temp_path);
+            return;
+        }
+    }
+    close(fd);
+    unlink(result_temp_path);
+}
 
 static int copy_package(const char *source) {
     if (strcmp(source, source_path) != 0) return 10;
@@ -100,11 +125,23 @@ static int run(const char *path, char *const argv[]) {
 
 int main(int argc, char **argv) {
     if (argc != 4) return 2;
-    if (setuid(0) != 0 || geteuid() != 0) return 3;
+    unlink(result_path);
+    if (setuid(0) != 0 || geteuid() != 0) {
+        write_result("privilege", 3, argv[3], argv[2]);
+        return 3;
+    }
+    const char *stage = "copy";
     int result = copy_package(argv[1]);
-    if (!result) result = verify_hash(argv[2]);
-    if (!result) result = verify_metadata(argv[3]);
     if (!result) {
+        stage = "checksum";
+        result = verify_hash(argv[2]);
+    }
+    if (!result) {
+        stage = "metadata";
+        result = verify_metadata(argv[3]);
+    }
+    if (!result) {
+        stage = "install";
         char *dpkg[] = {"/usr/bin/dpkg", "-i", (char *)safe_path, NULL};
         result = run(dpkg[0], dpkg);
     }
@@ -112,6 +149,8 @@ int main(int argc, char **argv) {
         char *uicache[] = {"/bin/su", "mobile", "-c", "/usr/bin/uicache", NULL};
         (void)run(uicache[0], uicache);
     }
+    if (!result) stage = "complete";
+    write_result(stage, result, argv[3], argv[2]);
     unlink(safe_path);
     return result;
 }
