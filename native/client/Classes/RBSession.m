@@ -19,6 +19,8 @@ static NSString *RBURLEscape(NSString *s);
 @property(nonatomic, assign) NSTimeInterval reconnectDelay;
 @property(nonatomic, assign) NSUInteger generation;
 @property(nonatomic, strong, readwrite) RBInteractionTracker *interactionTracker;
+@property(nonatomic, strong) NSDictionary *requiredClientUpdate;
+@property(nonatomic, copy) NSString *requiredServerVersion;
 @end
 
 @implementation RBSession
@@ -54,6 +56,8 @@ static NSString *RBURLEscape(NSString *s);
     }
     NSUInteger generation = ++self.generation;
     self.lastPassword = password;
+    self.requiredClientUpdate = nil;
+    self.requiredServerVersion = nil;
     [self moveToState:RBSessionStateConnecting];
     RBLog(@"session start %@ passwordLen=%d", [self.baseURL absoluteString], (int)[password length]);
     [self.delegate session:self status:@"logging in"];
@@ -63,10 +67,16 @@ static NSString *RBURLEscape(NSString *s);
             RBLog(@"session start failed: %@", error);
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (generation != self.generation) return;
-                self.lastPassword = nil;
                 [self moveToState:RBSessionStateIdle];
                 [self.delegate session:self status:error ?: @"login failed"];
-                [self.delegate sessionNeedsPassword:self message:error ?: @"Login failed"];
+                if (self.requiredClientUpdate) {
+                    [self.delegate session:self requiresClientUpdate:self.requiredClientUpdate];
+                } else if (self.requiredServerVersion) {
+                    [self.delegate sessionRequiresServerUpdate:self serverVersion:self.requiredServerVersion];
+                } else {
+                    self.lastPassword = nil;
+                    [self.delegate sessionNeedsPassword:self message:error ?: @"Login failed"];
+                }
             });
             return;
         }
@@ -111,7 +121,9 @@ static NSString *RBURLEscape(NSString *s);
 }
 
 - (BOOL)fetchNativeConfig:(NSString **)error {
-    NSURL *url = [NSURL URLWithString:@"/native-config" relativeToURL:self.baseURL];
+    NSString *path = [NSString stringWithFormat:@"/native-config?av=%@&nv=%@",
+                      RBURLEscape(RBAppVersion), RBURLEscape(RBNativeVersion)];
+    NSURL *url = [NSURL URLWithString:path relativeToURL:self.baseURL];
     RBLog(@"native-config GET %@", [url absoluteString]);
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:20.0];
     NSHTTPURLResponse *response = nil;
@@ -135,6 +147,18 @@ static NSString *RBURLEscape(NSString *s);
         self.viewHeight = serverHeight;
     }
     NSString *nv = [json objectForKey:@"nv"];
+    NSString *compatibility = [json objectForKey:@"compatibility"];
+    if ([compatibility isEqualToString:@"client-update-required"]) {
+        NSDictionary *update = [json objectForKey:@"clientUpdate"];
+        if ([update isKindOfClass:[NSDictionary class]]) self.requiredClientUpdate = update;
+        if (error) *error = @"This iPad needs a Surf update";
+        return NO;
+    }
+    if ([compatibility isEqualToString:@"server-update-required"]) {
+        self.requiredServerVersion = [json objectForKey:@"version"] ?: @"?";
+        if (error) *error = @"This server must be updated";
+        return NO;
+    }
     if (!self.wsTicket || ![nv isEqualToString:RBNativeVersion]) {
         if (error) *error = [NSString stringWithFormat:@"version mismatch app=%@ server=%@", RBNativeVersion, nv ?: @"?"];
         return NO;

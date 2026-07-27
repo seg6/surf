@@ -37,6 +37,7 @@
       display: flex; justify-content: space-between; align-items: center;
       gap: 18px; min-height: 0; padding: 18px;
     }
+    .hero-actions { display: flex; align-items: center; gap: 8px; }
     .engine { display: flex; align-items: center; gap: 13px; min-width: 0; }
     .engine-icon { width: 42px; height: 42px; }
     .engine-icon img { display: block; width: 100%; height: 100%; border-radius: 8px; }
@@ -142,7 +143,10 @@
               <div class="endpoint" id="endpoint">Loading local endpoint…</div>
             </div>
           </div>
-          <button class="button secondary" id="restart-overview" type="button">Restart engine</button>
+          <div class="hero-actions">
+            <button class="button secondary" id="update-button" type="button">Check for updates</button>
+            <button class="button secondary" id="restart-overview" type="button">Restart engine</button>
+          </div>
       </div>
 
       <div class="metrics">
@@ -244,6 +248,32 @@
       } catch (error) { toast(error.message); }
     }
     $('restart-overview').addEventListener('click', restart);
+    async function updateStatus() {
+      try {
+        const status = await (await request('/api/update/status')).json();
+        const button = $('update-button');
+        button.disabled = ['checking','downloading','applying'].includes(status.state);
+        if (status.state === 'available') {
+          button.disabled = false;
+          button.textContent = `Install ${status.version}`;
+          button.dataset.action = 'apply';
+        } else {
+          button.dataset.action = 'check';
+          button.textContent = {
+            checking: 'Checking…', downloading: 'Downloading…', applying: 'Installing…',
+            current: 'Up to date', error: 'Check failed'
+          }[status.state] || 'Check for updates';
+          if (status.state === 'error' && status.message) button.title = status.message;
+        }
+      } catch {}
+    }
+    $('update-button').addEventListener('click', async () => {
+      const action = $('update-button').dataset.action === 'apply' ? 'apply' : 'check';
+      try {
+        await request(`/api/update/${action}`, {method:'POST', headers:{'X-Surf-Desktop':'1'}});
+        await updateStatus();
+      } catch (error) { toast(error.message); }
+    });
     $('settings-form').addEventListener('submit', async event => {
       event.preventDefault();
       try {
@@ -273,6 +303,8 @@
       if (location.hash === '#logs') $('logs').open = true;
       await pollStatus();
       setInterval(pollStatus, 2000);
+      await updateStatus();
+      setInterval(updateStatus, 2000);
     })();
   </script>
 </body>

@@ -52,6 +52,13 @@ make native-package
 compiles the native protocol gate from `PROTOCOL_VERSION`. Do not edit generated
 `native/client/control` or `native/client/Resources/Info.plist` by hand.
 
+Packages from version 0.6.0 onward install the small root-owned
+`/usr/libexec/surf-update` helper. When a release backend reports an incompatible
+older client, the app can download the backend's embedded matching `.deb`,
+verify its size and SHA-256, validate its package identity, and install it.
+Devices running a package older than 0.6.0 need one final manual installation
+to bootstrap that helper.
+
 The package is written to:
 
 ```text
@@ -63,4 +70,10 @@ native/client/packages/
 ```sh
 docker run --rm -v "$PWD:/src" surf-buildenv lipo -info /src/native/client/.theos/obj/Surf
 docker run --rm -v "$PWD:/src" surf-buildenv dpkg-deb -c /src/native/client/packages/*.deb
+```
+
+To build the unified release binary with a matching client package embedded:
+
+```sh
+make surf-binary CLIENT_DEB=native/client/packages/space.seg6.surf_0.6.0-\*_iphoneos-arm.deb
 ```

@@ -17,6 +17,8 @@ typedef enum {
 // Login + native-config succeeded: credentials are good, safe to persist.
 - (void)sessionDidAuthenticate:(RBSession *)session;
 - (void)sessionNeedsPassword:(RBSession *)session message:(NSString *)message;
+- (void)session:(RBSession *)session requiresClientUpdate:(NSDictionary *)update;
+- (void)sessionRequiresServerUpdate:(RBSession *)session serverVersion:(NSString *)version;
 - (void)session:(RBSession *)session didReceiveFrameData:(NSData *)data;
 - (void)session:(RBSession *)session didReceiveControlMessage:(NSDictionary *)message;
 @end
