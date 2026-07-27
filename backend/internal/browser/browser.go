@@ -26,6 +26,41 @@ import (
 	"surf-backend/internal/ws"
 )
 
+const jpegSizeDebounceFrames = 3
+
+// jpegSizeDebouncer decides when a run of same-sized CDP screencast frames
+// should be treated as a genuine, persistent size change worth restarting
+// the H.264 encoder for. Acting on a single frame is dangerous: any resize
+// or video-subscribe transition makes Chromium emit a burst of transitional
+// frames at various in-between sizes as the compositor catches up, and
+// restarting the encoder for each one (confirmed live) cascades into a
+// storm where no ffmpeg process lives long enough to even finish starting.
+// Not safe for concurrent use — onScreencastFrame only ever runs on one CDP
+// dispatch goroutine, so a plain (unlocked) field is enough.
+type jpegSizeDebouncer struct {
+	w, h  int
+	count int
+}
+
+type videoResizeJob struct {
+	w, h    int
+	jpeg    []byte
+	session string
+}
+
+// observe records one frame's dimensions and reports true on the single
+// frame where a run first reaches jpegSizeDebounceFrames — the one moment
+// to act: not before (still-settling transitional noise) and not again
+// after (already acted on this run).
+func (d *jpegSizeDebouncer) observe(w, h int) bool {
+	if w == d.w && h == d.h {
+		d.count++
+	} else {
+		d.w, d.h, d.count = w, h, 1
+	}
+	return d.count == jpegSizeDebounceFrames
+}
+
 type Tab struct {
 	ID       int
 	TargetID string
@@ -73,10 +108,17 @@ type Browser struct {
 
 	streamer  *stream.Streamer
 	audio     *audio.Streamer
-	screenMu  sync.Mutex
 	mediaMu   sync.Mutex // guards client media subscriptions below
 	videoSubs map[*ws.Client]*stream.Sub
 	audioSubs map[*ws.Client]*audio.Sub
+
+	// jpegSizeDeb debounces onScreencastFrame's drift-correction SetSize
+	// call — see jpegSizeDebouncer.
+	jpegSizeDeb        jpegSizeDebouncer
+	videoResizeMu      sync.Mutex
+	videoResizeWake    chan struct{}
+	videoResizePending videoResizeJob
+	videoResizeSeq     uint64
 
 	perfMu        sync.Mutex
 	perfSince     time.Time
@@ -98,38 +140,39 @@ type Browser struct {
 }
 
 func New(cfg *config.Config, hub *ws.Hub, platform runenv.Handle) *Browser {
-	return &Browser{
+	b := &Browser{
 		cfg: cfg, hub: hub, platform: platform,
 		tabs:      map[int]*Tab{},
 		byTarget:  map[string]*Tab{},
 		bySession: map[string]*Tab{},
 		viewW:     cfg.ViewW, viewH: cfg.ViewH,
-		store:          NewStore(cfg.Profile),
-		icons:          map[string]*favicon{},
-		iconFetching:   map[string]bool{},
-		dlNames:        map[string]string{},
-		dialogSessions: map[string]bool{},
-		dlLastPush:     map[string]time.Time{},
-		streamer:       stream.New(streamConfig(cfg, platform)),
-		audio:          audio.New(audioConfig(cfg, platform)),
-		videoSubs:      map[*ws.Client]*stream.Sub{},
-		audioSubs:      map[*ws.Client]*audio.Sub{},
-		perfCounts:     map[string]int{},
+		store:           NewStore(cfg.Profile),
+		icons:           map[string]*favicon{},
+		iconFetching:    map[string]bool{},
+		dlNames:         map[string]string{},
+		dialogSessions:  map[string]bool{},
+		dlLastPush:      map[string]time.Time{},
+		streamer:        stream.New(streamConfig(cfg)),
+		audio:           audio.New(audioConfig(cfg, platform)),
+		videoSubs:       map[*ws.Client]*stream.Sub{},
+		audioSubs:       map[*ws.Client]*audio.Sub{},
+		perfCounts:      map[string]int{},
+		videoResizeWake: make(chan struct{}, 1),
 	}
+	go b.runVideoResize()
+	return b
 }
 
 // Start launches Chromium and wires target discovery; it returns once the
 // browser is ready to serve clients.
 func (b *Browser) Start() error {
 	client, cmd, err := cdp.Launch(cdp.LaunchConfig{
-		ChromePath:   b.cfg.ChromePath,
-		Profile:      b.cfg.Profile,
-		W:            b.cfg.DisplayW,
-		H:            b.cfg.DisplayH,
-		Env:          b.cfg.ChildEnv,
-		NoSandbox:    b.cfg.ChromeNoSandbox,
-		PlatformArgs: b.platform.ChromeArgs(),
-		Desktop:      b.platform.HiddenDesktop(),
+		ChromePath: b.cfg.ChromePath,
+		Profile:    b.cfg.Profile,
+		W:          b.cfg.ViewW,
+		H:          b.cfg.ViewH,
+		Env:        b.cfg.ChildEnv,
+		NoSandbox:  b.cfg.ChromeNoSandbox,
 	})
 	if err != nil {
 		return err
@@ -145,7 +188,7 @@ func (b *Browser) Start() error {
 		return err
 	}
 	b.setupDownloads()
-	log.Printf("browser ready, view %dx%d display %s %dx%d q%d (headful, profile %s)", b.viewW, b.viewH, b.cfg.Display, b.cfg.DisplayW, b.cfg.DisplayH, b.cfg.Quality, b.cfg.Profile)
+	log.Printf("browser ready, view %dx%d q%d (headless, profile %s)", b.viewW, b.viewH, b.cfg.Quality, b.cfg.Profile)
 	return nil
 }
 
@@ -315,6 +358,7 @@ func (b *Browser) onScreencastFrame(ev cdp.Event) {
 	if err != nil {
 		return
 	}
+	b.pushVideoFrame(buf, ev.SessionID)
 	// Header dims must be actual frame pixels, not CSS: the screencast
 	// downscales to the cast's max size (metadata only reports CSS).
 	b.mu.Lock()
@@ -331,4 +375,67 @@ func (b *Browser) onScreencastFrame(ev cdp.Event) {
 		ScrollY: clampScroll(p.Metadata.ScrollOffsetY),
 		Data:    buf,
 	}, nil)
+}
+
+// pushVideoFrame feeds a CDP JPEG to the H.264 transcoder while keeping its
+// configured input size synchronized with the actual image. Mismatched
+// transitional frames are withheld: feeding them to the old encoder can
+// corrupt its pipeline, while restarting for every intermediate size causes
+// a restart storm. Once one size persists, restart off the CDP dispatch
+// goroutine and make that settled frame the new encoder's first input.
+func (b *Browser) pushVideoFrame(buf []byte, session string) {
+	w, h, ok := jpegSize(buf)
+	if !ok {
+		b.streamer.Push(buf)
+		return
+	}
+	cur := b.streamer.Config()
+	if cur.CaptureW == w && cur.CaptureH == h {
+		b.streamer.Push(buf)
+		return
+	}
+	if !b.jpegSizeDeb.observe(w, h) {
+		return
+	}
+	b.requestVideoResize(w, h, buf, session)
+}
+
+// requestVideoResize serializes every browser-originated SetSize call through
+// one latest-wins worker. This prevents viewport changes, bootstrap captures,
+// and JPEG drift corrections from racing and applying an obsolete size last.
+func (b *Browser) requestVideoResize(w, h int, jpeg []byte, session string) {
+	job := videoResizeJob{w: w, h: h, jpeg: jpeg, session: session}
+	b.videoResizeMu.Lock()
+	b.videoResizePending = job
+	b.videoResizeSeq++
+	b.videoResizeMu.Unlock()
+	select {
+	case b.videoResizeWake <- struct{}{}:
+	default:
+	}
+}
+
+func (b *Browser) runVideoResize() {
+	for range b.videoResizeWake {
+		for {
+			b.videoResizeMu.Lock()
+			job, seq := b.videoResizePending, b.videoResizeSeq
+			b.videoResizeMu.Unlock()
+			if job.session != "" && !b.isActiveSession(job.session) {
+				break
+			}
+
+			b.streamer.SetSize(job.w, job.h)
+			if len(job.jpeg) > 0 && (job.session == "" || b.isActiveSession(job.session)) {
+				b.streamer.Push(job.jpeg)
+			}
+
+			b.videoResizeMu.Lock()
+			current := seq == b.videoResizeSeq
+			b.videoResizeMu.Unlock()
+			if current {
+				break
+			}
+		}
+	}
 }

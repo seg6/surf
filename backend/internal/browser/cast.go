@@ -26,8 +26,28 @@ func clampQuality(q, def int) int {
 // desiredCastLocked derives the wanted screencast parameters from the tab's
 // motion state: cheaper frames while the user interacts, full quality when
 // still. Always full resolution — the native decode path handles it.
+//
+// While a video subscriber is attached, motion is ignored and quality stays
+// fixed: the H.264 lane transcodes these same screencast frames now, so
+// every motion/settle transition's Page.stopScreencast+startScreencast
+// cycle (below, in ensureCast) would interrupt its frame supply too — and
+// real touch input (discrete swipes with pauses between them, unlike a
+// perfectly continuous synthetic scroll) hits that transition constantly
+// (confirmed live: this was why the video feed barely updated during
+// interaction). x264's own rate control already adapts bitrate to motion;
+// the JPEG-bandwidth-saving reason for this quality switch doesn't apply
+// when nobody's actually consuming the JPEG lane's bytes over the wire.
 // b.mu held by caller.
 func (b *Browser) desiredCastLocked(t *Tab) (q, maxW, maxH int) {
+	if b.hasVideoSubscribers() {
+		// H.264 is already the wire-quality boundary in video mode. Feeding
+		// its encoder q=100 JPEGs made Chromium produce and FFmpeg decode
+		// roughly half-megabyte frames 30 times per second, consuming CPU
+		// needed for browser/tab responsiveness without visible benefit.
+		// Keep one stable q=85 cast for the whole subscription: no expensive
+		// motion/settle restarts, and far less intermediate JPEG work.
+		return clampQuality(b.cfg.MotionQuality, 85), b.viewW, b.viewH
+	}
 	if t.motion {
 		return clampQuality(b.cfg.MotionQuality, 85), b.viewW, b.viewH
 	}
@@ -52,16 +72,17 @@ func (b *Browser) ensureCast(t *Tab) {
 			b.mu.Unlock()
 		}()
 		for i := 0; i < 6; i++ { // bounded: motion state flapping can't spin us forever
-			// Nobody consuming JPEG (all clients in video mode, or none at
-			// all): park the cast and give its CPU to x264. ClientConnected /
+			// Nobody consuming JPEG or H.264 (the latter is transcoded from
+			// these same screencast frames, so it depends on the cast too):
+			// park it and stop spending CPU on it. ClientConnected /
 			// video-off call ensureCast again to bring it back.
-			if !b.hub.HasCastClient() {
+			if !b.hub.HasCastClient() && !b.hasVideoSubscribers() {
 				b.mu.Lock()
 				casting := t.casting
 				b.mu.Unlock()
 				if casting {
 					b.stopCast(t)
-					log.Printf("cast tab %d parked: no JPEG consumers", t.ID)
+					log.Printf("cast tab %d parked: no consumers", t.ID)
 				}
 				return
 			}

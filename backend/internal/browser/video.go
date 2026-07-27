@@ -7,14 +7,24 @@ import (
 
 	"surf-backend/internal/config"
 	"surf-backend/internal/protocol"
-	"surf-backend/internal/runenv"
 	"surf-backend/internal/stream"
 	"surf-backend/internal/ws"
 )
 
 // firstAUWait bounds how long a fresh subscriber waits for its first
-// (IDR) access unit: process spawn + one 2s IDR interval + margin.
+// (IDR) access unit: process spawn + one capture round-trip + margin.
 const firstAUWait = 6 * time.Second
+
+// hasVideoSubscribers reports whether any client currently has the H.264
+// lane subscribed — cast.go's ensureCast needs this because the H.264 lane
+// is now transcoded from the JPEG screencast, so it depends on the cast
+// staying up even when every client is in video mode (no raw JPEG
+// consumers at all).
+func (b *Browser) hasVideoSubscribers() bool {
+	b.mediaMu.Lock()
+	defer b.mediaMu.Unlock()
+	return len(b.videoSubs) > 0
+}
 
 // handleVideo services {"t":"video","on":...}. Runs on the client's read
 // goroutine; everything slow happens in the pump goroutine.
@@ -32,7 +42,42 @@ func (b *Browser) handleVideo(c *ws.Client, on bool) {
 	b.videoSubs[c] = sub
 	b.mediaMu.Unlock()
 	log.Printf("video: client subscribed")
+	if t := b.active(); t != nil {
+		b.ensureCast(t) // converge the shared source to stable video quality
+	}
+	go b.bootstrapVideoFrame()
 	go b.pumpVideo(c, sub)
+}
+
+// bootstrapVideoFrame pushes one JPEG into the encoder right after a
+// subscribe. CDP's screencast only emits frames when the compositor
+// actually produces new content, so a subscriber landing on an already-
+// static page would otherwise wait out firstAUWait for a frame that may
+// never arrive on its own.
+func (b *Browser) bootstrapVideoFrame() {
+	t := b.active()
+	if t == nil {
+		return
+	}
+	b.mu.Lock()
+	s := t.Session
+	vw, vh := b.viewW, b.viewH
+	b.mu.Unlock()
+	buf, err := b.cdp.CaptureJPEG(s, clampQuality(b.cfg.MotionQuality, 85))
+	if err != nil {
+		return
+	}
+	b.mu.Lock()
+	stillCurrent := t.ID == b.activeID && s == t.Session && vw == b.viewW && vh == b.viewH
+	b.mu.Unlock()
+	if !stillCurrent || !b.hasVideoSubscribers() {
+		return
+	}
+	if w, h, ok := jpegSize(buf); ok {
+		b.requestVideoResize(w, h, buf, s)
+		return
+	}
+	b.streamer.Push(buf)
 }
 
 // pumpVideo gates on encoder health, then relays AUs until the sub dies or
@@ -126,7 +171,7 @@ func (b *Browser) ClientDisconnected(c *ws.Client) {
 }
 
 // streamConfig derives the encoder config from the server config.
-func streamConfig(cfg *config.Config, platform runenv.Handle) stream.Config {
+func streamConfig(cfg *config.Config) stream.Config {
 	maxW, maxH := 0, 0
 	if s := cfg.StreamScale; s != "" {
 		var sw, sh int
@@ -141,14 +186,12 @@ func streamConfig(cfg *config.Config, platform runenv.Handle) stream.Config {
 		}
 	}
 	return stream.Config{
-		Display: cfg.Display, FFmpegPath: cfg.FFmpegPath, Env: cfg.ChildEnv,
+		FFmpegPath: cfg.FFmpegPath, Env: cfg.ChildEnv,
 		W: cfg.ViewW, H: cfg.ViewH,
 		CaptureW: cfg.ViewW, CaptureH: cfg.ViewH,
 		ScaleMaxW: maxW, ScaleMaxH: maxH,
 		FPS:      cfg.StreamFPS,
 		BitrateK: cfg.StreamBitrateK, MaxrateK: cfg.StreamMaxrateK, BufsizeK: cfg.StreamBufsizeK,
-		CaptureArgs: platform.VideoCaptureArgs,
-		Desktop:     platform.HiddenDesktop(),
 	}
 }
 

@@ -1,28 +1,16 @@
 package browser
 
-import "log"
-
-// syncVideoSurface asks the active platform to resize its capture surface to
-// match a new viewport (a no-op where there's no virtual display, e.g. on
-// Windows/macOS) and retargets the H.264 encoder at the new size.
+// syncVideoSurface retargets the H.264 encoder at a new viewport size — the
+// only thing that used to need doing here was resizing the OS-level capture
+// surface (X screen / hidden desktop) for x11grab/gdigrab's benefit; since
+// the H.264 lane now transcodes CDP's own screencast frames instead of
+// grabbing the screen, there's no OS surface to resize at all anymore.
 func (b *Browser) syncVideoSurface(w, h int) {
-	b.screenMu.Lock()
-	defer b.screenMu.Unlock()
-
 	b.mu.Lock()
 	current := w == b.viewW && h == b.viewH
 	b.mu.Unlock()
 	if !current {
 		return
 	}
-	if err := b.platform.ResizeSurface(w, h); err != nil {
-		log.Printf("screen: resize capture surface to %dx%d: %v", w, h, err)
-	}
-	b.mu.Lock()
-	current = w == b.viewW && h == b.viewH
-	b.mu.Unlock()
-	if !current {
-		return
-	}
-	b.streamer.SetSize(w, h)
+	b.requestVideoResize(w, h, nil, "")
 }
