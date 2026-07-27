@@ -115,7 +115,7 @@ func (lh *linuxHandle) Shutdown() {
 		_ = cmd.Run()
 	}
 	for i := len(lh.children) - 1; i >= 0; i-- {
-		proc.Kill(lh.children[i])
+		proc.Kill(lh.children[i].Process.Pid)
 	}
 	for _, dir := range lh.tempDirs {
 		_ = os.RemoveAll(dir)
@@ -331,3 +331,7 @@ func logExit(name string, cmd *exec.Cmd) {
 		log.Printf("runtime: %s exited: %v", name, err)
 	}
 }
+
+// HiddenDesktop is a Windows-only concept: no-op here, Chromium always
+// launches on the (already invisible, since it's inside Xvfb) X display.
+func (lh *linuxHandle) HiddenDesktop() string { return "" }
