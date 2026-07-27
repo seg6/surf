@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os/exec"
+	"os"
 	"sync"
 	"time"
 
@@ -51,7 +51,7 @@ type Tab struct {
 type Browser struct {
 	cfg      *config.Config
 	cdp      *cdp.Client
-	cmd      *exec.Cmd
+	cmd      *os.Process
 	hub      *ws.Hub
 	platform runenv.Handle
 
@@ -129,6 +129,7 @@ func (b *Browser) Start() error {
 		Env:          b.cfg.ChildEnv,
 		NoSandbox:    b.cfg.ChromeNoSandbox,
 		PlatformArgs: b.platform.ChromeArgs(),
+		Desktop:      b.platform.HiddenDesktop(),
 	})
 	if err != nil {
 		return err
@@ -158,8 +159,8 @@ func (b *Browser) Shutdown() {
 	if b.cdp != nil {
 		b.cdp.Close()
 	}
-	if b.cmd != nil && b.cmd.Process != nil {
-		proc.Kill(b.cmd)
+	if b.cmd != nil {
+		proc.Kill(b.cmd.Pid)
 	}
 }
 

@@ -197,7 +197,7 @@ func logStderr(r io.Reader) {
 
 func (s *Streamer) stopLocked() {
 	if s.cmd != nil && s.cmd.Process != nil {
-		proc.Kill(s.cmd)
+		proc.Kill(s.cmd.Process.Pid)
 	}
 	s.running = false
 	s.cmd = nil

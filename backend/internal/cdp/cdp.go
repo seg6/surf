@@ -12,7 +12,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -79,7 +78,12 @@ type LaunchConfig struct {
 	// PlatformArgs are host-OS-specific launch flags (e.g. Linux's
 	// --ozone-platform=x11) supplied by the active runenv.Handle.
 	PlatformArgs []string
-	ExtraArgs    []string
+	// Desktop names a Windows desktop (runenv.Handle.HiddenDesktop) Chromium
+	// should launch onto instead of the interactive one. Empty everywhere
+	// else, and empty on Windows too when hidden-desktop launch is off or
+	// unavailable.
+	Desktop   string
+	ExtraArgs []string
 }
 
 func (cfg LaunchConfig) Args() []string {
@@ -131,22 +135,22 @@ func (cfg LaunchConfig) Args() []string {
 	return args
 }
 
-// Launch starts Chromium headful (Xvfb provides the display) with the same
+// Launch starts Chromium headful (Xvfb provides the display, or — Windows
+// hidden-desktop mode — cfg.Desktop names an invisible one) with the same
 // flag set puppeteer was given, and returns a connected browser client.
-func Launch(cfg LaunchConfig) (*Client, *exec.Cmd, error) {
-	cmd := proc.Command(cfg.ChromePath, cfg.Args()...)
-	cmd.Env = append(os.Environ(), cfg.Env...)
-	stderr, err := cmd.StderrPipe()
+func Launch(cfg LaunchConfig) (*Client, *os.Process, error) {
+	started, err := proc.Start(cfg.ChromePath, cfg.Args(), proc.Options{
+		Env:     append(os.Environ(), cfg.Env...),
+		Desktop: cfg.Desktop,
+		Stderr:  true,
+	})
 	if err != nil {
-		return nil, nil, err
-	}
-	if err := cmd.Start(); err != nil {
 		return nil, nil, err
 	}
 
 	wsURL := make(chan string, 1)
 	go func() {
-		sc := bufio.NewScanner(stderr)
+		sc := bufio.NewScanner(started.Stderr)
 		sc.Buffer(make([]byte, 64*1024), 1024*1024)
 		for sc.Scan() {
 			if m := devtoolsRe.FindStringSubmatch(sc.Text()); m != nil {
@@ -160,15 +164,15 @@ func Launch(cfg LaunchConfig) (*Client, *exec.Cmd, error) {
 
 	url, err := waitForURL(wsURL, cfg.Profile)
 	if err != nil {
-		proc.Kill(cmd)
+		proc.Kill(started.Process.Pid)
 		return nil, nil, err
 	}
 	c, err := Dial(url)
 	if err != nil {
-		proc.Kill(cmd)
+		proc.Kill(started.Process.Pid)
 		return nil, nil, err
 	}
-	return c, cmd, nil
+	return c, started.Process, nil
 }
 
 func (c *Client) ForceFullscreen() {

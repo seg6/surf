@@ -10,7 +10,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -50,6 +49,14 @@ type Config struct {
 	// H.264 lane is unsupported here; startLocked fails every subscriber
 	// immediately and callers fall back to the JPEG/CDP screencast.
 	CaptureArgs func(surface string, w, h, fps int) []string
+	// Desktop names a Windows desktop (runenv.Handle.HiddenDesktop) ffmpeg
+	// would launch onto instead of the interactive one, kept here for a
+	// future capture method. Currently unreachable in practice: gdigrab
+	// can't capture a desktop that isn't the foreground one (confirmed
+	// live — see runenv_windows.go's VideoCaptureArgs), so that method
+	// returns nil, and CaptureArgs is nil, whenever a hidden desktop is
+	// active — this lane just falls back to JPEG/CDP screencast then.
+	Desktop string
 }
 
 // AU is one complete Annex-B access unit (start codes intact). W/H are the
@@ -85,7 +92,7 @@ type Streamer struct {
 
 	mu        sync.Mutex
 	subs      map[*Sub]struct{}
-	cmd       *exec.Cmd
+	cmd       *os.Process
 	stdout    io.ReadCloser
 	running   bool
 	gen       int // process generation, guards stale readLoops
@@ -344,31 +351,28 @@ func (s *Streamer) startLocked() {
 		s.failAllLocked()
 		return
 	}
-	cmd := proc.Command(s.cfg.FFmpegPath, args...)
-	cmd.Env = append(os.Environ(), s.cfg.Env...)
-	stdout, err := cmd.StdoutPipe()
+	started, err := proc.Start(s.cfg.FFmpegPath, args, proc.Options{
+		Env:     append(os.Environ(), s.cfg.Env...),
+		Desktop: s.cfg.Desktop,
+		Stdout:  true,
+		Stderr:  true,
+	})
 	if err != nil {
-		log.Printf("stream: stdout pipe: %v", err)
-		s.failAllLocked()
-		return
-	}
-	stderr, _ := cmd.StderrPipe()
-	if err := cmd.Start(); err != nil {
 		log.Printf("stream: ffmpeg start failed: %v", err)
 		s.failAllLocked()
 		return
 	}
-	s.cmd = cmd
-	s.stdout = stdout
+	s.cmd = started.Process
+	s.stdout = started.Stdout
 	s.running = true
 	s.gen++
 	gen := s.gen
 	log.Printf("stream: encoder started pid=%d capture=%dx%d coded=%dx%d@%dfps %dk x264=%s",
-		cmd.Process.Pid, s.cfg.CaptureW, s.cfg.CaptureH, s.cfg.W, s.cfg.H, s.cfg.FPS, s.cfg.BitrateK, x264Speed)
-	if stderr != nil {
-		go logStderr(stderr)
+		started.Process.Pid, s.cfg.CaptureW, s.cfg.CaptureH, s.cfg.W, s.cfg.H, s.cfg.FPS, s.cfg.BitrateK, x264Speed)
+	if started.Stderr != nil {
+		go logStderr(started.Stderr)
 	}
-	go s.readLoop(stdout, cmd, gen)
+	go s.readLoop(started.Stdout, started.Process, gen)
 }
 
 func logStderr(r io.Reader) {
@@ -390,8 +394,8 @@ func logStderr(r io.Reader) {
 
 // stopLocked kills the encoder; s.mu held by caller.
 func (s *Streamer) stopLocked() {
-	if s.cmd != nil && s.cmd.Process != nil {
-		proc.Kill(s.cmd)
+	if s.cmd != nil {
+		proc.Kill(s.cmd.Pid)
 	}
 	s.running = false
 	s.cmd = nil
@@ -420,7 +424,7 @@ func (s *Streamer) failAllLocked() {
 }
 
 // readLoop splits ffmpeg's Annex-B output into AUs and fans them out.
-func (s *Streamer) readLoop(r io.Reader, cmd *exec.Cmd, gen int) {
+func (s *Streamer) readLoop(r io.Reader, cmd *os.Process, gen int) {
 	sp := newAUSplitter()
 	buf := make([]byte, 64<<10)
 	for {
@@ -441,7 +445,7 @@ func (s *Streamer) readLoop(r io.Reader, cmd *exec.Cmd, gen int) {
 			break
 		}
 	}
-	_ = cmd.Wait()
+	_, _ = cmd.Wait()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
