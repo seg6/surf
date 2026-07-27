@@ -60,8 +60,8 @@ surf-dist: surf-binary
 		rm -rf "dist/Surf.iconset"; \
 		sed "s/@VERSION@/$(VERSION)/g" packaging/desktop/Info.plist > "dist/Surf.app/Contents/Info.plist"; \
 		if [ -n "$${CI:-}" ]; then (cd backend && go clean -cache -modcache); fi; \
-		tar -C dist -czf "dist/$(SURF_ARCHIVE)" "Surf.app"; \
 		hdiutil create -volname Surf -srcfolder "dist/Surf.app" -ov -format UDZO "dist/surf-$(VERSION)-darwin-$(SURF_GOARCH).dmg" >/dev/null; \
+		tar -C dist -czf "dist/$(SURF_ARCHIVE)" "Surf.app"; \
 	else \
 		mkdir -p "dist/$(SURF_DIST)"; \
 		cp "backend/$(SURF_EXE)" "dist/$(SURF_DIST)/$(SURF_EXE)"; \
