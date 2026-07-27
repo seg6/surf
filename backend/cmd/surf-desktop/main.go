@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	_ "embed"
 	"encoding/base64"
@@ -31,6 +32,7 @@ import (
 	"surf-backend/internal/backendapp"
 	"surf-backend/internal/config"
 	"surf-backend/internal/runenv"
+	"surf-backend/internal/updater"
 )
 
 type desktopConfig struct {
@@ -55,11 +57,23 @@ type desktopApp struct {
 	done chan struct{}
 
 	statusItem *systray.MenuItem
+
+	updateRelease *updater.Release
+	updateState   string
+	updateError   string
 }
 
 func main() {
+	prepareConsole(len(os.Args) > 1 && os.Args[1] != "update-helper")
+	if len(os.Args) >= 2 && os.Args[1] == "update-helper" {
+		if err := runUpdateHelper(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "surf update:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 2 {
-		fmt.Fprintln(os.Stderr, "Usage: surf [serve|doctor|version]")
+		fmt.Fprintln(os.Stderr, "Usage: surf [serve|doctor|update|version]")
 		os.Exit(2)
 	}
 	if len(os.Args) == 1 {
@@ -76,17 +90,91 @@ func main() {
 		err = backendapp.Serve()
 	case "doctor":
 		err = doctor()
+	case "update":
+		err = runCommandUpdate()
 	case "version":
 		fmt.Printf("surf %s\nprotocol %s\n", config.AppVersion, config.NativeVersion)
 		return
 	default:
-		fmt.Fprintln(os.Stderr, "Usage: surf [serve|doctor|version]")
+		fmt.Fprintln(os.Stderr, "Usage: surf [serve|doctor|update|version]")
 		err = fmt.Errorf("unknown command %q", command)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "surf:", err)
 		os.Exit(1)
 	}
+}
+
+func updateClient() updater.Client {
+	return updater.Client{ManifestURL: os.Getenv("SURF_UPDATE_MANIFEST")}
+}
+
+func checkUpdate(ctx context.Context) (updater.Release, error) {
+	return updateClient().Check(ctx, config.AppVersion)
+}
+
+func stageUpdate(ctx context.Context, release updater.Release, home string) (string, error) {
+	directory := filepath.Join(home, "updates", release.Manifest.Version)
+	return updateClient().DownloadExecutable(ctx, release, directory)
+}
+
+func runCommandUpdate() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	release, err := checkUpdate(ctx)
+	if err != nil {
+		return err
+	}
+	if !release.Newer {
+		fmt.Printf("Surf %s is current.\n", config.AppVersion)
+		return nil
+	}
+	home, err := surfHome()
+	if err != nil {
+		return err
+	}
+	staged, err := stageUpdate(ctx, release, home)
+	if err != nil {
+		return err
+	}
+	target, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if runtime.GOOS == "windows" {
+		if err := launchUpdateHelper(staged, target, false); err != nil {
+			return err
+		}
+		fmt.Printf("Surf %s will be installed after this process exits.\n", release.Manifest.Version)
+		return nil
+	}
+	if err := updater.ReplaceExecutable(staged, target); err != nil {
+		return err
+	}
+	fmt.Printf("Updated Surf to %s.\n", release.Manifest.Version)
+	return nil
+}
+
+func runUpdateHelper(args []string) error {
+	hideConsole()
+	if len(args) != 3 {
+		return errors.New("invalid update helper invocation")
+	}
+	staged, target := args[0], args[1]
+	restart := args[2] == "restart"
+	deadline := time.Now().Add(45 * time.Second)
+	var err error
+	for time.Now().Before(deadline) {
+		err = updater.ReplaceExecutableCopy(staged, target)
+		if err == nil {
+			if restart {
+				return exec.Command(target).Start()
+			}
+			return nil
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return fmt.Errorf("replace executable: %w", err)
 }
 
 func runTray() error {
@@ -362,6 +450,9 @@ func (a *desktopApp) managementHandler() http.Handler {
 	})
 	mux.HandleFunc("/api/config", a.managementConfig)
 	mux.HandleFunc("/api/restart", a.managementRestart)
+	mux.HandleFunc("/api/update/check", a.managementUpdateCheck)
+	mux.HandleFunc("/api/update/apply", a.managementUpdateApply)
+	mux.HandleFunc("/api/update/status", a.managementUpdateStatus)
 	mux.HandleFunc("/settings", a.managementSettings)
 	mux.HandleFunc("/logs", a.managementLogs)
 	proxy := &httputil.ReverseProxy{
@@ -388,6 +479,117 @@ func (a *desktopApp) managementHandler() http.Handler {
 	}
 	mux.Handle("/api/status", proxy)
 	return localOnly(mux)
+}
+
+func (a *desktopApp) managementUpdateStatus(w http.ResponseWriter, _ *http.Request) {
+	a.mu.Lock()
+	state, message := a.updateState, a.updateError
+	version := ""
+	if a.updateRelease != nil {
+		version = a.updateRelease.Manifest.Version
+	}
+	a.mu.Unlock()
+	if state == "" {
+		state = "idle"
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"state": state, "version": version, "message": message, "current": config.AppVersion,
+	})
+}
+
+func (a *desktopApp) managementUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	if !validDesktopMutation(r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	a.mu.Lock()
+	if a.updateState == "checking" || a.updateState == "downloading" || a.updateState == "applying" {
+		a.mu.Unlock()
+		http.Error(w, "update already in progress", http.StatusConflict)
+		return
+	}
+	a.updateState, a.updateError = "checking", ""
+	a.mu.Unlock()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		release, err := checkUpdate(ctx)
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		if err != nil {
+			a.updateState, a.updateError = "error", err.Error()
+			return
+		}
+		a.updateRelease = &release
+		if release.Newer {
+			a.updateState = "available"
+		} else {
+			a.updateState = "current"
+		}
+	}()
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func (a *desktopApp) managementUpdateApply(w http.ResponseWriter, r *http.Request) {
+	if !validDesktopMutation(r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	a.mu.Lock()
+	if a.updateState != "available" || a.updateRelease == nil {
+		a.mu.Unlock()
+		http.Error(w, "no update is available", http.StatusConflict)
+		return
+	}
+	release := *a.updateRelease
+	a.updateState, a.updateError = "downloading", ""
+	a.mu.Unlock()
+	go a.applyDesktopUpdate(release)
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func validDesktopMutation(r *http.Request) bool {
+	return r.Method == http.MethodPost && r.Header.Get("X-Surf-Desktop") == "1"
+}
+
+func (a *desktopApp) applyDesktopUpdate(release updater.Release) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	staged, err := stageUpdate(ctx, release, a.home)
+	if err != nil {
+		a.setUpdateFailure(err)
+		return
+	}
+	target, err := os.Executable()
+	if err != nil {
+		a.setUpdateFailure(err)
+		return
+	}
+	a.mu.Lock()
+	a.updateState = "applying"
+	a.mu.Unlock()
+	a.stopBackend()
+	if runtime.GOOS == "windows" {
+		err = launchUpdateHelper(staged, target, true)
+	} else {
+		err = updater.ReplaceExecutable(staged, target)
+		if err == nil {
+			err = exec.Command(target).Start()
+		}
+	}
+	if err != nil {
+		a.setUpdateFailure(err)
+		_ = a.startBackend()
+		return
+	}
+	systray.Quit()
+}
+
+func (a *desktopApp) setUpdateFailure(err error) {
+	a.mu.Lock()
+	a.updateState, a.updateError = "error", err.Error()
+	a.mu.Unlock()
 }
 
 func localOnly(next http.Handler) http.Handler {

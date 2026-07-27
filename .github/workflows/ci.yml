@@ -32,6 +32,7 @@ jobs:
 
   packages:
     name: Surf ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: native
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -57,9 +58,17 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: surf-native-deb
+          path: dist/native
+
       - name: Build Surf package
         shell: bash
-        run: make surf-dist SURF_GOOS=${{ matrix.goos }} SURF_GOARCH=${{ matrix.goarch }}
+        run: |
+          client_deb="$(find dist/native -name '*.deb' -type f -print -quit)"
+          test -n "$client_deb"
+          make surf-dist SURF_GOOS=${{ matrix.goos }} SURF_GOARCH=${{ matrix.goarch }} CLIENT_DEB="$client_deb"
 
       - name: Verify package
         shell: bash

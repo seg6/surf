@@ -4,6 +4,7 @@ VERSION := $(shell tr -d '[:space:]' < VERSION)
 PROTOCOL_VERSION := $(shell tr -d '[:space:]' < PROTOCOL_VERSION)
 SURF_GOOS ?= $(shell go env GOOS)
 SURF_GOARCH ?= $(shell go env GOARCH)
+CLIENT_DEB ?=
 SURF_DIST := surf-$(VERSION)-$(SURF_GOOS)-$(SURF_GOARCH)
 ifeq ($(SURF_GOOS),windows)
 SURF_EXE := surf.exe
@@ -19,8 +20,13 @@ test:
 # The tray dependency uses native desktop APIs. Build on the target OS; CI uses
 # native Linux, Windows, and macOS runners.
 surf-binary:
+	if [ -n "$(CLIENT_DEB)" ]; then \
+		test -f "$(CLIENT_DEB)"; \
+		cp "$(CLIENT_DEB)" backend/internal/clientupdate/bundle/client.deb; \
+	fi
 	cd backend && CGO_ENABLED=1 GOOS=$(SURF_GOOS) GOARCH=$(SURF_GOARCH) go build -trimpath \
-		-ldflags="-s -w -X surf-backend/internal/config.AppVersion=$(VERSION) -X surf-backend/internal/config.NativeVersion=$(PROTOCOL_VERSION)" \
+		$(if $(CLIENT_DEB),-tags=client_bundle) \
+		-ldflags="-s -w $(if $(filter windows,$(SURF_GOOS)),-H=windowsgui) -X surf-backend/internal/config.AppVersion=$(VERSION) -X surf-backend/internal/config.NativeVersion=$(PROTOCOL_VERSION)" \
 		-o "$(SURF_EXE)" ./cmd/surf-desktop
 
 surf-dist: surf-binary

@@ -3,6 +3,9 @@
 #ifndef RBNativeVersion
 #error RBNativeVersion must be supplied by native/client/Makefile from PROTOCOL_VERSION
 #endif
+#ifndef RBAppVersion
+#error RBAppVersion must be supplied by native/client/Makefile from VERSION
+#endif
 #define RBDefaultServerURL @"https://surf.seg6.space"
 #define RBDefaultPassword @""
 #define RBLogDirectory @"/var/mobile/Library/Surf"

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"surf-backend/internal/auth"
+	"surf-backend/internal/clientupdate"
 	"surf-backend/internal/config"
 )
 
@@ -41,6 +42,52 @@ func TestHealthStatsRequiresAuth(t *testing.T) {
 	srv.Handler().ServeHTTP(authResp, authReq)
 	if authResp.Code != http.StatusOK {
 		t.Fatalf("auth stats code = %d, want %d", authResp.Code, http.StatusOK)
+	}
+}
+
+func TestNativeConfigOffersEmbeddedClientOnProtocolMismatch(t *testing.T) {
+	a, err := auth.New(t.TempDir(), "test-password", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(&config.Config{}, a, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.SetClientUpdate(&clientupdate.Bundle{
+		Version: "1.0.0", Protocol: config.NativeVersion, SHA256: "abc", Data: []byte("package"),
+	})
+	request := httptest.NewRequest(http.MethodGet, "/native-config?av=0.1.0&nv=old", nil)
+	cookies := httptest.NewRecorder()
+	a.SetCookie(cookies)
+	request.AddCookie(cookies.Result().Cookies()[0])
+	response := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(response, request)
+	var body struct {
+		Compatibility string `json:"compatibility"`
+		ClientUpdate  struct {
+			Version string `json:"version"`
+			Size    int    `json:"size"`
+		} `json:"clientUpdate"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Compatibility != "client-update-required" || body.ClientUpdate.Version != "1.0.0" || body.ClientUpdate.Size != 7 {
+		t.Fatalf("response=%+v", body)
+	}
+
+	unauthorized := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/updates/v1/client", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized client update code=%d", unauthorized.Code)
+	}
+	download := httptest.NewRequest(http.MethodGet, "/updates/v1/client", nil)
+	download.AddCookie(cookies.Result().Cookies()[0])
+	downloadResponse := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(downloadResponse, download)
+	if downloadResponse.Code != http.StatusOK || downloadResponse.Body.String() != "package" {
+		t.Fatalf("client update response code=%d body=%q", downloadResponse.Code, downloadResponse.Body.String())
 	}
 }
 

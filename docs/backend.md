@@ -17,6 +17,12 @@ opens Settings, restarts the backend, and quits Surf. The backend
 remains a separate process, so the same server implementation is used by both
 desktop and headless deployments.
 
+Settings checks GitHub Releases for a newer official build and can install it
+in place. Headless installations provide the same operation as `surf update`.
+The release manifest is fetched over HTTPS and every downloaded archive is
+checked against its declared size and SHA-256 before replacement. A previous
+executable is retained as `surf.previous`.
+
 Desktop packages are built natively for Linux x86-64, Windows x86-64, macOS
 Intel, and macOS Apple Silicon. Chrome and FFmpeg are downloaded into
 `SURF_HOME` on first launch.
@@ -128,7 +134,7 @@ schedules ordered control, drop-oldest audio, and a four-AU GOP-aware video
 queue; `AudioPipeline` owns capture and bounded fan-out. Video overflow
 requests an immediate cooldown-protected IDR instead of accumulating delay.
 
-Protocol `20260727-3` uses a 64-byte extensible binary header carrying AU and
+Protocol `20260727-5` uses a 64-byte extensible binary header carrying AU and
 source sequences, coded size, interaction ID, backend timing stamps, and
 encoder generation. The socket-write timestamp is stamped by the WebSocket
 writer immediately before the write.
@@ -168,6 +174,8 @@ Common overrides:
 - `AUDIO_SOURCE`: source FFmpeg captures; defaults to `surf_output.monitor`
   (Linux).
 - `SURF_ADVERTISE=0`: disable LAN discovery advertisement.
+- `SURF_UPDATE_MANIFEST`: override the GitHub update manifest URL for release
+  testing.
 
 If you run the backend as root on a VPS, Chromium usually requires
 `CHROME_NO_SANDBOX=1`. Surf enables this by default for root, but running as a
@@ -177,3 +185,9 @@ normal user is preferred.
 
 Do not expose a weak-password backend to the public internet. For VPS usage, put
 it behind HTTPS and use a strong password.
+
+Official GitHub Releases are Surf's update source of truth. SHA-256 protects
+against damaged or mismatched downloads; it is not a separate publisher
+signature. Release builds embed the native package built from the same commit.
+An authenticated native client with an older protocol can download that package
+from `/updates/v1/client`; media WebSockets are never used for update payloads.
