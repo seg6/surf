@@ -76,7 +76,10 @@ type LaunchConfig struct {
 	W, H       int
 	Env        []string
 	NoSandbox  bool
-	ExtraArgs  []string
+	// PlatformArgs are host-OS-specific launch flags (e.g. Linux's
+	// --ozone-platform=x11) supplied by the active runenv.Handle.
+	PlatformArgs []string
+	ExtraArgs    []string
 }
 
 func (cfg LaunchConfig) Args() []string {
@@ -90,10 +93,9 @@ func (cfg LaunchConfig) Args() []string {
 		"--hide-scrollbars",
 		"--disable-background-networking", "--disable-sync",
 		// The anti-throttling set puppeteer always passed: without these,
-		// Chromium treats the Xvfb window as backgrounded/occluded and stops
-		// producing compositor frames (dead screencast, multi-second
+		// Chromium treats the capture surface as backgrounded/occluded and
+		// stops producing compositor frames (dead screencast, multi-second
 		// screenshots).
-		"--ozone-platform=x11",
 		// Wheel scrolls must apply instantly: the client predicts scroll
 		// locally and reconciles against frame scroll offsets — an animated
 		// scroll makes the server look permanently behind.
@@ -112,9 +114,10 @@ func (cfg LaunchConfig) Args() []string {
 		fmt.Sprintf("--window-size=%d,%d", cfg.W, cfg.H),
 		// Fullscreen/kiosk: no toolbar/omnibox/tab strip on the X display. The
 		// CDP screencast sees page pixels either way, but the video lane films
-		// Xvfb directly, so a normal browser window would stream Chromium chrome.
-		// Position must be pinned: with no WM the default window origin is (10,10),
-		// which shifts and clips the filmed page.
+		// the capture surface directly, so a normal browser window would
+		// stream Chromium chrome. Position must be pinned: with no WM the
+		// default window origin is (10,10), which shifts and clips the
+		// filmed page.
 		"--kiosk",
 		"--start-fullscreen",
 		"--window-position=0,0",
@@ -122,6 +125,7 @@ func (cfg LaunchConfig) Args() []string {
 	if cfg.NoSandbox {
 		args = append(args, "--no-sandbox")
 	}
+	args = append(args, cfg.PlatformArgs...)
 	args = append(args, cfg.ExtraArgs...)
 	args = append(args, "about:blank")
 	return args

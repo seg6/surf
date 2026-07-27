@@ -102,7 +102,7 @@ func serve() error {
 		return fmt.Errorf("auth: %w", err)
 	}
 	hub := ws.NewHub()
-	b := browser.New(cfg, hub)
+	b := browser.New(cfg, hub, rt.Handle())
 	hub.SetHandler(b)
 	defer b.Shutdown()
 

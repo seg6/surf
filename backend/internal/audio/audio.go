@@ -25,6 +25,11 @@ type Config struct {
 	FFmpegPath string
 	Source     string
 	Env        []string
+	// CaptureArgs builds the ffmpeg arguments (up to and including "-i
+	// <source>") that grab this platform's system audio. Nil means the PCM
+	// lane is unsupported here; startLocked fails every subscriber
+	// immediately.
+	CaptureArgs func(source string) []string
 }
 
 type Chunk struct {
@@ -105,9 +110,14 @@ func (sub *Sub) Close() {
 }
 
 func (s *Streamer) startLocked() {
-	cmd := proc.Command(s.cfg.FFmpegPath, "-loglevel", "warning",
-		"-f", "pulse", "-i", s.cfg.Source,
+	if s.cfg.CaptureArgs == nil {
+		log.Printf("audio: capture unsupported on this platform")
+		s.failAllLocked()
+		return
+	}
+	args := append(append([]string{}, s.cfg.CaptureArgs(s.cfg.Source)...),
 		"-ac", "1", "-ar", "16000", "-f", "s16le", "pipe:1")
+	cmd := proc.Command(s.cfg.FFmpegPath, args...)
 	cmd.Env = append(os.Environ(), s.cfg.Env...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
