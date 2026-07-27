@@ -95,10 +95,9 @@ func (b *Controller) refreshFavicon(t *Tab) {
 			b.mu.Unlock()
 		}()
 		// Do not query the active renderer merely to discover a custom icon.
-		// Page.captureScreenshot is intentionally kept saturated for 30 fps;
-		// injecting Runtime.evaluate into that queue caused visible capture
-		// gaps during navigation and tab activation. The conventional origin
-		// favicon is sufficient and is fetched outside Chromium.
+		// Keep renderer-side feature work out of the capture-critical path.
+		// The conventional origin favicon is sufficient and can be fetched
+		// outside Chromium without disturbing screencast cadence.
 		href := origin + "/favicon.ico"
 		ic := fetchIcon(href)
 		if ic == nil {

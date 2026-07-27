@@ -436,10 +436,9 @@ func (b *Controller) handleTab(m *protocol.TabCommand) {
 			_, _ = b.cdp.Call("", "Target.closeTarget", map[string]any{"targetId": target})
 		}
 	case "new":
-		// A target created directly on a network URL can make its first
-		// captureScreenshot wait for renderer initialization (observed as the
-		// exact 15-second CDP timeout). Attach and show a stable blank first;
-		// attachTarget navigates after that first frame reaches the pipeline.
+		// Attach and capture a stable blank surface first. Navigating only
+		// after that first frame reaches the pipeline makes new-tab switching
+		// immediate even while the network page initializes.
 		_, _ = b.cdp.Call("", "Target.createTarget", b.newTargetParams("about:blank#surf-new"))
 	}
 }

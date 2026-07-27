@@ -95,11 +95,9 @@ func (b *Controller) attachTarget(info targetInfo) {
 
 	s := att.SessionID
 	log.Printf("tab %d attached: %.80s", id, info.URL)
-	// Finish one-time session setup before capture starts. Chromium serializes
-	// several Page-domain commands with captureScreenshot; overlapping these
-	// calls made a newly created tab emit one frame and then freeze for up to
-	// the CDP timeout. The previous tab remains live during this short setup,
-	// then switchActive can produce the new tab continuously from frame one.
+	// Finish one-time session setup before capture starts. The previous tab
+	// remains live during this short setup, then switchActive can produce the
+	// new tab continuously from frame one.
 	_ = b.cdp.Dispatch(s, "Page.enable", nil)
 	_ = b.cdp.Dispatch(s, "Runtime.enable", nil)
 	if b.userAgent != "" {
@@ -324,9 +322,8 @@ func (b *Controller) switchActive(id int) {
 	if old != nil && old != next {
 		b.stopCast(old)
 	}
-	// captureScreenshot(fromSurface=true) follows Chromium's active surface.
-	// Confirm activation before starting the new session's capture loop;
-	// fire-and-forget here can repeatedly return the previous tab's pixels.
+	// Confirm activation before starting the new session's screencast;
+	// fire-and-forget can briefly deliver the previous tab's surface.
 	started := time.Now()
 	if _, err := b.cdp.Call("", "Target.activateTarget", map[string]any{"targetId": next.TargetID}); err != nil {
 		log.Printf("tab %d activation failed after %s: %v", id, time.Since(started).Round(time.Millisecond), err)
