@@ -9,9 +9,14 @@ detected LAN address and stream state, change the password or port, expand
 local logs, or restart the backend. Surf listens on port 18080 by default and
 advertises itself to iOS devices on the local network.
 
-The first launch downloads pinned Chrome and FFmpeg runtimes into `~/.surf`
-(`%USERPROFILE%\.surf` on Windows). Allow inbound TCP port 18080 if the
-operating-system firewall asks.
+Surf prefers an installed Chrome or Chromium. If neither is compatible, it
+downloads a verified ungoogled-chromium release into `~/.surf`
+(`%USERPROFILE%\.surf` on Windows). FFmpeg is included. Allow inbound TCP port
+18080 if the operating-system firewall asks.
+
+On first run, Surf asks whether to start when you sign in. Change that choice
+from Settings at any time. Starting Surf while it is already running simply
+opens the existing Settings page.
 
 The app is currently unsigned. Windows SmartScreen or macOS Gatekeeper may
 show a warning until signed release builds are available.

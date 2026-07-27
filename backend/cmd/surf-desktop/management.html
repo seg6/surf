@@ -88,6 +88,10 @@
     .password-field input { padding-right: 70px; }
     .reveal { position: absolute; right: 8px; bottom: 7px; padding: 6px 8px; border: 0; background: transparent; color: var(--blue-bright); cursor: pointer; font-size: 11px; }
     .form-actions { display: flex; gap: 10px; margin-top: 20px; }
+    .check-row { display: flex; grid-template-columns: none; align-items: center; gap: 9px; margin-top: 14px; }
+    .check-row input { width: auto; }
+    .first-run { display: none; margin-bottom: 12px; border-color: var(--blue); }
+    .first-run.show { display: block; }
     .note { color: var(--quiet); font-size: 11px; line-height: 1.5; margin-top: 14px; }
     details.panel { margin-top: 12px; padding: 0; }
     details > summary {
@@ -149,6 +153,11 @@
           </div>
       </div>
 
+      <div class="panel first-run" id="first-run">
+        <h2>Start Surf automatically?</h2>
+        <p class="panel-copy">Surf must be running for the iPad to connect. Choose below, then save your settings.</p>
+      </div>
+
       <div class="metrics">
           <div class="metric"><div class="metric-label">Stream rate</div><div class="metric-value"><span id="metric-fps">—</span><span class="metric-unit">fps</span></div></div>
           <div class="metric"><div class="metric-label">Connected clients</div><div class="metric-value" id="metric-clients">—</div></div>
@@ -167,6 +176,7 @@
               </label>
               <label>Port<input id="port" name="port" type="number" min="1" max="65535" required></label>
             </div>
+            <label class="check-row"><input id="start-at-login" name="startAtLogin" type="checkbox">Start Surf when I sign in</label>
             <div class="form-actions"><button class="button primary" type="submit">Save &amp; restart</button><button class="button secondary" id="copy-settings-password" type="button">Copy password</button></div>
           </form>
         </div>
@@ -219,6 +229,8 @@
       $('lan-address').textContent = config.lanURL || `Port ${config.port} · no LAN address detected`;
       $('password').value = config.password;
       $('port').value = config.port;
+      $('start-at-login').checked = Boolean(config.startAtLogin);
+      $('first-run').classList.toggle('show', !config.startupChoiceMade);
     }
     function setOnline(online) {
       $('hero-status').classList.toggle('offline', !online);

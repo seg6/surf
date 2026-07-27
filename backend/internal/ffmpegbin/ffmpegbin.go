@@ -71,6 +71,19 @@ func Ensure(home string) (string, error) {
 	if executableOK(path) {
 		return path, nil
 	}
+	if data := embeddedExecutable(); len(data) != 0 {
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			return "", err
+		}
+		temp := path + ".part"
+		if err := os.WriteFile(temp, data, 0o755); err != nil {
+			return "", err
+		}
+		if err := os.Rename(temp, path); err != nil {
+			return "", err
+		}
+		return path, nil
+	}
 	if os.Getenv("SURF_FFMPEG_DOWNLOAD") == "0" {
 		return "", fmt.Errorf("FFmpeg runtime is not installed at %s and SURF_FFMPEG_DOWNLOAD=0; set FFMPEG", path)
 	}

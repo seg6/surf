@@ -40,12 +40,14 @@ type Manifest struct {
 	Version  string           `json:"version"`
 	Protocol string           `json:"protocol"`
 	Assets   map[string]Asset `json:"assets"`
+	Packages map[string]Asset `json:"packages,omitempty"`
 	Client   *ClientAsset     `json:"client,omitempty"`
 }
 
 type Release struct {
 	Manifest Manifest
 	Asset    Asset
+	Package  Asset
 	Newer    bool
 }
 
@@ -84,7 +86,21 @@ func (c Client) Check(ctx context.Context, currentVersion string) (Release, erro
 	if !ok || asset.URL == "" || asset.SHA256 == "" || asset.Size <= 0 {
 		return Release{}, fmt.Errorf("release has no asset for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
-	return Release{Manifest: manifest, Asset: asset, Newer: CompareVersions(manifest.Version, currentVersion) > 0}, nil
+	return Release{
+		Manifest: manifest, Asset: asset, Package: manifest.Packages[runtime.GOOS+"-"+runtime.GOARCH],
+		Newer: CompareVersions(manifest.Version, currentVersion) > 0,
+	}, nil
+}
+
+// DownloadAsset downloads and verifies a release payload without unpacking it.
+func (c Client) DownloadAsset(ctx context.Context, asset Asset, destination string) error {
+	if asset.URL == "" || asset.Name == "" || asset.Size <= 0 || asset.SHA256 == "" {
+		return errors.New("invalid release asset")
+	}
+	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
+		return err
+	}
+	return c.download(ctx, asset, destination)
 }
 
 func (c Client) DownloadExecutable(ctx context.Context, release Release, directory string) (string, error) {

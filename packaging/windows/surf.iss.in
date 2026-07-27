@@ -1,0 +1,36 @@
+#define SurfVersion "@VERSION@"
+#define SurfSource "@SOURCE@"
+
+[Setup]
+AppId={{7E96A844-98FB-49C7-A682-B525083975E0}
+AppName=Surf
+AppVersion={#SurfVersion}
+AppPublisher=Surf
+DefaultDirName={localappdata}\Programs\Surf
+DefaultGroupName=Surf
+PrivilegesRequired=lowest
+OutputDir=@OUTPUT_DIR@
+OutputBaseFilename=surf-{#SurfVersion}-windows-amd64-setup
+Compression=lzma2
+SolidCompression=yes
+CloseApplications=yes
+UninstallDisplayIcon={app}\surf.exe
+WizardStyle=modern
+
+[Files]
+Source: "{#SurfSource}\surf.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SurfSource}\README.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SurfSource}\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
+
+[Icons]
+Name: "{group}\Surf"; Filename: "{app}\surf.exe"
+Name: "{group}\Uninstall Surf"; Filename: "{uninstallexe}"
+
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "Surf"; Flags: uninsdeletevalue dontcreatekey
+
+[Run]
+Filename: "{app}\surf.exe"; Description: "Launch Surf"; Flags: nowait postinstall skipifsilent
+
+[UninstallRun]
+Filename: "{cmd}"; Parameters: "/C taskkill /IM surf.exe /F"; Flags: runhidden; RunOnceId: "StopSurf"
