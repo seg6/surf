@@ -21,7 +21,7 @@ still experimental.
 The main test target is the original iPad mini on iOS 6.1.3. Other iOS 6 iPads,
 iPhones, and iPods may work, but layout and performance are less tested.
 
-The video/browsing backend supports Linux x86-64, Windows x86-64, and macOS
+The video/browsing backend supports Linux x86-64 and ARM64, Windows x86-64, and macOS
 Intel/Apple Silicon. It prefers an installed Chrome or Chromium and otherwise
 installs a verified ungoogled-chromium release into `SURF_HOME`. Release
 packages include the tested FFmpeg runtime. Audio capture currently requires Linux plus
