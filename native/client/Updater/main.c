@@ -15,6 +15,8 @@ static const char *source_path = "/var/mobile/Library/Surf/update.deb";
 static const char *safe_path = "/tmp/surf-update.deb";
 static const char *result_path = "/var/mobile/Library/Surf/update-result";
 static const char *result_temp_path = "/var/mobile/Library/Surf/update-result.tmp";
+static const char *installed_helper = "/usr/libexec/surf-update-v2";
+static const char *runner_prefix = "/tmp/surf-update-v2.";
 
 static void write_result(const char *stage, int result, const char *version, const char *hash) {
     unlink(result_temp_path);
@@ -37,6 +39,51 @@ static void write_result(const char *stage, int result, const char *version, con
     }
     close(fd);
     unlink(result_temp_path);
+}
+
+static int reexec_private_copy(char **argv) {
+    if (strncmp(argv[0], runner_prefix, strlen(runner_prefix)) == 0) return 0;
+    int in = open(installed_helper, O_RDONLY | O_NOFOLLOW);
+    if (in < 0) return errno;
+    char runner[128];
+    snprintf(runner, sizeof(runner), "%s%ld", runner_prefix, (long)getpid());
+    unlink(runner);
+    int out = open(runner, O_CREAT | O_EXCL | O_WRONLY | O_NOFOLLOW, 0700);
+    if (out < 0) {
+        int result = errno;
+        close(in);
+        return result;
+    }
+    char buffer[65536];
+    ssize_t count;
+    int result = 0;
+    while ((count = read(in, buffer, sizeof(buffer))) > 0) {
+        char *cursor = buffer;
+        while (count > 0) {
+            ssize_t written = write(out, cursor, (size_t)count);
+            if (written <= 0) {
+                result = errno ? errno : EIO;
+                break;
+            }
+            cursor += written;
+            count -= written;
+        }
+        if (result) break;
+    }
+    if (count < 0 && !result) result = errno;
+    if (!result && fsync(out) != 0) result = errno;
+    if (!result && fchmod(out, 0700) != 0) result = errno;
+    close(out);
+    close(in);
+    if (result) {
+        unlink(runner);
+        return result;
+    }
+    argv[0] = runner;
+    execve(runner, argv, environ);
+    result = errno;
+    unlink(runner);
+    return result;
 }
 
 static int copy_package(const char *source) {
@@ -130,6 +177,11 @@ int main(int argc, char **argv) {
         write_result("privilege", 3, argv[3], argv[2]);
         return 3;
     }
+    int bootstrap_result = reexec_private_copy(argv);
+    if (bootstrap_result) {
+        write_result("bootstrap", bootstrap_result, argv[3], argv[2]);
+        return bootstrap_result;
+    }
     const char *stage = "copy";
     int result = copy_package(argv[1]);
     if (!result) {
@@ -152,5 +204,6 @@ int main(int argc, char **argv) {
     if (!result) stage = "complete";
     write_result(stage, result, argv[3], argv[2]);
     unlink(safe_path);
+    if (strncmp(argv[0], runner_prefix, strlen(runner_prefix)) == 0) unlink(argv[0]);
     return result;
 }
