@@ -9,13 +9,11 @@ func clearConfigEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
 		"SURF_HOME", "BIND_ADDR", "PORT", "CHROME", "START_URL",
-		"PROFILE", "VW", "VH", "XFB_W", "XFB_H", "QUALITY", "MOTION_QUALITY",
+		"PROFILE", "VW", "VH", "QUALITY", "MOTION_QUALITY",
 		"SHARP_QUALITY", "SETTLE_MS", "AUTH_DAYS", "DOWNLOADS", "UPLOADS",
-		"SURF_DISPLAY", "DISPLAY", "WAYLAND_DISPLAY", "XDG_SESSION_TYPE",
-		"GDK_BACKEND", "QT_QPA_PLATFORM", "SDL_VIDEODRIVER", "CLUTTER_BACKEND",
-		"X_OUTPUT", "PULSE_SERVER", "PULSE_SINK",
-		"AUDIO_SOURCE", "FFMPEG", "XVFB", "XRANDR", "PULSEAUDIO", "PACTL",
-		"SURF_MANAGE_DISPLAY", "SURF_MANAGE_PULSE", "SURF_ENSURE_PULSE_SINK",
+		"PULSE_SERVER", "PULSE_SINK",
+		"AUDIO_SOURCE", "FFMPEG", "PULSEAUDIO", "PACTL",
+		"SURF_MANAGE_PULSE", "SURF_ENSURE_PULSE_SINK",
 		"CHROME_NO_SANDBOX", "SURF_PASSWORD",
 		"STREAM_FPS", "STREAM_SCALE", "STREAM_BITRATE", "STREAM_MAXRATE",
 		"STREAM_BUFSIZE",
@@ -41,18 +39,6 @@ func envMap(env []string) map[string]string {
 func requireChildEnv(t *testing.T, cfg *Config, want map[string]string) {
 	t.Helper()
 	got := envMap(cfg.ChildEnv)
-	for k, v := range map[string]string{
-		"WAYLAND_DISPLAY":  "",
-		"XDG_SESSION_TYPE": "x11",
-		"GDK_BACKEND":      "x11",
-		"QT_QPA_PLATFORM":  "xcb",
-		"SDL_VIDEODRIVER":  "x11",
-		"CLUTTER_BACKEND":  "x11",
-	} {
-		if got[k] != v {
-			t.Fatalf("ChildEnv[%s]=%q, want %q in %v", k, got[k], v, cfg.ChildEnv)
-		}
-	}
 	for k, v := range want {
 		if got[k] != v {
 			t.Fatalf("ChildEnv[%s]=%q, want %q in %v", k, got[k], v, cfg.ChildEnv)
@@ -92,10 +78,10 @@ func TestLoadDefaultsStartPrivatePulseWhenNoServerIsAvailable(t *testing.T) {
 	if cfg.ChromePath != "chromium" {
 		t.Fatalf("ChromePath=%q", cfg.ChromePath)
 	}
-	if cfg.ChromeNoSandbox || !cfg.ManageDisplay || !cfg.ManagePulse || cfg.EnsurePulseSink {
-		t.Fatalf("flags noSandbox=%t manageDisplay=%t managePulse=%t ensurePulseSink=%t", cfg.ChromeNoSandbox, cfg.ManageDisplay, cfg.ManagePulse, cfg.EnsurePulseSink)
+	if cfg.ChromeNoSandbox || !cfg.ManagePulse || cfg.EnsurePulseSink {
+		t.Fatalf("flags noSandbox=%t managePulse=%t ensurePulseSink=%t", cfg.ChromeNoSandbox, cfg.ManagePulse, cfg.EnsurePulseSink)
 	}
-	requireChildEnv(t, cfg, map[string]string{"DISPLAY": ":99", "PULSE_SERVER": "unix:/tmp/pulse/native", "PULSE_SINK": "surf_output"})
+	requireChildEnv(t, cfg, map[string]string{"PULSE_SERVER": "unix:/tmp/pulse/native", "PULSE_SINK": "surf_output"})
 }
 
 func TestLoadUsesExistingPulseServerByDefault(t *testing.T) {
@@ -110,7 +96,7 @@ func TestLoadUsesExistingPulseServerByDefault(t *testing.T) {
 	if cfg.ManagePulse || !cfg.EnsurePulseSink {
 		t.Fatalf("pulse flags managePulse=%t ensurePulseSink=%t", cfg.ManagePulse, cfg.EnsurePulseSink)
 	}
-	requireChildEnv(t, cfg, map[string]string{"DISPLAY": ":99", "PULSE_SINK": "surf_output"})
+	requireChildEnv(t, cfg, map[string]string{"PULSE_SINK": "surf_output"})
 	if cfg.Profile != filepath.Join(home, "profile") {
 		t.Fatalf("Profile=%q", cfg.Profile)
 	}
@@ -172,7 +158,7 @@ func TestLoadForDiagnosticsDoesNotRequireSurfPassword(t *testing.T) {
 }
 
 func TestRefreshChildEnv(t *testing.T) {
-	cfg := &Config{Display: ":234", PulseServer: "unix:/tmp/surf/native"}
+	cfg := &Config{PulseServer: "unix:/tmp/surf/native", PulseSink: "surf_output"}
 	cfg.RefreshChildEnv()
-	requireChildEnv(t, cfg, map[string]string{"DISPLAY": ":234", "PULSE_SERVER": "unix:/tmp/surf/native"})
+	requireChildEnv(t, cfg, map[string]string{"PULSE_SERVER": "unix:/tmp/surf/native", "PULSE_SINK": "surf_output"})
 }

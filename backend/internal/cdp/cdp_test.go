@@ -16,6 +16,9 @@ func TestLaunchArgsSandboxDefault(t *testing.T) {
 	if hasArg(args, "--no-sandbox") {
 		t.Fatal("--no-sandbox present when NoSandbox=false")
 	}
+	if !hasArg(args, "--headless=new") {
+		t.Fatalf("missing headless flag: %v", args)
+	}
 	if !hasArg(args, "--user-data-dir=/tmp/profile") || !hasArg(args, "--window-size=1024,768") {
 		t.Fatalf("missing profile/window args: %v", args)
 	}
@@ -31,10 +34,10 @@ func TestLaunchArgsNoSandbox(t *testing.T) {
 	}
 }
 
-func TestLaunchArgsPlatformArgsAppended(t *testing.T) {
-	args := LaunchConfig{Profile: "/tmp/profile", W: 1024, H: 768, PlatformArgs: []string{"--ozone-platform=x11"}}.Args()
-	if !hasArg(args, "--ozone-platform=x11") {
-		t.Fatalf("missing platform arg: %v", args)
+func TestLaunchArgsExtraArgsAppendedBeforeURL(t *testing.T) {
+	args := LaunchConfig{Profile: "/tmp/profile", W: 1024, H: 768, ExtraArgs: []string{"--foo=bar"}}.Args()
+	if !hasArg(args, "--foo=bar") {
+		t.Fatalf("missing extra arg: %v", args)
 	}
 	if args[len(args)-1] != "about:blank" {
 		t.Fatalf("last arg=%q, want about:blank", args[len(args)-1])

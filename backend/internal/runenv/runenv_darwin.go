@@ -1,9 +1,10 @@
 //go:build darwin
 
-// Package runenv's macOS platform runs Chromium directly on the desktop
-// session: no virtual display or audio sink to manage, and no H.264/PCM
-// capture lane yet — the JPEG/CDP screencast lane covers browsing until an
-// avfoundation capture backend lands here.
+// Package runenv's macOS platform needs nothing host-specific yet: Chromium
+// runs headless (see internal/cdp) and the H.264 lane transcodes CDP's own
+// screencast frames instead of grabbing the screen, so there's no
+// display/desktop bring-up needed. The PCM lane is unsupported here for now
+// (no capture source has been wired up).
 package runenv
 
 import "surf-backend/internal/config"
@@ -28,20 +29,5 @@ type darwinHandle struct{}
 
 func (darwinHandle) Shutdown() {}
 
-// ChromeArgs is empty: Chromium uses its normal macOS windowing backend.
-func (darwinHandle) ChromeArgs() []string { return nil }
-
-// VideoCaptureArgs is unsupported for now: nil disables the H.264 lane and
-// callers fall back to the JPEG/CDP screencast.
-func (darwinHandle) VideoCaptureArgs(surface string, w, h, fps int) []string { return nil }
-
 // AudioCaptureArgs is unsupported for now: nil disables the PCM lane.
 func (darwinHandle) AudioCaptureArgs(source string) []string { return nil }
-
-// ResizeSurface is a no-op: there's no virtual display to resize.
-func (darwinHandle) ResizeSurface(w, h int) error { return nil }
-
-// HiddenDesktop is a Windows-only concept: no-op here (macOS's equivalent —
-// LSUIElement + off-screen window position — doesn't need a launch-time
-// surface name the way STARTUPINFO.lpDesktop does).
-func (darwinHandle) HiddenDesktop() string { return "" }
