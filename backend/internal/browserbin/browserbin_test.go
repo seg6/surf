@@ -1,10 +1,13 @@
 package browserbin
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"surf-backend/internal/cdp"
 )
 
 func TestVersionComparison(t *testing.T) {
@@ -75,5 +78,20 @@ func TestManagedDownload(t *testing.T) {
 	}
 	if version == "" || !compatible(path) {
 		t.Fatalf("path=%q version=%q", path, version)
+	}
+	profile := filepath.Join(home, "smoke-profile")
+	client, process, err := cdp.Launch(cdp.LaunchConfig{ChromePath: path, Profile: profile, W: 800, H: 600})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer process.Kill()
+	defer client.Close()
+	raw, err := client.Call("", "Browser.getVersion", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(raw, &result); err != nil || result["product"] == "" {
+		t.Fatalf("Browser.getVersion=%s err=%v", raw, err)
 	}
 }

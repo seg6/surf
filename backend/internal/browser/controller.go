@@ -198,7 +198,7 @@ func (b *Controller) Start() error {
 			UserAgent string `json:"userAgent"`
 		}
 		if json.Unmarshal(raw, &version) == nil {
-			b.userAgent = normalizeHeadlessUserAgent(version.UserAgent)
+			b.userAgent = NormalizeHeadlessUserAgent(version.UserAgent)
 		}
 	}
 	b.source = NewScreencastSource(client, b.onSourceFrame)
