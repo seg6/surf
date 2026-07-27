@@ -2,50 +2,8 @@ package browser
 
 import "testing"
 
-func TestJPEGSizeDebouncerSettlesOnlyAfterConsecutiveFrames(t *testing.T) {
-	var d jpegSizeDebouncer
-
-	// A burst of different transitional sizes must never fire — this is
-	// exactly the storm scenario: every frame differs from the last, so
-	// the run never reaches jpegSizeDebounceFrames.
-	sizes := [][2]int{{1024, 768}, {768, 934}, {768, 576}, {768, 576}, {768, 934}}
-	for i, sz := range sizes {
-		if d.observe(sz[0], sz[1]) {
-			t.Fatalf("frame %d (%v): fired during a noisy transitional burst", i, sz)
-		}
-	}
-
-	// Now it settles: the same size repeats consistently.
-	if d.observe(800, 600) {
-		t.Fatal("fired on the first frame of a new run")
-	}
-	if d.observe(800, 600) {
-		t.Fatal("fired on the second frame of a new run")
-	}
-	if !d.observe(800, 600) {
-		t.Fatal("did not fire on the frame that reaches jpegSizeDebounceFrames")
-	}
-	// Further identical frames must not re-fire for the same settled run.
-	for i := 0; i < 5; i++ {
-		if d.observe(800, 600) {
-			t.Fatalf("re-fired on stable frame %d after already settling", i)
-		}
-	}
-
-	// A genuinely new persistent size must be able to settle again.
-	if d.observe(640, 480) {
-		t.Fatal("fired on the first frame of a second new run")
-	}
-	if d.observe(640, 480) {
-		t.Fatal("fired on the second frame of a second new run")
-	}
-	if !d.observe(640, 480) {
-		t.Fatal("did not fire when a second run reached jpegSizeDebounceFrames")
-	}
-}
-
 func TestVideoResizeMailboxKeepsLatestRequest(t *testing.T) {
-	b := &Browser{videoResizeWake: make(chan struct{}, 1)}
+	b := &Controller{videoResizeWake: make(chan struct{}, 1)}
 	b.requestVideoResize(800, 600, []byte{1}, "old")
 	b.requestVideoResize(1024, 768, []byte{2}, "new")
 

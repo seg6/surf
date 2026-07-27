@@ -8,7 +8,7 @@ on:
 
 jobs:
   backend:
-    name: Backend
+    name: Backend tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,11 +18,49 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
-      - name: Test
-        run: make test
+      - name: Check formatting
+        working-directory: backend
+        run: test -z "$(gofmt -l .)"
+
+      - name: Vet
+        working-directory: backend
+        run: go vet ./...
+
+      - name: Test with race detector
+        working-directory: backend
+        run: go test -race ./...
 
       - name: Build backend tarball
         run: make backend-dist
+
+  backend-cross:
+    name: Backend ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: windows
+            goarch: amd64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Cross-build
+        working-directory: backend
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -trimpath -o "$RUNNER_TEMP/surf-backend" ./cmd/surf-backend
 
   native:
     name: Native package

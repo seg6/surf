@@ -1,12 +1,14 @@
 #import "RBRootViewController.h"
-#import "RBAudioPlayer.h"
 #import "RBChromeBar.h"
 #import "RBConfig.h"
+#import "RBDiagnostics.h"
 #import "RBFindBar.h"
 #import "RBLibraryController.h"
 #import "RBListPopover.h"
 #import "RBReaderController.h"
 #import "RBLog.h"
+#import "RBMediaPipeline.h"
+#import "RBInteractionTracker.h"
 #import "RBOmnibox.h"
 #import "RBProtocol.h"
 #import "RBSession.h"
@@ -15,7 +17,6 @@
 #import "RBSuggestPanel.h"
 #import "RBTabStrip.h"
 #import "RBTheme.h"
-#import "RBVideoDecoder.h"
 
 #import <ImageIO/ImageIO.h>
 #import <MessageUI/MessageUI.h>
@@ -24,7 +25,6 @@
 #include <math.h>
 #include <stdlib.h>
 
-static UIImage *RBDecodeJPEG(NSData *data);
 
 static const CGFloat kRBTopBarHeight = 56.0;
 static const CGFloat kRBTabStripHeight = 34.0;
@@ -32,7 +32,8 @@ static const CGFloat kRBFindBarHeight = 44.0;
 
 @interface RBRootViewController () <UITextFieldDelegate, RBSessionDelegate, RBChromeBarDelegate,
                                     RBOmniboxDelegate, RBTabStripDelegate, RBSuggestPanelDelegate,
-                                    RBFindBarDelegate, RBSettingsDelegate, RBVideoDecoderDelegate,
+                                    RBFindBarDelegate, RBSettingsDelegate, RBMediaPipelineDelegate, RBStreamViewDelegate,
+                                    RBInteractionTrackerDelegate,
                                     UIDocumentInteractionControllerDelegate, UIPopoverControllerDelegate,
                                     UIAlertViewDelegate, UIActionSheetDelegate,
                                     UIImagePickerControllerDelegate, UINavigationControllerDelegate,
@@ -56,24 +57,15 @@ static const CGFloat kRBFindBarHeight = 44.0;
 // Connect flow
 @property(nonatomic, copy) NSString *pendingServerURL;
 @property(nonatomic, copy) NSString *pendingPassword;
-// Frame pipeline
-@property(nonatomic, strong) RBFrame *pendingFrame;
-@property(nonatomic, assign) BOOL decodeBusy;
-@property(nonatomic, assign) NSUInteger framesReceived;
-@property(nonatomic, assign) NSUInteger framesDisplayed;
-@property(nonatomic, assign) CFTimeInterval lastFrameAt;
-@property(nonatomic, assign) CFTimeInterval lastPokeAt;
+// Presentation diagnostics
 @property(nonatomic, assign) CFTimeInterval lastPerfLogAt;
 @property(nonatomic, assign) NSUInteger perfLastFramesDisplayed;
-@property(nonatomic, assign) NSUInteger perfLastFramesReceived;
 @property(nonatomic, assign) NSUInteger perfLastVideoAUs;
 @property(nonatomic, assign) NSUInteger perfLastDecodedFrames;
 @property(nonatomic, assign) NSUInteger perfLastDecodeErrors;
 @property(nonatomic, assign) NSUInteger perfLastVideoSubmitted;
 @property(nonatomic, assign) NSUInteger perfLastVideoCallbacks;
 @property(nonatomic, assign) NSUInteger perfLastVideoDrops;
-@property(nonatomic, assign) double lastDecodeMS;
-@property(nonatomic, assign) double averageDecodeMS;
 // Page state
 @property(nonatomic, assign) BOOL loading;
 @property(nonatomic, assign) BOOL fullscreen;
@@ -93,11 +85,10 @@ static const CGFloat kRBFindBarHeight = 44.0;
 @property(nonatomic, assign) CGPoint longPressStart;
 @property(nonatomic, assign) BOOL longPressMoved;
 // Video lane
-@property(nonatomic, strong) RBVideoDecoder *videoDecoder;
-@property(nonatomic, strong) RBAudioPlayer *audioPlayer;
+@property(nonatomic, strong) RBMediaPipeline *mediaPipeline;
+@property(nonatomic, strong) RBDiagnostics *diagnostics;
 @property(nonatomic, assign) BOOL videoActive;   // server confirmed video-config ok
-@property(nonatomic, assign) BOOL videoRequested; // we sent video:on this connection
-@property(nonatomic, assign) NSUInteger videoAUs;
+@property(nonatomic, assign) BOOL videoStarting; // server is starting the automatic video lane
 // Keyboard avoidance (editable rect, viewport fractions)
 @property(nonatomic, assign) CGRect editableRect;
 @property(nonatomic, assign) BOOL editableHasRect;
@@ -121,14 +112,11 @@ static const CGFloat kRBFindBarHeight = 44.0;
 // Library (chrome rethink) / reader (M1.5)
 @property(nonatomic, strong) RBLibraryController *libraryController;
 @property(nonatomic, assign) BOOL readerPending;
-@property(nonatomic, assign) BOOL readerResumeVideo;
 // Pasteboard banner (M4.2)
 @property(nonatomic, strong) UIAlertView *pasteboardAlert;
+@property(nonatomic, strong) UIAlertView *videoErrorAlert;
 @property(nonatomic, copy) NSString *pasteboardURL;
 // Latency echo (M1.1)
-@property(nonatomic, assign) NSInteger latSeq;
-@property(nonatomic, assign) CFTimeInterval latSentAt;
-@property(nonatomic, assign) double lastRTTMS;
 // Wheel coalescing (M1.3)
 @property(nonatomic, assign) CGFloat wheelAccumX;
 @property(nonatomic, assign) CGFloat wheelAccumY;
@@ -153,8 +141,11 @@ static const CGFloat kRBFindBarHeight = 44.0;
                                                  name:@"RBReaderNavigate" object:nil];
 
     self.streamView = [[RBStreamView alloc] initWithFrame:CGRectZero];
+    self.streamView.presentationDelegate = self;
     [self.view addSubview:self.streamView];
-    self.audioPlayer = [[RBAudioPlayer alloc] init];
+    self.mediaPipeline = [[RBMediaPipeline alloc] init];
+    self.mediaPipeline.delegate = self;
+    self.diagnostics = [[RBDiagnostics alloc] init];
 
     UITapGestureRecognizer *tripleTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggleDebug:)];
     tripleTap.numberOfTapsRequired = 3;
@@ -259,7 +250,6 @@ static const CGFloat kRBFindBarHeight = 44.0;
 - (void)didReceiveMemoryWarning {
     [super didReceiveMemoryWarning];
     [self.tabStrip purgeIconCache];
-    self.pendingFrame = nil;
 }
 
 // ------------------------------------------------------------------- layout
@@ -349,7 +339,14 @@ static const CGFloat kRBFindBarHeight = 44.0;
     [oldSession shutdown];
     self.session = [[RBSession alloc] initWithBaseURL:url];
     self.session.delegate = self;
+    self.session.interactionTracker.delegate = self;
     [self.session startWithPassword:password];
+}
+
+- (void)interactionTracker:(RBInteractionTracker *)tracker
+                 didSendID:(unsigned long long)interactionID {
+    [self.diagnostics traceName:@"interaction_send"
+                         values:@{@"iid": [NSNumber numberWithUnsignedLongLong:interactionID]}];
 }
 
 - (void)presentSettingsAllowingCancel:(BOOL)allowsCancel message:(NSString *)message {
@@ -380,6 +377,14 @@ static const CGFloat kRBFindBarHeight = 44.0;
 
 - (void)settings:(RBSettingsController *)settings setDiagnosticsVisible:(BOOL)visible {
     [self setDebugVisible:visible];
+}
+
+- (void)settingsStartDiagnosticsCapture:(RBSettingsController *)settings {
+    [self.session startDiagnosticsCapture];
+}
+
+- (void)stopLocalDiagnosticsCapture {
+    [self.session uploadDiagnosticsEvents:[self.diagnostics stopCapture]];
 }
 
 - (void)settings:(RBSettingsController *)settings connectToURL:(NSString *)url password:(NSString *)password {
@@ -438,14 +443,12 @@ static const CGFloat kRBFindBarHeight = 44.0;
             [self.view layoutIfNeeded];
             [self sendCurrentViewportSizeForced:YES];
             [self.session sendMessage:@{@"t": @"audio", @"on": @YES}];
-            [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(maybeEnableVideo) object:nil];
-            [self performSelector:@selector(maybeEnableVideo) withObject:nil afterDelay:0.12];
             break;
         case RBSessionStateConnecting:
             self.connectionPill.hidden = NO;
             self.connectionPill.text = @"Connecting…";
             [self leaveVideoMode];
-            [self.audioPlayer stop];
+            [self.mediaPipeline stopAudio];
             break;
         case RBSessionStateRetrying:
             self.connectionPill.hidden = NO;
@@ -456,66 +459,80 @@ static const CGFloat kRBFindBarHeight = 44.0;
             self.connectionPill.hidden = NO;
             self.connectionPill.text = @"Disconnected";
             [self leaveVideoMode];
-            [self.audioPlayer stop];
+            [self.mediaPipeline stopAudio];
             break;
     }
 }
 
 // ------------------------------------------------------------- video lane
 
-- (void)maybeEnableVideo {
-    if (![RBVideoDecoder available]) return;
-    self.videoRequested = YES;
-    [self.session sendMessage:@{@"t": @"video", @"on": @YES}];
-}
-
 // Local-only teardown (reconnects, server switches): the server side is
 // cleaned up by its own disconnect path.
 - (void)leaveVideoMode {
-    if (!self.videoActive && !self.videoRequested) return;
+    if (!self.videoActive && !self.videoStarting) return;
     self.videoActive = NO;
-    self.videoRequested = NO;
+    self.videoStarting = NO;
     self.streamView.videoActive = NO;
-    [self.videoDecoder reset];
+    [self.mediaPipeline stopVideo];
 }
 
 - (void)handleVideoConfig:(NSDictionary *)message {
-    BOOL ok = [[message objectForKey:@"ok"] boolValue];
-    if (!ok) {
-        BOOL hadLane = self.videoActive;
-        [self leaveVideoMode];
-        if (hadLane) [self showToast:@"Video lane lost — using JPEG"];
-        else if (self.videoRequested) [self showToast:@"Video unavailable — using JPEG"];
+    NSString *state = [message objectForKey:@"state"];
+    if ([state isEqualToString:@"starting"]) {
+        self.videoStarting = YES;
         return;
     }
-    if (!self.videoDecoder) {
-        self.videoDecoder = [[RBVideoDecoder alloc] init];
-        self.videoDecoder.delegate = self;
+    if ([state isEqualToString:@"unavailable"]) {
+        [self leaveVideoMode];
+        [self showVideoUnavailable:[[message objectForKey:@"reason"] description]];
+        return;
     }
-    self.videoDecoder.codedWidth = [[message objectForKey:@"w"] intValue] ?: 1024;
-    self.videoDecoder.codedHeight = [[message objectForKey:@"h"] intValue] ?: 768;
-    [self.videoDecoder reset];
+    if (![state isEqualToString:@"ready"] && ![[message objectForKey:@"ok"] boolValue]) return;
+    if (![RBMediaPipeline videoAvailable]) {
+        [self leaveVideoMode];
+        [self showVideoUnavailable:@"videotoolbox-unavailable"];
+        return;
+    }
+    [self.mediaPipeline configureVideoWidth:[[message objectForKey:@"w"] intValue]
+                                     height:[[message objectForKey:@"h"] intValue]];
+    if (self.videoErrorAlert) {
+        [self.videoErrorAlert dismissWithClickedButtonIndex:self.videoErrorAlert.cancelButtonIndex animated:YES];
+        self.videoErrorAlert = nil;
+    }
     self.videoActive = YES;
     self.streamView.videoActive = YES;
-    self.videoAUs = 0;
-    RBLog(@"video: lane up %dx%d", self.videoDecoder.codedWidth, self.videoDecoder.codedHeight);
 }
 
-- (void)videoDecoder:(RBVideoDecoder *)decoder didDecodeImage:(CGImageRef)image {
+- (void)mediaPipeline:(RBMediaPipeline *)pipeline didDecodeImage:(CGImageRef)image
+             metadata:(RBFrameMetadata *)metadata {
+    [self.diagnostics traceName:@"decoded_frame" values:@{@"iid": [NSNumber numberWithUnsignedLongLong:metadata.interactionID]}];
     if (!self.videoActive) return;
-    [self.streamView displayVideoImage:image];
-    self.framesDisplayed++;
-    self.lastFrameAt = CACurrentMediaTime();
+    [self.streamView displayVideoImage:image metadata:metadata];
 }
 
-- (void)videoDecoderDidFail:(RBVideoDecoder *)decoder {
-    RBLog(@"video: decoder gave up, dropping to JPEG lane");
-    [self.session sendMessage:@{@"t": @"video", @"on": @NO}];
+- (void)streamView:(RBStreamView *)streamView didPresentMetadata:(RBFrameMetadata *)metadata {
+    [self.diagnostics traceName:@"presented_frame" values:@{@"iid": [NSNumber numberWithUnsignedLongLong:metadata.interactionID]}];
+    [self.session.interactionTracker didPresentInteractionID:metadata.interactionID];
+}
+
+- (void)mediaPipelineDidFailVideo:(RBMediaPipeline *)pipeline {
+    RBLog(@"video: decoder gave up; explicit retry required");
     [self leaveVideoMode];
-    [self showToast:@"Video decode failed — using JPEG"];
+    [self showVideoUnavailable:@"decoder-failed"];
 }
 
-- (void)videoDecoderNeedsKeyframe:(RBVideoDecoder *)decoder {
+- (void)showVideoUnavailable:(NSString *)reason {
+    if (self.videoErrorAlert) return;
+    NSString *message = [NSString stringWithFormat:@"The browser session is still connected, but H.264 video is unavailable (%@).",
+                         [reason length] ? reason : @"unknown"];
+    self.videoErrorAlert = [[UIAlertView alloc] initWithTitle:@"Video unavailable"
+                                                     message:message delegate:self
+                                           cancelButtonTitle:@"Dismiss"
+                                           otherButtonTitles:@"Retry Video", @"Reconnect", @"Start Diagnostics Capture", nil];
+    [self.videoErrorAlert show];
+}
+
+- (void)mediaPipelineNeedsKeyframe:(RBMediaPipeline *)pipeline {
     [self.session sendMessage:@{@"t": @"reqkeyframe"}];
 }
 
@@ -526,109 +543,22 @@ static const CGFloat kRBFindBarHeight = 44.0;
 // --------------------------------------------------------- incoming frames
 
 - (void)session:(RBSession *)session didReceiveFrameData:(NSData *)data {
-    NSString *error = nil;
-    RBFrame *frame = [RBProtocol frameFromData:data error:&error];
-    if (!frame) {
-        RBLog(@"bad frame: %@", error);
-        [self.session sendReady];
-        return;
-    }
-    if (frame.type == 3) {
-        // H.264 AU: not acked (flow control is IDR-drop based, server side).
-        if (self.videoActive) {
-            if (frame.width > 0 && frame.height > 0 &&
-                (self.videoDecoder.codedWidth != frame.width || self.videoDecoder.codedHeight != frame.height)) {
-                self.videoDecoder.codedWidth = frame.width;
-                self.videoDecoder.codedHeight = frame.height;
-                [self.videoDecoder reset];
-                self.videoAUs = 0;
-                RBLog(@"video: coded size changed to %dx%d", self.videoDecoder.codedWidth, self.videoDecoder.codedHeight);
-            }
-            self.videoAUs++;
-            [self.videoDecoder feedAU:frame.payload idr:(frame.flags & 1) != 0];
-        }
-        return;
-    }
-    if (frame.type == 4) {
-        [self.audioPlayer playPCM:frame.payload];
-        return;
-    }
-    if (frame.type != 1) return;
-    if (self.videoActive) {
-        // Video mode is H.264 only. Any stray JPEG must be acked for the
-        // server's type-1 window, but decoding it causes long A5 stalls.
-        [self.session sendReady];
-        return;
-    }
-    self.framesReceived++;
-    if (self.pendingFrame) {
-        self.pendingFrame = nil;
-        [self.session sendReady];
-    }
-    self.pendingFrame = frame;
-    [self startNextDecodeIfNeeded];
-}
-
-- (void)startNextDecodeIfNeeded {
-    if (self.decodeBusy || !self.pendingFrame) return;
-    RBFrame *frame = self.pendingFrame;
-    self.pendingFrame = nil;
-    self.decodeBusy = YES;
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        CFTimeInterval started = CACurrentMediaTime();
-        UIImage *image = RBDecodeJPEG(frame.payload);
-        double decodeMS = (CACurrentMediaTime() - started) * 1000.0;
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (image) {
-                [CATransaction begin];
-                [CATransaction setDisableActions:YES];
-                [self.streamView displayImage:image width:frame.width height:frame.height];
-                [CATransaction commit];
-                self.framesDisplayed++;
-                self.lastFrameAt = CACurrentMediaTime();
-                self.lastDecodeMS = decodeMS;
-                self.averageDecodeMS = self.averageDecodeMS <= 0.0 ? decodeMS : (self.averageDecodeMS * 0.85 + decodeMS * 0.15);
-            } else {
-                RBLog(@"jpeg decode failed seq=%u bytes=%u", frame.seq, [frame.payload length]);
-            }
-            [self.session sendReady];
-            self.decodeBusy = NO;
-            [self startNextDecodeIfNeeded];
-        });
-    });
-}
-
-static UIImage *RBDecodeJPEG(NSData *data) {
-    CGImageSourceRef source = CGImageSourceCreateWithData((__bridge CFDataRef)data, NULL);
-    if (!source) return nil;
-    CGImageRef image = CGImageSourceCreateImageAtIndex(source, 0, NULL);
-    CFRelease(source);
-    if (!image) return nil;
-
-    size_t width = CGImageGetWidth(image);
-    size_t height = CGImageGetHeight(image);
-    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-    CGContextRef ctx = CGBitmapContextCreate(NULL, width, height, 8, 0, colorSpace, kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little);
-    CGColorSpaceRelease(colorSpace);
-    if (!ctx) {
-        CGImageRelease(image);
-        return nil;
-    }
-    CGContextDrawImage(ctx, CGRectMake(0, 0, width, height), image);
-    CGImageRef decoded = CGBitmapContextCreateImage(ctx);
-    CGContextRelease(ctx);
-    CGImageRelease(image);
-    if (!decoded) return nil;
-    UIImage *out = [UIImage imageWithCGImage:decoded];
-    CGImageRelease(decoded);
-    return out;
+    [self.mediaPipeline consumeFrameData:data];
 }
 
 // ------------------------------------------------------- control messages
 
 - (void)session:(RBSession *)session didReceiveControlMessage:(NSDictionary *)message {
+    if ([self.diagnostics consumeControlMessage:message]) return;
     NSString *t = [message objectForKey:@"t"];
-    if ([t isEqualToString:@"url"]) {
+    if ([t isEqualToString:@"capture-state"]) {
+        if ([[message objectForKey:@"active"] boolValue]) {
+            [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(stopLocalDiagnosticsCapture) object:nil];
+            [self.diagnostics startCapture];
+            // Upload while the backend trace is still accepting client events.
+            [self performSelector:@selector(stopLocalDiagnosticsCapture) withObject:nil afterDelay:29.0];
+        }
+    } else if ([t isEqualToString:@"url"]) {
         NSString *url = [message objectForKey:@"url"];
         if (url) [self.chromeBar.omnibox setURLText:url];
         [self.chromeBar.omnibox setStarred:[[message objectForKey:@"starred"] boolValue]];
@@ -654,11 +584,11 @@ static UIImage *RBDecodeJPEG(NSData *data) {
         [self handleVideoConfig:message];
     } else if ([t isEqualToString:@"audio-config"]) {
         if ([[message objectForKey:@"ok"] boolValue]) {
-            [self.audioPlayer configureSampleRate:[[message objectForKey:@"rate"] intValue]
-                                       channels:[[message objectForKey:@"channels"] intValue]];
+            [self.mediaPipeline configureAudioSampleRate:[[message objectForKey:@"rate"] intValue]
+                                                channels:[[message objectForKey:@"channels"] intValue]];
             RBLog(@"audio: lane up");
         } else {
-            [self.audioPlayer stop];
+            [self.mediaPipeline stopAudio];
             RBLog(@"audio: lane down");
         }
     } else if ([t isEqualToString:@"copytext"]) {
@@ -714,11 +644,6 @@ static UIImage *RBDecodeJPEG(NSData *data) {
         [self handleReaderReply:message];
     } else if ([t isEqualToString:@"history"]) {
         [self.libraryController consumeHistoryReply:message];
-    } else if ([t isEqualToString:@"lat"]) {
-        if (self.latSentAt > 0.0) {
-            self.lastRTTMS = (CACurrentMediaTime() - self.latSentAt) * 1000.0;
-            self.latSentAt = 0.0;
-        }
     }
 }
 
@@ -741,7 +666,6 @@ static UIImage *RBDecodeJPEG(NSData *data) {
     [self hidePageKeyboard];
     [self stopInertia];
     [self hideCopyMenu];
-    [self.streamView hideSharpOverlay];
     CGPoint p = [tap locationInView:self.streamView];
     [self showTapRippleAt:p];
     CGPoint f = [self fractionForPoint:p];
@@ -769,7 +693,6 @@ static UIImage *RBDecodeJPEG(NSData *data) {
     if (pan.state == UIGestureRecognizerStateBegan) {
         [self hidePageKeyboard];
         [self stopInertia];
-        [self.streamView hideSharpOverlay];
         // Edge swipes (M2.6): a pan born on a screen edge is history nav.
         CGFloat w = self.streamView.bounds.size.width;
         self.edgeSwipe = 0;
@@ -787,8 +710,10 @@ static UIImage *RBDecodeJPEG(NSData *data) {
     if (pan.state == UIGestureRecognizerStateChanged) {
         if (self.edgeSwipe != 0) return; // candidate history swipe: no scrolling
         CGSize s = self.streamView.bounds.size;
-        CGFloat dx = -(p.x - self.lastPanPoint.x) / MAX(1.0, s.width);
-        CGFloat dy = -(p.y - self.lastPanPoint.y) / MAX(1.0, s.height);
+        CGFloat localDX = p.x - self.lastPanPoint.x;
+        CGFloat localDY = p.y - self.lastPanPoint.y;
+        CGFloat dx = -localDX / MAX(1.0, s.width);
+        CGFloat dy = -localDY / MAX(1.0, s.height);
         self.lastPanPoint = p;
         // Coalesce at ~30Hz (M1.3): halves the message rate of a flick with
         // no perceptible feel change; the remainder flushes on gesture end.
@@ -853,7 +778,6 @@ static UIImage *RBDecodeJPEG(NSData *data) {
     CGPoint f = [self fractionForPoint:p];
     if (longPress.state == UIGestureRecognizerStateBegan) {
         [self stopInertia];
-        [self.streamView hideSharpOverlay];
         self.longPressStart = p;
         self.longPressMoved = NO;
         // Ask what's under the finger (M2.4); the answer usually lands well
@@ -1368,6 +1292,18 @@ static UIImage *RBDecodeJPEG(NSData *data) {
 }
 
 - (void)alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex {
+    if (alertView == self.videoErrorAlert) {
+        self.videoErrorAlert = nil;
+        if (buttonIndex == 1) {
+            self.videoStarting = YES;
+            [self.session sendMessage:@{@"t": @"video-retry"}];
+        } else if (buttonIndex == 2) {
+            [self connectToURL:self.pendingServerURL password:self.pendingPassword];
+        } else if (buttonIndex == 3) {
+            [self.session startDiagnosticsCapture];
+        }
+        return;
+    }
     if (alertView == self.pasteboardAlert) {
         self.pasteboardAlert = nil;
         if (buttonIndex != alertView.cancelButtonIndex && [self.pasteboardURL length]) {
@@ -1602,23 +1538,10 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
         [self showToast:@"No article found on this page"];
         return;
     }
-    // Park the video lane while reading: local rendering needs no stream.
-    self.readerResumeVideo = self.videoActive || self.videoRequested;
-    if (self.readerResumeVideo) {
-        [self.session sendMessage:@{@"t": @"video", @"on": @NO}];
-        [self leaveVideoMode];
-    }
     RBReaderController *reader = [[RBReaderController alloc]
                                   initWithTitle:[message objectForKey:@"title"]
                                            html:[message objectForKey:@"html"]
                                             url:[message objectForKey:@"url"]];
-    __weak RBRootViewController *weakSelf = self;
-    reader.onDismiss = ^{
-        if (weakSelf.readerResumeVideo) {
-            weakSelf.readerResumeVideo = NO;
-            [weakSelf performSelector:@selector(maybeEnableVideo) withObject:nil afterDelay:0.2];
-        }
-    };
     [self presentViewController:reader animated:YES completion:nil];
 }
 
@@ -1670,7 +1593,8 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
     _debugVisible = debugVisible;
     self.debugLabel.hidden = !debugVisible;
     if (debugVisible) {
-        [self refreshDebugOverlayWithAge:(self.lastFrameAt > 0.0 ? CACurrentMediaTime() - self.lastFrameAt : 0.0)];
+        CFTimeInterval presented = self.streamView.lastPresentationAt;
+        [self refreshDebugOverlayWithAge:(presented > 0.0 ? CACurrentMediaTime() - presented : 0.0)];
         [self.view bringSubviewToFront:self.debugLabel];
     }
 }
@@ -1684,57 +1608,58 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
     if (!self.debugVisible) return;
     NSString *summary = self.debugSummary ?: @"warming up metrics";
     NSString *state = self.session.state == RBSessionStateOpen ? @"open" : (self.session.state == RBSessionStateConnecting ? @"connecting" : @"idle");
-    NSString *pending = self.pendingFrame ? @"pending" : @"clear";
-    self.debugLabel.text = [NSString stringWithFormat:@" %@ %@ %@\n %@\n view %.0fx%.0f age %.1fs rtt %.0fms %@",
+    self.debugLabel.text = [NSString stringWithFormat:@" %@ %@ %@\n %@\n view %.0fx%.0f age %.1fs rtt %.0fms i2p %.0fms",
                             RBNativeVersion,
                             state,
-                            self.videoActive ? @"h264" : @"jpeg",
+                            self.videoActive ? @"h264" : @"video-starting",
                             summary,
                             self.streamView.bounds.size.width,
                             self.streamView.bounds.size.height,
                             age,
-                            self.lastRTTMS,
-                            pending];
+                            self.diagnostics.lastRTTMS,
+                            self.session.interactionTracker.lastInteractionToPresentMS];
 }
 
 - (void)watchdogTick:(NSTimer *)timer {
-    double age = self.lastFrameAt > 0.0 ? CACurrentMediaTime() - self.lastFrameAt : 0.0;
-    if (self.lastFrameAt > 0.0 && age > 1.5 && CACurrentMediaTime() - self.lastPokeAt > 1.0) {
-        self.lastPokeAt = CACurrentMediaTime();
-        [self.session sendMessage:@{@"t": @"poke"}];
-    }
-    // Latency echo (M1.1): only while the overlay is up; one in flight at a time.
-    if (self.debugVisible && self.session.state == RBSessionStateOpen && self.latSentAt <= 0.0) {
-        self.latSeq++;
-        self.latSentAt = CACurrentMediaTime();
-        [self.session sendMessage:@{@"t": @"lat", @"id": [NSNumber numberWithInteger:self.latSeq]}];
+    CFTimeInterval presentedAt = self.streamView.lastPresentationAt;
+    double age = presentedAt > 0.0 ? CACurrentMediaTime() - presentedAt : 0.0;
+    // CDP screencasting is intentionally silent on static pages. Decoder
+    // errors request an IDR directly; elapsed wall time is not a fault signal.
+    // Continuous clock sync is cheap and diagnostics captures need a recent
+    // low-RTT sample even when the overlay has never been opened.
+    if (self.session.state == RBSessionStateOpen) {
+        NSDictionary *probe = [self.diagnostics latencyProbeIfIdle];
+        if (probe) [self.session sendMessage:probe];
     }
 
     CFTimeInterval now = CACurrentMediaTime();
     if (self.lastPerfLogAt <= 0.0) self.lastPerfLogAt = now;
     if (now - self.lastPerfLogAt >= 5.0) {
         double dt = MAX(0.001, now - self.lastPerfLogAt);
-        NSUInteger decoded = self.videoDecoder ? self.videoDecoder.decodedFrames : 0;
-        NSUInteger errors = self.videoDecoder ? self.videoDecoder.decodeErrors : 0;
-        NSUInteger submitted = self.videoDecoder ? self.videoDecoder.submittedAUs : 0;
-        NSUInteger callbacks = self.videoDecoder ? self.videoDecoder.callbackFrames : 0;
-        NSUInteger drops = self.videoDecoder ? self.videoDecoder.droppedAUs : 0;
-        double fps = (self.framesDisplayed - self.perfLastFramesDisplayed) / dt;
-        double rxps = (self.framesReceived - self.perfLastFramesReceived) / dt;
-        double aups = (self.videoAUs - self.perfLastVideoAUs) / dt;
-        double vtDone = (decoded - self.perfLastDecodedFrames) / dt;
-        double vtSubmit = (submitted - self.perfLastVideoSubmitted) / dt;
-        double vtCB = (callbacks - self.perfLastVideoCallbacks) / dt;
-        NSUInteger dropDelta = drops - self.perfLastVideoDrops;
-        NSUInteger errDelta = errors - self.perfLastDecodeErrors;
-        int queued = self.videoDecoder ? self.videoDecoder.queuedAUs : 0;
-        double vtCallMS = self.videoDecoder ? self.videoDecoder.averageSubmitMS : 0.0;
-        double vtCBMS = self.videoDecoder ? self.videoDecoder.averageCallbackMS : 0.0;
-        double wrapMS = self.videoDecoder ? self.videoDecoder.averageWrapMS : 0.0;
-        self.debugSummary = [NSString stringWithFormat:@"%@ fps %.1f rx %.1f au %.1f vt %.1f/%.1f/%.1f q %d d+%u e+%u ms %.1f/%.1f/%.1f",
-                             self.videoActive ? @"video" : @"jpeg",
+        NSUInteger decoded = self.mediaPipeline.decodedFrames;
+        NSUInteger errors = self.mediaPipeline.decodeErrors;
+        NSUInteger submitted = self.mediaPipeline.submittedAUs;
+        NSUInteger callbacks = self.mediaPipeline.callbackFrames;
+        NSUInteger drops = self.mediaPipeline.droppedAUs;
+        NSUInteger presented = self.streamView.presentedFrames;
+        double fps = presented >= self.perfLastFramesDisplayed ? (presented - self.perfLastFramesDisplayed) / dt : 0.0;
+        double aups = self.mediaPipeline.videoAUs >= self.perfLastVideoAUs ?
+            (self.mediaPipeline.videoAUs - self.perfLastVideoAUs) / dt : 0.0;
+        double vtDone = decoded >= self.perfLastDecodedFrames ?
+            (decoded - self.perfLastDecodedFrames) / dt : 0.0;
+        double vtSubmit = submitted >= self.perfLastVideoSubmitted ?
+            (submitted - self.perfLastVideoSubmitted) / dt : 0.0;
+        double vtCB = callbacks >= self.perfLastVideoCallbacks ?
+            (callbacks - self.perfLastVideoCallbacks) / dt : 0.0;
+        NSUInteger dropDelta = drops >= self.perfLastVideoDrops ? drops - self.perfLastVideoDrops : drops;
+        NSUInteger errDelta = errors >= self.perfLastDecodeErrors ? errors - self.perfLastDecodeErrors : errors;
+        int queued = self.mediaPipeline.queuedAUs;
+        double vtCallMS = self.mediaPipeline.averageSubmitMS;
+        double vtCBMS = self.mediaPipeline.averageCallbackMS;
+        double wrapMS = self.mediaPipeline.averageWrapMS;
+        self.debugSummary = [NSString stringWithFormat:@"%@ fps %.1f au %.1f vt %.1f/%.1f/%.1f q %d d+%u e+%u ms %.1f/%.1f/%.1f",
+                             self.videoActive ? @"video" : @"starting",
                              fps,
-                             rxps,
                              aups,
                              vtDone,
                              vtSubmit,
@@ -1745,33 +1670,29 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
                              vtCallMS,
                              vtCBMS,
                              wrapMS];
-        RBLog(@"perf lane=%@ fps=%.1f rxps=%.1f aups=%.1f vt_done=%.1f/s vt_submit=%.1f/s vt_cb=%.1f/s q=%d drops+%u vt_call=%.2f/%.2fms vt_cb_ms=%.2f/%.2f wrap=%.2f/%.2fms jpeg=%.1f/%.1fms errs+%u age=%.2fs pending=%@ view=%.0fx%.0f",
-              self.videoActive ? @"video" : @"jpeg",
+        RBLog(@"perf lane=%@ presented_fps=%.1f aups=%.1f vt_done=%.1f/s q=%d drops+%u overwritten=%u max_gap=%.1fms vt_submit=%.2fms vt_callback=%.2fms wrap=%.2fms errs+%u audio_q=%d audio_drop=%u audio_underrun=%u audio_restart=%u age=%.2fs view=%.0fx%.0f",
+              self.videoActive ? @"video" : @"starting",
               fps,
-              rxps,
               aups,
               vtDone,
-              vtSubmit,
-              vtCB,
               queued,
               (unsigned)dropDelta,
-              self.videoDecoder ? self.videoDecoder.lastSubmitMS : 0.0,
-              self.videoDecoder ? self.videoDecoder.averageSubmitMS : 0.0,
-              self.videoDecoder ? self.videoDecoder.lastCallbackMS : 0.0,
-              self.videoDecoder ? self.videoDecoder.averageCallbackMS : 0.0,
-              self.videoDecoder ? self.videoDecoder.lastWrapMS : 0.0,
-              self.videoDecoder ? self.videoDecoder.averageWrapMS : 0.0,
-              self.lastDecodeMS,
-              self.averageDecodeMS,
+              (unsigned)self.streamView.overwrittenVideoFrames,
+              self.streamView.maximumPresentationGapMS,
+              self.mediaPipeline.averageSubmitMS,
+              self.mediaPipeline.averageCallbackMS,
+              self.mediaPipeline.averageWrapMS,
               (unsigned)errDelta,
+              self.mediaPipeline.audioQueuedBuffers,
+              (unsigned)self.mediaPipeline.audioDroppedPCM,
+              (unsigned)self.mediaPipeline.audioUnderruns,
+              (unsigned)self.mediaPipeline.audioRestartCount,
               age,
-              self.pendingFrame ? @"yes" : @"no",
               self.streamView.bounds.size.width,
               self.streamView.bounds.size.height);
         self.lastPerfLogAt = now;
-        self.perfLastFramesDisplayed = self.framesDisplayed;
-        self.perfLastFramesReceived = self.framesReceived;
-        self.perfLastVideoAUs = self.videoAUs;
+        self.perfLastFramesDisplayed = presented;
+        self.perfLastVideoAUs = self.mediaPipeline.videoAUs;
         self.perfLastDecodedFrames = decoded;
         self.perfLastDecodeErrors = errors;
         self.perfLastVideoSubmitted = submitted;

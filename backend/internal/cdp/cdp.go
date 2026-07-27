@@ -79,17 +79,12 @@ type LaunchConfig struct {
 	ExtraArgs  []string
 }
 
-// Args builds Chromium's headless launch flags. Headless mode means every
-// platform launches identically — no display server, no virtual/hidden
-// desktop, no window-management flags at all — and it's still fully
-// CDP-drivable: confirmed live that Page.startScreencast, mouse/keyboard
-// input dispatch, and Runtime.evaluate all work exactly the same as headful.
+// Args builds the managed Chrome headless-new launch flags.
 func (cfg LaunchConfig) Args() []string {
 	args := []string{
-		"--headless=new",
 		"--remote-debugging-port=0",
 		"--user-data-dir=" + cfg.Profile,
-		"--disable-dev-shm-usage", "--disable-gpu",
+		"--disable-dev-shm-usage",
 		"--disable-blink-features=AutomationControlled",
 		"--disable-popup-blocking", "--no-first-run", "--no-default-browser-check",
 		"--disable-session-crashed-bubble", "--hide-crash-restore-bubble", "--noerrdialogs",
@@ -111,12 +106,12 @@ func (cfg LaunchConfig) Args() []string {
 		"--disable-ipc-flooding-protection",
 		"--disable-breakpad", "--disable-component-update",
 		"--disable-default-apps", "--disable-prompt-on-repost",
-		"--test-type",
 		"--allow-pre-commit-input", "--force-color-profile=srgb",
 		"--metrics-recording-only", "--password-store=basic", "--use-mock-keychain",
 		"--disable-features=Translate,MediaRouter,AcceptCHFrame,OptimizationHints",
 		fmt.Sprintf("--window-size=%d,%d", cfg.W, cfg.H),
 	}
+	args = append(args, "--disable-gpu", "--test-type", "--headless=new")
 	if cfg.NoSandbox {
 		args = append(args, "--no-sandbox")
 	}
@@ -161,33 +156,6 @@ func Launch(cfg LaunchConfig) (*Client, *os.Process, error) {
 		return nil, nil, err
 	}
 	return c, started.Process, nil
-}
-
-func (c *Client) ForceFullscreen() {
-	var target struct {
-		TargetInfos []struct {
-			TargetID string `json:"targetId"`
-			Type     string `json:"type"`
-		} `json:"targetInfos"`
-	}
-	raw, err := c.Call("", "Target.getTargets", nil)
-	if err != nil || json.Unmarshal(raw, &target) != nil {
-		return
-	}
-	for _, info := range target.TargetInfos {
-		if info.Type != "page" {
-			continue
-		}
-		var win struct {
-			WindowID int `json:"windowId"`
-		}
-		raw, err := c.Call("", "Browser.getWindowForTarget", map[string]any{"targetId": info.TargetID})
-		if err != nil || json.Unmarshal(raw, &win) != nil || win.WindowID == 0 {
-			continue
-		}
-		c.Send("", "Browser.setWindowBounds", map[string]any{"windowId": win.WindowID, "bounds": map[string]any{"windowState": "fullscreen"}})
-		return
-	}
 }
 
 // waitForURL prefers the stderr banner; the DevToolsActivePort file in the
@@ -394,6 +362,33 @@ func (c *Client) Call(sessionID, method string, params any) (json.RawMessage, er
 // (acks, best-effort input dispatch during navigation, ...).
 func (c *Client) Send(sessionID, method string, params any) {
 	go func() { _, _ = c.Call(sessionID, method, params) }()
+}
+
+// Dispatch writes a command in caller order without waiting for its response.
+// It is intended for high-rate input, where Chromium's receipt order matters
+// but synchronously waiting for an acknowledgement only stalls the transport
+// reader and lets newer touch events pile up behind an old one.
+func (c *Client) Dispatch(sessionID, method string, params any) error {
+	var raw json.RawMessage
+	if params != nil {
+		b, err := json.Marshal(params)
+		if err != nil {
+			return err
+		}
+		raw = b
+	}
+	c.mu.Lock()
+	c.nextID++
+	id := c.nextID
+	c.mu.Unlock()
+	b, err := json.Marshal(envelope{ID: id, Method: method, Params: raw, SessionID: sessionID})
+	if err != nil {
+		return err
+	}
+	c.writeMu.Lock()
+	err = c.conn.WriteMessage(websocket.TextMessage, b)
+	c.writeMu.Unlock()
+	return err
 }
 
 func (c *Client) Close() { _ = c.conn.Close() }

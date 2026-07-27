@@ -1,49 +1,84 @@
 package browser
 
 import (
+	"encoding/json"
+	"sync"
 	"testing"
-
-	"surf-backend/internal/config"
-	"surf-backend/internal/stream"
-	"surf-backend/internal/ws"
+	"time"
 )
 
-// TestDesiredCastIgnoresMotionWithVideoSubscriber guards a real fix: with a
-// video subscriber attached, motion-driven quality switching must not fire,
-// because each switch was forcing ensureCast to fully stop+restart the CDP
-// screencast — the H.264 lane's only frame source now — interrupting it.
-// Confirmed live: real touch input (discrete swipes with pauses, unlike a
-// perfectly continuous synthetic scroll) hit the motion/settle transition
-// constantly, and the video feed barely updated as a result.
-func TestDesiredCastIgnoresMotionWithVideoSubscriber(t *testing.T) {
-	b := &Browser{
-		cfg:   &config.Config{Quality: 100, MotionQuality: 85},
-		viewW: 800, viewH: 600,
-		videoSubs: map[*ws.Client]*stream.Sub{},
-	}
-	tab := &Tab{ID: 1, motion: true}
+type fakeSourceCDP struct {
+	mu       sync.Mutex
+	calls    []string
+	started  chan string
+	release  chan struct{}
+	blockOne sync.Once
+}
 
-	// No video subscriber yet: motion should still drop quality, same as
-	// before this fix — this behavior is unchanged for JPEG-only clients.
-	q, w, h := b.desiredCastLocked(tab)
-	if q != 85 || w != 800 || h != 600 {
-		t.Fatalf("no subscriber: got q=%d %dx%d, want 85 800x600", q, w, h)
+func (f *fakeSourceCDP) Call(session, method string, _ any) (json.RawMessage, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, session+":"+method)
+	f.mu.Unlock()
+	if method == "Page.startScreencast" {
+		select {
+		case f.started <- session:
+		default:
+		}
+		f.blockOne.Do(func() { <-f.release })
 	}
+	return nil, nil
+}
 
-	// A video subscriber attaches: motion must now be ignored and quality
-	// stays at the cheaper video-source value so ensureCast never restarts
-	// the cast just because the user is interacting.
-	client := &ws.Client{}
-	b.videoSubs[client] = &stream.Sub{}
-	q, w, h = b.desiredCastLocked(tab)
-	if q != 85 || w != 800 || h != 600 {
-		t.Fatalf("with subscriber: got q=%d %dx%d, want 85 800x600 (stable video source)", q, w, h)
+func (f *fakeSourceCDP) Dispatch(string, string, any) error { return nil }
+
+func TestScreencastSourceRejectsStaleStartCompletion(t *testing.T) {
+	fake := &fakeSourceCDP{
+		started: make(chan string, 4),
+		release: make(chan struct{}),
 	}
-
-	// Once the subscriber leaves, motion-based switching resumes.
-	delete(b.videoSubs, client)
-	q, _, _ = b.desiredCastLocked(tab)
-	if q != 85 {
-		t.Fatalf("after subscriber leaves: got q=%d, want 85 (motion switching resumed)", q)
+	source := NewScreencastSource(fake, func(SourceFrame) {})
+	defer source.Close()
+	source.Configure(1, "old", 100, 800, 600)
+	select {
+	case session := <-fake.started:
+		if session != "old" {
+			t.Fatalf("first start session = %q", session)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("old source did not start")
+	}
+	source.Configure(2, "new", 100, 1024, 768)
+	close(fake.release)
+	select {
+	case session := <-fake.started:
+		if session != "new" {
+			t.Fatalf("second start session = %q", session)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("new source did not start")
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		source.mu.Lock()
+		current := source.current
+		source.mu.Unlock()
+		if current.enabled && current.session == "new" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("current source = %+v", current)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	foundStop := false
+	for _, call := range fake.calls {
+		if call == "old:Page.stopScreencast" {
+			foundStop = true
+		}
+	}
+	if !foundStop {
+		t.Fatalf("stale source was not stopped: %v", fake.calls)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"surf-backend/internal/proc"
@@ -17,7 +18,10 @@ const (
 	channels   = 1
 	chunkMS    = 20
 	chunkBytes = sampleRate * channels * 2 * chunkMS / 1000
-	queueCap   = 20
+	// Fan-out is only a handoff to ClientTransport, not another jitter
+	// buffer. Keeping one newest packet prevents two independent 250ms
+	// reservoirs from accumulating audible lag.
+	queueCap   = 1 // one 20ms packet; overflow drops the oldest below
 	lingerStop = 5 * time.Second
 )
 
@@ -44,10 +48,10 @@ type Chunk struct {
 
 type Sub struct {
 	C chan Chunk
-	s *Streamer
+	s *AudioPipeline
 }
 
-type Streamer struct {
+type AudioPipeline struct {
 	cfg       Config
 	mu        sync.Mutex
 	subs      map[*Sub]struct{}
@@ -55,25 +59,30 @@ type Streamer struct {
 	running   bool
 	seq       uint32
 	stopTimer *time.Timer
+	drops     atomic.Uint64
 }
 
-func New(cfg Config) *Streamer {
+func (s *AudioPipeline) Stats() map[string]uint64 {
+	return map[string]uint64{"audio_fanout_drops": s.drops.Load()}
+}
+
+func New(cfg Config) *AudioPipeline {
 	if cfg.FFmpegPath == "" {
 		cfg.FFmpegPath = "ffmpeg"
 	}
 	if cfg.Source == "" {
 		cfg.Source = "surf_output.monitor"
 	}
-	return &Streamer{cfg: cfg, subs: map[*Sub]struct{}{}}
+	return &AudioPipeline{cfg: cfg, subs: map[*Sub]struct{}{}}
 }
 
-func (s *Streamer) Config() Config {
+func (s *AudioPipeline) Config() Config {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.cfg
 }
 
-func (s *Streamer) Subscribe() *Sub {
+func (s *AudioPipeline) Subscribe() *Sub {
 	sub := &Sub{C: make(chan Chunk, queueCap), s: s}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -109,7 +118,7 @@ func (sub *Sub) Close() {
 	}
 }
 
-func (s *Streamer) startLocked() {
+func (s *AudioPipeline) startLocked() {
 	var captureArgs []string
 	if s.cfg.CaptureArgs != nil {
 		captureArgs = s.cfg.CaptureArgs(s.cfg.Source)
@@ -144,7 +153,7 @@ func (s *Streamer) startLocked() {
 	go s.readLoop(stdout, cmd)
 }
 
-func (s *Streamer) readLoop(r io.Reader, cmd *exec.Cmd) {
+func (s *AudioPipeline) readLoop(r io.Reader, cmd *exec.Cmd) {
 	buf := make([]byte, chunkBytes)
 	for {
 		if _, err := io.ReadFull(r, buf); err != nil {
@@ -162,7 +171,18 @@ func (s *Streamer) readLoop(r io.Reader, cmd *exec.Cmd) {
 			select {
 			case sub.C <- chunk:
 			default:
-				// Audio should stay live, not buffered; drop if a client lags.
+				// Audio should stay live, not buffered. Discard the oldest
+				// chunk and admit the newest so a slow writer cannot build a
+				// delay that only reconnecting clears.
+				select {
+				case <-sub.C:
+					s.drops.Add(1)
+				default:
+				}
+				select {
+				case sub.C <- chunk:
+				default:
+				}
 			}
 		}
 		s.mu.Unlock()
@@ -195,7 +215,7 @@ func logStderr(r io.Reader) {
 	}
 }
 
-func (s *Streamer) stopLocked() {
+func (s *AudioPipeline) stopLocked() {
 	if s.cmd != nil && s.cmd.Process != nil {
 		proc.Kill(s.cmd.Process.Pid)
 	}
@@ -203,14 +223,14 @@ func (s *Streamer) stopLocked() {
 	s.cmd = nil
 }
 
-func (s *Streamer) failAllLocked() {
+func (s *AudioPipeline) failAllLocked() {
 	for sub := range s.subs {
 		delete(s.subs, sub)
 		close(sub.C)
 	}
 }
 
-func (s *Streamer) Shutdown() {
+func (s *AudioPipeline) Shutdown() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.stopLocked()

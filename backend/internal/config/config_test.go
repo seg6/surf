@@ -9,8 +9,8 @@ func clearConfigEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
 		"SURF_HOME", "BIND_ADDR", "PORT", "CHROME", "START_URL",
-		"PROFILE", "VW", "VH", "QUALITY", "MOTION_QUALITY",
-		"SHARP_QUALITY", "SETTLE_MS", "AUTH_DAYS", "DOWNLOADS", "UPLOADS",
+		"PROFILE", "VW", "VH", "SOURCE_JPEG_QUALITY",
+		"AUTH_DAYS", "DOWNLOADS", "UPLOADS",
 		"PULSE_SERVER", "PULSE_SINK",
 		"AUDIO_SOURCE", "FFMPEG", "PULSEAUDIO", "PACTL",
 		"SURF_MANAGE_PULSE", "SURF_ENSURE_PULSE_SINK",
@@ -72,11 +72,17 @@ func TestLoadDefaultsStartPrivatePulseWhenNoServerIsAvailable(t *testing.T) {
 	if cfg.Port != 18080 {
 		t.Fatalf("Port=%d, want 18080", cfg.Port)
 	}
+	if cfg.SourceJPEGQuality != 100 {
+		t.Fatalf("SourceJPEGQuality=%d, want 100", cfg.SourceJPEGQuality)
+	}
 	if cfg.Profile != filepath.Join(home, "profile") || cfg.DownloadsDir != filepath.Join(home, "downloads") || cfg.UploadsDir != filepath.Join(home, "uploads") {
 		t.Fatalf("data dirs = %q %q %q", cfg.Profile, cfg.DownloadsDir, cfg.UploadsDir)
 	}
-	if cfg.ChromePath != "chromium" {
-		t.Fatalf("ChromePath=%q", cfg.ChromePath)
+	if cfg.ChromePath != "" {
+		t.Fatalf("ChromePath=%q, want managed runtime selection", cfg.ChromePath)
+	}
+	if cfg.FFmpegPath != "" {
+		t.Fatalf("FFmpegPath=%q, want managed runtime selection", cfg.FFmpegPath)
 	}
 	if cfg.ChromeNoSandbox || !cfg.ManagePulse || cfg.EnsurePulseSink {
 		t.Fatalf("flags noSandbox=%t managePulse=%t ensurePulseSink=%t", cfg.ChromeNoSandbox, cfg.ManagePulse, cfg.EnsurePulseSink)

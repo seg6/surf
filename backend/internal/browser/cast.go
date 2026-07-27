@@ -1,241 +1,260 @@
 package browser
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"log"
-	"strconv"
-	"strings"
+	"sync"
 	"time"
 
-	"surf-backend/internal/protocol"
-	"surf-backend/internal/ws"
+	"surf-backend/internal/cdp"
 )
 
-func clampQuality(q, def int) int {
-	if q <= 0 {
-		q = def
-	}
+type sourceCDP interface {
+	Call(sessionID, method string, params any) (json.RawMessage, error)
+	Dispatch(sessionID, method string, params any) error
+}
+
+// SourceFrame is an immutable frame produced by Chromium. JPEG remains an
+// internal capture representation; only VideoPipeline sees its bytes.
+type SourceFrame struct {
+	Session string
+	JPEG    []byte
+}
+
+type FrameSource interface {
+	Configure(tabID int, session string, quality, maxW, maxH int)
+	Disable(session string)
+	Casting() bool
+	Handle(cdp.Event)
+	Close()
+}
+
+type sourceConfig struct {
+	tabID      int
+	session    string
+	quality    int
+	maxW, maxH int
+	enabled    bool
+}
+
+func clampQuality(q, fallback int) int {
 	if q < 1 {
-		return 1
+		q = fallback
 	}
 	if q > 100 {
-		return 100
+		q = 100
 	}
 	return q
 }
 
-// desiredCastLocked derives the wanted screencast parameters from the tab's
-// motion state: cheaper frames while the user interacts, full quality when
-// still. Always full resolution — the native decode path handles it.
-//
-// While a video subscriber is attached, motion is ignored and quality stays
-// fixed: the H.264 lane transcodes these same screencast frames now, so
-// every motion/settle transition's Page.stopScreencast+startScreencast
-// cycle (below, in ensureCast) would interrupt its frame supply too — and
-// real touch input (discrete swipes with pauses between them, unlike a
-// perfectly continuous synthetic scroll) hits that transition constantly
-// (confirmed live: this was why the video feed barely updated during
-// interaction). x264's own rate control already adapts bitrate to motion;
-// the JPEG-bandwidth-saving reason for this quality switch doesn't apply
-// when nobody's actually consuming the JPEG lane's bytes over the wire.
-// b.mu held by caller.
-func (b *Browser) desiredCastLocked(t *Tab) (q, maxW, maxH int) {
-	if b.hasVideoSubscribers() {
-		// H.264 is already the wire-quality boundary in video mode. Feeding
-		// its encoder q=100 JPEGs made Chromium produce and FFmpeg decode
-		// roughly half-megabyte frames 30 times per second, consuming CPU
-		// needed for browser/tab responsiveness without visible benefit.
-		// Keep one stable q=85 cast for the whole subscription: no expensive
-		// motion/settle restarts, and far less intermediate JPEG work.
-		return clampQuality(b.cfg.MotionQuality, 85), b.viewW, b.viewH
-	}
-	if t.motion {
-		return clampQuality(b.cfg.MotionQuality, 85), b.viewW, b.viewH
-	}
-	return clampQuality(b.cfg.Quality, 100), b.viewW, b.viewH
+// ScreencastSource is the sole owner of Page.start/stopScreencast and capture
+// credits. Desired-state generations ensure a late CDP completion can never
+// revive an old tab or viewport.
+type ScreencastSource struct {
+	cdp     sourceCDP
+	onFrame func(SourceFrame)
+
+	mu         sync.Mutex
+	desired    sourceConfig
+	current    sourceConfig
+	generation uint64
+	wake       chan struct{}
+	done       chan struct{}
+	closeOnce  sync.Once
 }
 
-// ensureCast converges the running screencast onto the desired parameters.
-// One worker per tab; safe to call from anywhere, never blocks the caller.
-func (b *Browser) ensureCast(t *Tab) {
-	b.mu.Lock()
-	if t.recasting {
-		b.mu.Unlock()
-		return
+func NewScreencastSource(client sourceCDP, onFrame func(SourceFrame)) *ScreencastSource {
+	s := &ScreencastSource{
+		cdp: client, onFrame: onFrame,
+		wake: make(chan struct{}, 1),
+		done: make(chan struct{}),
 	}
-	t.recasting = true
-	b.mu.Unlock()
-
-	go func() {
-		defer func() {
-			b.mu.Lock()
-			t.recasting = false
-			b.mu.Unlock()
-		}()
-		for i := 0; i < 6; i++ { // bounded: motion state flapping can't spin us forever
-			// Nobody consuming JPEG or H.264 (the latter is transcoded from
-			// these same screencast frames, so it depends on the cast too):
-			// park it and stop spending CPU on it. ClientConnected /
-			// video-off call ensureCast again to bring it back.
-			if !b.hub.HasCastClient() && !b.hasVideoSubscribers() {
-				b.mu.Lock()
-				casting := t.casting
-				b.mu.Unlock()
-				if casting {
-					b.stopCast(t)
-					log.Printf("cast tab %d parked: no consumers", t.ID)
-				}
-				return
-			}
-			b.mu.Lock()
-			q, maxW, maxH := b.desiredCastLocked(t)
-			done := t.casting && t.castQuality == q && t.castMaxW == maxW
-			active := t.ID == b.activeID
-			b.mu.Unlock()
-			if done || !active {
-				return
-			}
-			b.stopCast(t)
-			if !b.startCast(t, q, maxW, maxH) {
-				return
-			}
-		}
-	}()
+	go s.run()
+	return s
 }
 
-func (b *Browser) startCast(t *Tab, q, maxW, maxH int) bool {
-	b.mu.Lock()
-	s := t.Session
-	b.mu.Unlock()
-	opts := map[string]any{
-		"format": "jpeg", "quality": q,
-		"maxWidth": maxW, "maxHeight": maxH, "everyNthFrame": 1,
-	}
-	var lastErr error
-	for i := 0; i < 15; i++ {
-		if _, err := b.cdp.Call(s, "Page.startScreencast", opts); err == nil {
-			log.Printf("cast tab %d started q=%d max=%dx%d motion=%t", t.ID, q, maxW, maxH, t.motion)
-			b.mu.Lock()
-			t.casting = true
-			t.castQuality = q
-			t.castMaxW = maxW
-			t.castMaxH = maxH
-			b.mu.Unlock()
-			return true
-		} else {
-			lastErr = err
-		}
-		time.Sleep(250 * time.Millisecond)
-	}
-	log.Printf("startCast tab %d failed after retries: %v", t.ID, lastErr)
-	return false
+func (s *ScreencastSource) Close() {
+	s.closeOnce.Do(func() { close(s.done) })
 }
 
-func (b *Browser) stopCast(t *Tab) {
-	b.mu.Lock()
-	s := t.Session
-	b.mu.Unlock()
-	_, _ = b.cdp.Call(s, "Page.stopScreencast", nil)
-	b.mu.Lock()
-	t.casting = false
-	b.mu.Unlock()
+func (s *ScreencastSource) stopCurrent() {
+	s.mu.Lock()
+	current := s.current
+	s.current = sourceConfig{}
+	s.mu.Unlock()
+	if current.enabled {
+		_, _ = s.cdp.Call(current.session, "Page.stopScreencast", nil)
+	}
 }
 
-// beginMotion drops the cast to cheap low-res frames while the user is
-// interacting; once input stops for SettleMS we go back to full resolution
-// and push one sharp screenshot so the final view is crisp.
-func (b *Browser) beginMotion(t *Tab) {
-	b.mu.Lock()
-	wasMotion := t.motion
-	t.motion = true
-	t.settleSeq++
-	seq := t.settleSeq
-	if t.settleTimer != nil {
-		t.settleTimer.Stop()
-	}
-	t.settleTimer = time.AfterFunc(time.Duration(b.cfg.SettleMS)*time.Millisecond, func() {
-		b.mu.Lock()
-		if t.settleSeq != seq {
-			b.mu.Unlock()
-			return
-		}
-		t.motion = false
-		b.mu.Unlock()
-		b.ensureCast(t)
-		b.sendSharpFrame(nil, t)
+func (s *ScreencastSource) Configure(tabID int, session string, quality, maxW, maxH int) {
+	quality = clampQuality(quality, 100)
+	s.setDesired(sourceConfig{
+		tabID: tabID, session: session, quality: quality,
+		maxW: maxW, maxH: maxH, enabled: session != "",
 	})
-	b.mu.Unlock()
-	if !wasMotion {
-		b.ensureCast(t)
+}
+
+func (s *ScreencastSource) Disable(session string) {
+	s.mu.Lock()
+	if session != "" && s.desired.session != session {
+		s.mu.Unlock()
+		return
+	}
+	if !s.desired.enabled {
+		s.mu.Unlock()
+		return
+	}
+	s.desired.enabled = false
+	s.generation++
+	s.mu.Unlock()
+	select {
+	case s.wake <- struct{}{}:
+	default:
 	}
 }
 
-func (b *Browser) sendSharpFrame(only *ws.Client, t *Tab) {
-	b.mu.Lock()
-	if t == nil || t.ID != b.activeID {
-		b.mu.Unlock()
+func (s *ScreencastSource) setDesired(next sourceConfig) {
+	s.mu.Lock()
+	if s.desired == next {
+		s.mu.Unlock()
 		return
 	}
-	if time.Since(t.lastSharpAt) < 750*time.Millisecond {
-		b.mu.Unlock()
-		return
+	s.desired = next
+	s.generation++
+	s.mu.Unlock()
+	select {
+	case s.wake <- struct{}{}:
+	default:
 	}
-	t.lastSharpAt = time.Now()
-	b.mu.Unlock()
-	b.sendFreshFrame(only, b.cfg.SharpQuality)
 }
 
-// sendFreshFrame captures a full-res screenshot of the active tab and queues
-// it to one client (only != nil) or everyone, stamped with the current scroll
-// offset. Guarantees the latest state is visible even when the page is static
-// and the screencast is idle.
-func (b *Browser) sendFreshFrame(only *ws.Client, quality int) {
-	t := b.active()
-	if t == nil {
-		return
-	}
-	q := clampQuality(quality, b.cfg.Quality)
-	b.mu.Lock()
-	s := t.Session
-	w, h := b.viewW, b.viewH
-	z := t.Zoom
-	b.mu.Unlock()
-	if z < 1 {
-		z = 1
-	}
+func (s *ScreencastSource) Casting() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.current.enabled
+}
 
-	// Scroll offset first (cheap), then the pixels; a tiny race between the
-	// two is invisible next to frame latency.
-	var sx, sy uint32
-	if v, err := b.cdp.EvaluateString(s, "''+window.pageXOffset+','+window.pageYOffset"); err == nil {
-		if i := strings.IndexByte(v, ','); i > 0 {
-			fx, err1 := strconv.ParseFloat(v[:i], 64)
-			fy, err2 := strconv.ParseFloat(v[i+1:], 64)
-			if err1 == nil && err2 == nil {
-				sx, sy = clampScroll(fx), clampScroll(fy)
+func (s *ScreencastSource) run() {
+	for {
+		select {
+		case <-s.done:
+			s.stopCurrent()
+			return
+		case <-s.wake:
+		}
+		for {
+			select {
+			case <-s.done:
+				s.stopCurrent()
+				return
+			default:
 			}
+			s.mu.Lock()
+			want, current, generation := s.desired, s.current, s.generation
+			s.mu.Unlock()
+			if current == want {
+				break
+			}
+			if current.enabled {
+				_, _ = s.cdp.Call(current.session, "Page.stopScreencast", nil)
+				s.mu.Lock()
+				if s.current == current {
+					s.current = sourceConfig{}
+				}
+				s.mu.Unlock()
+				continue
+			}
+			if !want.enabled {
+				s.mu.Lock()
+				if s.generation == generation {
+					s.current = want
+				}
+				s.mu.Unlock()
+				continue
+			}
+			opts := map[string]any{
+				"format": "jpeg", "quality": want.quality,
+				"maxWidth": want.maxW, "maxHeight": want.maxH, "everyNthFrame": 1,
+			}
+			var err error
+			for attempt := 0; attempt < 15; attempt++ {
+				if _, err = s.cdp.Call(want.session, "Page.startScreencast", opts); err == nil {
+					break
+				}
+				time.Sleep(250 * time.Millisecond)
+			}
+			s.mu.Lock()
+			stillWanted := s.generation == generation && s.desired == want
+			if err == nil && stillWanted {
+				s.current = want
+			}
+			s.mu.Unlock()
+			if err != nil {
+				log.Printf("startCast tab %d failed after retries: %v", want.tabID, err)
+				break
+			}
+			if !stillWanted {
+				// The start completed for a superseded target. Tear it down;
+				// the next loop converges the latest desired generation.
+				_, _ = s.cdp.Call(want.session, "Page.stopScreencast", nil)
+				continue
+			}
+			log.Printf("cast tab %d started q=%d max=%dx%d", want.tabID, want.quality, want.maxW, want.maxH)
 		}
 	}
-
-	started := time.Now()
-	buf, err := b.cdp.CaptureJPEG(s, q)
-	if err != nil {
-		log.Printf("captureScreenshot tab %d failed after %.1fs: %v", t.ID, time.Since(started).Seconds(), err)
-		return
-	}
-	if d := time.Since(started); d > 2*time.Second {
-		log.Printf("captureScreenshot tab %d slow: %.1fs", t.ID, d.Seconds())
-	}
-	if !b.isActiveSession(s) {
-		return
-	}
-	// Sharp marks this as the settle frame — the one JPEG that still reaches
-	// video-mode clients (their crisp-text overlay).
-	b.hub.QueueFrame(&protocol.Frame{W: w, H: h, ScrollX: sx, ScrollY: sy, Data: buf, Sharp: true}, only)
 }
 
-func clampScroll(v float64) uint32 {
-	if v < 0 {
-		return 0
+// Handle acknowledges the CDP credit before decoding. It is safe to call
+// directly from the CDP event sink and never waits for the controller loop.
+func (s *ScreencastSource) Handle(ev cdp.Event) {
+	select {
+	case <-s.done:
+		return
+	default:
 	}
-	return uint32(v + 0.5)
+	var payload struct {
+		Data      string `json:"data"`
+		SessionID int    `json:"sessionId"`
+	}
+	if json.Unmarshal(ev.Params, &payload) != nil {
+		return
+	}
+	_ = s.cdp.Dispatch(ev.SessionID, "Page.screencastFrameAck", map[string]any{"sessionId": payload.SessionID})
+	s.mu.Lock()
+	active := s.desired.enabled && s.desired.session == ev.SessionID
+	s.mu.Unlock()
+	if !active {
+		return
+	}
+	data, err := base64.StdEncoding.DecodeString(payload.Data)
+	if err != nil {
+		return
+	}
+	s.onFrame(SourceFrame{Session: ev.SessionID, JPEG: data})
+}
+
+func (b *Controller) ensureCast(t *Tab) {
+	if b.source == nil || t == nil {
+		return
+	}
+	if !b.hasVideoSubscribers() {
+		b.source.Disable(t.Session)
+		return
+	}
+	b.mu.Lock()
+	active := t.ID == b.activeID
+	session := t.Session
+	w, h := b.viewW, b.viewH
+	b.mu.Unlock()
+	if active {
+		b.source.Configure(t.ID, session, b.cfg.SourceJPEGQuality, w, h)
+	}
+}
+
+func (b *Controller) stopCast(t *Tab) {
+	if b.source != nil && t != nil {
+		b.source.Disable(t.Session)
+	}
 }

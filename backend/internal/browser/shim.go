@@ -46,7 +46,6 @@ const webauthnShim = `
 })();
 `
 
-func (b *Browser) installCompatScripts(session string) {
-	_, _ = b.cdp.Call(session, "Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": webauthnShim})
-	_, _ = b.cdp.Call(session, "Runtime.evaluate", map[string]any{"expression": webauthnShim})
+func (b *Controller) installCompatScripts(session string) {
+	_ = b.cdp.Dispatch(session, "Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": webauthnShim})
 }

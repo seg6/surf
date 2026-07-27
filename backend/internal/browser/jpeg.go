@@ -4,14 +4,14 @@ package browser
 // scanning its marker segments for a Start Of Frame marker, or ok=false if
 // none is found (truncated/corrupt data). Chromium's screencast frames
 // always have one; this is far cheaper than decoding the whole image just
-// to read its size, and it's the authoritative size — unlike castMaxW/
-// castMaxH (what we asked Page.startScreencast for), what CDP actually
+// to read its size, and it's the authoritative size — unlike the configured
+// Page.startScreencast bounds, what CDP actually
 // delivers can drift from that: transitional frames right after
 // navigation, aspect-ratio rounding, cast quality/size transitions. Feeding
 // a size the running H.264 encoder doesn't expect corrupts its ffmpeg
 // pipeline (confirmed live: "No JPEG data found in image" / "Invalid data
 // found when processing input", the encoder crash-looping under real
-// interactive use) — see onScreencastFrame's serialized resize correction, which
+// interactive use) — see onSourceFrame's serialized resize correction, which
 // this exists to feed.
 func jpegSize(data []byte) (w, h int, ok bool) {
 	if len(data) < 4 || data[0] != 0xFF || data[1] != 0xD8 {

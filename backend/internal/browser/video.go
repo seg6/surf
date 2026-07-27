@@ -16,37 +16,37 @@ import (
 const firstAUWait = 6 * time.Second
 
 // hasVideoSubscribers reports whether any client currently has the H.264
-// lane subscribed — cast.go's ensureCast needs this because the H.264 lane
-// is now transcoded from the JPEG screencast, so it depends on the cast
-// staying up even when every client is in video mode (no raw JPEG
-// consumers at all).
-func (b *Browser) hasVideoSubscribers() bool {
+// lane subscribed. The internal CDP screencast exists only to feed it.
+func (b *Controller) hasVideoSubscribers() bool {
 	b.mediaMu.Lock()
 	defer b.mediaMu.Unlock()
 	return len(b.videoSubs) > 0
 }
 
-// handleVideo services {"t":"video","on":...}. Runs on the client's read
-// goroutine; everything slow happens in the pump goroutine.
-func (b *Browser) handleVideo(c *ws.Client, on bool) {
-	if !on {
-		b.stopVideo(c, true)
-		return
-	}
+func (b *Controller) subscribeVideo(c *ws.ClientTransport) {
+	b.mu.Lock()
+	viewW, viewH := b.viewW, b.viewH
+	b.mu.Unlock()
 	b.mediaMu.Lock()
 	if _, exists := b.videoSubs[c]; exists {
 		b.mediaMu.Unlock()
 		return
 	}
-	sub := b.streamer.Subscribe()
+	// The client viewport is known before automatic subscription. Configure
+	// the dormant encoder first so it never starts at the backend default and
+	// immediately restarts at the iPad size.
+	b.video.SetSize(viewW, viewH)
+	sub := b.video.Subscribe()
 	b.videoSubs[c] = sub
 	b.mediaMu.Unlock()
+	cfg := b.video.Config()
+	c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "starting", FPS: cfg.FPS, Generation: b.video.Generation()})
 	log.Printf("video: client subscribed")
 	if t := b.active(); t != nil {
 		b.ensureCast(t) // converge the shared source to stable video quality
 	}
-	go b.bootstrapVideoFrame()
 	go b.pumpVideo(c, sub)
+	go b.bootstrapVideoFrame()
 }
 
 // bootstrapVideoFrame pushes one JPEG into the encoder right after a
@@ -54,7 +54,7 @@ func (b *Browser) handleVideo(c *ws.Client, on bool) {
 // actually produces new content, so a subscriber landing on an already-
 // static page would otherwise wait out firstAUWait for a frame that may
 // never arrive on its own.
-func (b *Browser) bootstrapVideoFrame() {
+func (b *Controller) bootstrapVideoFrame() {
 	t := b.active()
 	if t == nil {
 		return
@@ -63,7 +63,7 @@ func (b *Browser) bootstrapVideoFrame() {
 	s := t.Session
 	vw, vh := b.viewW, b.viewH
 	b.mu.Unlock()
-	buf, err := b.cdp.CaptureJPEG(s, clampQuality(b.cfg.MotionQuality, 85))
+	buf, err := b.cdp.CaptureJPEG(s, clampQuality(b.cfg.SourceJPEGQuality, 100))
 	if err != nil {
 		return
 	}
@@ -74,26 +74,36 @@ func (b *Browser) bootstrapVideoFrame() {
 		return
 	}
 	if w, h, ok := jpegSize(buf); ok {
-		b.requestVideoResize(w, h, buf, s)
+		if w != vw || h != vh {
+			// Page.captureScreenshot can race the device-metrics update and
+			// return the previous viewport. Never let a bootstrap image
+			// override the client-authoritative encoder size.
+			return
+		}
+		current := b.video.Config()
+		if current.CaptureW == w && current.CaptureH == h {
+			b.video.PushBootstrap(buf)
+			return
+		}
+		b.requestVideoResizeMode(w, h, buf, s, true)
 		return
 	}
-	b.streamer.Push(buf)
+	b.video.PushBootstrap(buf)
 }
 
 // pumpVideo gates on encoder health, then relays AUs until the sub dies or
-// the client leaves video mode.
-func (b *Browser) pumpVideo(c *ws.Client, sub *stream.Sub) {
-	cfg := b.streamer.Config()
+// the client disconnects or explicitly retries.
+func (b *Controller) pumpVideo(c *ws.ClientTransport, sub *stream.Sub) {
+	cfg := b.video.Config()
 	select {
 	case au, ok := <-sub.C:
 		if !ok {
 			b.videoFailed(c)
 			return
 		}
-		c.SetVideoMode(true)
-		c.SendJSON(map[string]any{"t": "video-config", "ok": true, "fps": cfg.FPS, "w": au.W, "h": au.H})
+		c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "ready", FPS: cfg.FPS, W: au.W, H: au.H, Generation: au.Generation})
 		if t := b.active(); t != nil {
-			b.ensureCast(t) // may stop the cast if nobody consumes JPEG now
+			b.ensureCast(t)
 		}
 		b.deliverAU(c, sub, au)
 	case <-time.After(firstAUWait):
@@ -105,31 +115,41 @@ func (b *Browser) pumpVideo(c *ws.Client, sub *stream.Sub) {
 	for au := range sub.C {
 		b.deliverAU(c, sub, au)
 	}
-	// Channel closed: encoder gave up (or we unsubscribed). Tell the client
-	// to fall back; stopVideo is idempotent.
-	c.SendJSON(map[string]any{"t": "video-config", "ok": false})
-	b.stopVideo(c, true)
+	// Channel closed: encoder gave up (or we unsubscribed).
+	c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "unavailable", Reason: "encoder-stopped", FPS: cfg.FPS})
+	b.stopVideo(c)
 }
 
-func (b *Browser) deliverAU(c *ws.Client, sub *stream.Sub, au stream.AU) {
+func (b *Controller) deliverAU(c *ws.ClientTransport, sub *stream.Sub, au stream.AU) {
+	b.noteEncodeLatency(au.SourceReceiveNS, au.EncodeCompleteNS)
 	if !au.T.IsZero() {
 		b.noteVideoLatency(time.Since(au.T))
 	}
-	if err := c.SendBinary(protocol.EncodeVideoAU(au.Seq, au.IDR, au.W, au.H, au.Data)); err != nil {
+	meta := protocol.VideoMeta{
+		AUSeq: au.Seq, SourceSeq: au.SourceSeq, W: au.W, H: au.H,
+		InteractionID:     au.InteractionID,
+		SourceReceiveNS:   au.SourceReceiveNS,
+		EncodeCompleteNS:  au.EncodeCompleteNS,
+		EncoderGeneration: au.Generation,
+	}
+	if err := c.SendBinary(protocol.EncodeVideo(meta, au.IDR, au.Data)); err != nil {
 		// Outbox dropped the AU — every P-frame after it is garbage, so make
-		// the subscription resume at the next IDR.
+		// the subscription resume at an immediate IDR. Waiting for the normal
+		// two-second GOP boundary is the visible freeze this recovery path is
+		// specifically meant to avoid; VideoPipeline applies its own cooldown.
 		sub.ForceResync()
+		go b.video.RequestKeyframe()
 	}
 }
 
-func (b *Browser) videoFailed(c *ws.Client) {
-	c.SendJSON(map[string]any{"t": "video-config", "ok": false})
-	b.stopVideo(c, false)
+func (b *Controller) videoFailed(c *ws.ClientTransport) {
+	c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "unavailable", Reason: "encoder-start-timeout"})
+	b.stopVideo(c)
 }
 
-// stopVideo tears down the client's subscription. restoreCast also brings the
-// JPEG lane back and pushes a fresh frame so the screen never goes stale.
-func (b *Browser) stopVideo(c *ws.Client, restoreCast bool) {
+// stopVideo tears down the client's subscription. The capture source parks
+// automatically after the final video consumer leaves.
+func (b *Controller) stopVideo(c *ws.ClientTransport) {
 	b.mediaMu.Lock()
 	sub := b.videoSubs[c]
 	delete(b.videoSubs, c)
@@ -138,19 +158,12 @@ func (b *Browser) stopVideo(c *ws.Client, restoreCast bool) {
 		return
 	}
 	sub.Close()
-	c.SetVideoMode(false)
 	log.Printf("video: client unsubscribed")
-	if restoreCast {
-		if t := b.active(); t != nil {
-			b.ensureCast(t)
-		}
-		go b.sendFreshFrame(c, b.cfg.SharpQuality)
-	}
 }
 
 // ClientDisconnected implements ws.Handler: release the video subscription
 // (idle-stop then kills the encoder) and let the cast converge.
-func (b *Browser) ClientDisconnected(c *ws.Client) {
+func (b *Controller) ClientDisconnected(c *ws.ClientTransport) {
 	b.mediaMu.Lock()
 	sub := b.videoSubs[c]
 	delete(b.videoSubs, c)

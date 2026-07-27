@@ -2,13 +2,15 @@
 #import <CoreGraphics/CoreGraphics.h>
 
 @class RBVideoDecoder;
+@class RBFrameMetadata;
 
 @protocol RBVideoDecoderDelegate <NSObject>
 // Main thread. The image wraps the decoder's pixel buffer zero-copy; display
 // it (retain via layer.contents) and let go — releasing it unlocks the buffer.
-- (void)videoDecoder:(RBVideoDecoder *)decoder didDecodeImage:(CGImageRef)image;
+- (void)videoDecoder:(RBVideoDecoder *)decoder didDecodeImage:(CGImageRef)image
+            metadata:(RBFrameMetadata *)metadata;
 // Main thread. The decode path is unrecoverable (too many resyncs); the
-// caller should leave video mode and fall back to the JPEG lane.
+// caller should surface video unavailable and offer an explicit retry.
 - (void)videoDecoderDidFail:(RBVideoDecoder *)decoder;
 // Main thread. A real decode-error resync just happened (VT session loss,
 // bad SPS/PPS) — not a client-side queue-congestion drop, which already
@@ -42,7 +44,7 @@
 // Whether VideoToolbox resolved — safe to call any time, caches its answer.
 + (BOOL)available;
 
-- (void)feedAU:(NSData *)au idr:(BOOL)idr;
+- (void)feedAU:(NSData *)au idr:(BOOL)idr metadata:(RBFrameMetadata *)metadata;
 // Drops all state (session, parameter sets, queued AUs); next feed must be an IDR.
 - (void)reset;
 @end

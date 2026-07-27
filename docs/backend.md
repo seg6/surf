@@ -1,16 +1,15 @@
 # Backend
 
-The backend is named `surf-backend`. It runs Chromium headless, transcodes
-its own CDP screencast frames to H.264 with FFmpeg, and streams video, audio,
-and control messages to the native client. Windows and macOS are also
-supported for the video/browsing path; audio capture is Linux-only for now.
+The backend is named `surf-backend`. It runs managed Chrome in
+`--headless=new`, transcodes CDP screencast frames to H.264 with managed
+FFmpeg, and streams video, audio, and control messages to the native client.
+Windows and macOS are also supported for the video/browsing path; audio
+capture is Linux-only for now.
 
 ## Dependencies
 
-Install the host runtime tools before starting the backend:
+Surf downloads Chrome and FFmpeg automatically. Linux audio additionally needs:
 
-- Chromium (`chromium`, or set `CHROME`).
-- FFmpeg (`ffmpeg`).
 - `pactl` with PulseAudio or PipeWire Pulse compatibility (Linux, for audio).
 - `pulseaudio` when no existing PulseAudio-compatible server is available
   (Linux, for audio).
@@ -19,19 +18,16 @@ Example package installs:
 
 ```sh
 # Debian/Ubuntu package names vary by release.
-sudo apt install chromium ffmpeg pulseaudio-utils pulseaudio
+sudo apt install pulseaudio-utils pulseaudio
 
 # Fedora package names vary by release and enabled repositories.
-sudo dnf install chromium ffmpeg pulseaudio-utils pulseaudio
+sudo dnf install pulseaudio-utils pulseaudio
 
 # Arch.
-sudo pacman -S chromium ffmpeg pulseaudio
+sudo pacman -S pulseaudio
 ```
 
-On Windows, install Chromium (or Google Chrome) and FFmpeg; if neither
-`chromium` nor `CHROME` resolves to a real binary, surf-backend looks for a
-Chromium/Chrome/Edge install in the usual locations automatically. Audio
-capture is not yet implemented on Windows.
+Audio capture is not yet implemented on Windows and macOS.
 
 ## Quick Start
 
@@ -80,11 +76,46 @@ SURF_PASSWORD='change-me' ./backend/surf-backend serve
 
 ## Runtime Behavior
 
-Chromium runs headless (`--headless=new`) — no display server, virtual or
-otherwise, is needed on any platform, and no window ever appears. Both the
-JPEG lane (`Page.startScreencast`) and the H.264 lane (transcoded from those
-same screencast frames via FFmpeg) work identically whether or not there's
-even a desktop session to render into.
+On first run Surf downloads pinned Chrome for Testing and a pinned FFmpeg
+executable into `SURF_HOME/runtime`. Linux x86-64, Windows x86-64,
+macOS x86-64, and macOS arm64 are selected automatically. The pinned runtimes
+keep browser and encoder behavior reproducible. Chrome always runs with
+`--headless=new`; the capture source is event-driven `Page.startScreencast`,
+and its JPEG is internal only. FFmpeg sends H.264/RTP over localhost so RTP
+marker bits delimit access units without waiting for a following frame.
+Annex-B H.264 is the sole client-facing visual format.
+Clients subscribe automatically after connecting; encoder failures are
+reported as explicit `video-config` states and require `video-retry`.
+
+The Linux runtime uses a pinned BtbN GPL build because Surf needs both the
+Pulse input device and libx264. Windows and macOS use pinned `ffmpeg-static`
+executables; audio capture is not implemented on those platforms.
+
+There is no desktop capture, headful, headless-shell, or screenshot-polling
+mode. `CHROME=/path/to/browser` and `FFMPEG=/path/to/ffmpeg` remain explicit
+development/recovery overrides.
+
+Backend ownership is split by latency domain. `Controller` consumes concrete
+typed commands and owns tab/input state. `ScreencastSource` exclusively owns
+CDP screencast start/stop/ACK and rejects stale tab/viewport completions by
+generation. Immutable source frames bypass the controller loop into
+`VideoPipeline`'s latest-frame mailbox. `ClientTransport` independently
+schedules ordered control, drop-oldest audio, and a four-AU GOP-aware video
+queue; `AudioPipeline` owns capture and bounded fan-out. Video overflow
+requests an immediate cooldown-protected IDR instead of accumulating delay.
+
+Protocol `20260727-3` uses a 64-byte extensible binary header carrying AU and
+source sequences, coded size, interaction ID, backend timing stamps, and
+encoder generation. The socket-write timestamp is stamped by the WebSocket
+writer immediately before the write.
+
+Authenticated diagnostics are available at `/diagnostics`. The embedded
+dashboard provides live snapshots, SSE updates, Prometheus text metrics,
+30-second backend/native Perfetto captures, and downloadable retained bundles.
+Bundles are metadata-only and omit URLs, credentials, typed text, and media.
+Their summary includes interaction-to-present p50/p95/p99, causally coalesced
+and genuinely unpresented interactions, trace loss, and source-to-AU mapping
+failures.
 
 For audio (Linux only), Surf first checks whether `pactl info` can reach an
 existing PulseAudio-compatible server. On common PipeWire desktops this
@@ -105,7 +136,14 @@ Common overrides:
 - `PORT`: listen port; defaults to `18080`.
 - `BIND_ADDR`: listen address; defaults to `0.0.0.0`.
 - `SURF_HOME`: data root; defaults to `~/.surf`.
-- `CHROME`, `FFMPEG`, `PULSEAUDIO`, `PACTL`: tool paths.
+- `CHROME`: explicit browser override. Setting this disables managed browser
+  selection.
+- `SURF_BROWSER_DOWNLOAD=0`: prohibit downloading a missing managed browser.
+- `FFMPEG`: explicit encoder override; otherwise Surf manages FFmpeg.
+- `SURF_FFMPEG_DOWNLOAD=0`: prohibit downloading a missing managed FFmpeg.
+- `PULSEAUDIO`, `PACTL`: Linux audio tool paths.
+- `SOURCE_JPEG_QUALITY`: quality of the internal CDP-to-FFmpeg capture;
+  defaults to `100` and does not select a client wire format.
 - `SURF_MANAGE_PULSE=1`: force Surf to start a private PulseAudio process
   (Linux).
 - `SURF_ENSURE_PULSE_SINK=0`: do not create `PULSE_SINK` automatically when

@@ -12,8 +12,12 @@ import (
 
 	"surf-backend/internal/auth"
 	"surf-backend/internal/browser"
+	"surf-backend/internal/browserbin"
 	"surf-backend/internal/config"
+	"surf-backend/internal/diagnostics"
+	"surf-backend/internal/ffmpegbin"
 	"surf-backend/internal/httpd"
+	"surf-backend/internal/protocol"
 	"surf-backend/internal/runenv"
 	"surf-backend/internal/ws"
 )
@@ -66,6 +70,12 @@ func doctor() error {
 	if err != nil {
 		return err
 	}
+	if err := ensureBrowser(cfg); err != nil {
+		return err
+	}
+	if err := ensureFFmpeg(cfg); err != nil {
+		return err
+	}
 	failed := false
 	for _, check := range runenv.Doctor(cfg) {
 		if check.OK {
@@ -88,6 +98,12 @@ func doctor() error {
 func serve() error {
 	cfg, err := config.Load()
 	if err != nil {
+		return err
+	}
+	if err := ensureBrowser(cfg); err != nil {
+		return err
+	}
+	if err := ensureFFmpeg(cfg); err != nil {
 		return err
 	}
 
@@ -130,6 +146,14 @@ func serve() error {
 	srv.SetHealthCheck(b.Health)
 	srv.SetStats(b.Stats)
 	b.RegisterRoutes(srv)
+	diagnosticsManager, err := diagnostics.New(cfg.SurfHome, b.Stats)
+	if err != nil {
+		return fmt.Errorf("diagnostics: %w", err)
+	}
+	diagnosticsManager.SetCaptureNotifier(func(active bool) {
+		hub.BroadcastJSON(protocol.CaptureStateEvent{Type: "capture-state", Active: active})
+	})
+	diagnosticsManager.Register(srv)
 	log.Printf("surf-backend listening on %s:%d", cfg.BindAddr, cfg.Port)
 
 	serverErr := make(chan error, 1)
@@ -145,4 +169,34 @@ func serve() error {
 		log.Printf("received %s, shutting down", s)
 		return nil
 	}
+}
+
+func ensureBrowser(cfg *config.Config) error {
+	if cfg.ChromePath != "" {
+		log.Printf("runtime: using CHROME=%s", cfg.ChromePath)
+		return nil
+	}
+	log.Printf("runtime: ensuring Chrome for Testing %s (--headless=new)", browserbin.Version)
+	path, err := browserbin.EnsureChrome(cfg.SurfHome)
+	if err != nil {
+		return err
+	}
+	cfg.ChromePath = path
+	log.Printf("runtime: using managed Chrome %s", path)
+	return nil
+}
+
+func ensureFFmpeg(cfg *config.Config) error {
+	if cfg.FFmpegPath != "" {
+		log.Printf("runtime: using FFMPEG=%s", cfg.FFmpegPath)
+		return nil
+	}
+	log.Printf("runtime: ensuring FFmpeg %s", ffmpegbin.Version)
+	path, err := ffmpegbin.Ensure(cfg.SurfHome)
+	if err != nil {
+		return err
+	}
+	cfg.FFmpegPath = path
+	log.Printf("runtime: using managed FFmpeg %s", path)
+	return nil
 }

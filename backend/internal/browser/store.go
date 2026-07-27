@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"surf-backend/internal/protocol"
 )
 
 // Store keeps browsing history (append-only JSONL) and bookmarks (one JSON
@@ -20,11 +22,7 @@ type Store struct {
 	bookmarks []Entry
 }
 
-type Entry struct {
-	URL   string `json:"url"`
-	Title string `json:"title"`
-	TS    int64  `json:"ts"`
-}
+type Entry = protocol.LibraryEntry
 
 // histKeep bounds RAM and the on-disk file after rotation; at ~100 visits/day
 // this is roughly a year and a half of history.

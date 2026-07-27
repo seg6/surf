@@ -24,7 +24,7 @@ import (
 // ---- per-tab setup ----------------------------------------------------
 
 // setupFeatures runs once per tab after Page/Runtime are enabled.
-func (b *Browser) setupFeatures(t *Tab) {
+func (b *Controller) setupFeatures(t *Tab) {
 	b.mu.Lock()
 	s := t.Session
 	b.mu.Unlock()
@@ -34,7 +34,7 @@ func (b *Browser) setupFeatures(t *Tab) {
 
 // onURLChanged fires on every main-frame URL change: record history and
 // (lazily) resolve the favicon.
-func (b *Browser) onURLChanged(t *Tab, u string) {
+func (b *Controller) onURLChanged(t *Tab, u string) {
 	b.store.AddHistory(u, "")
 	b.refreshFavicon(t)
 }
@@ -48,7 +48,7 @@ type favicon struct {
 }
 
 // iconURLLocked returns the tab-strip icon URL; b.mu is held by the caller.
-func (b *Browser) iconURLLocked(t *Tab) string {
+func (b *Controller) iconURLLocked(t *Tab) string {
 	ic := b.icons[t.IconKey]
 	if ic == nil {
 		return ""
@@ -57,10 +57,9 @@ func (b *Browser) iconURLLocked(t *Tab) string {
 }
 
 // refreshFavicon resolves and caches the favicon for the tab's current origin.
-func (b *Browser) refreshFavicon(t *Tab) {
+func (b *Controller) refreshFavicon(t *Tab) {
 	b.mu.Lock()
 	pageURL := t.URL
-	s := t.Session
 	b.mu.Unlock()
 	origin := pageOrigin(pageURL)
 	if origin == "" {
@@ -95,21 +94,12 @@ func (b *Browser) refreshFavicon(t *Tab) {
 			delete(b.iconFetching, origin)
 			b.mu.Unlock()
 		}()
+		// Do not query the active renderer merely to discover a custom icon.
+		// Page.captureScreenshot is intentionally kept saturated for 30 fps;
+		// injecting Runtime.evaluate into that queue caused visible capture
+		// gaps during navigation and tab activation. The conventional origin
+		// favicon is sufficient and is fetched outside Chromium.
 		href := origin + "/favicon.ico"
-		res, err := b.cdp.Call(s, "Runtime.evaluate", map[string]any{
-			"expression":    `(function(){var l=document.querySelector('link[rel~="icon"],link[rel="shortcut icon"]');return l&&l.href?l.href:'';})()`,
-			"returnByValue": true,
-		})
-		if err == nil {
-			var p struct {
-				Result struct {
-					Value string `json:"value"`
-				} `json:"result"`
-			}
-			if json.Unmarshal(res, &p) == nil && strings.HasPrefix(p.Result.Value, "http") {
-				href = p.Result.Value
-			}
-		}
 		ic := fetchIcon(href)
 		if ic == nil {
 			return
@@ -162,14 +152,14 @@ func fetchIcon(href string) *favicon {
 
 var unsafeName = regexp.MustCompile(`[^a-zA-Z0-9._ ()\-]`)
 
-func (b *Browser) setupDownloads() {
+func (b *Controller) setupDownloads() {
 	_ = os.MkdirAll(b.cfg.DownloadsDir, 0o755)
-	_, _ = b.cdp.Call("", "Browser.setDownloadBehavior", map[string]any{
+	_, _ = b.cdp.Call("", "Controller.setDownloadBehavior", map[string]any{
 		"behavior": "allowAndName", "downloadPath": b.cfg.DownloadsDir, "eventsEnabled": true,
 	})
 }
 
-func (b *Browser) onDownloadBegin(ev cdp.Event) {
+func (b *Controller) onDownloadBegin(ev cdp.Event) {
 	var p struct {
 		GUID              string `json:"guid"`
 		SuggestedFilename string `json:"suggestedFilename"`
@@ -193,10 +183,10 @@ func (b *Browser) onDownloadBegin(ev cdp.Event) {
 	}
 	b.dlNames[p.GUID] = final
 	b.dlMu.Unlock()
-	b.hub.BroadcastJSON(map[string]any{"t": "toast", "text": "downloading " + final})
+	b.hub.BroadcastJSON(protocol.TextEvent{Type: "toast", Text: "downloading " + final})
 }
 
-func (b *Browser) onDownloadProgress(ev cdp.Event) {
+func (b *Controller) onDownloadProgress(ev cdp.Event) {
 	var p struct {
 		GUID          string  `json:"guid"`
 		State         string  `json:"state"`
@@ -223,7 +213,7 @@ func (b *Browser) onDownloadProgress(ev cdp.Event) {
 			if p.TotalBytes > 0 {
 				pct = int(p.ReceivedBytes / p.TotalBytes * 100)
 			}
-			b.hub.BroadcastJSON(map[string]any{"t": "dlprogress", "name": name, "pct": pct})
+			b.hub.BroadcastJSON(protocol.DownloadProgressEvent{Type: "dlprogress", Name: name, Pct: pct})
 		}
 		return
 	}
@@ -238,19 +228,19 @@ func (b *Browser) onDownloadProgress(ev cdp.Event) {
 		return
 	}
 	_ = os.Rename(filepath.Join(b.cfg.DownloadsDir, p.GUID), filepath.Join(b.cfg.DownloadsDir, name))
-	b.hub.BroadcastJSON(map[string]any{"t": "download", "name": name})
+	b.hub.BroadcastJSON(protocol.NameEvent{Type: "download", Name: name})
 }
 
-func (b *Browser) downloadList() []map[string]any {
+func (b *Controller) downloadList() []protocol.DownloadItem {
 	entries, _ := os.ReadDir(b.cfg.DownloadsDir)
-	items := []map[string]any{}
+	items := []protocol.DownloadItem{}
 	for _, e := range entries {
 		info, err := e.Info()
 		if err != nil || e.IsDir() {
 			continue
 		}
-		items = append(items, map[string]any{
-			"name": e.Name(), "size": info.Size(), "ts": info.ModTime().Unix(),
+		items = append(items, protocol.DownloadItem{
+			Name: e.Name(), Size: info.Size(), TS: info.ModTime().Unix(),
 		})
 	}
 	return items
@@ -259,7 +249,7 @@ func (b *Browser) downloadList() []map[string]any {
 // ---- HTTP routes ---------------------------------------------------------
 
 // RegisterRoutes adds feature routes (all behind the auth cookie).
-func (b *Browser) RegisterRoutes(srv *httpd.Server) {
+func (b *Controller) RegisterRoutes(srv *httpd.Server) {
 	srv.Gated("/tabicon/", func(w http.ResponseWriter, r *http.Request) {
 		id, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/tabicon/"))
 		b.mu.Lock()
@@ -291,26 +281,27 @@ func (b *Browser) RegisterRoutes(srv *httpd.Server) {
 // ---- feature messages ------------------------------------------------------
 
 // handleFeatureMessage handles message types beyond the M1 set.
-func (b *Browser) handleFeatureMessage(c *ws.Client, t *Tab, session string, m *protocol.ClientMessage) {
-	switch m.T {
+func (b *Controller) handleFeatureMessage(c *ws.ClientTransport, t *Tab, session string, command protocol.Command) {
+	switch command.Kind() {
 	case "zoom":
-		b.handleZoom(t, session, m)
+		b.handleZoom(t, session, command.(*protocol.ZoomCommand))
 	case "paste":
+		m := command.(*protocol.TextCommand)
 		if m.Text != "" {
-			b.beginMotion(t)
-			_, _ = b.cdp.Call(session, "Input.insertText", map[string]any{"text": m.Text})
+			_ = b.cdp.Dispatch(session, "Input.insertText", map[string]any{"text": m.Text})
 		}
 	case "find":
-		b.handleFind(c, t, session, m)
+		b.handleFind(c, t, session, command.(*protocol.FindCommand))
 	case "suggest":
-		c.SendJSON(map[string]any{"t": "suggest", "items": b.store.Suggest(m.Q)})
+		m := command.(*protocol.QueryCommand)
+		c.SendJSON(protocol.SuggestEvent{Type: "suggest", Items: b.store.Suggest(m.Q)})
 	case "hist":
 		b.mu.Lock()
 		u := t.URL
 		b.mu.Unlock()
-		c.SendJSON(map[string]any{
-			"t": "hist", "hist": b.store.Recent(50), "bookmarks": b.store.Bookmarks(),
-			"starred": b.store.IsBookmarked(u),
+		c.SendJSON(protocol.LibraryEvent{
+			Type: "hist", History: b.store.Recent(50), Bookmarks: b.store.Bookmarks(),
+			Starred: b.store.IsBookmarked(u),
 		})
 	case "bookmark":
 		b.mu.Lock()
@@ -321,19 +312,21 @@ func (b *Browser) handleFeatureMessage(c *ws.Client, t *Tab, session string, m *
 		if on {
 			msg = "bookmarked"
 		}
-		c.SendJSON(map[string]any{"t": "toast", "text": msg})
-		c.SendJSON(map[string]any{"t": "starred", "on": on})
+		c.SendJSON(protocol.TextEvent{Type: "toast", Text: msg})
+		c.SendJSON(protocol.BoolEvent{Type: "starred", On: on})
 	case "downloads":
-		c.SendJSON(map[string]any{"t": "downloads", "items": b.downloadList()})
+		c.SendJSON(protocol.DownloadsEvent{Type: "downloads", Items: b.downloadList()})
 	case "dldel":
+		m := command.(*protocol.NameCommand)
 		// Delete a completed download from the server (Library UI). Name is
 		// path-sanitized the same way the /downloads/ route is.
 		name := filepath.Base(m.Name)
 		if name != "." && name != "/" && !strings.HasPrefix(name, ".") {
 			_ = os.Remove(filepath.Join(b.cfg.DownloadsDir, name))
 		}
-		c.SendJSON(map[string]any{"t": "downloads", "items": b.downloadList()})
+		c.SendJSON(protocol.DownloadsEvent{Type: "downloads", Items: b.downloadList()})
 	case "hit":
+		m := command.(*protocol.PointCommand)
 		// Long-press hit-test (M2.4): coordinates arrive as fractions like all
 		// input; convert to CSS px of the (possibly zoomed) viewport.
 		b.mu.Lock()
@@ -347,27 +340,31 @@ func (b *Browser) handleFeatureMessage(c *ws.Client, t *Tab, session string, m *
 	case "reader":
 		go b.handleReader(c, t, session) // heavy evaluate; off the read loop
 	case "history":
+		m := command.(*protocol.QueryCommand)
 		items, total := b.store.Search(m.Q, m.Offset, 50)
-		c.SendJSON(map[string]any{
-			"t": "history", "items": items, "offset": m.Offset, "total": total,
+		c.SendJSON(protocol.HistoryPageEvent{
+			Type: "history", Items: items, Offset: m.Offset, Total: total,
 		})
 	case "histdel":
+		m := command.(*protocol.HistoryDeleteCommand)
 		b.store.DeleteHistory(m.URL, m.TS)
-		c.SendJSON(map[string]any{"t": "toast", "text": "removed"})
+		c.SendJSON(protocol.TextEvent{Type: "toast", Text: "removed"})
 	case "bmdel":
+		m := command.(*protocol.URLCommand)
 		b.store.RemoveBookmark(m.URL)
 		b.mu.Lock()
 		u := t.URL
 		b.mu.Unlock()
-		c.SendJSON(map[string]any{"t": "starred", "on": b.store.IsBookmarked(u)})
+		c.SendJSON(protocol.BoolEvent{Type: "starred", On: b.store.IsBookmarked(u)})
 	case "clear":
+		m := command.(*protocol.ClearCommand)
 		b.handleClear(c, session, m.What)
 	}
 }
 
 // handleZoom applies an absolute page zoom, recentering on the gesture focus
 // (CX/CY are viewport fractions).
-func (b *Browser) handleZoom(t *Tab, session string, m *protocol.ClientMessage) {
+func (b *Controller) handleZoom(t *Tab, session string, m *protocol.ZoomCommand) {
 	z := m.Scale
 	if z < 1.05 {
 		z = 1
@@ -393,14 +390,13 @@ func (b *Browser) handleZoom(t *Tab, session string, m *protocol.ClientMessage) 
 			m.CX*float64(vw)/oldZ, m.CY*float64(vh)/oldZ, int(float64(vw)/z), int(float64(vh)/z))
 		_, _ = b.cdp.Call(session, "Runtime.evaluate", map[string]any{"expression": expr})
 	}
-	b.hub.BroadcastJSON(map[string]any{"t": "zoom", "scale": z})
-	go b.sendSharpFrame(nil, t)
+	b.hub.BroadcastJSON(protocol.ScaleEvent{Type: "zoom", Scale: z})
 }
 
 // finishLongpress runs after the long-press mouse-up. Plain press (sel=true):
 // double-click-select the word underneath. After a drag: whatever the drag
 // selected. Either way, ship the selection to the client for native copy.
-func (b *Browser) finishLongpress(c *ws.Client, t *Tab, session string, x, y float64, selectWord bool) {
+func (b *Controller) finishLongpress(c *ws.ClientTransport, t *Tab, session string, x, y float64, selectWord bool) {
 	if selectWord {
 		b.mouse(session, "mousePressed", x, y, 2)
 		b.mouse(session, "mouseReleased", x, y, 2)
@@ -413,11 +409,10 @@ func (b *Browser) finishLongpress(c *ws.Client, t *Tab, session string, x, y flo
 	if !selectWord && text == "" {
 		return
 	}
-	c.SendJSON(map[string]any{"t": "copytext", "text": text})
-	go b.sendSharpFrame(nil, t)
+	c.SendJSON(protocol.TextEvent{Type: "copytext", Text: text})
 }
 
-func (b *Browser) handleFind(c *ws.Client, t *Tab, session string, m *protocol.ClientMessage) {
+func (b *Controller) handleFind(c *ws.ClientTransport, t *Tab, session string, m *protocol.FindCommand) {
 	if strings.TrimSpace(m.Q) == "" {
 		return
 	}
@@ -427,6 +422,5 @@ func (b *Browser) handleFind(c *ws.Client, t *Tab, session string, m *protocol.C
 	if err != nil {
 		found = false
 	}
-	c.SendJSON(map[string]any{"t": "found", "on": found})
-	go b.sendSharpFrame(nil, t)
+	c.SendJSON(protocol.BoolEvent{Type: "found", On: found})
 }

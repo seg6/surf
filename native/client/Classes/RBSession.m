@@ -1,6 +1,7 @@
 #import "RBSession.h"
 #import "RBConfig.h"
 #import "RBLog.h"
+#import "RBInteractionTracker.h"
 #import "RBSocket.h"
 
 static NSString *RBURLEscape(NSString *s);
@@ -17,6 +18,7 @@ static NSString *RBURLEscape(NSString *s);
 @property(nonatomic, copy) NSString *lastPassword;
 @property(nonatomic, assign) NSTimeInterval reconnectDelay;
 @property(nonatomic, assign) NSUInteger generation;
+@property(nonatomic, strong, readwrite) RBInteractionTracker *interactionTracker;
 @end
 
 @implementation RBSession
@@ -33,6 +35,7 @@ static NSString *RBURLEscape(NSString *s);
         self.viewHeight = 0;
         self.state = RBSessionStateIdle;
         self.reconnectDelay = 1.0;
+        self.interactionTracker = [[RBInteractionTracker alloc] init];
     }
     return self;
 }
@@ -160,9 +163,9 @@ static NSString *RBURLEscape(NSString *s) {
     [self.socket connect];
 }
 
-- (void)sendMessage:(NSDictionary *)message { [self.socket sendJSON:message]; }
-
-- (void)sendReady { [self sendMessage:@{@"t": @"ready"}]; }
+- (void)sendMessage:(NSDictionary *)message {
+    [self.socket sendJSON:[self.interactionTracker decorateMessage:message]];
+}
 
 - (void)updateViewportWidth:(NSInteger)width height:(NSInteger)height {
     [self updateViewportWidth:width height:height force:NO];
@@ -184,10 +187,36 @@ static NSString *RBURLEscape(NSString *s) {
     [self sendMessage:@{@"t": @"wheel", @"x": [NSNumber numberWithFloat:x], @"y": [NSNumber numberWithFloat:y], @"dx": [NSNumber numberWithFloat:dx], @"dy": [NSNumber numberWithFloat:dy]}];
 }
 
+- (void)startDiagnosticsCapture {
+    NSURL *url = [NSURL URLWithString:@"/diagnostics/trace/start" relativeToURL:self.baseURL];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+    request.HTTPMethod = @"POST";
+    [request setValue:@"1" forHTTPHeaderField:@"X-Surf-Diagnostics"];
+    [NSURLConnection sendAsynchronousRequest:request queue:[[NSOperationQueue alloc] init]
+                           completionHandler:^(NSURLResponse *response, NSData *data, NSError *error) {
+        if (error) RBLog(@"diagnostics start failed: %@", [error localizedDescription]);
+    }];
+}
+
+- (void)uploadDiagnosticsEvents:(NSArray *)events {
+    if (![events count]) return;
+    NSData *body = [NSJSONSerialization dataWithJSONObject:events options:0 error:nil];
+    if (!body) return;
+    NSURL *url = [NSURL URLWithString:@"/diagnostics/client-trace" relativeToURL:self.baseURL];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+    request.HTTPMethod = @"POST";
+    request.HTTPBody = body;
+    [request setValue:@"1" forHTTPHeaderField:@"X-Surf-Diagnostics"];
+    [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    [NSURLConnection sendAsynchronousRequest:request queue:[[NSOperationQueue alloc] init]
+                           completionHandler:^(NSURLResponse *response, NSData *data, NSError *error) {
+        if (error) RBLog(@"diagnostics upload failed: %@", [error localizedDescription]);
+    }];
+}
+
 - (void)socketDidOpen:(RBSocket *)socket {
     self.socketOpen = YES;
     self.reconnectDelay = 1.0;
-    [self sendMessage:@{@"t": @"size", @"w": [NSNumber numberWithInteger:self.viewWidth], @"h": [NSNumber numberWithInteger:self.viewHeight]}];
     [self moveToState:RBSessionStateOpen];
     [self.delegate session:self status:@"websocket open"];
 }
@@ -217,10 +246,6 @@ static NSString *RBURLEscape(NSString *s) {
     NSData *data = [text dataUsingEncoding:NSUTF8StringEncoding];
     NSDictionary *json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
     if (![json isKindOfClass:[NSDictionary class]]) return;
-    NSString *t = [json objectForKey:@"t"];
-    if ([t isEqualToString:@"hello"]) {
-        [self sendMessage:@{@"t": @"size", @"w": [NSNumber numberWithInteger:self.viewWidth], @"h": [NSNumber numberWithInteger:self.viewHeight]}];
-    }
     [self.delegate session:self didReceiveControlMessage:json];
 }
 

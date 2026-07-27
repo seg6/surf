@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"surf-backend/internal/protocol"
+	"surf-backend/internal/telemetry"
 	"surf-backend/internal/ws"
 )
 
@@ -57,64 +58,90 @@ const editableExpr = `(function(){
   return {on:true, kind:kind, rect:[r.left/w, r.top/h, r.width/w, r.height/h]};
 })()`
 
-// ClientConnected implements ws.Handler: greet, sync tabs/url, push a frame.
-func (b *Browser) ClientConnected(c *ws.Client) {
+// ClientConnected implements ws.Handler: greet, sync state, and automatically
+// subscribe the client to the only visual lane (H.264).
+func (b *Controller) ClientConnected(c *ws.ClientTransport) {
 	b.mu.Lock()
 	w, h := b.viewW, b.viewH
 	b.mu.Unlock()
-	c.SendJSON(map[string]any{"t": "hello", "vw": w, "vh": h})
-	c.SendJSON(map[string]any{"t": "tabs", "tabs": b.tabList()})
+	c.SendJSON(protocol.HelloEvent{Type: "hello", W: w, H: h})
+	c.SendJSON(protocol.TabsEvent{Type: "tabs", Tabs: b.tabList()})
+	// The native controller sends its laid-out viewport immediately after the
+	// socket opens. Let that ordered message settle before spawning FFmpeg so
+	// startup does not encode at the config default and then restart twice.
+	time.AfterFunc(150*time.Millisecond, func() {
+		select {
+		case <-c.Closed():
+			return
+		default:
+			b.subscribeVideo(c)
+		}
+	})
 	if t := b.active(); t != nil {
 		b.mu.Lock()
 		u := t.URL
 		b.mu.Unlock()
 		c.SendJSON(b.urlMessage(u))
 		b.pushNavState()
-		// The cast may be parked (all previous clients were video-mode or
-		// gone); a new JPEG consumer brings it back.
-		b.ensureCast(t)
-		go b.sendFreshFrame(c, 0)
 	}
 }
 
 // HandleMessage implements ws.Handler. It runs on the client's read goroutine,
-// so per-client message order is preserved (press before release, etc.).
-func (b *Browser) HandleMessage(c *ws.Client, m *protocol.ClientMessage) {
-	b.noteClientMessage(m.T)
-	switch m.T {
-	case "ready":
-		c.Ready()
+// and only enqueues immutable typed commands. The controller goroutine is the
+// sole ordered executor (press before release, key order, tab commands).
+func (b *Controller) HandleMessage(c *ws.ClientTransport, command protocol.Command) {
+	select {
+	case b.commands <- controllerCommand{client: c, command: command}:
+	case <-c.Closed():
+	default:
+		c.Close()
+	}
+}
+
+func (b *Controller) handleCommand(c *ws.ClientTransport, command protocol.Command) {
+	kind := command.Kind()
+	telemetry.Emit("client_command", "input", "controller", map[string]any{"type": kind})
+	iid, _ := command.Causal()
+	b.noteClientMessage(kind)
+	if iid != 0 && renderCommand(kind) {
+		b.noteRenderInput()
+		defer func() {
+			b.perfMu.Lock()
+			b.interactionID = iid
+			b.perfMu.Unlock()
+		}()
+	}
+	switch m := command.(type) {
+	case *protocol.SizeCommand:
+		b.handleSize(m)
 		return
-	case "poke":
-		c.PokeReset()
-		go b.sendFreshFrame(c, 0)
-		return
-	case "size":
-		b.handleSize(c, m)
-		return
-	case "tab":
+	case *protocol.TabCommand:
 		b.handleTab(m)
 		return
-	case "video":
-		b.handleVideo(c, m.On)
+	case *protocol.ToggleCommand:
+		if kind == "audio" {
+			b.handleAudio(c, m.On)
+		}
 		return
-	case "audio":
-		b.handleAudio(c, m.On)
+	case *protocol.DialogReplyCommand:
+		b.handleDialogReply(m)
+		return
+	case *protocol.URLCommand:
+		if kind == "opennew" {
+			b.openInNewTab(m.URL)
+			return
+		}
+	}
+	switch kind {
+	case "video-retry":
+		b.stopVideo(c)
+		b.video.ResetCrashBudget()
+		b.subscribeVideo(c)
 		return
 	case "reqkeyframe":
 		// Client lost decode sync (VT session error / bad SPS-PPS) and wants an
 		// early IDR instead of waiting for the fixed 2s cadence.
-		b.streamer.RequestKeyframe()
-		return
-	case "lat":
-		// Latency echo (M1.1): immediate bounce, client computes RTT.
-		c.SendJSON(map[string]any{"t": "lat", "id": m.ID})
-		return
-	case "dialogreply":
-		b.handleDialogReply(m)
-		return
-	case "opennew":
-		b.openInNewTab(m.URL)
+		b.video.RequestKeyframe()
 		return
 	}
 
@@ -134,52 +161,67 @@ func (b *Browser) HandleMessage(c *ws.Client, m *protocol.ClientMessage) {
 	// pixels of the (possibly zoomed) emulated viewport.
 	cssW, cssH := float64(vw)/z, float64(vh)/z
 
-	switch m.T {
-	case "nav":
+	switch m := command.(type) {
+	case *protocol.URLCommand:
+		if kind != "nav" {
+			b.handleFeatureMessage(c, t, s, command)
+			return
+		}
 		// Fire-and-forget: Page.navigate doesn't answer until the navigation
 		// commits, and the WS reader must stay responsive meanwhile.
 		if u := NormalizeNavURL(m.URL); u != "" {
 			log.Printf("nav -> %s", u)
-			b.cdp.Send(s, "Page.navigate", map[string]any{"url": u})
+			b.mu.Lock()
+			t.loading = true
+			b.mu.Unlock()
+			_ = b.cdp.Dispatch(s, "Page.navigate", map[string]any{"url": u})
 		}
-	case "reload":
-		b.cdp.Send(s, "Page.reload", map[string]any{})
-	case "stop":
-		_, _ = b.cdp.Call(s, "Page.stopLoading", nil)
-	case "back", "fwd":
-		b.navigateHistory(s, m.T == "back")
-	case "click":
-		b.beginMotion(t)
-		b.mouse(s, "mousePressed", m.X*cssW, m.Y*cssH, 1)
-		b.mouse(s, "mouseReleased", m.X*cssW, m.Y*cssH, 1)
-		b.checkEditable(c, s)
-	case "wheel":
-		b.beginMotion(t)
-		b.cdp.Send(s, "Input.dispatchMouseEvent", map[string]any{
+	case *protocol.EmptyCommand:
+		switch kind {
+		case "reload":
+			b.mu.Lock()
+			t.loading = true
+			b.mu.Unlock()
+			_ = b.cdp.Dispatch(s, "Page.reload", map[string]any{})
+		case "stop":
+			_, _ = b.cdp.Call(s, "Page.stopLoading", nil)
+		case "back", "fwd":
+			b.mu.Lock()
+			t.loading = true
+			b.mu.Unlock()
+			b.navigateHistory(s, kind == "back")
+		default:
+			b.handleFeatureMessage(c, t, s, command)
+		}
+	case *protocol.PointCommand:
+		switch kind {
+		case "click":
+			b.mouse(s, "mousePressed", m.X*cssW, m.Y*cssH, 1)
+			b.mouse(s, "mouseReleased", m.X*cssW, m.Y*cssH, 1)
+			b.checkEditable(c, s)
+		case "lpdown":
+			b.mouse(s, "mousePressed", m.X*cssW, m.Y*cssH, 1)
+		case "lpmove":
+			_ = b.cdp.Dispatch(s, "Input.dispatchMouseEvent", map[string]any{
+				"type": "mouseMoved", "x": math.Round(m.X * cssW), "y": math.Round(m.Y * cssH),
+				"button": "left", "buttons": 1,
+			})
+		default:
+			b.handleFeatureMessage(c, t, s, command)
+		}
+	case *protocol.WheelCommand:
+		_ = b.cdp.Dispatch(s, "Input.dispatchMouseEvent", map[string]any{
 			"type": "mouseWheel", "x": math.Round(m.X * cssW), "y": math.Round(m.Y * cssH),
 			"deltaX": m.DX * cssW, "deltaY": m.DY * cssH,
 		})
-	case "lpdown":
-		// Long-press: a real mouse-down that stays down. Moving drags
-		// (sliders, maps, text selection); releasing in place selects the
-		// word underneath (handled on lpup).
-		b.beginMotion(t)
-		b.mouse(s, "mousePressed", m.X*cssW, m.Y*cssH, 1)
-	case "lpmove":
-		b.beginMotion(t)
-		b.cdp.Send(s, "Input.dispatchMouseEvent", map[string]any{
-			"type": "mouseMoved", "x": math.Round(m.X * cssW), "y": math.Round(m.Y * cssH),
-			"button": "left", "buttons": 1,
-		})
-	case "lpup":
+	case *protocol.LongPressUpCommand:
 		b.mouse(s, "mouseReleased", m.X*cssW, m.Y*cssH, 1)
 		b.finishLongpress(c, t, s, m.X*cssW, m.Y*cssH, m.Sel)
-	case "key":
-		b.beginMotion(t)
+	case *protocol.KeyCommand:
 		if m.Text != "" {
 			// Key messages must stay ordered. cdp.Send launches a goroutine per
 			// command, which can race rapid typing before Chromium sees it.
-			_, _ = b.cdp.Call(s, "Input.insertText", map[string]any{"text": m.Text})
+			_ = b.cdp.Dispatch(s, "Input.insertText", map[string]any{"text": m.Text})
 		} else {
 			typ := "keyUp"
 			if m.Down {
@@ -197,17 +239,22 @@ func (b *Browser) HandleMessage(c *ws.Client, m *protocol.ClientMessage) {
 				params["text"] = "\r"
 				params["unmodifiedText"] = "\r"
 			}
-			_, _ = b.cdp.Call(s, "Input.dispatchKeyEvent", params)
+			_ = b.cdp.Dispatch(s, "Input.dispatchKeyEvent", params)
 		}
 	default:
-		b.handleFeatureMessage(c, t, s, m)
+		b.handleFeatureMessage(c, t, s, command)
 	}
 }
 
-func (b *Browser) noteClientMessage(t string) {
-	if t == "ready" {
-		return
+func renderCommand(t string) bool {
+	switch t {
+	case "click", "wheel", "lpdown", "lpmove", "lpup", "key", "paste", "nav", "reload", "back", "fwd", "zoom":
+		return true
 	}
+	return false
+}
+
+func (b *Controller) noteClientMessage(t string) {
 	now := time.Now()
 	b.perfMu.Lock()
 	if b.perfSince.IsZero() {
@@ -222,9 +269,13 @@ func (b *Browser) noteClientMessage(t string) {
 	counts := b.perfCounts
 	latN, latSumMS, latMaxMS := b.perfLatN, b.perfLatSumMS, b.perfLatMaxMS
 	aLatN, aLatSumMS, aLatMaxMS := b.perfALatN, b.perfALatSumMS, b.perfALatMaxMS
+	sourceN, sourceSumMS, sourceMaxMS := b.sourceLatN, b.sourceLatSumMS, b.sourceLatMaxMS
+	encodeN, encodeSumMS, encodeMaxMS := b.encodeLatN, b.encodeLatSumMS, b.encodeLatMaxMS
 	b.perfCounts = map[string]int{}
 	b.perfLatN, b.perfLatSumMS, b.perfLatMaxMS = 0, 0, 0
 	b.perfALatN, b.perfALatSumMS, b.perfALatMaxMS = 0, 0, 0
+	b.sourceLatN, b.sourceLatSumMS, b.sourceLatMaxMS = 0, 0, 0
+	b.encodeLatN, b.encodeLatSumMS, b.encodeLatMaxMS = 0, 0, 0
 	b.perfSince = now
 	b.perfMu.Unlock()
 
@@ -236,23 +287,68 @@ func (b *Browser) noteClientMessage(t string) {
 	if aLatN > 0 {
 		aLatMeanMS = aLatSumMS / float64(aLatN)
 	}
-	log.Printf("perf input %.1fs: click=%.1f/s wheel=%.1f/s key=%.1f/s nav=%d size=%d video=%d poke=%d lp=%d other=%d | video lat mean=%.1fms max=%.1fms n=%d | audio lat mean=%.1fms max=%.1fms n=%d",
+	sourceMeanMS := 0.0
+	if sourceN > 0 {
+		sourceMeanMS = sourceSumMS / float64(sourceN)
+	}
+	encodeMeanMS := 0.0
+	if encodeN > 0 {
+		encodeMeanMS = encodeSumMS / float64(encodeN)
+	}
+	log.Printf("perf input %.1fs: click=%.1f/s wheel=%.1f/s key=%.1f/s nav=%d size=%d lp=%d other=%d | input->source mean=%.1fms max=%.1fms n=%d | source->encode mean=%.1fms max=%.1fms n=%d | video queue mean=%.1fms max=%.1fms n=%d | audio lat mean=%.1fms max=%.1fms n=%d",
 		dt,
 		float64(counts["click"])/dt,
 		float64(counts["wheel"])/dt,
 		float64(counts["key"])/dt,
-		counts["nav"], counts["size"], counts["video"], counts["poke"],
+		counts["nav"], counts["size"],
 		counts["lpdown"]+counts["lpmove"]+counts["lpup"],
 		otherInputCount(counts),
+		sourceMeanMS, sourceMaxMS, sourceN,
+		encodeMeanMS, encodeMaxMS, encodeN,
 		latMeanMS, latMaxMS, latN,
 		aLatMeanMS, aLatMaxMS, aLatN)
+}
+
+func (b *Controller) noteEncodeLatency(sourceNS, encodeNS uint64) {
+	if sourceNS == 0 || encodeNS < sourceNS {
+		return
+	}
+	ms := float64(encodeNS-sourceNS) / 1e6
+	b.perfMu.Lock()
+	b.encodeLatN++
+	b.encodeLatSumMS += ms
+	if ms > b.encodeLatMaxMS {
+		b.encodeLatMaxMS = ms
+	}
+	b.perfMu.Unlock()
+}
+
+func (b *Controller) noteRenderInput() {
+	b.perfMu.Lock()
+	b.lastRenderInputAt = time.Now()
+	b.perfMu.Unlock()
+}
+
+func (b *Controller) noteSourceFrame() {
+	now := time.Now()
+	b.perfMu.Lock()
+	if !b.lastRenderInputAt.IsZero() {
+		ms := float64(now.Sub(b.lastRenderInputAt).Microseconds()) / 1000.0
+		b.sourceLatN++
+		b.sourceLatSumMS += ms
+		if ms > b.sourceLatMaxMS {
+			b.sourceLatMaxMS = ms
+		}
+		b.lastRenderInputAt = time.Time{}
+	}
+	b.perfMu.Unlock()
 }
 
 // noteVideoLatency records one AU's per-subscriber queue-dwell time (time
 // from splitter assembly to the SendBinary call) into the same rolling
 // window noteClientMessage flushes, so one log line covers both input and
 // video-pipeline health.
-func (b *Browser) noteVideoLatency(d time.Duration) {
+func (b *Controller) noteVideoLatency(d time.Duration) {
 	ms := float64(d) / float64(time.Millisecond)
 	b.perfMu.Lock()
 	if b.perfSince.IsZero() {
@@ -267,7 +363,7 @@ func (b *Browser) noteVideoLatency(d time.Duration) {
 }
 
 // noteAudioLatency mirrors noteVideoLatency for the PCM lane.
-func (b *Browser) noteAudioLatency(d time.Duration) {
+func (b *Controller) noteAudioLatency(d time.Duration) {
 	ms := float64(d) / float64(time.Millisecond)
 	b.perfMu.Lock()
 	if b.perfSince.IsZero() {
@@ -284,7 +380,7 @@ func (b *Browser) noteAudioLatency(d time.Duration) {
 func otherInputCount(counts map[string]int) int {
 	known := map[string]bool{
 		"click": true, "wheel": true, "key": true, "nav": true, "size": true,
-		"video": true, "poke": true, "lpdown": true, "lpmove": true, "lpup": true,
+		"lpdown": true, "lpmove": true, "lpup": true,
 	}
 	n := 0
 	for k, v := range counts {
@@ -295,7 +391,7 @@ func otherInputCount(counts map[string]int) int {
 	return n
 }
 
-func (b *Browser) handleSize(c *ws.Client, m *protocol.ClientMessage) {
+func (b *Controller) handleSize(m *protocol.SizeCommand) {
 	clampDim := func(v, def int) int {
 		if v == 0 {
 			return def
@@ -312,7 +408,6 @@ func (b *Browser) handleSize(c *ws.Client, m *protocol.ClientMessage) {
 	b.mu.Unlock()
 	log.Printf("size: client asked %dx%d -> view %dx%d (changed=%t)", m.W, m.H, w, h, changed)
 	if !changed {
-		go b.sendFreshFrame(c, 0)
 		return
 	}
 	t := b.active()
@@ -321,15 +416,11 @@ func (b *Browser) handleSize(c *ws.Client, m *protocol.ClientMessage) {
 	}
 	b.stopCast(t)
 	b.applyView(t)
-	go b.syncVideoSurface(w, h)
-	b.mu.Lock()
-	t.motion = false
-	b.mu.Unlock()
+	b.requestVideoResize(w, h, nil, "")
 	b.ensureCast(t)
-	go b.sendSharpFrame(nil, t)
 }
 
-func (b *Browser) handleTab(m *protocol.ClientMessage) {
+func (b *Controller) handleTab(m *protocol.TabCommand) {
 	switch m.Action {
 	case "select":
 		b.switchActive(m.ID)
@@ -345,11 +436,15 @@ func (b *Browser) handleTab(m *protocol.ClientMessage) {
 			_, _ = b.cdp.Call("", "Target.closeTarget", map[string]any{"targetId": target})
 		}
 	case "new":
-		_, _ = b.cdp.Call("", "Target.createTarget", map[string]any{"url": b.cfg.StartURL})
+		// A target created directly on a network URL can make its first
+		// captureScreenshot wait for renderer initialization (observed as the
+		// exact 15-second CDP timeout). Attach and show a stable blank first;
+		// attachTarget navigates after that first frame reaches the pipeline.
+		_, _ = b.cdp.Call("", "Target.createTarget", b.newTargetParams("about:blank#surf-new"))
 	}
 }
 
-func (b *Browser) navigateHistory(session string, back bool) {
+func (b *Controller) navigateHistory(session string, back bool) {
 	h, err := b.cdp.NavigationHistory(session)
 	if err != nil {
 		return
@@ -363,8 +458,8 @@ func (b *Browser) navigateHistory(session string, back bool) {
 	}
 }
 
-func (b *Browser) mouse(session, typ string, x, y float64, clicks int) {
-	_, _ = b.cdp.Call(session, "Input.dispatchMouseEvent", map[string]any{
+func (b *Controller) mouse(session, typ string, x, y float64, clicks int) {
+	_ = b.cdp.Dispatch(session, "Input.dispatchMouseEvent", map[string]any{
 		"type": typ, "x": math.Round(x), "y": math.Round(y),
 		"button": "left", "clickCount": clicks,
 	})
@@ -372,7 +467,7 @@ func (b *Browser) mouse(session, typ string, x, y float64, clicks int) {
 
 // checkEditable tells the tapping client whether focus landed in a text field
 // (so it can raise the iOS keyboard). Waits 180ms for focus to settle.
-func (b *Browser) checkEditable(c *ws.Client, session string) {
+func (b *Controller) checkEditable(c *ws.ClientTransport, session string) {
 	time.AfterFunc(180*time.Millisecond, func() {
 		if !b.isActiveSession(session) {
 			return
@@ -399,13 +494,13 @@ func (b *Browser) checkEditable(c *ws.Client, session string) {
 			return
 		}
 		v := p.Result.Value
-		msg := map[string]any{"t": "editable", "on": v.On}
+		msg := protocol.EditableEvent{Type: "editable", On: v.On}
 		// kind selects the keyboard type; rect (viewport fractions) drives
 		// keyboard avoidance.
 		if v.On {
-			msg["kind"] = v.Kind
+			msg.Kind = v.Kind
 			if len(v.Rect) == 4 {
-				msg["rect"] = v.Rect
+				msg.Rect = v.Rect
 			}
 		}
 		c.SendJSON(msg)
