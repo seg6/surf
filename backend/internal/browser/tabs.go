@@ -117,7 +117,7 @@ func (b *Controller) attachTarget(info targetInfo) {
 	b.switchActive(id)
 }
 
-func normalizeHeadlessUserAgent(userAgent string) string {
+func NormalizeHeadlessUserAgent(userAgent string) string {
 	return strings.ReplaceAll(userAgent, "HeadlessChrome/", "Chrome/")
 }
 
