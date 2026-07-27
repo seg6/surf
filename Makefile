@@ -59,6 +59,7 @@ surf-dist: surf-binary
 		iconutil -c icns "dist/Surf.iconset" -o "dist/Surf.app/Contents/Resources/Surf.icns"; \
 		rm -rf "dist/Surf.iconset"; \
 		sed "s/@VERSION@/$(VERSION)/g" packaging/desktop/Info.plist > "dist/Surf.app/Contents/Info.plist"; \
+		if [ -n "$${CI:-}" ]; then (cd backend && go clean -cache -modcache); fi; \
 		tar -C dist -czf "dist/$(SURF_ARCHIVE)" "Surf.app"; \
 		hdiutil create -volname Surf -srcfolder "dist/Surf.app" -ov -format UDZO "dist/surf-$(VERSION)-darwin-$(SURF_GOARCH).dmg" >/dev/null; \
 	else \
