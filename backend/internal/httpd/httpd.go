@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"surf-backend/internal/auth"
+	"surf-backend/internal/clientupdate"
 	"surf-backend/internal/config"
+	"surf-backend/internal/updater"
 	"surf-backend/internal/ws"
 )
 
@@ -24,6 +26,7 @@ type Server struct {
 	extra  map[string]http.HandlerFunc // feature routes (downloads, tabicons)
 	health func() error
 	stats  func() map[string]any
+	client *clientupdate.Bundle
 }
 
 func New(cfg *config.Config, a *auth.Auth, hub *ws.Hub) (*Server, error) {
@@ -37,6 +40,13 @@ func (s *Server) SetHealthCheck(fn func() error) { s.health = fn }
 
 // SetStats wires the runtime snapshot served at /health?stats=1.
 func (s *Server) SetStats(fn func() map[string]any) { s.stats = fn }
+
+func (s *Server) SetClientUpdate(bundle *clientupdate.Bundle) {
+	s.client = bundle
+	if bundle != nil {
+		s.extra["/updates/v1/client"] = bundle.ServeHTTP
+	}
+}
 
 // Gated registers an auth-required feature route (/downloads/, /tabicon/).
 // Prefix match when the pattern ends with '/'.
@@ -121,9 +131,31 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleNativeConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	caps, _ := json.Marshal(config.Caps)
-	fmt.Fprintf(w, `{"ticket":%q,"vw":%d,"vh":%d,"nv":%q,"host":%q,"caps":%s}`,
-		s.auth.WSTicket(), s.cfg.ViewW, s.cfg.ViewH, config.NativeVersion, r.Host, caps)
+	clientVersion := r.URL.Query().Get("av")
+	clientProtocol := r.URL.Query().Get("nv")
+	compatibility := "compatible"
+	var update map[string]any
+	if clientProtocol != "" && clientProtocol != config.NativeVersion {
+		compatibility = "server-update-required"
+		if s.client != nil && s.client.Protocol == config.NativeVersion &&
+			updater.CompareVersions(s.client.Version, clientVersion) > 0 {
+			compatibility = "client-update-required"
+			update = map[string]any{
+				"version": s.client.Version, "protocol": s.client.Protocol,
+				"size": len(s.client.Data), "sha256": s.client.SHA256,
+				"url": "/updates/v1/client",
+			}
+		}
+	}
+	response := map[string]any{
+		"ticket": s.auth.WSTicket(), "vw": s.cfg.ViewW, "vh": s.cfg.ViewH,
+		"nv": config.NativeVersion, "version": config.AppVersion, "host": r.Host,
+		"caps": config.Caps, "compatibility": compatibility,
+	}
+	if update != nil {
+		response["clientUpdate"] = update
+	}
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {

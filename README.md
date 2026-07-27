@@ -82,7 +82,8 @@ Download the matching `surf` archive from GitHub Releases:
 The tray/menu-bar menu opens Settings, restarts the backend, or quits Surf.
 The Settings window shows the
 detected LAN address and stream status, lets you change the password and port,
-and keeps logs behind a collapsed disclosure. The password is saved under
+keeps logs behind a collapsed disclosure, and installs updates published on
+GitHub Releases. The password is saved under
 `SURF_HOME` so the iPad does not need to be reconfigured on every launch. The
 first launch downloads the pinned Chrome and FFmpeg runtimes.
 
@@ -98,6 +99,17 @@ SURF_PASSWORD='change-me' ./surf serve
 
 Windows archives contain `surf.exe`. macOS archives are published separately
 for Intel and Apple Silicon.
+
+Terminal installations can update in place with:
+
+```sh
+./surf update
+```
+
+Release builds also contain the matching iOS package. If an older native app
+connects with an incompatible protocol, Surf offers the matching update in the
+app instead of failing with an unexplained authorization error. The first
+update from a build older than 0.6.0 must still be installed manually once.
 
 Use a strong password before exposing Surf beyond local testing.
 

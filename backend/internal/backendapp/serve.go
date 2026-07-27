@@ -15,6 +15,7 @@ import (
 	"surf-backend/internal/auth"
 	"surf-backend/internal/browser"
 	"surf-backend/internal/browserbin"
+	"surf-backend/internal/clientupdate"
 	"surf-backend/internal/config"
 	"surf-backend/internal/ffmpegbin"
 	"surf-backend/internal/httpd"
@@ -67,6 +68,10 @@ func Serve() error {
 	}
 	srv.SetHealthCheck(b.Health)
 	srv.SetStats(b.Stats)
+	if bundle := clientupdate.Current(); bundle != nil {
+		srv.SetClientUpdate(bundle)
+		log.Printf("updates: embedded iPad client %s protocol %s (%d bytes)", bundle.Version, bundle.Protocol, len(bundle.Data))
+	}
 	b.RegisterRoutes(srv)
 	log.Printf("surf listening on %s:%d", cfg.BindAddr, cfg.Port)
 

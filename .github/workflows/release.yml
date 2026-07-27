@@ -10,8 +10,37 @@ permissions:
   contents: write
 
 jobs:
+  native:
+    name: Native package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify generated native metadata
+        run: |
+          VERSION="$(tr -d '[:space:]' < VERSION)" \
+          PROTOCOL_VERSION="$(tr -d '[:space:]' < PROTOCOL_VERSION)" \
+            native/client/render-versioned-files.sh
+          git diff --exit-code -- native/client/control native/client/Resources/Info.plist
+
+      - name: Download native SDK
+        run: make native-sdk
+
+      - name: Build native build environment
+        run: docker build -t surf-buildenv native/buildenv
+
+      - name: Build native package
+        run: make native-package
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: surf-native-deb
+          path: native/client/packages/*.deb
+          if-no-files-found: error
+
   packages:
     name: Surf ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: native
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -37,9 +66,17 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: surf-native-deb
+          path: dist/native
+
       - name: Build Surf package
         shell: bash
-        run: make surf-dist SURF_GOOS=${{ matrix.goos }} SURF_GOARCH=${{ matrix.goarch }}
+        run: |
+          client_deb="$(find dist/native -name '*.deb' -type f -print -quit)"
+          test -n "$client_deb"
+          make surf-dist SURF_GOOS=${{ matrix.goos }} SURF_GOARCH=${{ matrix.goarch }} CLIENT_DEB="$client_deb"
 
       - name: Verify package
         shell: bash
@@ -58,7 +95,7 @@ jobs:
   release:
     name: Build release
     runs-on: ubuntu-latest
-    needs: packages
+    needs: [native, packages]
     steps:
       - uses: actions/checkout@v4
 
@@ -104,25 +141,19 @@ jobs:
           go vet ./...
           go test -race ./...
 
-      - name: Download native SDK
-        run: make native-sdk
-
-      - name: Build native build environment
-        run: docker build -t surf-buildenv native/buildenv
-
-      - name: Build native package
-        run: make native-package
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: surf-native-${{ steps.meta.outputs.tag }}
-          path: native/client/packages/*.deb
-
       - uses: actions/download-artifact@v4
         with:
           pattern: surf-*
           path: dist/packages
           merge-multiple: true
+
+      - name: Generate update manifest
+        shell: bash
+        run: |
+          client_deb="$(find dist/packages -name '*.deb' -type f -print -quit)"
+          test -n "$client_deb"
+          go run ./backend/tools/updatemanifest dist/packages "$client_deb" \
+            "${{ steps.meta.outputs.version }}" "${{ steps.meta.outputs.protocol_version }}" update.json
 
       - uses: softprops/action-gh-release@v2
         with:
@@ -135,6 +166,7 @@ jobs:
             Windows, and macOS are attached. Launch `surf` for the desktop app
             or use `surf serve` for the backend alone.
           files: |
-            native/client/packages/*.deb
             dist/packages/surf-*.tar.gz
             dist/packages/surf-*.zip
+            dist/packages/*.deb
+            update.json

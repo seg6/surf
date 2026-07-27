@@ -14,12 +14,17 @@ ARCHS := armv7
 include $(THEOS)/makefiles/common.mk
 
 APPLICATION_NAME := Surf
+TOOL_NAME := surf-update
 Surf_FILES := $(wildcard Classes/*.m) $(wildcard Classes/*.c)
 # VideoToolbox is intentionally absent: private on iOS 6, resolved via dlopen.
 Surf_FRAMEWORKS := UIKit CoreGraphics QuartzCore ImageIO Security CFNetwork AudioToolbox CoreMedia CoreVideo MessageUI
-Surf_CFLAGS := -fobjc-arc -Wall -Werror=return-type -Wno-deprecated-declarations -DRBNativeVersion='@"$(PROTOCOL_VERSION)"'
+Surf_CFLAGS := -fobjc-arc -Wall -Werror=return-type -Wno-deprecated-declarations -DRBAppVersion='@"$(VERSION)"' -DRBNativeVersion='@"$(PROTOCOL_VERSION)"'
+surf-update_FILES := Updater/main.c
+surf-update_INSTALL_PATH := /usr/libexec
+surf-update_CFLAGS := -Wall -Werror
 
 include $(THEOS_MAKE_PATH)/application.mk
+include $(THEOS_MAKE_PATH)/tool.mk
 
 after-stage::
 	@mkdir -p $(THEOS_STAGING_DIR)/Applications/Surf.app
@@ -27,6 +32,8 @@ after-stage::
 	@cp Resources/icon-72@2x.png $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-72@2x.png
 	@cp Resources/icon-144.png $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-144.png
 	@chmod 0755 $(THEOS_STAGING_DIR)/Applications/Surf.app/Surf
+	@chown 0:0 $(THEOS_STAGING_DIR)/usr/libexec/surf-update
+	@chmod 4755 $(THEOS_STAGING_DIR)/usr/libexec/surf-update
 
 # The buildenv container bind-mounts the repo (native/buildenv/build.sh),
 # so Resources/* keep the host's numeric UID/GID in the staged bundle no
@@ -42,3 +49,4 @@ before-package::
 	@find $(THEOS_STAGING_DIR)/Applications/Surf.app -type d -exec chmod 0755 {} +
 	@find $(THEOS_STAGING_DIR)/Applications/Surf.app -type f -exec chmod 0644 {} +
 	@chmod 0755 $(THEOS_STAGING_DIR)/Applications/Surf.app/Surf
+	@chmod 4755 $(THEOS_STAGING_DIR)/usr/libexec/surf-update

@@ -2,6 +2,7 @@
 #import "RBChromeBar.h"
 #import "RBConfig.h"
 #import "RBClockSync.h"
+#import "RBClientUpdater.h"
 #import "RBFindBar.h"
 #import "RBLibraryController.h"
 #import "RBListPopover.h"
@@ -33,7 +34,7 @@ static const CGFloat kRBFindBarHeight = 44.0;
 @interface RBRootViewController () <UITextFieldDelegate, RBSessionDelegate, RBChromeBarDelegate,
                                     RBOmniboxDelegate, RBTabStripDelegate, RBSuggestPanelDelegate,
                                     RBFindBarDelegate, RBSettingsDelegate, RBMediaPipelineDelegate, RBStreamViewDelegate,
-                                    RBInteractionTrackerDelegate,
+                                    RBInteractionTrackerDelegate, RBClientUpdaterDelegate,
                                     UIDocumentInteractionControllerDelegate, UIPopoverControllerDelegate,
                                     UIAlertViewDelegate, UIActionSheetDelegate,
                                     UIImagePickerControllerDelegate, UINavigationControllerDelegate,
@@ -57,6 +58,10 @@ static const CGFloat kRBFindBarHeight = 44.0;
 // Connect flow
 @property(nonatomic, copy) NSString *pendingServerURL;
 @property(nonatomic, copy) NSString *pendingPassword;
+@property(nonatomic, strong) NSDictionary *pendingClientUpdate;
+@property(nonatomic, strong) RBClientUpdater *clientUpdater;
+@property(nonatomic, strong) UIAlertView *updateAlert;
+@property(nonatomic, strong) UIAlertView *updateInstalledAlert;
 // Presentation metrics
 @property(nonatomic, assign) CFTimeInterval lastPerfLogAt;
 @property(nonatomic, assign) NSUInteger perfLastFramesDisplayed;
@@ -417,6 +422,55 @@ static const CGFloat kRBFindBarHeight = 44.0;
 - (void)sessionNeedsPassword:(RBSession *)session message:(NSString *)message {
     if (session != self.session) return;
     [self presentSettingsAllowingCancel:NO message:message ?: @"Login failed"];
+}
+
+- (void)session:(RBSession *)session requiresClientUpdate:(NSDictionary *)update {
+    if (session != self.session || self.updateAlert) return;
+    self.pendingClientUpdate = update;
+    double megabytes = [[update objectForKey:@"size"] doubleValue] / (1024.0 * 1024.0);
+    NSString *message = [NSString stringWithFormat:
+                         @"This server requires Surf %@ (%0.1f MB).",
+                         [update objectForKey:@"version"] ?: @"?", megabytes];
+    self.updateAlert = [[UIAlertView alloc] initWithTitle:@"Surf Update Required"
+                                                  message:message delegate:self
+                                        cancelButtonTitle:@"Cancel"
+                                        otherButtonTitles:@"Update", nil];
+    [self.updateAlert show];
+}
+
+- (void)sessionRequiresServerUpdate:(RBSession *)session serverVersion:(NSString *)version {
+    if (session != self.session) return;
+    [[[UIAlertView alloc] initWithTitle:@"Server Update Required"
+                               message:[NSString stringWithFormat:@"Update the Surf server (currently %@), then reconnect.", version ?: @"?"]
+                              delegate:nil cancelButtonTitle:@"OK" otherButtonTitles:nil] show];
+}
+
+- (void)startClientUpdate {
+    self.clientUpdater = [[RBClientUpdater alloc] initWithBaseURL:self.session.baseURL
+                                                           update:self.pendingClientUpdate];
+    self.clientUpdater.delegate = self;
+    self.connectionPill.hidden = NO;
+    self.connectionPill.text = @"Downloading update…";
+    [self.clientUpdater start];
+}
+
+- (void)clientUpdater:(RBClientUpdater *)updater progress:(double)progress {
+    self.connectionPill.text = [NSString stringWithFormat:@"Downloading update… %d%%", (int)(progress * 100.0)];
+}
+
+- (void)clientUpdaterDidInstall:(RBClientUpdater *)updater {
+    self.clientUpdater = nil;
+    self.updateInstalledAlert = [[UIAlertView alloc] initWithTitle:@"Update Installed"
+                                                           message:@"Surf must close to finish the update."
+                                                          delegate:self cancelButtonTitle:@"Close Surf" otherButtonTitles:nil];
+    [self.updateInstalledAlert show];
+}
+
+- (void)clientUpdater:(RBClientUpdater *)updater failed:(NSString *)message {
+    self.clientUpdater = nil;
+    self.connectionPill.hidden = YES;
+    [[[UIAlertView alloc] initWithTitle:@"Update Failed" message:message delegate:nil
+                     cancelButtonTitle:@"OK" otherButtonTitles:nil] show];
 }
 
 - (void)session:(RBSession *)session didChangeState:(RBSessionState)state {
@@ -1268,6 +1322,15 @@ static const CGFloat kRBFindBarHeight = 44.0;
 }
 
 - (void)alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex {
+    if (alertView == self.updateAlert) {
+        self.updateAlert = nil;
+        if (buttonIndex != alertView.cancelButtonIndex) [self startClientUpdate];
+        return;
+    }
+    if (alertView == self.updateInstalledAlert) {
+        self.updateInstalledAlert = nil;
+        exit(0);
+    }
     if (alertView == self.videoErrorAlert) {
         self.videoErrorAlert = nil;
         if (buttonIndex == 1) {
