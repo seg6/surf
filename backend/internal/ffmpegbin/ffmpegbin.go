@@ -45,6 +45,13 @@ func platformArtifact(goos, goarch string) (artifact, error) {
 			"e891a9be20a37d4c82bb1b803f09ba93739a3b523b872c1033f76f1a92e6b46b",
 			root + "/bin/ffmpeg",
 		}, nil
+	case "linux/arm64":
+		const root = "ffmpeg-n7.1.5-10-g2aefd64d48-linuxarm64-gpl-7.1"
+		return artifact{
+			linuxReleaseBase + root + ".tar.xz",
+			"7a010ee13ada24442814569564f432ef376eb3c95b568de04a897dd52b89ef6e",
+			root + "/bin/ffmpeg",
+		}, nil
 	case "windows/amd64":
 		return artifact{staticReleaseBase + "ffmpeg-win32-x64.gz", "8883a3dffbd0a16cf4ef95206ea05283f78908dbfb118f73c83f4951dcc06d77", ""}, nil
 	case "darwin/amd64":

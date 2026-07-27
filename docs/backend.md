@@ -23,7 +23,7 @@ The release manifest is fetched over HTTPS and every downloaded archive is
 checked against its declared size and SHA-256 before replacement. A previous
 executable is retained as `surf.previous`.
 
-Desktop packages are built natively for Linux x86-64, Windows x86-64, macOS
+Desktop packages are built natively for Linux x86-64 and ARM64, Windows x86-64, macOS
 Intel, and macOS Apple Silicon. They include FFmpeg. Surf prefers a compatible
 system Chrome, then system Chromium, and otherwise downloads a verified
 ungoogled-chromium release into `SURF_HOME`.
@@ -61,7 +61,7 @@ Audio capture is not yet implemented on Windows and macOS.
 
 ## Quick Start
 
-Download the `surf` archive matching Linux x86-64, Windows x86-64, macOS
+Download the `surf` archive matching Linux x86-64 or ARM64, Windows x86-64, macOS
 Intel, or macOS Apple Silicon from GitHub Releases. For Linux:
 
 ```sh
