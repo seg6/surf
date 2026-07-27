@@ -30,7 +30,6 @@ var Caps = []string{
 	"security",    // TLS state on url messages
 	"pageerror",   // native error surface messages
 	"clock",       // NTP-style monotonic clock synchronization
-	"diagnostics", // authenticated trace capture and bundles
 	"dlprogress",  // download progress events
 	"dldel",       // delete a download from the server
 	"reqkeyframe", // on-demand IDR request (decode error / resync)
@@ -136,7 +135,7 @@ func Load() (*Config, error) {
 	return load(true)
 }
 
-func LoadForDiagnostics() (*Config, error) {
+func LoadForDoctor() (*Config, error) {
 	return load(false)
 }
 

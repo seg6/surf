@@ -3,7 +3,7 @@
 // Package runenv's Windows platform resolves a real Chromium/Edge path
 // (Windows has no "chromium" PATH convention) and sets up a Job Object so
 // the whole Chromium/ffmpeg process tree is killed automatically if
-// surf-backend itself is force-killed and never gets to run its own
+// Surf itself is force-killed and never gets to run its own
 // cleanup.
 //
 // Chromium runs headless (see internal/cdp) and the H.264 lane transcodes
@@ -53,9 +53,9 @@ func (windowsPlatform) Prepare(cfg *config.Config) (Handle, error) {
 
 // createKillOnCloseJob puts our own process into a Job Object configured to
 // kill every member process the instant the job's last handle closes — an
-// OS-level safety net for when surf-backend itself is force-killed and
+// OS-level safety net for when Surf itself is force-killed and
 // never gets to run its own cleanup at all. Confirmed live: a forced kill of
-// surf-backend's own process left a dozen orphaned Chromium helper
+// Surf's own process left a dozen orphaned Chromium helper
 // processes running even with proc.Kill's taskkill /T fix, because that fix
 // never ran — nothing in Go ever executes if the process is torn down from
 // outside. Every child process this program spawns inherits membership in
@@ -94,7 +94,7 @@ func createKillOnCloseJob() windows.Handle {
 		_ = windows.CloseHandle(job)
 		return 0
 	}
-	log.Printf("runtime: chromium/ffmpeg will be killed automatically if surf-backend exits unexpectedly")
+	log.Printf("runtime: chromium/ffmpeg will be killed automatically if Surf exits unexpectedly")
 	return job
 }
 

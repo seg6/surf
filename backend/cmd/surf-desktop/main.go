@@ -1,32 +1,36 @@
-// surf-desktop is a small tray supervisor for the standalone surf-backend
-// executable. Keeping the server in its own process preserves the same CLI,
-// service, crash containment, and diagnostics behavior used on headless hosts.
+// Surf is a backend and tray supervisor. Tray mode relaunches the same
+// executable in serve mode to retain process isolation.
 package main
 
 import (
 	"bytes"
 	"crypto/rand"
+	_ "embed"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"image"
-	"image/color"
-	"image/png"
 	"io"
+	"log"
+	"net"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"fyne.io/systray"
+	"surf-backend/internal/backendapp"
+	"surf-backend/internal/config"
+	"surf-backend/internal/runenv"
 )
 
 type desktopConfig struct {
@@ -38,11 +42,14 @@ type desktopApp struct {
 	mu sync.Mutex
 
 	home        string
-	backendPath string
+	manageChild bool
 	baseURL     string
 	password    string
 	logPath     string
 	logFile     *os.File
+	manageURL   string
+	manageHTTP  *http.Server
+	authCookie  *http.Cookie
 
 	cmd  *exec.Cmd
 	done chan struct{}
@@ -51,12 +58,68 @@ type desktopApp struct {
 }
 
 func main() {
-	app, err := newDesktopApp()
+	if len(os.Args) > 2 {
+		fmt.Fprintln(os.Stderr, "Usage: surf [tray|serve|doctor|version]")
+		os.Exit(2)
+	}
+	command := "tray"
+	if len(os.Args) > 1 {
+		command = os.Args[1]
+	}
+	var err error
+	switch command {
+	case "tray":
+		err = runTray()
+	case "serve":
+		err = backendapp.Serve()
+	case "doctor":
+		err = doctor()
+	case "version":
+		fmt.Printf("surf %s\nprotocol %s\n", config.AppVersion, config.NativeVersion)
+		return
+	default:
+		fmt.Fprintln(os.Stderr, "Usage: surf [tray|serve|doctor|version]")
+		err = fmt.Errorf("unknown command %q", command)
+	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "surf-desktop:", err)
+		fmt.Fprintln(os.Stderr, "surf:", err)
 		os.Exit(1)
 	}
+}
+
+func runTray() error {
+	hideConsole()
+	app, err := newDesktopApp()
+	if err != nil {
+		return err
+	}
 	systray.Run(app.onReady, app.onExit)
+	return nil
+}
+
+func doctor() error {
+	cfg, err := config.LoadForDoctor()
+	if err != nil {
+		return err
+	}
+	if err := backendapp.EnsureRuntime(cfg); err != nil {
+		return err
+	}
+	failed := false
+	for _, check := range runenv.Doctor(cfg) {
+		if check.OK {
+			log.Printf("doctor: ok %s=%s", check.Name, check.Path)
+		} else if check.Required {
+			failed = true
+			log.Printf("doctor: missing %s=%s: %v", check.Name, check.Path, check.Err)
+		} else {
+			log.Printf("doctor: optional missing %s=%s: %v", check.Name, check.Path, check.Err)
+		}
+	}
+	if failed {
+		return fmt.Errorf("doctor failed")
+	}
+	return nil
 }
 
 func newDesktopApp() (*desktopApp, error) {
@@ -86,53 +149,40 @@ func newDesktopApp() (*desktopApp, error) {
 	if err := saveDesktopConfig(home, cfg); err != nil {
 		return nil, err
 	}
-	backendPath, err := locateBackend()
-	if err != nil {
-		return nil, err
-	}
 	logPath := filepath.Join(home, "desktop.log")
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
 	}
-	return &desktopApp{
-		home: home, backendPath: backendPath,
+	app := &desktopApp{
+		home: home, manageChild: true,
 		baseURL:  "http://127.0.0.1:" + strconv.Itoa(cfg.Port),
 		password: cfg.Password, logPath: logPath, logFile: logFile,
-	}, nil
+	}
+	if err := app.startManagementServer(); err != nil {
+		_ = logFile.Close()
+		return nil, err
+	}
+	fmt.Fprintln(logFile, "surf: management UI", app.manageURL)
+	return app, nil
 }
 
 func (a *desktopApp) onReady() {
 	icon := trayIcon()
 	systray.SetIcon(icon)
-	systray.SetTemplateIcon(icon, icon)
 	systray.SetTitle("Surf")
 	systray.SetTooltip("Surf remote browser backend")
 
 	a.statusItem = systray.AddMenuItem("Starting Surf…", "Backend status")
 	a.statusItem.Disable()
-	openSurf := systray.AddMenuItem("Open Surf", "Open the backend in your browser")
-	openDiagnostics := systray.AddMenuItem("Open Diagnostics", "Open performance diagnostics")
-	password := systray.AddMenuItem("Password: "+a.password, "Password used by the iPad")
-	password.Disable()
-	copyPassword := systray.AddMenuItem("Copy Password", "Copy the generated Surf password")
-	openLogs := systray.AddMenuItem("Open Logs", "Open Surf's desktop log")
+	settings := systray.AddMenuItem("Settings…", "Open Surf settings and status")
 	restart := systray.AddMenuItem("Restart Backend", "Restart the managed backend process")
 	systray.AddSeparator()
 	quit := systray.AddMenuItem("Quit Surf", "Stop the backend and quit")
 
 	go a.startBackend()
 	go a.monitorHealth()
-	go menuLoop(openSurf, func() { _ = openExternal(a.baseURL) })
-	go menuLoop(openDiagnostics, func() { _ = openExternal(a.baseURL + "/diagnostics/") })
-	go menuLoop(copyPassword, func() {
-		if err := copyText(a.password); err != nil {
-			a.setStatus("Could not copy password")
-			return
-		}
-		a.setStatus("Password copied")
-	})
-	go menuLoop(openLogs, func() { _ = openFile(a.logPath) })
+	go menuLoop(settings, func() { a.openManagement("") })
 	go menuLoop(restart, func() {
 		a.setStatus("Restarting Surf…")
 		a.stopBackend()
@@ -149,6 +199,9 @@ func menuLoop(item *systray.MenuItem, action func()) {
 
 func (a *desktopApp) onExit() {
 	a.stopBackend()
+	if a.manageHTTP != nil {
+		_ = a.manageHTTP.Close()
+	}
 	if a.logFile != nil {
 		_ = a.logFile.Close()
 	}
@@ -160,12 +213,18 @@ func (a *desktopApp) startBackend() error {
 		a.mu.Unlock()
 		return nil
 	}
-	cmd := exec.Command(a.backendPath, "serve")
-	cmd.Env = append(os.Environ(),
+	password, baseURL := a.password, a.baseURL
+	self, err := os.Executable()
+	if err != nil {
+		a.mu.Unlock()
+		return err
+	}
+	cmd := exec.Command(self, "serve")
+	cmd.Env = append(filteredEnv(os.Environ(), "SURF_HOME", "SURF_PASSWORD", "BIND_ADDR", "PORT"),
 		"SURF_HOME="+a.home,
-		"SURF_PASSWORD="+a.password,
+		"SURF_PASSWORD="+password,
 		"BIND_ADDR=0.0.0.0",
-		"PORT="+strings.TrimPrefix(a.baseURL, "http://127.0.0.1:"),
+		"PORT="+strings.TrimPrefix(baseURL, "http://127.0.0.1:"),
 	)
 	cmd.Stdout, cmd.Stderr = a.logFile, a.logFile
 	done := make(chan struct{})
@@ -186,7 +245,7 @@ func (a *desktopApp) startBackend() error {
 		}
 		a.mu.Unlock()
 		if err != nil {
-			fmt.Fprintln(a.logFile, "surf-desktop: backend exited:", err)
+			fmt.Fprintln(a.logFile, "surf: backend exited:", err)
 		}
 		close(done)
 	}()
@@ -216,7 +275,10 @@ func (a *desktopApp) monitorHealth() {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
-		response, err := client.Get(a.baseURL + "/health")
+		a.mu.Lock()
+		baseURL := a.baseURL
+		a.mu.Unlock()
+		response, err := client.Get(baseURL + "/health")
 		if err == nil {
 			io.Copy(io.Discard, response.Body)
 			response.Body.Close()
@@ -241,6 +303,300 @@ func (a *desktopApp) setStatus(status string) {
 	if a.statusItem != nil {
 		a.statusItem.SetTitle(status)
 	}
+}
+
+func (a *desktopApp) currentPassword() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.password
+}
+
+func filteredEnv(env []string, names ...string) []string {
+	blocked := make(map[string]bool, len(names))
+	for _, name := range names {
+		blocked[name] = true
+	}
+	out := make([]string, 0, len(env))
+	for _, entry := range env {
+		name, _, _ := strings.Cut(entry, "=")
+		if !blocked[name] {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
+func (a *desktopApp) startManagementServer() error {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return fmt.Errorf("desktop management listener: %w", err)
+	}
+	a.manageURL = "http://" + listener.Addr().String()
+	a.manageHTTP = &http.Server{
+		Handler:           a.managementHandler(),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		if err := a.manageHTTP.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			fmt.Fprintln(a.logFile, "surf: management server:", err)
+		}
+	}()
+	return nil
+}
+
+func (a *desktopApp) openManagement(path string) {
+	if err := openExternal(a.manageURL + path); err != nil {
+		a.setStatus("Could not open browser")
+		fmt.Fprintln(a.logFile, "surf: open browser:", err)
+	}
+}
+
+func (a *desktopApp) managementHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", a.managementHome)
+	mux.HandleFunc("/icon.png", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(surfIconPNG)
+	})
+	mux.HandleFunc("/api/config", a.managementConfig)
+	mux.HandleFunc("/api/restart", a.managementRestart)
+	mux.HandleFunc("/settings", a.managementSettings)
+	mux.HandleFunc("/logs", a.managementLogs)
+	proxy := &httputil.ReverseProxy{
+		Director: func(request *http.Request) {
+			a.mu.Lock()
+			baseURL := a.baseURL
+			a.mu.Unlock()
+			target, err := url.Parse(baseURL)
+			if err != nil {
+				return
+			}
+			request.URL.Scheme = target.Scheme
+			request.URL.Host = target.Host
+			if request.URL.Path == "/api/status" {
+				request.URL.Path = "/health"
+				request.URL.RawQuery = "stats=1"
+			}
+			request.Host = target.Host
+		},
+		Transport: &desktopTransport{app: a, base: http.DefaultTransport},
+		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
+			http.Error(w, "Surf backend is not ready: "+err.Error(), http.StatusBadGateway)
+		},
+	}
+	mux.Handle("/api/status", proxy)
+	return localOnly(mux)
+}
+
+func localOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		ip := net.ParseIP(host)
+		if err != nil || ip == nil || !ip.IsLoopback() {
+			http.Error(w, "local access only", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		next.ServeHTTP(w, r)
+	})
+}
+
+//go:embed management.html
+var managementHTML []byte
+
+func (a *desktopApp) managementHome(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(managementHTML)
+}
+
+func (a *desktopApp) managementConfig(w http.ResponseWriter, _ *http.Request) {
+	a.mu.Lock()
+	password, baseURL := a.password, a.baseURL
+	running := a.cmd != nil
+	a.mu.Unlock()
+	port, _ := strconv.Atoi(strings.TrimPrefix(baseURL, "http://127.0.0.1:"))
+	lanURLs := localLANURLs(port)
+	lanURL := ""
+	if len(lanURLs) != 0 {
+		lanURL = lanURLs[0]
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"password": password, "baseURL": baseURL, "lanURL": lanURL, "lanURLs": lanURLs,
+		"port": port, "running": running,
+	})
+}
+
+func localLANURLs(port int) []string {
+	addresses, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	urls := make([]string, 0, len(addresses))
+	preferred := preferredLANIP()
+	for _, address := range addresses {
+		ip, _, err := net.ParseCIDR(address.String())
+		if err != nil || ip == nil || ip.IsLoopback() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() {
+			continue
+		}
+		if ip4 := ip.To4(); ip4 != nil {
+			value := "http://" + net.JoinHostPort(ip4.String(), strconv.Itoa(port))
+			if preferred != nil && ip4.Equal(preferred) {
+				urls = append([]string{value}, urls...)
+			} else {
+				urls = append(urls, value)
+			}
+		}
+	}
+	if len(urls) > 1 {
+		slices.Sort(urls[1:])
+	}
+	return slices.Compact(urls)
+}
+
+func preferredLANIP() net.IP {
+	connection, err := net.Dial("udp", "192.0.2.1:9")
+	if err != nil {
+		return nil
+	}
+	defer connection.Close()
+	address, _ := connection.LocalAddr().(*net.UDPAddr)
+	if address == nil {
+		return nil
+	}
+	return address.IP.To4()
+}
+
+func (a *desktopApp) managementRestart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost || r.Header.Get("X-Surf-Desktop") != "1" {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+	go func() {
+		a.setStatus("Restarting Surf…")
+		a.stopBackend()
+		if err := a.startBackend(); err != nil {
+			fmt.Fprintln(a.logFile, "surf: restart:", err)
+		}
+	}()
+}
+
+func (a *desktopApp) managementSettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost || r.Header.Get("X-Surf-Desktop") != "1" {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	if err := r.ParseMultipartForm(64 << 10); err != nil {
+		http.Error(w, "invalid settings", http.StatusBadRequest)
+		return
+	}
+	password := r.FormValue("password")
+	port, err := strconv.Atoi(r.FormValue("port"))
+	if len(password) < 8 {
+		http.Error(w, "Password must contain at least 8 characters.", http.StatusBadRequest)
+		return
+	}
+	if err != nil || port < 1 || port > 65535 {
+		http.Error(w, "Port must be between 1 and 65535.", http.StatusBadRequest)
+		return
+	}
+	cfg := desktopConfig{Password: password, Port: port}
+	if err := saveDesktopConfig(a.home, cfg); err != nil {
+		http.Error(w, "Could not save settings.", http.StatusInternalServerError)
+		return
+	}
+	a.mu.Lock()
+	a.password = password
+	a.baseURL = "http://127.0.0.1:" + strconv.Itoa(port)
+	a.authCookie = nil
+	a.mu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
+	if !a.manageChild { // unit tests exercise settings without a child process
+		return
+	}
+	go func() {
+		a.setStatus("Restarting Surf…")
+		a.stopBackend()
+		if err := a.startBackend(); err != nil {
+			fmt.Fprintln(a.logFile, "surf: restart after settings:", err)
+		}
+	}()
+}
+
+func (a *desktopApp) managementLogs(w http.ResponseWriter, _ *http.Request) {
+	data, err := os.ReadFile(a.logPath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if len(data) > 1<<20 {
+		data = data[len(data)-(1<<20):]
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write(data)
+}
+
+type desktopTransport struct {
+	app  *desktopApp
+	base http.RoundTripper
+}
+
+func (t *desktopTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	cookie, err := t.app.backendAuthCookie()
+	if err != nil {
+		return nil, err
+	}
+	clone := request.Clone(request.Context())
+	clone.Header = request.Header.Clone()
+	clone.AddCookie(cookie)
+	response, err := t.base.RoundTrip(clone)
+	if err == nil && response.StatusCode == http.StatusUnauthorized {
+		t.app.mu.Lock()
+		t.app.authCookie = nil
+		t.app.mu.Unlock()
+	}
+	return response, err
+}
+
+func (a *desktopApp) backendAuthCookie() (*http.Cookie, error) {
+	a.mu.Lock()
+	if a.authCookie != nil {
+		cookie := *a.authCookie
+		a.mu.Unlock()
+		return &cookie, nil
+	}
+	password, baseURL := a.password, a.baseURL
+	a.mu.Unlock()
+
+	form := url.Values{"password": {password}}
+	request, _ := http.NewRequest(http.MethodPost, baseURL+"/login", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response, err := (&http.Client{Timeout: 3 * time.Second}).Do(request)
+	if err != nil {
+		return nil, err
+	}
+	_, _ = io.Copy(io.Discard, response.Body)
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		return nil, fmt.Errorf("backend login returned HTTP %d", response.StatusCode)
+	}
+	for _, cookie := range response.Cookies() {
+		if cookie.Name == "surf_auth" {
+			a.mu.Lock()
+			a.authCookie = cookie
+			a.mu.Unlock()
+			copy := *cookie
+			return &copy, nil
+		}
+	}
+	return nil, fmt.Errorf("backend login did not return an auth cookie")
 }
 
 func surfHome() (string, error) {
@@ -302,25 +658,6 @@ func randomPassword() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
-func locateBackend() (string, error) {
-	if path := os.Getenv("SURF_BACKEND"); path != "" {
-		return path, nil
-	}
-	self, err := os.Executable()
-	if err != nil {
-		return "", err
-	}
-	name := "surf-backend"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	path := filepath.Join(filepath.Dir(self), name)
-	if info, err := os.Stat(path); err == nil && !info.IsDir() {
-		return path, nil
-	}
-	return "", fmt.Errorf("surf-backend was not found beside %s; set SURF_BACKEND", self)
-}
-
 func openExternal(target string) error {
 	switch runtime.GOOS {
 	case "windows":
@@ -332,75 +669,24 @@ func openExternal(target string) error {
 	}
 }
 
-func openFile(path string) error {
-	target := (&url.URL{Scheme: "file", Path: filepath.ToSlash(path)}).String()
-	return openExternal(target)
-}
+//go:embed surf-icon.png
+var surfIconPNG []byte
 
-func copyText(value string) error {
-	var commands [][]string
-	switch runtime.GOOS {
-	case "windows":
-		commands = [][]string{{"cmd", "/c", "clip"}}
-	case "darwin":
-		commands = [][]string{{"pbcopy"}}
-	default:
-		commands = [][]string{
-			{"wl-copy"},
-			{"xclip", "-selection", "clipboard"},
-			{"xsel", "--clipboard", "--input"},
-		}
-	}
-	var lastErr error
-	for _, command := range commands {
-		cmd := exec.Command(command[0], command[1:]...)
-		cmd.Stdin = strings.NewReader(value)
-		if err := cmd.Run(); err == nil {
-			return nil
-		} else {
-			lastErr = err
-		}
-	}
-	return lastErr
-}
+//go:embed tray-icon.png
+var trayIconPNG []byte
 
 func trayIcon() []byte {
-	const size = 32
-	img := image.NewRGBA(image.Rect(0, 0, size, size))
-	blue := color.RGBA{R: 25, G: 116, B: 210, A: 255}
-	white := color.RGBA{R: 255, G: 255, B: 255, A: 255}
-	for y := 0; y < size; y++ {
-		for x := 0; x < size; x++ {
-			dx, dy := x-size/2, y-size/2
-			if dx*dx+dy*dy <= 15*15 {
-				img.Set(x, y, blue)
-			}
-		}
+	if runtime.GOOS != "windows" {
+		return trayIconPNG
 	}
-	for y := 8; y < 13; y++ {
-		for x := 8; x < 24; x++ {
-			img.Set(x, y, white)
-		}
-	}
-	for y := 13; y < 19; y++ {
-		for x := 8; x < 13; x++ {
-			img.Set(x, y, white)
-		}
-	}
-	for y := 18; y < 23; y++ {
-		for x := 8; x < 24; x++ {
-			img.Set(x, y, white)
-		}
-	}
-	var pngData bytes.Buffer
-	_ = png.Encode(&pngData, img)
+	// Windows requires an ICO container and accepts embedded PNG image entries.
 	var icon bytes.Buffer
 	_ = binary.Write(&icon, binary.LittleEndian, []uint16{0, 1, 1})
-	icon.Write([]byte{size, size, 0, 0})
+	icon.Write([]byte{64, 64, 0, 0})
 	_ = binary.Write(&icon, binary.LittleEndian, uint16(1))
 	_ = binary.Write(&icon, binary.LittleEndian, uint16(32))
-	_ = binary.Write(&icon, binary.LittleEndian, uint32(pngData.Len()))
+	_ = binary.Write(&icon, binary.LittleEndian, uint32(len(trayIconPNG)))
 	_ = binary.Write(&icon, binary.LittleEndian, uint32(22))
-	icon.Write(pngData.Bytes())
+	icon.Write(trayIconPNG)
 	return icon.Bytes()
 }

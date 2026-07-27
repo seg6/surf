@@ -291,7 +291,7 @@ func (b *Controller) Shutdown() {
 // Died signals that the Chromium connection is gone (supervisor restarts us).
 func (b *Controller) Died() <-chan struct{} { return b.cdp.Closed() }
 
-// Stats is the /health?stats=1 diagnostics snapshot (M1.1): enough to see
+// Stats is the /health?stats=1 runtime snapshot: enough to see
 // what the server thinks is happening without ssh + log spelunking.
 func (b *Controller) Stats() map[string]any {
 	b.mu.Lock()

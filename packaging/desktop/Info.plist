@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>Surf Desktop</string>
+	<string>Surf</string>
 	<key>CFBundleExecutable</key>
-	<string>surf-desktop</string>
+	<string>surf</string>
 	<key>CFBundleIdentifier</key>
 	<string>space.seg6.surf.desktop</string>
 	<key>CFBundleName</key>
-	<string>Surf Desktop</string>
+	<string>Surf</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

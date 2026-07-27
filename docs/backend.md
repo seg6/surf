@@ -1,6 +1,6 @@
 # Backend
 
-The backend is named `surf-backend`. It runs managed Chrome in
+The backend is started with `surf serve`. It runs managed Chrome in
 `--headless=new`, transcodes CDP screencast frames to H.264 with managed
 FFmpeg, and streams video, audio, and control messages to the native client.
 Windows and macOS are also supported for the video/browsing path; audio
@@ -8,24 +8,26 @@ capture is Linux-only for now.
 
 ## Desktop app
 
-The recommended local-computer package is Surf Desktop. It is a small native
-tray/menu-bar supervisor that starts the included `surf-backend`, generates and
-persists a strong password, reports health, and exposes logs, diagnostics,
-restart, and quit actions. The backend remains a separate process, so the same
-server implementation and diagnostics are used by both desktop and headless
-deployments.
+The recommended local-computer package is Surf. It is a single
+executable containing a tray/menu-bar supervisor and an isolated backend child
+mode. It generates and persists a strong password and reports health. Its
+loopback-only Settings window shows the detected LAN address and stream state, provides editable
+password and port settings, and exposes collapsed local logs. The tray menu
+opens Settings, restarts the backend, and quits Surf. The backend
+remains a separate process, so the same server implementation is used by both
+desktop and headless deployments.
 
 Desktop packages are built natively for Linux x86-64, Windows x86-64, macOS
-Intel, and macOS Apple Silicon. They include the backend executable; Chrome and
-FFmpeg are still downloaded into `SURF_HOME` on first launch.
+Intel, and macOS Apple Silicon. Chrome and FFmpeg are downloaded into
+`SURF_HOME` on first launch.
 
-The desktop app accepts `SURF_HOME`, `SURF_PASSWORD`, and `SURF_BACKEND`
-overrides. Its generated configuration is stored at
+The desktop app accepts `SURF_HOME` and `SURF_PASSWORD` overrides. Its
+generated configuration is stored at
 `SURF_HOME/desktop.json`, and combined supervisor/backend output is written to
 `SURF_HOME/desktop.log`.
 
-The standalone CLI described below remains preferable for services, VPSes, and
-machines without a desktop session.
+The `serve` mode described below is intended for services, VPSes, and machines
+without a desktop session.
 
 ## Dependencies
 
@@ -52,14 +54,14 @@ Audio capture is not yet implemented on Windows and macOS.
 
 ## Quick Start
 
-Download the archive matching Linux x86-64, Windows x86-64, macOS Intel, or
-macOS Apple Silicon from GitHub Releases. For Linux:
+Download the `surf` archive matching Linux x86-64, Windows x86-64, macOS
+Intel, or macOS Apple Silicon from GitHub Releases. For Linux:
 
 ```sh
-tar xf surf-backend-*-linux-*.tar.gz
-cd surf-backend-*-linux-*
-./surf-backend doctor
-SURF_PASSWORD='change-me' ./surf-backend serve
+tar xf surf-*-linux-*.tar.gz
+cd surf-*-linux-*
+./surf doctor
+SURF_PASSWORD='change-me' ./surf serve
 ```
 
 Use a strong password before exposing Surf beyond local testing. Press `Ctrl-C`
@@ -76,8 +78,8 @@ http://YOUR_COMPUTER_IP:18080
 From the repo root:
 
 ```sh
-make backend-binary
-SURF_PASSWORD='change-me' ./backend/surf-backend serve
+make surf-binary
+SURF_PASSWORD='change-me' ./backend/surf serve
 ```
 
 Press `Ctrl-C` to stop the foreground backend.
@@ -85,17 +87,15 @@ Press `Ctrl-C` to stop the foreground backend.
 ## Useful Commands
 
 ```sh
-make backend-binary      # build backend/surf-backend
-make backend-dist        # build the current host package
-make backend-dist-all    # cross-package every supported backend target
-make desktop-dist        # build the desktop app on the current host
+make surf-binary         # build backend/surf
+make surf-dist           # build the current host package
 ```
 
 Run the binary directly:
 
 ```sh
-make backend-binary
-SURF_PASSWORD='change-me' ./backend/surf-backend serve
+make surf-binary
+SURF_PASSWORD='change-me' ./backend/surf serve
 ```
 
 ## Runtime Behavior
@@ -132,14 +132,6 @@ Protocol `20260727-3` uses a 64-byte extensible binary header carrying AU and
 source sequences, coded size, interaction ID, backend timing stamps, and
 encoder generation. The socket-write timestamp is stamped by the WebSocket
 writer immediately before the write.
-
-Authenticated diagnostics are available at `/diagnostics`. The embedded
-dashboard provides live snapshots, SSE updates, Prometheus text metrics,
-30-second backend/native Perfetto captures, and downloadable retained bundles.
-Bundles are metadata-only and omit URLs, credentials, typed text, and media.
-Their summary includes interaction-to-present p50/p95/p99, causally coalesced
-and genuinely unpresented interactions, trace loss, and source-to-AU mapping
-failures.
 
 For audio (Linux only), Surf first checks whether `pactl info` can reach an
 existing PulseAudio-compatible server. On common PipeWire desktops this

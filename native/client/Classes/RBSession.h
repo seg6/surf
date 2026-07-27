@@ -38,6 +38,4 @@ typedef enum {
 - (void)sendMessage:(NSDictionary *)message;
 - (void)sendClickX:(CGFloat)x y:(CGFloat)y;
 - (void)sendWheelX:(CGFloat)x y:(CGFloat)y dx:(CGFloat)dx dy:(CGFloat)dy;
-- (void)startDiagnosticsCapture;
-- (void)uploadDiagnosticsEvents:(NSArray *)events;
 @end

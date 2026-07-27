@@ -1,4 +1,4 @@
-// Package runenv owns host-mode process orchestration for surf-backend: it
+// Package runenv owns host-mode process orchestration for Surf: it
 // dispatches to whichever Platform matches runtime.GOOS so everything above
 // this layer (CDP, browser tabs, the ws hub, the wire protocol, stream
 // fan-out) never branches on the host OS.

@@ -26,8 +26,8 @@ Restart the backend with the intended `SURF_PASSWORD`, then reconnect from Surf.
 Run:
 
 ```sh
-make backend-binary
-./backend/surf-backend doctor
+make surf-binary
+./backend/surf doctor
 ```
 
 Surf installs managed Chrome and FFmpeg automatically. If a download is
@@ -40,9 +40,9 @@ also requires the PulseAudio-compatible tools reported by `doctor`.
 Retry with the default managed runtime settings:
 
 ```sh
-make backend-binary
+make surf-binary
 unset CHROME FFMPEG SURF_BROWSER_DOWNLOAD SURF_FFMPEG_DOWNLOAD
-SURF_PASSWORD='change-me' ./backend/surf-backend serve
+SURF_PASSWORD='change-me' ./backend/surf serve
 ```
 
 Downloads are checksum-verified and stored below `SURF_HOME/runtime`. Set
@@ -53,7 +53,7 @@ the corresponding runtime yourself.
 
 The current backend always uses Chrome `--headless=new`; it does not use Xvfb
 or desktop capture. A visible window means an old backend process or an
-explicitly launched browser is still running. Stop all old `surf-backend`
+explicitly launched browser is still running. Stop all old `surf serve`
 processes, rebuild, and start the current binary.
 
 ## App Installed But Icon Did Not Update
@@ -71,7 +71,7 @@ If needed, respring.
 Backend:
 
 ```sh
-SURF_PASSWORD='change-me' ./backend/surf-backend serve
+SURF_PASSWORD='change-me' ./backend/surf serve
 ```
 
 The backend runs in the foreground and writes logs to the terminal.

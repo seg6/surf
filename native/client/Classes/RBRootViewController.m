@@ -1,7 +1,7 @@
 #import "RBRootViewController.h"
 #import "RBChromeBar.h"
 #import "RBConfig.h"
-#import "RBDiagnostics.h"
+#import "RBClockSync.h"
 #import "RBFindBar.h"
 #import "RBLibraryController.h"
 #import "RBListPopover.h"
@@ -57,7 +57,7 @@ static const CGFloat kRBFindBarHeight = 44.0;
 // Connect flow
 @property(nonatomic, copy) NSString *pendingServerURL;
 @property(nonatomic, copy) NSString *pendingPassword;
-// Presentation diagnostics
+// Presentation metrics
 @property(nonatomic, assign) CFTimeInterval lastPerfLogAt;
 @property(nonatomic, assign) NSUInteger perfLastFramesDisplayed;
 @property(nonatomic, assign) NSUInteger perfLastVideoAUs;
@@ -86,7 +86,7 @@ static const CGFloat kRBFindBarHeight = 44.0;
 @property(nonatomic, assign) BOOL longPressMoved;
 // Video lane
 @property(nonatomic, strong) RBMediaPipeline *mediaPipeline;
-@property(nonatomic, strong) RBDiagnostics *diagnostics;
+@property(nonatomic, strong) RBClockSync *clockSync;
 @property(nonatomic, assign) BOOL videoActive;   // server confirmed video-config ok
 @property(nonatomic, assign) BOOL videoStarting; // server is starting the automatic video lane
 // Keyboard avoidance (editable rect, viewport fractions)
@@ -145,7 +145,7 @@ static const CGFloat kRBFindBarHeight = 44.0;
     [self.view addSubview:self.streamView];
     self.mediaPipeline = [[RBMediaPipeline alloc] init];
     self.mediaPipeline.delegate = self;
-    self.diagnostics = [[RBDiagnostics alloc] init];
+    self.clockSync = [[RBClockSync alloc] init];
 
     UITapGestureRecognizer *tripleTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggleDebug:)];
     tripleTap.numberOfTapsRequired = 3;
@@ -345,8 +345,6 @@ static const CGFloat kRBFindBarHeight = 44.0;
 
 - (void)interactionTracker:(RBInteractionTracker *)tracker
                  didSendID:(unsigned long long)interactionID {
-    [self.diagnostics traceName:@"interaction_send"
-                         values:@{@"iid": [NSNumber numberWithUnsignedLongLong:interactionID]}];
 }
 
 - (void)presentSettingsAllowingCancel:(BOOL)allowsCancel message:(NSString *)message {
@@ -361,7 +359,6 @@ static const CGFloat kRBFindBarHeight = 44.0;
     settings.delegate = self;
     settings.allowsCancel = allowsCancel;
     settings.connected = self.session.state == RBSessionStateOpen;
-    settings.diagnosticsVisible = self.debugVisible;
     self.settingsController = settings;
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:settings];
     nav.modalPresentationStyle = UIModalPresentationFormSheet;
@@ -373,18 +370,6 @@ static const CGFloat kRBFindBarHeight = 44.0;
 
 - (void)settings:(RBSettingsController *)settings clearData:(NSString *)what {
     [self.session sendMessage:@{@"t": @"clear", @"what": what ?: @""}];
-}
-
-- (void)settings:(RBSettingsController *)settings setDiagnosticsVisible:(BOOL)visible {
-    [self setDebugVisible:visible];
-}
-
-- (void)settingsStartDiagnosticsCapture:(RBSettingsController *)settings {
-    [self.session startDiagnosticsCapture];
-}
-
-- (void)stopLocalDiagnosticsCapture {
-    [self.session uploadDiagnosticsEvents:[self.diagnostics stopCapture]];
 }
 
 - (void)settings:(RBSettingsController *)settings connectToURL:(NSString *)url password:(NSString *)password {
@@ -505,13 +490,11 @@ static const CGFloat kRBFindBarHeight = 44.0;
 
 - (void)mediaPipeline:(RBMediaPipeline *)pipeline didDecodeImage:(CGImageRef)image
              metadata:(RBFrameMetadata *)metadata {
-    [self.diagnostics traceName:@"decoded_frame" values:@{@"iid": [NSNumber numberWithUnsignedLongLong:metadata.interactionID]}];
     if (!self.videoActive) return;
     [self.streamView displayVideoImage:image metadata:metadata];
 }
 
 - (void)streamView:(RBStreamView *)streamView didPresentMetadata:(RBFrameMetadata *)metadata {
-    [self.diagnostics traceName:@"presented_frame" values:@{@"iid": [NSNumber numberWithUnsignedLongLong:metadata.interactionID]}];
     [self.session.interactionTracker didPresentInteractionID:metadata.interactionID];
 }
 
@@ -528,7 +511,7 @@ static const CGFloat kRBFindBarHeight = 44.0;
     self.videoErrorAlert = [[UIAlertView alloc] initWithTitle:@"Video unavailable"
                                                      message:message delegate:self
                                            cancelButtonTitle:@"Dismiss"
-                                           otherButtonTitles:@"Retry Video", @"Reconnect", @"Start Diagnostics Capture", nil];
+                                           otherButtonTitles:@"Retry Video", @"Reconnect", nil];
     [self.videoErrorAlert show];
 }
 
@@ -549,16 +532,9 @@ static const CGFloat kRBFindBarHeight = 44.0;
 // ------------------------------------------------------- control messages
 
 - (void)session:(RBSession *)session didReceiveControlMessage:(NSDictionary *)message {
-    if ([self.diagnostics consumeControlMessage:message]) return;
+    if ([self.clockSync consumeControlMessage:message]) return;
     NSString *t = [message objectForKey:@"t"];
-    if ([t isEqualToString:@"capture-state"]) {
-        if ([[message objectForKey:@"active"] boolValue]) {
-            [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(stopLocalDiagnosticsCapture) object:nil];
-            [self.diagnostics startCapture];
-            // Upload while the backend trace is still accepting client events.
-            [self performSelector:@selector(stopLocalDiagnosticsCapture) withObject:nil afterDelay:29.0];
-        }
-    } else if ([t isEqualToString:@"url"]) {
+    if ([t isEqualToString:@"url"]) {
         NSString *url = [message objectForKey:@"url"];
         if (url) [self.chromeBar.omnibox setURLText:url];
         [self.chromeBar.omnibox setStarred:[[message objectForKey:@"starred"] boolValue]];
@@ -1299,8 +1275,6 @@ static const CGFloat kRBFindBarHeight = 44.0;
             [self.session sendMessage:@{@"t": @"video-retry"}];
         } else if (buttonIndex == 2) {
             [self connectToURL:self.pendingServerURL password:self.pendingPassword];
-        } else if (buttonIndex == 3) {
-            [self.session startDiagnosticsCapture];
         }
         return;
     }
@@ -1616,7 +1590,7 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
                             self.streamView.bounds.size.width,
                             self.streamView.bounds.size.height,
                             age,
-                            self.diagnostics.lastRTTMS,
+                            self.clockSync.lastRTTMS,
                             self.session.interactionTracker.lastInteractionToPresentMS];
 }
 
@@ -1625,10 +1599,9 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
     double age = presentedAt > 0.0 ? CACurrentMediaTime() - presentedAt : 0.0;
     // CDP screencasting is intentionally silent on static pages. Decoder
     // errors request an IDR directly; elapsed wall time is not a fault signal.
-    // Continuous clock sync is cheap and diagnostics captures need a recent
-    // low-RTT sample even when the overlay has never been opened.
+    // Keep a recent low-RTT sample for the performance overlay.
     if (self.session.state == RBSessionStateOpen) {
-        NSDictionary *probe = [self.diagnostics latencyProbeIfIdle];
+        NSDictionary *probe = [self.clockSync probeIfIdle];
         if (probe) [self.session sendMessage:probe];
     }
 

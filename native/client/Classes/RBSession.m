@@ -187,33 +187,6 @@ static NSString *RBURLEscape(NSString *s) {
     [self sendMessage:@{@"t": @"wheel", @"x": [NSNumber numberWithFloat:x], @"y": [NSNumber numberWithFloat:y], @"dx": [NSNumber numberWithFloat:dx], @"dy": [NSNumber numberWithFloat:dy]}];
 }
 
-- (void)startDiagnosticsCapture {
-    NSURL *url = [NSURL URLWithString:@"/diagnostics/trace/start" relativeToURL:self.baseURL];
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-    request.HTTPMethod = @"POST";
-    [request setValue:@"1" forHTTPHeaderField:@"X-Surf-Diagnostics"];
-    [NSURLConnection sendAsynchronousRequest:request queue:[[NSOperationQueue alloc] init]
-                           completionHandler:^(NSURLResponse *response, NSData *data, NSError *error) {
-        if (error) RBLog(@"diagnostics start failed: %@", [error localizedDescription]);
-    }];
-}
-
-- (void)uploadDiagnosticsEvents:(NSArray *)events {
-    if (![events count]) return;
-    NSData *body = [NSJSONSerialization dataWithJSONObject:events options:0 error:nil];
-    if (!body) return;
-    NSURL *url = [NSURL URLWithString:@"/diagnostics/client-trace" relativeToURL:self.baseURL];
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-    request.HTTPMethod = @"POST";
-    request.HTTPBody = body;
-    [request setValue:@"1" forHTTPHeaderField:@"X-Surf-Diagnostics"];
-    [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-    [NSURLConnection sendAsynchronousRequest:request queue:[[NSOperationQueue alloc] init]
-                           completionHandler:^(NSURLResponse *response, NSData *data, NSError *error) {
-        if (error) RBLog(@"diagnostics upload failed: %@", [error localizedDescription]);
-    }];
-}
-
 - (void)socketDidOpen:(RBSocket *)socket {
     self.socketOpen = YES;
     self.reconnectDelay = 1.0;
