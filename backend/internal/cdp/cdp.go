@@ -1,7 +1,8 @@
-// Package cdp is a thin Chrome DevTools Protocol client: launch Chromium,
-// dial its browser WebSocket, correlate request/response by id, and fan out
-// events. Flat sessions only (Target.attachToTarget with flatten:true); the
-// small CDP surface we use doesn't justify a generated protocol binding.
+// Package cdp is a thin Chrome DevTools Protocol client: launch headless
+// Chromium, dial its browser WebSocket, correlate request/response by id,
+// and fan out events. Flat sessions only (Target.attachToTarget with
+// flatten:true); the small CDP surface we use doesn't justify a generated
+// protocol binding.
 package cdp
 
 import (
@@ -75,19 +76,17 @@ type LaunchConfig struct {
 	W, H       int
 	Env        []string
 	NoSandbox  bool
-	// PlatformArgs are host-OS-specific launch flags (e.g. Linux's
-	// --ozone-platform=x11) supplied by the active runenv.Handle.
-	PlatformArgs []string
-	// Desktop names a Windows desktop (runenv.Handle.HiddenDesktop) Chromium
-	// should launch onto instead of the interactive one. Empty everywhere
-	// else, and empty on Windows too when hidden-desktop launch is off or
-	// unavailable.
-	Desktop   string
-	ExtraArgs []string
+	ExtraArgs  []string
 }
 
+// Args builds Chromium's headless launch flags. Headless mode means every
+// platform launches identically — no display server, no virtual/hidden
+// desktop, no window-management flags at all — and it's still fully
+// CDP-drivable: confirmed live that Page.startScreencast, mouse/keyboard
+// input dispatch, and Runtime.evaluate all work exactly the same as headful.
 func (cfg LaunchConfig) Args() []string {
 	args := []string{
+		"--headless=new",
 		"--remote-debugging-port=0",
 		"--user-data-dir=" + cfg.Profile,
 		"--disable-dev-shm-usage", "--disable-gpu",
@@ -97,9 +96,10 @@ func (cfg LaunchConfig) Args() []string {
 		"--hide-scrollbars",
 		"--disable-background-networking", "--disable-sync",
 		// The anti-throttling set puppeteer always passed: without these,
-		// Chromium treats the capture surface as backgrounded/occluded and
-		// stops producing compositor frames (dead screencast, multi-second
-		// screenshots).
+		// Chromium can treat itself as backgrounded/occluded and throttle or
+		// stop producing compositor frames (dead screencast, multi-second
+		// screenshots) — headless removes most of the reasons this would
+		// happen, but these are harmless to keep as a safety margin.
 		// Wheel scrolls must apply instantly: the client predicts scroll
 		// locally and reconciles against frame scroll offsets — an animated
 		// scroll makes the server look permanently behind.
@@ -116,33 +116,21 @@ func (cfg LaunchConfig) Args() []string {
 		"--metrics-recording-only", "--password-store=basic", "--use-mock-keychain",
 		"--disable-features=Translate,MediaRouter,AcceptCHFrame,OptimizationHints",
 		fmt.Sprintf("--window-size=%d,%d", cfg.W, cfg.H),
-		// Fullscreen/kiosk: no toolbar/omnibox/tab strip on the X display. The
-		// CDP screencast sees page pixels either way, but the video lane films
-		// the capture surface directly, so a normal browser window would
-		// stream Chromium chrome. Position must be pinned: with no WM the
-		// default window origin is (10,10), which shifts and clips the
-		// filmed page.
-		"--kiosk",
-		"--start-fullscreen",
-		"--window-position=0,0",
 	}
 	if cfg.NoSandbox {
 		args = append(args, "--no-sandbox")
 	}
-	args = append(args, cfg.PlatformArgs...)
 	args = append(args, cfg.ExtraArgs...)
 	args = append(args, "about:blank")
 	return args
 }
 
-// Launch starts Chromium headful (Xvfb provides the display, or — Windows
-// hidden-desktop mode — cfg.Desktop names an invisible one) with the same
-// flag set puppeteer was given, and returns a connected browser client.
+// Launch starts headless Chromium (see Args) and returns a connected browser
+// client.
 func Launch(cfg LaunchConfig) (*Client, *os.Process, error) {
 	started, err := proc.Start(cfg.ChromePath, cfg.Args(), proc.Options{
-		Env:     append(os.Environ(), cfg.Env...),
-		Desktop: cfg.Desktop,
-		Stderr:  true,
+		Env:    append(os.Environ(), cfg.Env...),
+		Stderr: true,
 	})
 	if err != nil {
 		return nil, nil, err

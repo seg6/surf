@@ -43,8 +43,6 @@ type Config struct {
 	Profile       string
 	ViewW         int
 	ViewH         int
-	DisplayW      int // X framebuffer / Chromium window size; must cover every viewport
-	DisplayH      int
 	Quality       int // steady-state screencast JPEG quality
 	MotionQuality int // JPEG quality while scrolling/typing (cheap frames, low latency)
 	SharpQuality  int // quality of the post-settle captureScreenshot
@@ -54,28 +52,16 @@ type Config struct {
 	DownloadsDir  string
 	UploadsDir    string
 
-	Display         string
-	XOutput         string
 	PulseServer     string
 	PulseSink       string
 	AudioSource     string
 	FFmpegPath      string
-	XvfbPath        string
-	XrandrPath      string
 	PulseaudioPath  string
 	PactlPath       string
-	ManageDisplay   bool
 	ManagePulse     bool
 	EnsurePulseSink bool
 	ChromeNoSandbox bool
 	ChildEnv        []string
-
-	// HiddenDesktop gates the Windows hidden-desktop launch (see
-	// runenv_windows.go): Chromium and the capture ffmpeg run on a second,
-	// non-interactive desktop instead of the real one. Ignored on every
-	// other platform. Default on; SURF_HIDDEN_DESKTOP=0 forces the older
-	// visible-window launch, useful when debugging capture issues.
-	HiddenDesktop bool
 
 	// H.264 lane. The encoder only runs while a native video-mode client
 	// is subscribed.
@@ -86,16 +72,12 @@ type Config struct {
 	StreamBufsizeK int    // STREAM_BUFSIZE
 }
 
+// RefreshChildEnv rebuilds the environment ffmpeg (and, on Linux, Chromium)
+// children get. Chromium itself runs headless — no display server, so no
+// DISPLAY/Wayland/toolkit-backend forcing is needed here anymore, only
+// whatever PulseAudio connection info the audio lane depends on.
 func (c *Config) RefreshChildEnv() {
-	env := []string{
-		"DISPLAY=" + c.Display,
-		"WAYLAND_DISPLAY=",
-		"XDG_SESSION_TYPE=x11",
-		"GDK_BACKEND=x11",
-		"QT_QPA_PLATFORM=xcb",
-		"SDL_VIDEODRIVER=x11",
-		"CLUTTER_BACKEND=x11",
-	}
+	var env []string
 	if c.PulseServer != "" {
 		env = append(env, "PULSE_SERVER="+c.PulseServer)
 	}
@@ -162,7 +144,6 @@ func load(requireAuth bool) (*Config, error) {
 	home := surfHome()
 	viewW := envInt("VW", 1024)
 	viewH := envInt("VH", 768)
-	displayDefault := max(viewW, viewH)
 	pulseSink := envStr("PULSE_SINK", "surf_output")
 	pactlPath := envStr("PACTL", "pactl")
 	managePulseDefault := true
@@ -182,8 +163,6 @@ func load(requireAuth bool) (*Config, error) {
 		Profile:         envStr("PROFILE", filepath.Join(home, "profile")),
 		ViewW:           viewW,
 		ViewH:           viewH,
-		DisplayW:        envInt("XFB_W", displayDefault),
-		DisplayH:        envInt("XFB_H", displayDefault),
 		Quality:         envInt("QUALITY", 100),
 		MotionQuality:   envInt("MOTION_QUALITY", 85),
 		SharpQuality:    envInt("SHARP_QUALITY", 82),
@@ -192,21 +171,15 @@ func load(requireAuth bool) (*Config, error) {
 		AuthDays:        envInt("AUTH_DAYS", 180),
 		DownloadsDir:    envStr("DOWNLOADS", filepath.Join(home, "downloads")),
 		UploadsDir:      envStr("UPLOADS", filepath.Join(home, "uploads")),
-		Display:         envStr("SURF_DISPLAY", envStr("DISPLAY", ":99")),
-		XOutput:         envStr("X_OUTPUT", "screen"),
 		PulseServer:     envStr("PULSE_SERVER", pulseServerDefault),
 		PulseSink:       pulseSink,
 		AudioSource:     envStr("AUDIO_SOURCE", pulseSink+".monitor"),
 		FFmpegPath:      envStr("FFMPEG", "ffmpeg"),
-		XvfbPath:        envStr("XVFB", "Xvfb"),
-		XrandrPath:      envStr("XRANDR", "xrandr"),
 		PulseaudioPath:  envStr("PULSEAUDIO", "pulseaudio"),
 		PactlPath:       pactlPath,
-		ManageDisplay:   envBool("SURF_MANAGE_DISPLAY", true),
 		ManagePulse:     managePulse,
 		EnsurePulseSink: envBool("SURF_ENSURE_PULSE_SINK", !managePulse),
 		ChromeNoSandbox: envBool("CHROME_NO_SANDBOX", os.Geteuid() == 0),
-		HiddenDesktop:   envBool("SURF_HIDDEN_DESKTOP", true),
 		StreamFPS:       envInt("STREAM_FPS", 30),
 		StreamScale:     envStr("STREAM_SCALE", "1024x1024"),
 		StreamBitrateK:  envInt("STREAM_BITRATE", 6000),

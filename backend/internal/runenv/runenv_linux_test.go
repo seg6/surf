@@ -8,34 +8,37 @@ import (
 	"surf-backend/internal/config"
 )
 
-func TestDisplaySocket(t *testing.T) {
-	if got := displaySocket(":123.0"); got != "/tmp/.X11-unix/X123" {
-		t.Fatalf("displaySocket=%q", got)
+func TestDoctorChecksCommonToolsWhenPulseUnmanaged(t *testing.T) {
+	checks := Doctor(&config.Config{
+		ChromePath: "missing-chromium",
+		FFmpegPath: "missing-ffmpeg",
+	})
+	if len(checks) != 2 {
+		t.Fatalf("checks=%v, want chromium+ffmpeg only", checks)
 	}
 }
 
-func TestDoctorRequiresXrandr(t *testing.T) {
+func TestDoctorRequiresPulseaudioAndPactlWhenManagingPulse(t *testing.T) {
 	checks := Doctor(&config.Config{
 		ChromePath:     "missing-chromium",
 		FFmpegPath:     "missing-ffmpeg",
-		XvfbPath:       "missing-xvfb",
-		XrandrPath:     "missing-xrandr",
 		PulseaudioPath: "missing-pulseaudio",
 		PactlPath:      "missing-pactl",
-		ManageDisplay:  true,
 		ManagePulse:    true,
 	})
-	found := false
-	for _, check := range checks {
-		if check.Name == "xrandr" {
-			found = true
-			if !check.Required {
-				t.Fatal("xrandr should be required")
+	for _, name := range []string{"pulseaudio", "pactl"} {
+		found := false
+		for _, check := range checks {
+			if check.Name == name {
+				found = true
+				if !check.Required {
+					t.Fatalf("%s should be required", name)
+				}
 			}
 		}
-	}
-	if !found {
-		t.Fatal("doctor did not include xrandr")
+		if !found {
+			t.Fatalf("doctor did not include %s", name)
+		}
 	}
 }
 
@@ -43,7 +46,6 @@ func TestDoctorRequiresPactlWhenEnsuringExternalSink(t *testing.T) {
 	checks := Doctor(&config.Config{
 		ChromePath:      "missing-chromium",
 		FFmpegPath:      "missing-ffmpeg",
-		XrandrPath:      "missing-xrandr",
 		PactlPath:       "missing-pactl",
 		EnsurePulseSink: true,
 	})
