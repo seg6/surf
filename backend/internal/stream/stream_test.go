@@ -2,9 +2,18 @@ package stream
 
 import (
 	"bytes"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+type countingWriter struct{ n atomic.Int64 }
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	w.n.Add(1)
+	return len(p), nil
+}
 
 func nal(start4 bool, typ byte, payload ...byte) []byte {
 	var b []byte
@@ -99,6 +108,29 @@ func TestSubBackpressureResyncsOnIDR(t *testing.T) {
 	}
 }
 
+func TestRestartMovesEverySubscriberToNewGeneration(t *testing.T) {
+	s := &Streamer{subs: map[*Sub]struct{}{}, gen: 3}
+	a := &Sub{C: make(chan AU, 2), s: s, gen: 1}
+	b := &Sub{C: make(chan AU, 2), s: s, gen: 2}
+	a.C <- AU{Seq: 1}
+	b.C <- AU{Seq: 2}
+	s.subs[a] = struct{}{}
+	s.subs[b] = struct{}{}
+
+	s.mu.Lock()
+	s.resetSubsForGenLocked()
+	s.mu.Unlock()
+
+	for name, sub := range map[string]*Sub{"a": a, "b": b} {
+		if sub.gen != 3 || !sub.dropped || !sub.fresh {
+			t.Fatalf("sub %s not reset for generation 3: gen=%d dropped=%t fresh=%t", name, sub.gen, sub.dropped, sub.fresh)
+		}
+		if len(sub.C) != 0 {
+			t.Fatalf("sub %s retained stale AUs", name)
+		}
+	}
+}
+
 // TestRequestKeyframeNoopWhenNotRunning exercises the guard clauses only —
 // actually restarting ffmpeg needs a real binary and display.
 func TestRequestKeyframeNoopWhenNotRunning(t *testing.T) {
@@ -125,28 +157,189 @@ func TestRequestKeyframeCooldown(t *testing.T) {
 	}
 }
 
-func TestSubscribeFailsImmediatelyWhenCaptureArgsUnset(t *testing.T) {
+func TestArgsBuildsMjpegFromStdin(t *testing.T) {
+	s := New(Config{W: 1024, H: 768, FPS: 30, BitrateK: 6000, MaxrateK: 8000, BufsizeK: 1800})
+	args := s.args()
+	want := []string{
+		"-loglevel", "warning",
+		"-fflags", "nobuffer",
+		"-f", "mjpeg", "-framerate", "30", "-probesize", "32", "-analyzeduration", "0",
+		"-i", "pipe:0",
+	}
+	if len(args) < len(want) {
+		t.Fatalf("args=%v, too short", args)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Fatalf("args[%d]=%q, want %q (full: %v)", i, args[i], want[i], args)
+		}
+	}
+	if args[len(args)-1] != "pipe:1" {
+		t.Fatalf("last arg=%q, want pipe:1 (full: %v)", args[len(args)-1], args)
+	}
+}
+
+func TestArgsPassesThroughUntimestampedFrames(t *testing.T) {
+	s := New(Config{W: 640, H: 480, FPS: 30, BitrateK: 1000, MaxrateK: 1200, BufsizeK: 500})
+	args := strings.Join(s.args(), " ")
+	if !strings.Contains(args, "-fps_mode passthrough") {
+		t.Fatalf("args must preserve every event-driven JPEG frame: %s", args)
+	}
+	if !strings.Contains(args, "-framerate 30") {
+		t.Fatalf("args must timestamp input at configured FPS: %s", args)
+	}
+}
+
+func TestArgsAddsScaleFilterWhenDownscaling(t *testing.T) {
+	s := New(Config{W: 1024, H: 1024, ScaleMaxW: 512, ScaleMaxH: 512, FPS: 30, BitrateK: 100, MaxrateK: 100, BufsizeK: 50})
+	args := s.args()
+	found := false
+	for i, a := range args {
+		if a == "-vf" && i+1 < len(args) && strings.HasPrefix(args[i+1], "scale=512:512") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a scale=512:512 filter in args: %v", args)
+	}
+}
+
+func TestPushIsNoopWhenNotRunning(t *testing.T) {
 	s := New(Config{W: 64, H: 64, FPS: 15, BitrateK: 100, MaxrateK: 100, BufsizeK: 50})
+	// Must not panic or block: no encoder has been started (no Subscribe
+	// call), so Push has nowhere to write and should just return.
+	s.Push([]byte("not a real jpeg"))
+}
+
+// TestPushStateNeverBlocksSender guards the actual bug this design exists to
+// prevent: an earlier version wrote straight to ffmpeg's stdin from Push,
+// which runs on the CDP event dispatch goroutine — confirmed live that a
+// real interactive page (bigger, more frequent frames than any synthetic
+// test used) filled the pipe and froze frame delivery entirely, JPEG lane
+// included. pushState.set must stay O(1) regardless of how fast the writer
+// goroutine drains it — here, not at all — by coalescing to the latest
+// frame instead of blocking.
+func TestPushStateNeverBlocksSender(t *testing.T) {
+	ps := newPushState(30)
+	// No writer goroutine is running at all: if set ever blocked on the
+	// consumer, this would hang forever instead of finishing quickly.
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 100000; i++ {
+			ps.set([]byte{byte(i)})
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("pushState.set blocked despite nothing ever draining it")
+	}
+}
+
+func TestPushStatePacesWrites(t *testing.T) {
+	ps := newPushState(100)
+	w := &countingWriter{}
+	go ps.run(w)
+	defer close(ps.done)
+
+	deadline := time.Now().Add(120 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		ps.set([]byte{1})
+	}
+	// Allow the final scheduled tick, but nowhere near enough time for an
+	// unpaced writer to hide behind scheduler variance.
+	time.Sleep(15 * time.Millisecond)
+	got := w.n.Load()
+	if got < 8 || got > 15 {
+		t.Fatalf("paced writer made %d writes in about 135ms at 100fps, want 8..15", got)
+	}
+}
+
+func TestSeedLatestRequiresMatchingCaptureSize(t *testing.T) {
+	s := &Streamer{
+		cfg:       Config{CaptureW: 800, CaptureH: 600},
+		push:      newPushState(30),
+		lastJPEG:  []byte{1, 2, 3},
+		lastJPEGW: 800,
+		lastJPEGH: 600,
+	}
+	s.seedLatestLocked()
+	s.push.mu.Lock()
+	got := append([]byte(nil), s.push.pending...)
+	s.push.pending = nil
+	s.push.mu.Unlock()
+	if !bytes.Equal(got, s.lastJPEG) {
+		t.Fatalf("matching restart seed = %v, want %v", got, s.lastJPEG)
+	}
+
+	s.cfg.CaptureW = 1024
+	s.seedLatestLocked()
+	s.push.mu.Lock()
+	got = append([]byte(nil), s.push.pending...)
+	s.push.mu.Unlock()
+	if len(got) != 0 {
+		t.Fatalf("size-changing restart reused stale JPEG: %v", got)
+	}
+}
+
+// TestSubscribeForcesRestartWhenAlreadyRunning guards the fix for a real,
+// live bug: a subscriber joining an already-running encoder (e.g. still
+// alive within lingerStop's grace period from a previous viewer) started
+// "dropped" waiting for an IDR, but nothing forced one — with scenecut=0
+// the next periodic IDR was up to keyint frames away, and since frames
+// only arrive when CDP's screencast actually produces one, a subscriber
+// landing on an already-static page could wait forever, silently falling
+// back to JPEG (confirmed live: "no AU within 6s, lane unavailable" after
+// navigating a lingering session to a settled page). Subscribe must now
+// force a restart whenever it joins a running encoder instead of trusting
+// one to show up on its own.
+func TestSubscribeForcesRestartWhenAlreadyRunning(t *testing.T) {
+	s := New(Config{
+		FFmpegPath: "surf-definitely-does-not-exist-xyz",
+		W:          64, H: 64, FPS: 15, BitrateK: 100, MaxrateK: 100, BufsizeK: 50,
+	})
+	// Simulate an encoder that's already running (as if still lingering
+	// from a prior subscriber) without spawning a real process.
+	s.mu.Lock()
+	s.running = true
+	s.mu.Unlock()
+
 	sub := s.Subscribe()
+
+	// The bad FFmpegPath makes the forced restart's startLocked fail
+	// immediately — proving a restart was actually attempted (rather than
+	// Subscribe trusting the already-"running" encoder to eventually
+	// produce an IDR): running flips back to false and every subscriber,
+	// including this brand new one, gets closed via failAllLocked.
 	select {
 	case _, ok := <-sub.C:
 		if ok {
 			t.Fatal("expected closed channel, got a value")
 		}
 	default:
-		t.Fatal("expected sub.C already closed after Subscribe")
+		t.Fatal("expected sub.C already closed after the forced restart failed")
+	}
+	s.mu.Lock()
+	running, lastReq := s.running, s.lastKeyframeReq
+	s.mu.Unlock()
+	if running {
+		t.Fatal("streamer still marked running after the forced restart's startLocked failed")
+	}
+	if lastReq.IsZero() {
+		t.Fatal("Subscribe did not record the forced keyframe restart attempt")
 	}
 }
 
-// TestSubscribeFailsWhenCaptureArgsReturnsEmpty guards against a real bug: a
-// platform Handle's method value (e.g. windowsHandle{}.VideoCaptureArgs) is
-// never a nil func even when calling it always returns an empty slice, so
-// args()/startLocked must check the result, not whether CaptureArgs itself
-// is nil.
-func TestSubscribeFailsWhenCaptureArgsReturnsEmpty(t *testing.T) {
+// TestSubscribeFailsImmediatelyWhenFFmpegMissing guards the one remaining
+// startup-failure path: mjpeg-from-stdin has no platform-specific
+// "unsupported" case anymore (unlike the old x11grab/gdigrab CaptureArgs
+// hook), so the only way Subscribe can fail now is ffmpeg itself not
+// existing.
+func TestSubscribeFailsImmediatelyWhenFFmpegMissing(t *testing.T) {
 	s := New(Config{
-		W: 64, H: 64, FPS: 15, BitrateK: 100, MaxrateK: 100, BufsizeK: 50,
-		CaptureArgs: func(string, int, int, int) []string { return nil },
+		FFmpegPath: "surf-definitely-does-not-exist-xyz",
+		W:          64, H: 64, FPS: 15, BitrateK: 100, MaxrateK: 100, BufsizeK: 50,
 	})
 	sub := s.Subscribe()
 	select {

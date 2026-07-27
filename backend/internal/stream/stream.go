@@ -1,8 +1,21 @@
-// Package stream owns the H.264 lane: one ffmpeg process grabbing the X
-// display (bypassing CDP entirely), an access-unit splitter, and per-
-// subscriber fan-out with IDR-aware backpressure. The encoder runs only
-// while at least one subscriber exists (plus a short linger), so the lane
-// costs nothing when no native video client is connected.
+// Package stream owns the H.264 lane: it transcodes the JPEG frames
+// Chromium's own CDP screencast already produces (pushed in via
+// Streamer.Push — see browser.go's onScreencastFrame) into H.264 through
+// one ffmpeg process (JPEG in over stdin, Annex-B H.264 out), an
+// access-unit splitter, and per-subscriber fan-out with IDR-aware
+// backpressure.
+//
+// This used to grab the OS display directly (x11grab/gdigrab), bypassing
+// CDP entirely. Re-encoding frames CDP already delivers instead means this
+// package needs no platform-specific capture method at all — the same
+// ffmpeg invocation works on every OS, and it works even when Chromium runs
+// on a Windows hidden desktop, which OS-level screen capture cannot reach:
+// confirmed live that gdigrab fails with ERROR_ACCESS_DENIED against a
+// desktop that has never been the foreground one, independent of its DACL.
+//
+// The encoder runs only while at least one subscriber exists (plus a short
+// linger), so the lane costs nothing when no native video client is
+// connected.
 package stream
 
 import (
@@ -36,27 +49,19 @@ const (
 )
 
 type Config struct {
-	Display                      string // ":99" on Linux, or whatever surface name the platform uses
-	FFmpegPath                   string
-	Env                          []string
-	W, H                         int // coded size
-	CaptureW, CaptureH           int // grab size; defaults to coded size
-	ScaleMaxW, ScaleMaxH         int // optional coded-size bounding box
+	FFmpegPath string
+	Env        []string
+	W, H       int // coded size
+	// CaptureW, CaptureH is the size of the JPEG frames being pushed in —
+	// Chromium's screencast maxWidth/maxHeight, kept in sync with the
+	// client's viewport by browser.go. Defaults to the coded size.
+	CaptureW, CaptureH   int
+	ScaleMaxW, ScaleMaxH int // optional coded-size bounding box
+	// FPS is nominal now, not a literal capture poll rate (frames arrive
+	// whenever CDP's screencast produces one, not on a fixed clock): used
+	// only for the keyint/level math below.
 	FPS                          int
 	BitrateK, MaxrateK, BufsizeK int
-	// CaptureArgs builds the ffmpeg arguments (up to and including "-i
-	// <surface>") that grab this platform's rendered surface. Nil means the
-	// H.264 lane is unsupported here; startLocked fails every subscriber
-	// immediately and callers fall back to the JPEG/CDP screencast.
-	CaptureArgs func(surface string, w, h, fps int) []string
-	// Desktop names a Windows desktop (runenv.Handle.HiddenDesktop) ffmpeg
-	// would launch onto instead of the interactive one, kept here for a
-	// future capture method. Currently unreachable in practice: gdigrab
-	// can't capture a desktop that isn't the foreground one (confirmed
-	// live — see runenv_windows.go's VideoCaptureArgs), so that method
-	// returns nil, and CaptureArgs is nil, whenever a hidden desktop is
-	// active — this lane just falls back to JPEG/CDP screencast then.
-	Desktop string
 }
 
 // AU is one complete Annex-B access unit (start codes intact). W/H are the
@@ -93,6 +98,11 @@ type Streamer struct {
 	mu        sync.Mutex
 	subs      map[*Sub]struct{}
 	cmd       *os.Process
+	stdin     io.WriteCloser
+	push      *pushState // coalescing mailbox for Push; nil when not running
+	lastJPEG  []byte     // latest immutable input, used to seed same-size restarts
+	lastJPEGW int
+	lastJPEGH int
 	stdout    io.ReadCloser
 	running   bool
 	gen       int // process generation, guards stale readLoops
@@ -103,15 +113,64 @@ type Streamer struct {
 	lastKeyframeReq time.Time
 }
 
+// pushState is a single-slot coalescing mailbox between Push (called on the
+// CDP event dispatch goroutine — must never block) and one writer goroutine
+// that owns the actual stdin.Write calls. Only the latest not-yet-written
+// frame is kept, same trade-off ws.Client.queue makes for the WebSocket
+// outbox: if the encoder falls behind, dropping stale frames is correct
+// for a live feed, and a live feed is all this ever carries.
+type pushState struct {
+	mu      sync.Mutex
+	pending []byte
+	done    chan struct{} // closed once, by stopLocked, to stop the writer
+	period  time.Duration
+}
+
+func newPushState(fps int) *pushState {
+	if fps < 1 {
+		fps = 30
+	}
+	return &pushState{done: make(chan struct{}), period: time.Second / time.Duration(fps)}
+}
+
+func (ps *pushState) set(data []byte) {
+	ps.mu.Lock()
+	ps.pending = data
+	ps.mu.Unlock()
+}
+
+// run is the dedicated paced writer goroutine: the only thing that ever
+// calls w.Write, so a stuck/slow ffmpeg blocks this goroutine alone, never
+// Push's caller. It samples the latest pending frame at the configured FPS.
+// Chromium can emit screencast frames at the compositor's 60Hz rate; passing
+// all of them through overloaded the target iPad even though the stream was
+// advertised as 30fps (confirmed live: 300 AUs in a 5s perf window). Pacing
+// here makes FPS real while preserving the latest-frame-wins behavior.
+func (ps *pushState) run(w io.Writer) {
+	ticker := time.NewTicker(ps.period)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ps.done:
+			return
+		case <-ticker.C:
+			ps.mu.Lock()
+			data := ps.pending
+			ps.pending = nil
+			ps.mu.Unlock()
+			if len(data) == 0 {
+				continue
+			}
+			if _, err := w.Write(data); err != nil {
+				return
+			}
+		}
+	}
+}
+
 func New(cfg Config) *Streamer {
 	if cfg.FFmpegPath == "" {
 		cfg.FFmpegPath = "ffmpeg"
-	}
-	if cfg.Display == "" {
-		cfg.Display = os.Getenv("DISPLAY")
-		if cfg.Display == "" {
-			cfg.Display = ":99"
-		}
 	}
 	if cfg.CaptureW == 0 || cfg.CaptureH == 0 {
 		cfg.CaptureW, cfg.CaptureH = cfg.W, cfg.H
@@ -126,16 +185,46 @@ func (s *Streamer) Config() Config {
 	return s.cfg
 }
 
-// SetSize retargets the encoder at a new viewport size. ffmpeg grabs the full
-// X viewport, then optionally scales it down before x264 so old clients decode
-// fewer pixels without cropping the page.
+// Push feeds one JPEG frame — straight from Chromium's own CDP screencast —
+// into the encoder if one is running; a no-op otherwise (no subscriber has
+// started the lane, or it's between a restart).
+//
+// Never blocks the caller: this runs on the CDP event dispatch goroutine,
+// the same one that delivers every other event including the JPEG lane
+// itself, so blocking here would freeze the whole browser, not just video
+// (confirmed live: an earlier version wrote straight to ffmpeg's stdin, and
+// a real interactive page — bigger, more frequent frames than any synthetic
+// test used — filled the pipe and froze frame delivery entirely). The frame
+// is handed to a small coalescing mailbox; a dedicated writer goroutine
+// drains it into ffmpeg's stdin, so a slow/stuck encoder just means the
+// next Push replaces the still-unwritten frame instead of blocking anyone.
+func (s *Streamer) Push(jpeg []byte) {
+	if len(jpeg) == 0 {
+		return
+	}
+	s.mu.Lock()
+	s.lastJPEG = jpeg
+	s.lastJPEGW, s.lastJPEGH = s.cfg.CaptureW, s.cfg.CaptureH
+	ps := s.push
+	s.mu.Unlock()
+	if ps == nil {
+		return
+	}
+	ps.set(jpeg)
+}
+
+// SetSize retargets the encoder at a new viewport size (CaptureW/H — the
+// size Chromium's screencast now delivers). The encoder is restarted so
+// x264 gets a coded size matching the new incoming frames, optionally
+// scaled down first so old clients decode fewer pixels without cropping
+// the page.
 func (s *Streamer) SetSize(w, h int) {
 	if w < 64 || h < 64 {
 		return
 	}
-	cw, ch := s.cfg.codedSize(w, h)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	cw, ch := s.cfg.codedSize(w, h)
 	if w == s.cfg.CaptureW && h == s.cfg.CaptureH && cw == s.cfg.W && ch == s.cfg.H {
 		return
 	}
@@ -146,9 +235,7 @@ func (s *Streamer) SetSize(w, h int) {
 		s.stopLocked()
 		s.startLocked()
 	}
-	for sub := range s.subs {
-		sub.resetForGen(s.gen)
-	}
+	s.resetSubsForGenLocked()
 }
 
 func even(v int) int {
@@ -183,10 +270,28 @@ func (s *Streamer) Subscribe() *Sub {
 	}
 	if !s.running {
 		s.startLocked()
+	} else {
+		// Joining an already-running encoder: this subscriber starts
+		// "dropped" and needs an IDR to begin, but with scenecut=0 the next
+		// one is only guaranteed every keyint encoded frames — and frames
+		// now only arrive when CDP's screencast actually produces one, not
+		// on a fixed clock. A subscriber landing on an already-static page
+		// (e.g. lingerStop kept a prior viewer's encoder alive and this is
+		// a quick reconnect) could then wait out firstAUWait for an IDR
+		// that never comes on its own, and silently fall back to JPEG
+		// (confirmed live). Restarting is the only way to force one
+		// (see RequestKeyframe) — the same already-accepted tradeoff of
+		// briefly disrupting any other subscriber, for a product built
+		// around a single active viewer.
+		s.lastKeyframeReq = time.Now()
+		s.stopLocked()
+		s.startLocked()
 	}
-	if _, ok := s.subs[sub]; ok {
-		sub.resetForGen(s.gen)
-	}
+	// A restart changes the accepted generation for every existing
+	// subscriber, not just the newcomer. Leaving older subscribers on the
+	// previous generation silently strands them because offer rejects every
+	// subsequent AU.
+	s.resetSubsForGenLocked()
 	return sub
 }
 
@@ -199,13 +304,14 @@ func (sub *Sub) ForceResync() {
 }
 
 // RequestKeyframe restarts the encoder so every subscriber's next AU is an
-// IDR — the only available "force a keyframe" primitive, since ffmpeg runs as
-// an external pipe:1 subprocess with no live IPC hook (no stdin control, no
-// zmq/sendcmd filter). A freshly spawned x264 process's first output frame is
-// always an IDR regardless of keyint. This is a single-active-viewer product,
-// so a restart affecting every subscriber is an acceptable, already-
-// precedented tradeoff — SetSize restarts the encoder for the same
-// reason. Cooldown-guarded so a resync storm can't thrash the process.
+// IDR — the only available "force a keyframe" primitive: ffmpeg's stdin now
+// carries the JPEG frame stream itself, not a control channel, so there's
+// no way to ask a running x264 for an early IDR without restarting it. A
+// freshly spawned x264 process's first output frame is always an IDR
+// regardless of keyint. This is a single-active-viewer product, so a
+// restart affecting every subscriber is an acceptable, already-precedented
+// tradeoff — SetSize restarts the encoder for the same reason.
+// Cooldown-guarded so a resync storm can't thrash the process.
 func (s *Streamer) RequestKeyframe() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -220,6 +326,22 @@ func (s *Streamer) RequestKeyframe() {
 	log.Printf("stream: keyframe requested, restarting encoder")
 	s.stopLocked()
 	s.startLocked()
+	s.resetSubsForGenLocked()
+}
+
+// seedLatestLocked gives a same-size restart an immediate first frame. CDP's
+// screencast is change-driven, so a static page may never emit another frame
+// after a keyframe request, reconnect, or crash recovery. s.mu held by caller.
+func (s *Streamer) seedLatestLocked() {
+	if s.push != nil && len(s.lastJPEG) > 0 &&
+		s.lastJPEGW == s.cfg.CaptureW && s.lastJPEGH == s.cfg.CaptureH {
+		s.push.set(s.lastJPEG)
+	}
+}
+
+// resetSubsForGenLocked moves every subscriber onto the current encoder
+// generation and drains AUs from the superseded process. s.mu held by caller.
+func (s *Streamer) resetSubsForGenLocked() {
 	for sub := range s.subs {
 		sub.resetForGen(s.gen)
 	}
@@ -292,30 +414,34 @@ func (sub *Sub) offer(au AU, gen int) {
 	}
 }
 
-// args builds the full ffmpeg command line, or nil if this platform's
-// CaptureArgs is unset or reports the H.264 lane unsupported (an empty
-// slice) — checked here rather than by comparing CaptureArgs to nil,
-// because callers usually pass a bound Handle method value, which is never
-// a nil func even when the platform behind it always returns no args.
+// args builds the ffmpeg command line: decode JPEG frames pushed via stdin
+// and re-encode as H.264. Fixed and platform-independent — no OS-level
+// capture involved at all.
 func (s *Streamer) args() []string {
 	c := s.cfg
-	if c.CaptureArgs == nil {
-		return nil
-	}
-	captureW, captureH := c.CaptureW, c.CaptureH
-	if captureW == 0 || captureH == 0 {
-		captureW, captureH = c.W, c.H
-	}
-	capture := c.CaptureArgs(c.Display, captureW, captureH, c.FPS)
-	if len(capture) == 0 {
-		return nil
-	}
 	keyint := 2 * c.FPS
-	args := append([]string{}, capture...)
-	if captureW != c.W || captureH != c.H {
+	args := []string{
+		"-loglevel", "warning",
+		// No input buffering/probing: every ms of demuxer buffer is
+		// glass-to-glass latency (carried over from the old x11grab args,
+		// still true for a live stdin stream).
+		"-fflags", "nobuffer",
+		"-f", "mjpeg", "-framerate", fmt.Sprintf("%d", c.FPS),
+		"-probesize", "32", "-analyzeduration", "0",
+		"-i", "pipe:0",
+	}
+	if c.CaptureW != c.W || c.CaptureH != c.H {
 		args = append(args, "-vf", fmt.Sprintf("scale=%d:%d:flags=fast_bilinear", c.W, c.H))
 	}
 	args = append(args,
+		// CDP's event-driven JPEG frames carry no timestamps. FFmpeg's
+		// default output sync treats their repeated/absent PTS as duplicate
+		// frames and drops nearly all of them (confirmed live: 60 complete
+		// JPEG writes produced two encoded frames, with verbose logging
+		// reporting "dropping frame ... at ts 0"). Passthrough makes this a
+		// strict one-input-frame -> one-output-frame transcoder; timing is
+		// intentionally owned by arrival order, not a synthetic media clock.
+		"-fps_mode", "passthrough",
 		"-c:v", "libx264",
 		"-profile:v", "baseline", "-level", c.h264Level(),
 		"-preset", x264Speed,
@@ -345,17 +471,11 @@ func macroblocksPerSecond(w, h, fps int) int {
 
 // startLocked launches ffmpeg; s.mu held by caller.
 func (s *Streamer) startLocked() {
-	args := s.args()
-	if args == nil {
-		log.Printf("stream: capture unsupported on this platform")
-		s.failAllLocked()
-		return
-	}
-	started, err := proc.Start(s.cfg.FFmpegPath, args, proc.Options{
-		Env:     append(os.Environ(), s.cfg.Env...),
-		Desktop: s.cfg.Desktop,
-		Stdout:  true,
-		Stderr:  true,
+	started, err := proc.Start(s.cfg.FFmpegPath, s.args(), proc.Options{
+		Env:    append(os.Environ(), s.cfg.Env...),
+		Stdin:  true,
+		Stdout: true,
+		Stderr: true,
 	})
 	if err != nil {
 		log.Printf("stream: ffmpeg start failed: %v", err)
@@ -363,12 +483,16 @@ func (s *Streamer) startLocked() {
 		return
 	}
 	s.cmd = started.Process
+	s.stdin = started.Stdin
 	s.stdout = started.Stdout
+	s.push = newPushState(s.cfg.FPS)
+	go s.push.run(started.Stdin)
 	s.running = true
 	s.gen++
+	s.seedLatestLocked()
 	gen := s.gen
-	log.Printf("stream: encoder started pid=%d capture=%dx%d coded=%dx%d@%dfps %dk x264=%s",
-		started.Process.Pid, s.cfg.CaptureW, s.cfg.CaptureH, s.cfg.W, s.cfg.H, s.cfg.FPS, s.cfg.BitrateK, x264Speed)
+	log.Printf("stream: encoder started pid=%d coded=%dx%d@%dfps %dk x264=%s",
+		started.Process.Pid, s.cfg.W, s.cfg.H, s.cfg.FPS, s.cfg.BitrateK, x264Speed)
 	if started.Stderr != nil {
 		go logStderr(started.Stderr)
 	}
@@ -394,11 +518,39 @@ func logStderr(r io.Reader) {
 
 // stopLocked kills the encoder; s.mu held by caller.
 func (s *Streamer) stopLocked() {
+	if s.push != nil {
+		close(s.push.done)
+		s.push = nil
+	}
+	if s.stdin != nil {
+		_ = s.stdin.Close()
+	}
 	if s.cmd != nil {
 		proc.Kill(s.cmd.Pid)
 	}
 	s.running = false
 	s.cmd = nil
+	s.stdin = nil
+	s.stdout = nil
+}
+
+// cleanupExitedLocked releases pipes/mailbox state after Wait reports an
+// unexpected process exit, without trying to kill the already-dead process.
+// s.mu held by caller.
+func (s *Streamer) cleanupExitedLocked() {
+	if s.push != nil {
+		close(s.push.done)
+		s.push = nil
+	}
+	if s.stdin != nil {
+		_ = s.stdin.Close()
+	}
+	if s.stdout != nil {
+		_ = s.stdout.Close()
+	}
+	s.running = false
+	s.cmd = nil
+	s.stdin = nil
 	s.stdout = nil
 }
 
@@ -452,8 +604,7 @@ func (s *Streamer) readLoop(r io.Reader, cmd *os.Process, gen int) {
 	if gen != s.gen || !s.running {
 		return // superseded by a restart or an intentional stop
 	}
-	s.running = false
-	s.cmd = nil
+	s.cleanupExitedLocked()
 	if len(s.subs) == 0 {
 		return
 	}
@@ -478,6 +629,7 @@ func (s *Streamer) readLoop(r io.Reader, cmd *os.Process, gen int) {
 		defer s.mu.Unlock()
 		if !s.running && len(s.subs) > 0 {
 			s.startLocked()
+			s.resetSubsForGenLocked()
 		}
 	})
 }
