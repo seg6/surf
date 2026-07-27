@@ -16,7 +16,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -90,17 +89,7 @@ func compatible(path string) bool {
 	if !executableOK(path) {
 		return false
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	output, err := exec.CommandContext(ctx, path, "--version").CombinedOutput()
-	if err != nil {
-		return false
-	}
-	match := regexp.MustCompile(`\b(\d+)\.`).FindSubmatch(output)
-	if len(match) != 2 {
-		return false
-	}
-	major, err := strconv.Atoi(string(match[1]))
+	major, err := browserMajor(path)
 	return err == nil && major >= MinimumMajor
 }
 
