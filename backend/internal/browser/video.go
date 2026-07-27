@@ -148,6 +148,7 @@ func streamConfig(cfg *config.Config, platform runenv.Handle) stream.Config {
 		FPS:      cfg.StreamFPS,
 		BitrateK: cfg.StreamBitrateK, MaxrateK: cfg.StreamMaxrateK, BufsizeK: cfg.StreamBufsizeK,
 		CaptureArgs: platform.VideoCaptureArgs,
+		Desktop:     platform.HiddenDesktop(),
 	}
 }
 

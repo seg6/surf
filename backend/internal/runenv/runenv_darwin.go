@@ -40,3 +40,8 @@ func (darwinHandle) AudioCaptureArgs(source string) []string { return nil }
 
 // ResizeSurface is a no-op: there's no virtual display to resize.
 func (darwinHandle) ResizeSurface(w, h int) error { return nil }
+
+// HiddenDesktop is a Windows-only concept: no-op here (macOS's equivalent —
+// LSUIElement + off-screen window position — doesn't need a launch-time
+// surface name the way STARTUPINFO.lpDesktop does).
+func (darwinHandle) HiddenDesktop() string { return "" }
