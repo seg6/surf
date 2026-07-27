@@ -132,8 +132,8 @@ jobs:
           generate_release_notes: true
           body: |
             Native iOS package and unified Surf executables for Linux,
-            Windows, and macOS are attached. Use `surf tray` for the desktop
-            app or `surf serve` for the backend alone.
+            Windows, and macOS are attached. Launch `surf` for the desktop app
+            or use `surf serve` for the backend alone.
           files: |
             native/client/packages/*.deb
             dist/packages/surf-*.tar.gz

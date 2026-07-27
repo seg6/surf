@@ -59,17 +59,19 @@ type desktopApp struct {
 
 func main() {
 	if len(os.Args) > 2 {
-		fmt.Fprintln(os.Stderr, "Usage: surf [tray|serve|doctor|version]")
+		fmt.Fprintln(os.Stderr, "Usage: surf [serve|doctor|version]")
 		os.Exit(2)
 	}
-	command := "tray"
-	if len(os.Args) > 1 {
-		command = os.Args[1]
+	if len(os.Args) == 1 {
+		if err := runTray(); err != nil {
+			fmt.Fprintln(os.Stderr, "surf:", err)
+			os.Exit(1)
+		}
+		return
 	}
+	command := os.Args[1]
 	var err error
 	switch command {
-	case "tray":
-		err = runTray()
 	case "serve":
 		err = backendapp.Serve()
 	case "doctor":
@@ -78,7 +80,7 @@ func main() {
 		fmt.Printf("surf %s\nprotocol %s\n", config.AppVersion, config.NativeVersion)
 		return
 	default:
-		fmt.Fprintln(os.Stderr, "Usage: surf [tray|serve|doctor|version]")
+		fmt.Fprintln(os.Stderr, "Usage: surf [serve|doctor|version]")
 		err = fmt.Errorf("unknown command %q", command)
 	}
 	if err != nil {
