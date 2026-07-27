@@ -69,7 +69,7 @@ surf-dist: surf-binary
 		if [ "$(SURF_GOOS)" = "linux" ]; then cp packaging/backend/surf.service "dist/$(SURF_DIST)/surf.service"; fi; \
 		if [ "$(SURF_GOOS)" = "windows" ]; then \
 			rm -f "dist/$(SURF_ARCHIVE)"; \
-			cd backend && go run ./tools/zipdir "../dist/$(SURF_DIST)" "../dist/$(SURF_ARCHIVE)"; \
+			(cd backend && go run ./tools/zipdir "../dist/$(SURF_DIST)" "../dist/$(SURF_ARCHIVE)"); \
 			if command -v iscc >/dev/null 2>&1; then \
 				sed -e "s|@VERSION@|$(VERSION)|g" -e "s|@SOURCE@|$(CURDIR)/dist/$(SURF_DIST)|g" \
 					-e "s|@OUTPUT_DIR@|$(CURDIR)/dist|g" packaging/windows/surf.iss.in > dist/surf.iss; \
