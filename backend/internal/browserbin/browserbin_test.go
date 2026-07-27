@@ -1,56 +1,79 @@
 package browserbin
 
 import (
-	"archive/zip"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
-func makeZIP(t *testing.T, name, body string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "runtime.zip")
-	f, err := os.Create(path)
+func TestVersionComparison(t *testing.T) {
+	for _, test := range []struct {
+		left, right string
+		want        int
+	}{
+		{"150.0.7871.186-1", "150.0.7871.186-1", 0},
+		{"150.0.7871.186-2", "150.0.7871.186-1", 1},
+		{"151.0.1.0", "150.9.9.9", 1},
+		{"149.0.0.0", "150.0.0.0", -1},
+	} {
+		if got := compareVersion(test.left, test.right); got != test.want {
+			t.Errorf("compareVersion(%q,%q)=%d want %d", test.left, test.right, got, test.want)
+		}
+	}
+}
+
+func TestManagedStateRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	want := installation{
+		Version: "150.0.7871.186-1", Executable: filepath.Join("version", "chrome"),
+		CheckedAt: time.Now().UTC().Truncate(time.Second),
+	}
+	if err := writeCurrent(root, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readCurrent(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	z := zip.NewWriter(f)
-	w, err := z.Create(name)
-	if err == nil {
-		_, err = w.Write([]byte(body))
+	if got.Version != want.Version || got.Executable != want.Executable || !got.CheckedAt.Equal(want.CheckedAt) {
+		t.Fatalf("got %+v want %+v", got, want)
 	}
-	if closeErr := z.Close(); err == nil {
-		err = closeErr
+}
+
+func TestFindSystemRejectsNonBrowser(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "chrome")
+	if err := os.WriteFile(path, []byte("not a browser"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if closeErr := f.Close(); err == nil {
-		err = closeErr
+	if compatible(path) {
+		t.Fatal("accepted invalid executable")
 	}
+}
+
+func TestPlatformRelease(t *testing.T) {
+	repository, pattern, err := platformRelease()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return path
-}
-
-func TestUnzipRejectsTraversal(t *testing.T) {
-	if err := unzip(makeZIP(t, "../escape", "bad"), t.TempDir()); err == nil {
-		t.Fatal("accepted traversal path")
+	if repository == "" || pattern == nil {
+		t.Fatalf("repository=%q pattern=%v", repository, pattern)
 	}
 }
 
-func TestUnzipRegularFile(t *testing.T) {
-	dst := t.TempDir()
-	if err := unzip(makeZIP(t, "runtime/browser", "ok"), dst); err != nil {
+func TestManagedDownload(t *testing.T) {
+	if os.Getenv("SURF_TEST_BROWSER_DOWNLOAD") != "1" {
+		t.Skip("set SURF_TEST_BROWSER_DOWNLOAD=1 for release-asset smoke test")
+	}
+	home := os.Getenv("SURF_TEST_BROWSER_HOME")
+	if home == "" {
+		home = t.TempDir()
+	}
+	path, version, err := EnsureManaged(home)
+	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(filepath.Join(dst, "runtime", "browser"))
-	if err != nil || string(data) != "ok" {
-		t.Fatalf("data=%q err=%v", data, err)
-	}
-}
-
-func TestPlatformIsSupportedOnBuilder(t *testing.T) {
-	archiveName, executable, err := platformFor("chrome")
-	if err != nil || archiveName == "" || executable == "" {
-		t.Fatalf("chrome archive=%q executable=%q err=%v", archiveName, executable, err)
+	if version == "" || !compatible(path) {
+		t.Fatalf("path=%q version=%q", path, version)
 	}
 }

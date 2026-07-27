@@ -1,7 +1,7 @@
 # Backend
 
 The backend is started with `surf serve`. It runs managed Chrome in
-`--headless=new`, transcodes CDP screencast frames to H.264 with managed
+`--headless=new`, transcodes CDP screencast frames to H.264 with bundled
 FFmpeg, and streams video, audio, and control messages to the native client.
 Windows and macOS are also supported for the video/browsing path; audio
 capture is Linux-only for now.
@@ -24,8 +24,9 @@ checked against its declared size and SHA-256 before replacement. A previous
 executable is retained as `surf.previous`.
 
 Desktop packages are built natively for Linux x86-64, Windows x86-64, macOS
-Intel, and macOS Apple Silicon. Chrome and FFmpeg are downloaded into
-`SURF_HOME` on first launch.
+Intel, and macOS Apple Silicon. They include FFmpeg. Surf prefers a compatible
+system Chrome, then system Chromium, and otherwise downloads a verified
+ungoogled-chromium release into `SURF_HOME`.
 
 The desktop app accepts `SURF_HOME` and `SURF_PASSWORD` overrides. Its
 generated configuration is stored at
@@ -37,7 +38,7 @@ without a desktop session.
 
 ## Dependencies
 
-Surf downloads Chrome and FFmpeg automatically. Linux audio additionally needs:
+Surf resolves Chromium automatically. Linux audio additionally needs:
 
 - `pactl` with PulseAudio or PipeWire Pulse compatibility (Linux, for audio).
 - `pulseaudio` when no existing PulseAudio-compatible server is available
@@ -106,10 +107,16 @@ SURF_PASSWORD='change-me' ./backend/surf serve
 
 ## Runtime Behavior
 
-On first run Surf downloads pinned Chrome for Testing and a pinned FFmpeg
-executable into `SURF_HOME/runtime`. Linux x86-64, Windows x86-64,
-macOS x86-64, and macOS arm64 are selected automatically. The pinned runtimes
-keep browser and encoder behavior reproducible. Chrome always runs with
+Surf uses `CHROME` when explicitly set, otherwise a compatible installed Google
+Chrome Stable, then installed Chromium, and finally its managed
+ungoogled-chromium runtime. Managed releases are downloaded from the official
+ungoogled-chromium GitHub organization, checked against GitHub's declared size
+and SHA-256 digest, installed atomically, and checked daily. One previous
+version is retained for rollback. Chrome for Testing is not used.
+
+Release packages embed the pinned FFmpeg executable and install it into
+`SURF_HOME/runtime` on demand. Development builds retain the verified download
+fallback. The selected browser always runs with
 `--headless=new`; the capture source is event-driven `Page.startScreencast`,
 and its JPEG is internal only. FFmpeg sends H.264/RTP over localhost so RTP
 marker bits delimit access units without waiting for a following frame.
@@ -160,8 +167,8 @@ Common overrides:
 - `SURF_HOME`: data root; defaults to `~/.surf`.
 - `CHROME`: explicit browser override. Setting this disables managed browser
   selection.
-- `SURF_BROWSER_DOWNLOAD=0`: prohibit downloading a missing managed browser.
-- `FFMPEG`: explicit encoder override; otherwise Surf manages FFmpeg.
+- `SURF_BROWSER_DOWNLOAD=0`: prohibit downloading managed ungoogled-chromium.
+- `FFMPEG`: explicit encoder override; otherwise Surf uses its bundled FFmpeg.
 - `SURF_FFMPEG_DOWNLOAD=0`: prohibit downloading a missing managed FFmpeg.
 - `PULSEAUDIO`, `PACTL`: Linux audio tool paths.
 - `SOURCE_JPEG_QUALITY`: quality of the internal CDP-to-FFmpeg capture;
