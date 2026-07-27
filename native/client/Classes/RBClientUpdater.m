@@ -1,10 +1,13 @@
 #import "RBClientUpdater.h"
 #import "RBLog.h"
 #import <CommonCrypto/CommonDigest.h>
+#import <errno.h>
 #import <spawn.h>
 #import <sys/wait.h>
 
 extern char **environ;
+
+static NSString *const RBUpdateResultPath = @"/var/mobile/Library/Surf/update-result";
 
 @interface RBClientUpdater ()
 @property(nonatomic, strong) NSURL *baseURL;
@@ -112,6 +115,7 @@ extern char **environ;
         [self fail:@"This Surf build needs one final manual update before in-app updates are available"];
         return;
     }
+    [[NSFileManager defaultManager] removeItemAtPath:RBUpdateResultPath error:nil];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         pid_t pid = 0;
         const char *argv[] = {
@@ -120,15 +124,47 @@ extern char **environ;
         };
         int spawnError = posix_spawn(&pid, argv[0], NULL, NULL, (char *const *)argv, environ);
         int status = 0;
-        if (spawnError == 0) waitpid(pid, &status, 0);
+        int waitError = 0;
+        if (spawnError == 0 && waitpid(pid, &status, 0) < 0) waitError = errno;
+        NSDictionary *result = [self installResult];
+        BOOL recordedSuccess =
+            [[result objectForKey:@"schema"] isEqualToString:@"1"] &&
+            [[result objectForKey:@"stage"] isEqualToString:@"complete"] &&
+            [[result objectForKey:@"result"] intValue] == 0 &&
+            [[result objectForKey:@"version"] isEqualToString:version] &&
+            [[[result objectForKey:@"sha256"] lowercaseString] isEqualToString:[hash lowercaseString]];
+        int exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+        RBLog(@"client update installer spawn=%d wait=%d exited=%d exit=%d record=%@",
+              spawnError, waitError, WIFEXITED(status), exitCode, result ?: @{});
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (spawnError != 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-                [self fail:[NSString stringWithFormat:@"Installer failed (%d)", spawnError ?: WEXITSTATUS(status)]];
-            } else {
+            if (recordedSuccess || (spawnError == 0 && waitError == 0 &&
+                                    WIFEXITED(status) && exitCode == 0)) {
                 [self.delegate clientUpdaterDidInstall:self];
+            } else {
+                NSString *stage = [result objectForKey:@"stage"];
+                int code = [[result objectForKey:@"result"] intValue];
+                if (![stage length]) stage = spawnError ? @"launch" : (waitError ? @"wait" : @"installer");
+                if (code == 0) code = spawnError ?: (waitError ?: exitCode);
+                [self fail:[NSString stringWithFormat:@"Installer failed during %@ (%d)", stage, code]];
             }
         });
     });
+}
+
+- (NSDictionary *)installResult {
+    NSString *contents = [NSString stringWithContentsOfFile:RBUpdateResultPath
+                                                   encoding:NSUTF8StringEncoding error:nil];
+    if (![contents length]) return nil;
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    for (NSString *line in [contents componentsSeparatedByCharactersInSet:
+                            [NSCharacterSet newlineCharacterSet]]) {
+        NSRange separator = [line rangeOfString:@"="];
+        if (separator.location == NSNotFound || separator.location == 0) continue;
+        NSString *key = [line substringToIndex:separator.location];
+        NSString *value = [line substringFromIndex:separator.location + 1];
+        [result setObject:value forKey:key];
+    }
+    return result;
 }
 
 - (void)fail:(NSString *)message {
