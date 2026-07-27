@@ -75,9 +75,9 @@ not appear after installation, run `uicache` again or respring.
 
 Download the matching `surf` archive from GitHub Releases:
 
-- Windows: run `surf.exe tray`.
+- Windows: double-click `surf.exe`.
 - macOS: open `Surf.app`.
-- Linux: run `./surf tray`.
+- Linux: run `./surf`.
 
 The tray/menu-bar menu opens Settings, restarts the backend, or quits Surf.
 The Settings window shows the
