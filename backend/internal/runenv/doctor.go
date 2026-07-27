@@ -14,21 +14,10 @@ type Check struct {
 	Err      error
 }
 
+// Doctor lists the external tool checks for the platform matching
+// runtime.GOOS.
 func Doctor(cfg *config.Config) []Check {
-	checks := []Check{
-		checkTool("chromium", cfg.ChromePath, true),
-		checkTool("ffmpeg", cfg.FFmpegPath, true),
-	}
-	if cfg.ManageDisplay {
-		checks = append(checks, checkTool("Xvfb", cfg.XvfbPath, true))
-	}
-	checks = append(checks, checkTool("xrandr", cfg.XrandrPath, true))
-	if cfg.ManagePulse {
-		checks = append(checks, checkTool("pulseaudio", cfg.PulseaudioPath, true), checkTool("pactl", cfg.PactlPath, true))
-	} else if cfg.EnsurePulseSink {
-		checks = append(checks, checkTool("pactl", cfg.PactlPath, true))
-	}
-	return checks
+	return newPlatform().Doctor(cfg)
 }
 
 func checkTool(name, path string, required bool) Check {
