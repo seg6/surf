@@ -21,6 +21,7 @@ import (
 	"surf-backend/internal/config"
 	"surf-backend/internal/proc"
 	"surf-backend/internal/protocol"
+	"surf-backend/internal/runenv"
 	"surf-backend/internal/stream"
 	"surf-backend/internal/ws"
 )
@@ -48,10 +49,11 @@ type Tab struct {
 }
 
 type Browser struct {
-	cfg *config.Config
-	cdp *cdp.Client
-	cmd *exec.Cmd
-	hub *ws.Hub
+	cfg      *config.Config
+	cdp      *cdp.Client
+	cmd      *exec.Cmd
+	hub      *ws.Hub
+	platform runenv.Handle
 
 	mu        sync.Mutex
 	tabs      map[int]*Tab
@@ -95,9 +97,9 @@ type Browser struct {
 	dlLastPush     map[string]time.Time // download guid -> last dlprogress
 }
 
-func New(cfg *config.Config, hub *ws.Hub) *Browser {
+func New(cfg *config.Config, hub *ws.Hub, platform runenv.Handle) *Browser {
 	return &Browser{
-		cfg: cfg, hub: hub,
+		cfg: cfg, hub: hub, platform: platform,
 		tabs:      map[int]*Tab{},
 		byTarget:  map[string]*Tab{},
 		bySession: map[string]*Tab{},
@@ -108,8 +110,8 @@ func New(cfg *config.Config, hub *ws.Hub) *Browser {
 		dlNames:        map[string]string{},
 		dialogSessions: map[string]bool{},
 		dlLastPush:     map[string]time.Time{},
-		streamer:       stream.New(streamConfig(cfg)),
-		audio:          audio.New(audioConfig(cfg)),
+		streamer:       stream.New(streamConfig(cfg, platform)),
+		audio:          audio.New(audioConfig(cfg, platform)),
 		videoSubs:      map[*ws.Client]*stream.Sub{},
 		audioSubs:      map[*ws.Client]*audio.Sub{},
 		perfCounts:     map[string]int{},
@@ -120,12 +122,13 @@ func New(cfg *config.Config, hub *ws.Hub) *Browser {
 // browser is ready to serve clients.
 func (b *Browser) Start() error {
 	client, cmd, err := cdp.Launch(cdp.LaunchConfig{
-		ChromePath: b.cfg.ChromePath,
-		Profile:    b.cfg.Profile,
-		W:          b.cfg.DisplayW,
-		H:          b.cfg.DisplayH,
-		Env:        b.cfg.ChildEnv,
-		NoSandbox:  b.cfg.ChromeNoSandbox,
+		ChromePath:   b.cfg.ChromePath,
+		Profile:      b.cfg.Profile,
+		W:            b.cfg.DisplayW,
+		H:            b.cfg.DisplayH,
+		Env:          b.cfg.ChildEnv,
+		NoSandbox:    b.cfg.ChromeNoSandbox,
+		PlatformArgs: b.platform.ChromeArgs(),
 	})
 	if err != nil {
 		return err

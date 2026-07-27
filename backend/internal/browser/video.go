@@ -7,6 +7,7 @@ import (
 
 	"surf-backend/internal/config"
 	"surf-backend/internal/protocol"
+	"surf-backend/internal/runenv"
 	"surf-backend/internal/stream"
 	"surf-backend/internal/ws"
 )
@@ -125,7 +126,7 @@ func (b *Browser) ClientDisconnected(c *ws.Client) {
 }
 
 // streamConfig derives the encoder config from the server config.
-func streamConfig(cfg *config.Config) stream.Config {
+func streamConfig(cfg *config.Config, platform runenv.Handle) stream.Config {
 	maxW, maxH := 0, 0
 	if s := cfg.StreamScale; s != "" {
 		var sw, sh int
@@ -146,6 +147,7 @@ func streamConfig(cfg *config.Config) stream.Config {
 		ScaleMaxW: maxW, ScaleMaxH: maxH,
 		FPS:      cfg.StreamFPS,
 		BitrateK: cfg.StreamBitrateK, MaxrateK: cfg.StreamMaxrateK, BufsizeK: cfg.StreamBufsizeK,
+		CaptureArgs: platform.VideoCaptureArgs,
 	}
 }
 

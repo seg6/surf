@@ -37,14 +37,19 @@ const (
 )
 
 type Config struct {
-	Display                      string // ":99"
+	Display                      string // ":99" on Linux, or whatever surface name the platform uses
 	FFmpegPath                   string
 	Env                          []string
 	W, H                         int // coded size
-	CaptureW, CaptureH           int // X grab size; defaults to coded size
+	CaptureW, CaptureH           int // grab size; defaults to coded size
 	ScaleMaxW, ScaleMaxH         int // optional coded-size bounding box
 	FPS                          int
 	BitrateK, MaxrateK, BufsizeK int
+	// CaptureArgs builds the ffmpeg arguments (up to and including "-i
+	// <surface>") that grab this platform's rendered surface. Nil means the
+	// H.264 lane is unsupported here; startLocked fails every subscriber
+	// immediately and callers fall back to the JPEG/CDP screencast.
+	CaptureArgs func(surface string, w, h, fps int) []string
 }
 
 // AU is one complete Annex-B access unit (start codes intact). W/H are the
@@ -287,18 +292,7 @@ func (s *Streamer) args() []string {
 		captureW, captureH = c.W, c.H
 	}
 	keyint := 2 * c.FPS
-	args := []string{
-		"-loglevel", "warning",
-		// No input buffering/probing: x11grab is raw frames, every ms of
-		// demuxer buffer is glass-to-glass latency (M1.2).
-		"-fflags", "nobuffer",
-		"-probesize", "32",
-		"-f", "x11grab",
-		"-draw_mouse", "0", // the X cursor is CDP's phantom, not the user's
-		"-framerate", fmt.Sprint(c.FPS),
-		"-video_size", fmt.Sprintf("%dx%d", captureW, captureH),
-		"-i", c.Display,
-	}
+	args := append([]string{}, c.CaptureArgs(c.Display, captureW, captureH, c.FPS)...)
 	if captureW != c.W || captureH != c.H {
 		args = append(args, "-vf", fmt.Sprintf("scale=%d:%d:flags=fast_bilinear", c.W, c.H))
 	}
@@ -332,6 +326,11 @@ func macroblocksPerSecond(w, h, fps int) int {
 
 // startLocked launches ffmpeg; s.mu held by caller.
 func (s *Streamer) startLocked() {
+	if s.cfg.CaptureArgs == nil {
+		log.Printf("stream: capture unsupported on this platform")
+		s.failAllLocked()
+		return
+	}
 	cmd := proc.Command(s.cfg.FFmpegPath, s.args()...)
 	cmd.Env = append(os.Environ(), s.cfg.Env...)
 	stdout, err := cmd.StdoutPipe()

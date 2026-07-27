@@ -7,6 +7,7 @@ import (
 	"surf-backend/internal/audio"
 	"surf-backend/internal/config"
 	"surf-backend/internal/protocol"
+	"surf-backend/internal/runenv"
 	"surf-backend/internal/ws"
 )
 
@@ -28,8 +29,11 @@ func (b *Browser) handleAudio(c *ws.Client, on bool) {
 	go b.pumpAudio(c, sub)
 }
 
-func audioConfig(cfg *config.Config) audio.Config {
-	return audio.Config{FFmpegPath: cfg.FFmpegPath, Source: cfg.AudioSource, Env: cfg.ChildEnv}
+func audioConfig(cfg *config.Config, platform runenv.Handle) audio.Config {
+	return audio.Config{
+		FFmpegPath: cfg.FFmpegPath, Source: cfg.AudioSource, Env: cfg.ChildEnv,
+		CaptureArgs: platform.AudioCaptureArgs,
+	}
 }
 
 func (b *Browser) pumpAudio(c *ws.Client, sub *audio.Sub) {
