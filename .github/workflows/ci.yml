@@ -63,6 +63,19 @@ jobs:
           name: surf-native-deb
           path: dist/native
 
+      - name: Prepare Linux AppImage tooling
+        if: matrix.goos == 'linux'
+        shell: bash
+        run: |
+          curl -fL https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -o "$RUNNER_TEMP/appimagetool"
+          chmod +x "$RUNNER_TEMP/appimagetool"
+          echo "APPIMAGETOOL=$RUNNER_TEMP/appimagetool" >> "$GITHUB_ENV"
+
+      - name: Prepare Windows installer tooling
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
       - name: Build Surf package
         shell: bash
         run: |
@@ -75,6 +88,11 @@ jobs:
         run: |
           test -n "$(find dist -type f \( -name surf -o -name surf.exe \) -print -quit)"
           test -z "$(find dist -type f \( -name surf-desktop -o -name surf-backend -o -name surf-desktop.exe -o -name surf-backend.exe \) -print -quit)"
+          case "${{ matrix.goos }}" in
+            linux) test -n "$(find dist -name '*.AppImage' -type f -print -quit)" ;;
+            windows) test -n "$(find dist -name '*-setup.exe' -type f -print -quit)" ;;
+            darwin) test -n "$(find dist -name '*.dmg' -type f -print -quit)" ;;
+          esac
 
       - uses: actions/upload-artifact@v4
         with:
@@ -82,6 +100,9 @@ jobs:
           path: |
             dist/surf-*.tar.gz
             dist/surf-*.zip
+            dist/surf-*.AppImage
+            dist/surf-*.dmg
+            dist/surf-*-setup.exe
           if-no-files-found: error
 
   native:

@@ -1,118 +1,373 @@
-// Package browserbin installs the Chromium runtime that Surf is tested
-// against. Keeping the browser beside Surf avoids silently changing capture
-// semantics when a distribution upgrades its system Chromium.
+// Package browserbin resolves a production Chromium browser for Surf.
+//
+// Surf prefers an explicit override, then an installed Chrome/Chromium, and
+// finally a managed ungoogled-chromium release stored below SURF_HOME.
 package browserbin
 
 import (
-	"archive/zip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
 
-const Version = "151.0.7922.47"
-
 const (
-	maxArchiveBytes  = 500 << 20
-	maxUnpackedBytes = 2 << 30
+	MinimumMajor     = 148
+	maxArchiveBytes  = 400 << 20
+	githubAPIVersion = "2022-11-28"
 )
 
-func platformFor(kind string) (archiveName, executable string, err error) {
-	var p string
-	switch runtime.GOOS + "/" + runtime.GOARCH {
-	case "linux/amd64":
-		p = "linux64"
-	case "windows/amd64":
-		p = "win64"
-	case "darwin/amd64":
-		p = "mac-x64"
-	case "darwin/arm64":
-		p = "mac-arm64"
-	default:
-		return "", "", fmt.Errorf("automatic Chromium runtime is unavailable for %s/%s; set CHROME", runtime.GOOS, runtime.GOARCH)
-	}
-	root := kind + "-" + p
-	switch kind {
-	case "chrome":
-		switch runtime.GOOS {
-		case "windows":
-			executable = filepath.Join(root, "chrome.exe")
-		case "darwin":
-			executable = filepath.Join(root, "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing")
-		default:
-			executable = filepath.Join(root, "chrome")
-		}
-	default:
-		return "", "", fmt.Errorf("unknown Chromium runtime kind %q", kind)
-	}
-	return root + ".zip", executable, nil
+type installation struct {
+	Version    string    `json:"version"`
+	Executable string    `json:"executable"`
+	CheckedAt  time.Time `json:"checkedAt"`
 }
 
-// EnsureChrome returns pinned full Chrome for Testing. Surf launches it with
-// --headless=new and continues to capture exclusively through CDP.
-func EnsureChrome(home string) (string, error) {
-	return ensure(home, "chrome")
+type release struct {
+	TagName string `json:"tag_name"`
+	Assets  []struct {
+		Name        string `json:"name"`
+		URL         string `json:"browser_download_url"`
+		Size        int64  `json:"size"`
+		Digest      string `json:"digest"`
+		ContentType string `json:"content_type"`
+		State       string `json:"state"`
+	} `json:"assets"`
 }
 
-func ensure(home, kind string) (string, error) {
-	archiveName, executable, err := platformFor(kind)
+type artifact struct {
+	Version string
+	Name    string
+	URL     string
+	SHA256  string
+	Size    int64
+}
+
+// Resolve returns the first compatible system Chrome/Chromium, falling back
+// to a managed ungoogled-chromium build.
+func Resolve(home string) (string, string, error) {
+	if path, label := FindSystem(); path != "" {
+		return path, label, nil
+	}
+	path, version, err := EnsureManaged(home)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	root := filepath.Join(home, "runtime", kind, Version)
-	path := filepath.Join(root, executable)
-	if executableOK(path) {
-		return path, nil
+	return path, "managed ungoogled-chromium " + version, nil
+}
+
+// FindSystem checks a deliberately bounded list of normal installation paths.
+func FindSystem() (string, string) {
+	for _, candidate := range systemCandidates() {
+		path := candidate.path
+		if !filepath.IsAbs(path) {
+			resolved, err := exec.LookPath(path)
+			if err != nil {
+				continue
+			}
+			path = resolved
+		}
+		if compatible(path) {
+			return path, candidate.label
+		}
+	}
+	return "", ""
+}
+
+func compatible(path string) bool {
+	if !executableOK(path) {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, path, "--version").CombinedOutput()
+	if err != nil {
+		return false
+	}
+	match := regexp.MustCompile(`\b(\d+)\.`).FindSubmatch(output)
+	if len(match) != 2 {
+		return false
+	}
+	major, err := strconv.Atoi(string(match[1]))
+	return err == nil && major >= MinimumMajor
+}
+
+// EnsureManaged installs the latest official ungoogled-chromium organization
+// release if no usable managed version exists.
+func EnsureManaged(home string) (string, string, error) {
+	root := filepath.Join(home, "runtime", "ungoogled-chromium")
+	if current, err := readCurrent(root); err == nil && executableOK(filepath.Join(root, current.Executable)) {
+		return filepath.Join(root, current.Executable), current.Version, nil
+	}
+	return installLatest(root)
+}
+
+// UpdateManaged refreshes a previously managed browser at most once per day.
+// The newly installed version is selected on the next backend restart.
+func UpdateManaged(home string) error {
+	root := filepath.Join(home, "runtime", "ungoogled-chromium")
+	current, err := readCurrent(root)
+	if err != nil {
+		_, _, err = installLatest(root)
+		return err
+	}
+	if time.Since(current.CheckedAt) < 24*time.Hour {
+		return nil
+	}
+	a, err := latestArtifact(context.Background())
+	if err != nil {
+		return err
+	}
+	if compareVersion(a.Version, current.Version) > 0 {
+		_, _, err = install(root, a)
+		return err
+	}
+	current.CheckedAt = time.Now().UTC()
+	return writeCurrent(root, current)
+}
+
+func installLatest(root string) (string, string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	a, err := latestArtifact(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	return install(root, a)
+}
+
+func latestArtifact(ctx context.Context) (artifact, error) {
+	repository, pattern, err := platformRelease()
+	if err != nil {
+		return artifact{}, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		"https://api.github.com/repos/"+repository+"/releases/latest", nil)
+	if err != nil {
+		return artifact{}, err
+	}
+	request.Header.Set("Accept", "application/vnd.github+json")
+	request.Header.Set("X-GitHub-Api-Version", githubAPIVersion)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return artifact{}, fmt.Errorf("query ungoogled-chromium release: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return artifact{}, fmt.Errorf("query ungoogled-chromium release: HTTP %d", response.StatusCode)
+	}
+	var value release
+	decoder := json.NewDecoder(io.LimitReader(response.Body, 2<<20))
+	if err := decoder.Decode(&value); err != nil {
+		return artifact{}, err
+	}
+	for _, asset := range value.Assets {
+		if !pattern.MatchString(asset.Name) || asset.State != "uploaded" {
+			continue
+		}
+		digest := strings.TrimPrefix(asset.Digest, "sha256:")
+		if len(digest) != sha256.Size*2 || asset.Size <= 0 || asset.Size > maxArchiveBytes {
+			return artifact{}, fmt.Errorf("release asset %s has invalid integrity metadata", asset.Name)
+		}
+		return artifact{
+			Version: strings.TrimPrefix(value.TagName, "v"), Name: asset.Name,
+			URL: asset.URL, SHA256: digest, Size: asset.Size,
+		}, nil
+	}
+	return artifact{}, fmt.Errorf("ungoogled-chromium release %s has no asset for %s/%s", value.TagName, runtime.GOOS, runtime.GOARCH)
+}
+
+func install(root string, a artifact) (string, string, error) {
+	versionRoot := filepath.Join(root, a.Version)
+	if current, err := locateExecutable(versionRoot); err == nil && compatible(current) {
+		rel, _ := filepath.Rel(root, current)
+		state := installation{Version: a.Version, Executable: rel, CheckedAt: time.Now().UTC()}
+		return current, a.Version, writeCurrent(root, state)
 	}
 	if os.Getenv("SURF_BROWSER_DOWNLOAD") == "0" {
-		return "", fmt.Errorf("Chromium runtime is not installed at %s and SURF_BROWSER_DOWNLOAD=0; set CHROME", path)
+		return "", "", errors.New("no compatible Chrome/Chromium installation found and managed browser downloads are disabled")
 	}
-	if err := os.MkdirAll(filepath.Dir(root), 0o755); err != nil {
-		return "", err
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return "", "", err
 	}
-	tmp, err := os.MkdirTemp(filepath.Dir(root), ".install-"+Version+"-")
+	temp, err := os.MkdirTemp(root, ".install-"+safeVersion(a.Version)+"-")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	defer os.RemoveAll(tmp)
-
-	// The archive URL uses the platform name as a path component.
-	platformName := strings.TrimSuffix(strings.TrimPrefix(archiveName, kind+"-"), ".zip")
-	url := "https://storage.googleapis.com/chrome-for-testing-public/" + Version + "/" +
-		platformName + "/" + archiveName
-	zipPath := filepath.Join(tmp, archiveName)
-	if err := download(zipPath, url); err != nil {
-		return "", fmt.Errorf("download Chromium runtime: %w", err)
+	defer os.RemoveAll(temp)
+	archive := filepath.Join(temp, a.Name)
+	if err := download(archive, a); err != nil {
+		return "", "", err
 	}
-	unpacked := filepath.Join(tmp, "unpacked")
-	if err := unzip(zipPath, unpacked); err != nil {
-		return "", fmt.Errorf("unpack Chromium runtime: %w", err)
+	unpacked := filepath.Join(temp, "unpacked")
+	if err := installArchive(archive, unpacked); err != nil {
+		return "", "", fmt.Errorf("unpack ungoogled-chromium: %w", err)
 	}
-	if !executableOK(filepath.Join(unpacked, executable)) {
-		return "", fmt.Errorf("Chromium archive did not contain %s", executable)
+	executable, err := locateExecutable(unpacked)
+	if err != nil {
+		return "", "", err
 	}
 	if runtime.GOOS != "windows" {
-		if err := os.Chmod(filepath.Join(unpacked, executable), 0o755); err != nil {
-			return "", err
+		_ = os.Chmod(executable, 0o755)
+	}
+	if !compatible(executable) {
+		return "", "", errors.New("downloaded ungoogled-chromium failed its version check")
+	}
+	_ = os.RemoveAll(versionRoot)
+	if err := os.Rename(unpacked, versionRoot); err != nil {
+		return "", "", err
+	}
+	executable, err = locateExecutable(versionRoot)
+	if err != nil {
+		return "", "", err
+	}
+	rel, err := filepath.Rel(root, executable)
+	if err != nil {
+		return "", "", err
+	}
+	state := installation{Version: a.Version, Executable: rel, CheckedAt: time.Now().UTC()}
+	if err := writeCurrent(root, state); err != nil {
+		return "", "", err
+	}
+	pruneOld(root, a.Version)
+	return executable, a.Version, nil
+}
+
+func download(destination string, a artifact) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, a.URL, nil)
+	if err != nil {
+		return err
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("download %s: HTTP %d", a.Name, response.StatusCode)
+	}
+	file, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	hash := sha256.New()
+	written, copyErr := io.Copy(io.MultiWriter(file, hash), io.LimitReader(response.Body, a.Size+1))
+	closeErr := file.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if written != a.Size {
+		return fmt.Errorf("download %s: size %d, want %d", a.Name, written, a.Size)
+	}
+	if !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), a.SHA256) {
+		return fmt.Errorf("download %s: checksum mismatch", a.Name)
+	}
+	return nil
+}
+
+func readCurrent(root string) (installation, error) {
+	var value installation
+	data, err := os.ReadFile(filepath.Join(root, "current.json"))
+	if err != nil {
+		return value, err
+	}
+	err = json.Unmarshal(data, &value)
+	if err != nil || value.Version == "" || value.Executable == "" {
+		return installation{}, errors.New("invalid managed browser state")
+	}
+	return value, nil
+}
+
+func writeCurrent(root string, value installation) error {
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	temp := filepath.Join(root, "current.json.tmp")
+	if err := os.WriteFile(temp, data, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(temp, filepath.Join(root, "current.json"))
+}
+
+func pruneOld(root, current string) {
+	entries, _ := os.ReadDir(root)
+	var versions []string
+	for _, entry := range entries {
+		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") && entry.Name() != current {
+			versions = append(versions, entry.Name())
 		}
 	}
-	// Another process may have completed the same install while we downloaded.
-	if executableOK(path) {
-		return path, nil
+	if len(versions) <= 1 {
+		return
 	}
-	if err := os.Rename(unpacked, root); err != nil {
-		if executableOK(path) {
-			return path, nil
+	// Keep the greatest previous version as a rollback.
+	for keepIndex := 0; keepIndex < len(versions); keepIndex++ {
+		if compareVersion(versions[keepIndex], versions[0]) > 0 {
+			versions[0], versions[keepIndex] = versions[keepIndex], versions[0]
 		}
-		return "", err
 	}
-	return path, nil
+	for _, version := range versions[1:] {
+		_ = os.RemoveAll(filepath.Join(root, version))
+	}
+}
+
+func compareVersion(left, right string) int {
+	parse := func(value string) []int {
+		fields := strings.FieldsFunc(value, func(r rune) bool { return r == '.' || r == '-' })
+		result := make([]int, len(fields))
+		for i, field := range fields {
+			result[i], _ = strconv.Atoi(field)
+		}
+		return result
+	}
+	a, b := parse(left), parse(right)
+	for i := 0; i < len(a) || i < len(b); i++ {
+		var av, bv int
+		if i < len(a) {
+			av = a[i]
+		}
+		if i < len(b) {
+			bv = b[i]
+		}
+		if av < bv {
+			return -1
+		}
+		if av > bv {
+			return 1
+		}
+	}
+	return 0
+}
+
+func safeVersion(value string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' || r == '.' || r == '-' {
+			return r
+		}
+		return -1
+	}, value)
 }
 
 func executableOK(path string) bool {
@@ -120,94 +375,4 @@ func executableOK(path string) bool {
 	return err == nil && !info.IsDir() && info.Size() > 0
 }
 
-func download(dst, url string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s returned %s", url, resp.Status)
-	}
-	if resp.ContentLength > maxArchiveBytes {
-		return fmt.Errorf("Chromium archive is unexpectedly large: %d bytes", resp.ContentLength)
-	}
-	f, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
-	}
-	written, copyErr := io.Copy(f, io.LimitReader(resp.Body, maxArchiveBytes+1))
-	closeErr := f.Close()
-	if copyErr != nil {
-		return copyErr
-	}
-	if written > maxArchiveBytes {
-		return fmt.Errorf("Chromium archive exceeds %d bytes", maxArchiveBytes)
-	}
-	return closeErr
-}
-
-func unzip(src, dst string) error {
-	z, err := zip.OpenReader(src)
-	if err != nil {
-		return err
-	}
-	defer z.Close()
-	if err := os.MkdirAll(dst, 0o755); err != nil {
-		return err
-	}
-	var unpacked int64
-	for _, entry := range z.File {
-		clean := filepath.Clean(filepath.FromSlash(entry.Name))
-		if clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("unsafe ZIP path %q", entry.Name)
-		}
-		target := filepath.Join(dst, clean)
-		if entry.FileInfo().IsDir() {
-			if err := os.MkdirAll(target, 0o755); err != nil {
-				return err
-			}
-			continue
-		}
-		if entry.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("symlink in Chromium ZIP: %q", entry.Name)
-		}
-		unpacked += int64(entry.UncompressedSize64)
-		if unpacked > maxUnpackedBytes {
-			return fmt.Errorf("Chromium ZIP expands beyond %d bytes", maxUnpackedBytes)
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return err
-		}
-		in, err := entry.Open()
-		if err != nil {
-			return err
-		}
-		out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, entry.Mode().Perm())
-		if err != nil {
-			in.Close()
-			return err
-		}
-		written, copyErr := io.Copy(out, io.LimitReader(in, int64(entry.UncompressedSize64)+1))
-		inErr, outErr := in.Close(), out.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		if written != int64(entry.UncompressedSize64) {
-			return fmt.Errorf("bad uncompressed size for %q", entry.Name)
-		}
-		if inErr != nil {
-			return inErr
-		}
-		if outErr != nil {
-			return outErr
-		}
-	}
-	return nil
-}
+type candidate struct{ path, label string }

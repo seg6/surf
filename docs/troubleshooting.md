@@ -30,8 +30,9 @@ make surf-binary
 ./backend/surf doctor
 ```
 
-Surf installs managed Chrome and FFmpeg automatically. If a download is
-blocked, permit access to Google Chrome for Testing storage and GitHub
+Surf installs managed ungoogled-chromium when no compatible system Chrome or
+Chromium is present. Development builds may also download FFmpeg. If a download
+is blocked, permit access to GitHub
 Releases, or set `CHROME`/`FFMPEG` to explicit local executables. Linux audio
 also requires the PulseAudio-compatible tools reported by `doctor`.
 

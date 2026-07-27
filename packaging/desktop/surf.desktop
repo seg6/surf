@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Surf
+Comment=Remote browser backend for legacy iOS
+Exec=surf
+Icon=surf
+Terminal=false
+Categories=Network;WebBrowser;

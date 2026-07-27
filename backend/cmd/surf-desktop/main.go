@@ -36,8 +36,10 @@ import (
 )
 
 type desktopConfig struct {
-	Password string `json:"password"`
-	Port     int    `json:"port"`
+	Password          string `json:"password"`
+	Port              int    `json:"port"`
+	StartAtLogin      bool   `json:"startAtLogin"`
+	StartupChoiceMade bool   `json:"startupChoiceMade"`
 }
 
 type desktopApp struct {
@@ -57,6 +59,7 @@ type desktopApp struct {
 	done chan struct{}
 
 	statusItem *systray.MenuItem
+	updateItem *systray.MenuItem
 
 	updateRelease *updater.Release
 	updateState   string
@@ -129,6 +132,21 @@ func runCommandUpdate() error {
 		fmt.Printf("Surf %s is current.\n", config.AppVersion)
 		return nil
 	}
+	if runtime.GOOS == "linux" && os.Getenv("APPIMAGE") != "" && release.Package.URL != "" {
+		home, err := surfHome()
+		if err != nil {
+			return err
+		}
+		staged := filepath.Join(home, "updates", release.Manifest.Version, release.Package.Name)
+		if err := updateClient().DownloadAsset(ctx, release.Package, staged); err != nil {
+			return err
+		}
+		if err := updater.ReplaceExecutable(staged, os.Getenv("APPIMAGE")); err != nil {
+			return err
+		}
+		fmt.Printf("Updated Surf AppImage to %s.\n", release.Manifest.Version)
+		return nil
+	}
 	home, err := surfHome()
 	if err != nil {
 		return err
@@ -179,10 +197,26 @@ func runUpdateHelper(args []string) error {
 
 func runTray() error {
 	hideConsole()
+	home, err := surfHome()
+	if err != nil {
+		return err
+	}
+	lock, primary, err := acquireDesktopInstance(home)
+	if err != nil {
+		return err
+	}
+	if !primary {
+		return activateDesktopInstance(home)
+	}
+	defer lock.Close()
 	app, err := newDesktopApp()
 	if err != nil {
 		return err
 	}
+	if err := writeDesktopInstance(home, app.manageURL); err != nil {
+		return err
+	}
+	defer os.Remove(filepath.Join(home, "desktop-instance.json"))
 	systray.Run(app.onReady, app.onExit)
 	return nil
 }
@@ -267,18 +301,27 @@ func (a *desktopApp) onReady() {
 	a.statusItem.Disable()
 	settings := systray.AddMenuItem("Settings…", "Open Surf settings and status")
 	restart := systray.AddMenuItem("Restart Backend", "Restart the managed backend process")
+	a.updateItem = systray.AddMenuItem("Check for Updates…", "Check GitHub Releases for a newer Surf")
 	systray.AddSeparator()
 	quit := systray.AddMenuItem("Quit Surf", "Stop the backend and quit")
 
 	go a.startBackend()
 	go a.monitorHealth()
+	if cfg, err := loadDesktopConfig(a.home); err == nil && !cfg.StartupChoiceMade {
+		go a.openManagement("")
+	}
 	go menuLoop(settings, func() { a.openManagement("") })
 	go menuLoop(restart, func() {
 		a.setStatus("Restarting Surf…")
 		a.stopBackend()
 		_ = a.startBackend()
 	})
+	go menuLoop(a.updateItem, func() {
+		a.startUpdateCheck()
+		a.openManagement("")
+	})
 	go menuLoop(quit, systray.Quit)
+	go a.automaticUpdateChecks()
 }
 
 func menuLoop(item *systray.MenuItem, action func()) {
@@ -453,6 +496,10 @@ func (a *desktopApp) managementHandler() http.Handler {
 	mux.HandleFunc("/api/update/check", a.managementUpdateCheck)
 	mux.HandleFunc("/api/update/apply", a.managementUpdateApply)
 	mux.HandleFunc("/api/update/status", a.managementUpdateStatus)
+	mux.HandleFunc("/api/activate", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+		go a.openManagement("")
+	})
 	mux.HandleFunc("/settings", a.managementSettings)
 	mux.HandleFunc("/logs", a.managementLogs)
 	proxy := &httputil.ReverseProxy{
@@ -503,11 +550,18 @@ func (a *desktopApp) managementUpdateCheck(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
+	if !a.startUpdateCheck() {
+		http.Error(w, "update already in progress", http.StatusConflict)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func (a *desktopApp) startUpdateCheck() bool {
 	a.mu.Lock()
 	if a.updateState == "checking" || a.updateState == "downloading" || a.updateState == "applying" {
 		a.mu.Unlock()
-		http.Error(w, "update already in progress", http.StatusConflict)
-		return
+		return false
 	}
 	a.updateState, a.updateError = "checking", ""
 	a.mu.Unlock()
@@ -524,11 +578,26 @@ func (a *desktopApp) managementUpdateCheck(w http.ResponseWriter, r *http.Reques
 		a.updateRelease = &release
 		if release.Newer {
 			a.updateState = "available"
+			if a.updateItem != nil {
+				a.updateItem.SetTitle("Update available: " + release.Manifest.Version + "…")
+			}
 		} else {
 			a.updateState = "current"
+			if a.updateItem != nil {
+				a.updateItem.SetTitle("Check for Updates…")
+			}
 		}
 	}()
-	w.WriteHeader(http.StatusAccepted)
+	return true
+}
+
+func (a *desktopApp) automaticUpdateChecks() {
+	a.startUpdateCheck()
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for range ticker.C {
+		a.startUpdateCheck()
+	}
 }
 
 func (a *desktopApp) managementUpdateApply(w http.ResponseWriter, r *http.Request) {
@@ -556,6 +625,48 @@ func validDesktopMutation(r *http.Request) bool {
 func (a *desktopApp) applyDesktopUpdate(release updater.Release) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
+	if runtime.GOOS == "windows" && release.Package.URL != "" {
+		installer := filepath.Join(a.home, "updates", release.Manifest.Version, release.Package.Name)
+		if err := updateClient().DownloadAsset(ctx, release.Package, installer); err != nil {
+			a.setUpdateFailure(err)
+			return
+		}
+		a.mu.Lock()
+		a.updateState = "applying"
+		a.mu.Unlock()
+		a.stopBackend()
+		command := exec.Command(installer, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS")
+		if err := command.Start(); err != nil {
+			a.setUpdateFailure(err)
+			_ = a.startBackend()
+			return
+		}
+		systray.Quit()
+		return
+	}
+	if runtime.GOOS == "linux" && os.Getenv("APPIMAGE") != "" && release.Package.URL != "" {
+		staged := filepath.Join(a.home, "updates", release.Manifest.Version, release.Package.Name)
+		if err := updateClient().DownloadAsset(ctx, release.Package, staged); err != nil {
+			a.setUpdateFailure(err)
+			return
+		}
+		a.mu.Lock()
+		a.updateState = "applying"
+		a.mu.Unlock()
+		a.stopBackend()
+		target := os.Getenv("APPIMAGE")
+		if err := updater.ReplaceExecutable(staged, target); err != nil {
+			a.setUpdateFailure(err)
+			_ = a.startBackend()
+			return
+		}
+		if err := exec.Command(target).Start(); err != nil {
+			a.setUpdateFailure(err)
+			return
+		}
+		systray.Quit()
+		return
+	}
 	staged, err := stageUpdate(ctx, release, a.home)
 	if err != nil {
 		a.setUpdateFailure(err)
@@ -629,10 +740,12 @@ func (a *desktopApp) managementConfig(w http.ResponseWriter, _ *http.Request) {
 	if len(lanURLs) != 0 {
 		lanURL = lanURLs[0]
 	}
+	cfg, _ := loadDesktopConfig(a.home)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"password": password, "baseURL": baseURL, "lanURL": lanURL, "lanURLs": lanURLs,
-		"port": port, "running": running,
+		"port": port, "running": running, "startAtLogin": cfg.StartAtLogin,
+		"startupChoiceMade": cfg.StartupChoiceMade,
 	})
 }
 
@@ -711,7 +824,16 @@ func (a *desktopApp) managementSettings(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Port must be between 1 and 65535.", http.StatusBadRequest)
 		return
 	}
-	cfg := desktopConfig{Password: password, Port: port}
+	startAtLogin := r.FormValue("startAtLogin") == "on"
+	cfg := desktopConfig{
+		Password: password, Port: port, StartAtLogin: startAtLogin, StartupChoiceMade: true,
+	}
+	if a.manageChild {
+		if err := setStartAtLogin(startAtLogin); err != nil {
+			http.Error(w, "Could not update start-at-login: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
 	if err := saveDesktopConfig(a.home, cfg); err != nil {
 		http.Error(w, "Could not save settings.", http.StatusInternalServerError)
 		return

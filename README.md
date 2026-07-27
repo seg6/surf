@@ -22,8 +22,9 @@ The main test target is the original iPad mini on iOS 6.1.3. Other iOS 6 iPads,
 iPhones, and iPods may work, but layout and performance are less tested.
 
 The video/browsing backend supports Linux x86-64, Windows x86-64, and macOS
-Intel/Apple Silicon. It downloads pinned Chrome and FFmpeg runtimes into
-`SURF_HOME` on first launch. Audio capture currently requires Linux plus
+Intel/Apple Silicon. It prefers an installed Chrome or Chromium and otherwise
+installs a verified ungoogled-chromium release into `SURF_HOME`. Release
+packages include the tested FFmpeg runtime. Audio capture currently requires Linux plus
 PulseAudio or PipeWire Pulse compatibility. See `docs/backend.md` for details.
 
 ## AI Disclosure
@@ -47,7 +48,7 @@ code, test your setup, and assume there are rough edges.
 - Filza, iFile, OpenSSH, or another way to install `.deb` packages.
 - A Linux, Windows, or macOS computer for `surf`.
 - On Linux, `pactl` with PulseAudio or PipeWire Pulse compatibility for audio.
-- Enough disk space for the managed Chrome and FFmpeg runtimes.
+- Enough disk space for Chromium and Surf's media runtime.
 - A low-latency network between the device and backend. LAN is best.
 
 You do not need to build the native app yourself if a `.deb` is available in
@@ -73,11 +74,11 @@ not appear after installation, run `uicache` again or respring.
 
 ## Start The Backend
 
-Download the matching `surf` archive from GitHub Releases:
+Download the matching Surf package from GitHub Releases:
 
-- Windows: double-click `surf.exe`.
-- macOS: open `Surf.app`.
-- Linux: run `./surf`.
+- Windows: run the per-user installer, or extract the portable ZIP.
+- macOS: open the DMG and copy `Surf.app`.
+- Linux desktop: run the AppImage; servers can use the tarball.
 
 The tray/menu-bar menu opens Settings, restarts the backend, or quits Surf.
 The Settings window shows the
@@ -85,7 +86,14 @@ detected LAN address and stream status, lets you change the password and port,
 keeps logs behind a collapsed disclosure, and installs updates published on
 GitHub Releases. The password is saved under
 `SURF_HOME` so the iPad does not need to be reconfigured on every launch. The
-first launch downloads the pinned Chrome and FFmpeg runtimes.
+If Chrome or Chromium is not installed, first launch downloads the latest
+verified ungoogled-chromium build maintained by its official GitHub
+organization. Surf keeps this private browser current without touching a
+personal browser profile.
+
+On first run Surf asks whether it should start when you sign in. The choice can
+be changed later in Settings. Launching Surf again while it is already running
+opens the existing Settings page instead of starting a second backend.
 
 The desktop app is presently unsigned, so Windows or macOS may display a
 security warning. For a server or terminal-only launch, use the same archive:
@@ -131,7 +139,8 @@ By default, `surf serve`:
 - Listens on port `18080`.
 - Advertises the backend on the local network for Surf discovery.
 - Reads required `SURF_PASSWORD` from the environment.
-- Downloads pinned Chrome and FFmpeg runtimes on first launch.
+- Prefers system Chrome/Chromium and manages ungoogled-chromium as a fallback.
+- Uses the FFmpeg runtime included in release packages.
 - Runs Chrome with `--headless=new` and uses CDP screencast capture.
 
 To run the binary directly:

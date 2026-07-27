@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/grandcat/zeroconf"
@@ -102,13 +103,20 @@ func ensureBrowser(cfg *config.Config) error {
 		log.Printf("runtime: using CHROME=%s", cfg.ChromePath)
 		return nil
 	}
-	log.Printf("runtime: ensuring Chrome for Testing %s (--headless=new)", browserbin.Version)
-	path, err := browserbin.EnsureChrome(cfg.SurfHome)
+	log.Printf("runtime: resolving Chrome/Chromium (--headless=new)")
+	path, source, err := browserbin.Resolve(cfg.SurfHome)
 	if err != nil {
 		return err
 	}
 	cfg.ChromePath = path
-	log.Printf("runtime: using managed Chrome %s", path)
+	log.Printf("runtime: using %s at %s", source, path)
+	if strings.HasPrefix(source, "managed ") {
+		go func() {
+			if err := browserbin.UpdateManaged(cfg.SurfHome); err != nil {
+				log.Printf("runtime: managed browser update check failed: %v", err)
+			}
+		}()
+	}
 	return nil
 }
 
