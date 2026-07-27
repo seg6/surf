@@ -73,6 +73,22 @@ not appear after installation, run `uicache` again or respring.
 
 ## Start The Backend
 
+For a normal desktop computer, download the matching `surf-desktop` archive
+from GitHub Releases. It includes both the tray app and backend:
+
+- Windows: run `surf-desktop.exe`.
+- macOS: open `Surf Desktop.app`.
+- Linux: run `./surf-desktop`.
+
+The tray/menu-bar menu shows the generated password and provides shortcuts for
+logs, diagnostics, restart, and quit. The password is saved under `SURF_HOME`
+so the iPad does not need to be reconfigured on every launch. The first launch
+downloads the pinned Chrome and FFmpeg runtimes.
+
+The desktop app is presently unsigned, so Windows or macOS may display a
+security warning. Server and advanced users can instead use the standalone
+CLI package:
+
 On the backend computer, download the matching Linux, Windows, or macOS
 `surf-backend` archive from GitHub Releases:
 
@@ -94,6 +110,12 @@ To build from source instead:
 ```sh
 make backend-binary
 SURF_PASSWORD='change-me' ./backend/surf-backend serve
+```
+
+Build the native desktop package on the matching operating system with:
+
+```sh
+make desktop-dist
 ```
 
 By default, `surf-backend serve`:

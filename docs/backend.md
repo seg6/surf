@@ -6,6 +6,27 @@ FFmpeg, and streams video, audio, and control messages to the native client.
 Windows and macOS are also supported for the video/browsing path; audio
 capture is Linux-only for now.
 
+## Desktop app
+
+The recommended local-computer package is Surf Desktop. It is a small native
+tray/menu-bar supervisor that starts the included `surf-backend`, generates and
+persists a strong password, reports health, and exposes logs, diagnostics,
+restart, and quit actions. The backend remains a separate process, so the same
+server implementation and diagnostics are used by both desktop and headless
+deployments.
+
+Desktop packages are built natively for Linux x86-64, Windows x86-64, macOS
+Intel, and macOS Apple Silicon. They include the backend executable; Chrome and
+FFmpeg are still downloaded into `SURF_HOME` on first launch.
+
+The desktop app accepts `SURF_HOME`, `SURF_PASSWORD`, and `SURF_BACKEND`
+overrides. Its generated configuration is stored at
+`SURF_HOME/desktop.json`, and combined supervisor/backend output is written to
+`SURF_HOME/desktop.log`.
+
+The standalone CLI described below remains preferable for services, VPSes, and
+machines without a desktop session.
+
 ## Dependencies
 
 Surf downloads Chrome and FFmpeg automatically. Linux audio additionally needs:
@@ -67,6 +88,7 @@ Press `Ctrl-C` to stop the foreground backend.
 make backend-binary      # build backend/surf-backend
 make backend-dist        # build the current host package
 make backend-dist-all    # cross-package every supported backend target
+make desktop-dist        # build the desktop app on the current host
 ```
 
 Run the binary directly:

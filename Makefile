@@ -1,16 +1,21 @@
-.PHONY: test backend-binary backend-dist backend-dist-all native-sdk native-package
+.PHONY: test backend-binary backend-dist backend-dist-all desktop-binaries desktop-dist native-sdk native-package
 
 VERSION := $(shell tr -d '[:space:]' < VERSION)
 PROTOCOL_VERSION := $(shell tr -d '[:space:]' < PROTOCOL_VERSION)
 BACKEND_GOOS ?= $(shell go env GOOS)
 BACKEND_GOARCH ?= $(shell go env GOARCH)
 BACKEND_DIST := surf-backend-$(VERSION)-$(BACKEND_GOOS)-$(BACKEND_GOARCH)
+DESKTOP_DIST := surf-desktop-$(VERSION)-$(BACKEND_GOOS)-$(BACKEND_GOARCH)
 ifeq ($(BACKEND_GOOS),windows)
 BACKEND_EXE := surf-backend.exe
+DESKTOP_EXE := surf-desktop.exe
 BACKEND_ARCHIVE := $(BACKEND_DIST).zip
+DESKTOP_ARCHIVE := $(DESKTOP_DIST).zip
 else
 BACKEND_EXE := surf-backend
+DESKTOP_EXE := surf-desktop
 BACKEND_ARCHIVE := $(BACKEND_DIST).tar.gz
+DESKTOP_ARCHIVE := $(DESKTOP_DIST).tar.gz
 endif
 
 test:
@@ -41,6 +46,37 @@ backend-dist-all:
 	$(MAKE) backend-dist BACKEND_GOOS=darwin BACKEND_GOARCH=arm64
 	$(MAKE) backend-binary
 	rm -f backend/surf-backend.exe
+
+# The tray dependency uses native desktop APIs (and cgo on macOS). Build this
+# target on the matching OS/architecture; CI does so on native runners.
+desktop-binaries:
+	cd backend && CGO_ENABLED=0 GOOS=$(BACKEND_GOOS) GOARCH=$(BACKEND_GOARCH) go build -trimpath \
+		-ldflags="-s -w -X surf-backend/internal/config.AppVersion=$(VERSION) -X surf-backend/internal/config.NativeVersion=$(PROTOCOL_VERSION)" \
+		-o "$(BACKEND_EXE)" ./cmd/surf-backend
+	cd backend && CGO_ENABLED=1 GOOS=$(BACKEND_GOOS) GOARCH=$(BACKEND_GOARCH) go build -trimpath \
+		$(if $(filter windows,$(BACKEND_GOOS)),-ldflags="-s -w -H=windowsgui",-ldflags="-s -w") \
+		-o "$(DESKTOP_EXE)" ./cmd/surf-desktop
+
+desktop-dist: desktop-binaries
+	rm -rf "dist/$(DESKTOP_DIST)" "dist/Surf Desktop.app"
+	if [ "$(BACKEND_GOOS)" = "darwin" ]; then \
+		mkdir -p "dist/Surf Desktop.app/Contents/MacOS"; \
+		cp "backend/$(DESKTOP_EXE)" "dist/Surf Desktop.app/Contents/MacOS/surf-desktop"; \
+		cp "backend/$(BACKEND_EXE)" "dist/Surf Desktop.app/Contents/MacOS/surf-backend"; \
+		sed "s/@VERSION@/$(VERSION)/g" packaging/desktop/Info.plist > "dist/Surf Desktop.app/Contents/Info.plist"; \
+		tar -C dist -czf "dist/$(DESKTOP_ARCHIVE)" "Surf Desktop.app"; \
+	else \
+		mkdir -p "dist/$(DESKTOP_DIST)"; \
+		cp "backend/$(DESKTOP_EXE)" "dist/$(DESKTOP_DIST)/$(DESKTOP_EXE)"; \
+		cp "backend/$(BACKEND_EXE)" "dist/$(DESKTOP_DIST)/$(BACKEND_EXE)"; \
+		cp packaging/desktop/README.md "dist/$(DESKTOP_DIST)/README.md"; \
+		if [ "$(BACKEND_GOOS)" = "windows" ]; then \
+			rm -f "dist/$(DESKTOP_ARCHIVE)"; \
+			cd backend && go run ./tools/zipdir "../dist/$(DESKTOP_DIST)" "../dist/$(DESKTOP_ARCHIVE)"; \
+		else \
+			tar -C dist -czf "dist/$(DESKTOP_ARCHIVE)" "$(DESKTOP_DIST)"; \
+		fi; \
+	fi
 
 native-sdk:
 	native/buildenv/fetch-sdk.sh

@@ -64,6 +64,45 @@ jobs:
             dist/*.zip
           if-no-files-found: error
 
+  desktop-packages:
+    name: Desktop app ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - runner: windows-latest
+            goos: windows
+            goarch: amd64
+          - runner: macos-15-intel
+            goos: darwin
+            goarch: amd64
+          - runner: macos-15
+            goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Build desktop package
+        shell: bash
+        run: make desktop-dist BACKEND_GOOS=${{ matrix.goos }} BACKEND_GOARCH=${{ matrix.goarch }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: surf-desktop-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            dist/surf-desktop-*.tar.gz
+            dist/surf-desktop-*.zip
+          if-no-files-found: error
+
   native:
     name: Native package
     runs-on: ubuntu-latest
