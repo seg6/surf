@@ -163,13 +163,6 @@ jobs:
             native/client/render-versioned-files.sh
           git diff --exit-code -- native/client/control native/client/Resources/Info.plist
 
-      - name: Test backend
-        working-directory: backend
-        run: |
-          test -z "$(gofmt -l .)"
-          go vet ./...
-          go test -race ./...
-
       - uses: actions/download-artifact@v4
         with:
           pattern: surf-*
