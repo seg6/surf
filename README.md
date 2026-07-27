@@ -6,8 +6,8 @@ obsolete system WebKit.
 
 The native app provides the touch-first browser UI, input handling, H.264 video
 decoding, audio playback, tabs, downloads, uploads, and device integration. The
-backend, `surf-backend`, runs Chromium on Linux, captures the browser display,
-and streams it to the device over WebSocket.
+backend, `surf-backend`, runs managed Chrome headlessly, captures compositor
+frames through CDP, and streams H.264 to the device over WebSocket.
 
 The result is closer to a purpose-built remote browser than a remote desktop:
 Chromium does the web compatibility work, while the iOS app keeps the device
@@ -21,8 +21,10 @@ still experimental.
 The main test target is the original iPad mini on iOS 6.1.3. Other iOS 6 iPads,
 iPhones, and iPods may work, but layout and performance are less tested.
 
-The backend runs directly on Linux with host-installed Chromium, Xvfb, FFmpeg,
-and PulseAudio/PipeWire tools. See `docs/backend.md` for details.
+The video/browsing backend supports Linux x86-64, Windows x86-64, and macOS
+Intel/Apple Silicon. It downloads pinned Chrome and FFmpeg runtimes into
+`SURF_HOME` on first launch. Audio capture currently requires Linux plus
+PulseAudio or PipeWire Pulse compatibility. See `docs/backend.md` for details.
 
 ## AI Disclosure
 
@@ -43,9 +45,9 @@ code, test your setup, and assume there are rough edges.
 - A jailbroken iOS device.
 - iOS 6 is the primary target.
 - Filza, iFile, OpenSSH, or another way to install `.deb` packages.
-- A Linux computer or server for `surf-backend`.
-- Host backend tools: Chromium, Xvfb, xrandr, FFmpeg, and `pactl` with
-  PulseAudio or PipeWire Pulse compatibility.
+- A Linux, Windows, or macOS computer for `surf-backend`.
+- On Linux, `pactl` with PulseAudio or PipeWire Pulse compatibility for audio.
+- Enough disk space for the managed Chrome and FFmpeg runtimes.
 - A low-latency network between the device and backend. LAN is best.
 
 You do not need to build the native app yourself if a `.deb` is available in
@@ -71,8 +73,8 @@ not appear after installation, run `uicache` again or respring.
 
 ## Start The Backend
 
-On the Linux computer or server that will run Chromium, download the
-`surf-backend-*-linux-*.tar.gz` archive from GitHub Releases, then:
+On the backend computer, download the appropriate `surf-backend` release.
+The current packaged archive is Linux x86-64:
 
 ```sh
 tar xf surf-backend-*-linux-*.tar.gz
@@ -95,6 +97,8 @@ By default, `surf-backend serve`:
 - Listens on port `18080`.
 - Advertises the backend on the local network for Surf discovery.
 - Reads required `SURF_PASSWORD` from the environment.
+- Downloads pinned Chrome and FFmpeg runtimes on first launch.
+- Runs Chrome with `--headless=new` and uses CDP screencast capture.
 
 To run the binary directly:
 
@@ -146,7 +150,7 @@ If you use another firewall, allow inbound TCP port `18080`.
 ## What Surf Is
 
 - A native client for legacy jailbroken iOS devices.
-- A standalone Linux Chromium backend named `surf-backend`.
+- A cross-platform remote Chromium backend named `surf-backend`.
 - A touch-first remote browser, not a generic remote desktop.
 - Intended for LAN use, with VPS deployment possible if latency is acceptable.
 

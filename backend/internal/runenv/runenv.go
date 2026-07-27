@@ -12,9 +12,8 @@ type Runtime struct {
 	handle Handle
 }
 
-// Handle exposes the active platform's capture/launch hooks to the browser
-// package: Chromium launch flags, ffmpeg capture argument builders for the
-// H.264/PCM lanes, and capture-surface resize.
+// Handle exposes the one remaining host-specific facility: system-audio
+// capture. Chromium launch and the H.264 path are platform-independent.
 func (r *Runtime) Handle() Handle { return r.handle }
 
 // Shutdown tears down whatever the platform's Prepare started.
@@ -24,9 +23,8 @@ func (r *Runtime) Shutdown() {
 	}
 }
 
-// Start prepares whatever host services the current OS needs — a virtual
-// display and audio sink on Linux; nothing on Windows/macOS — via the
-// platform matching runtime.GOOS.
+// Start prepares whatever audio service the current OS needs — a PulseAudio
+// sink on Linux; nothing on Windows/macOS — via the matching implementation.
 func Start(cfg *config.Config) (*Runtime, error) {
 	handle, err := newPlatform().Prepare(cfg)
 	if err != nil {

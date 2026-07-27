@@ -6,13 +6,15 @@ import (
 	"testing"
 )
 
-func TestFrameEncode(t *testing.T) {
-	f := &Frame{Seq: 7, W: 1024, H: 768, ScrollX: 3, ScrollY: 123456, Data: []byte{0xff, 0xd8, 0xff}}
-	b := f.Encode()
+func TestVideoEncode(t *testing.T) {
+	data := []byte{0, 0, 1}
+	meta := VideoMeta{AUSeq: 7, SourceSeq: 6, W: 1024, H: 768, InteractionID: 42,
+		SourceReceiveNS: 100, EncodeCompleteNS: 200, EncoderGeneration: 3}
+	b := EncodeVideo(meta, true, data)
 	if len(b) != FrameHeaderBytes+3 {
 		t.Fatalf("length %d", len(b))
 	}
-	if string(b[0:4]) != FrameMagic || b[4] != FrameTypeFull {
+	if string(b[0:4]) != FrameMagic || b[4] != FrameTypeVideo || b[5] != 1 {
 		t.Fatal("bad magic/type")
 	}
 	if binary.BigEndian.Uint16(b[6:8]) != FrameHeaderBytes {
@@ -24,17 +26,21 @@ func TestFrameEncode(t *testing.T) {
 	if binary.BigEndian.Uint16(b[16:18]) != 1024 || binary.BigEndian.Uint16(b[18:20]) != 768 {
 		t.Fatal("bad dims")
 	}
-	if binary.BigEndian.Uint32(b[20:24]) != 3 || !bytes.Equal(b[FrameHeaderBytes:], f.Data) {
+	if binary.BigEndian.Uint32(b[12:16]) != 6 || binary.BigEndian.Uint32(b[20:24]) != 3 || !bytes.Equal(b[FrameHeaderBytes:], data) {
 		t.Fatal("bad payload")
 	}
-	if binary.BigEndian.Uint32(b[24:28]) != 3 || binary.BigEndian.Uint32(b[28:32]) != 123456 {
-		t.Fatal("bad scroll offsets")
+	if binary.BigEndian.Uint64(b[24:32]) != 42 || binary.BigEndian.Uint64(b[32:40]) != 100 ||
+		binary.BigEndian.Uint64(b[40:48]) != 200 || binary.BigEndian.Uint32(b[56:60]) != 3 {
+		t.Fatal("bad metadata")
+	}
+	StampSocketWrite(b, 300)
+	if binary.BigEndian.Uint64(b[48:56]) != 300 {
+		t.Fatal("socket timestamp")
 	}
 }
 
 func TestFrameEncodeClampsDims(t *testing.T) {
-	f := &Frame{W: 100000, H: -5, Data: nil}
-	b := f.Encode()
+	b := EncodeVideo(VideoMeta{W: 100000, H: -5}, false, nil)
 	if binary.BigEndian.Uint16(b[16:18]) != 65535 || binary.BigEndian.Uint16(b[18:20]) != 0 {
 		t.Fatal("dims not clamped")
 	}

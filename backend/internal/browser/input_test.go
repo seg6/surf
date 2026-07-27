@@ -24,7 +24,7 @@ func TestNormalizeNavURL(t *testing.T) {
 }
 
 func TestIsActiveSession(t *testing.T) {
-	b := &Browser{
+	b := &Controller{
 		tabs:     map[int]*Tab{},
 		activeID: 1,
 	}

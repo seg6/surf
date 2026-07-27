@@ -2,6 +2,7 @@
 #import <CoreGraphics/CoreGraphics.h>
 
 @class RBSession;
+@class RBInteractionTracker;
 
 typedef enum {
     RBSessionStateIdle,       // not started or given up
@@ -21,6 +22,7 @@ typedef enum {
 @end
 
 @interface RBSession : NSObject
+@property(nonatomic, strong, readonly) RBInteractionTracker *interactionTracker;
 @property(nonatomic, weak) id<RBSessionDelegate> delegate;
 @property(nonatomic, readonly) NSInteger viewWidth;
 @property(nonatomic, readonly) NSInteger viewHeight;
@@ -34,7 +36,8 @@ typedef enum {
 - (void)updateViewportWidth:(NSInteger)width height:(NSInteger)height;
 - (void)updateViewportWidth:(NSInteger)width height:(NSInteger)height force:(BOOL)force;
 - (void)sendMessage:(NSDictionary *)message;
-- (void)sendReady;
 - (void)sendClickX:(CGFloat)x y:(CGFloat)y;
 - (void)sendWheelX:(CGFloat)x y:(CGFloat)y dx:(CGFloat)dx dy:(CGFloat)dy;
+- (void)startDiagnosticsCapture;
+- (void)uploadDiagnosticsEvents:(NSArray *)events;
 @end

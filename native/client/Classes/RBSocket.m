@@ -57,7 +57,7 @@ static void RBSetSocketOptions(int fd) {
     setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
 #endif
     // Every message on this socket is either a small control frame or one
-    // binary frame we want on the wire immediately (JPEG/AU/PCM) — Nagle's
+    // binary frame we want on the wire immediately (H.264 AU/PCM) — Nagle's
     // coalescing delay (up to ~40ms) only hurts here, never helps.
     int noDelay = 1;
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &noDelay, sizeof(noDelay));
@@ -434,16 +434,28 @@ static BOOL RBReadAll(int fd, void *buf, NSUInteger len) {
 - (void)deliverPayload:(NSData *)payload opcode:(unsigned char)opcode {
     if (opcode == 0x1) {
         NSString *text = [[NSString alloc] initWithData:payload encoding:NSUTF8StringEncoding];
-        dispatch_async(dispatch_get_main_queue(), ^{
+        // Preserve WebSocket wire order across control and binary messages.
+        // In particular, video-config must finish configuring VideoToolbox
+        // before the immediately-following IDR reaches the media pipeline.
+        // The socket read loop is never the main thread, so this cannot
+        // self-deadlock. Binary payloads still bypass the main queue.
+        dispatch_sync(dispatch_get_main_queue(), ^{
             id<RBSocketDelegate> delegate = self.delegate;
             if (self.running && [delegate respondsToSelector:@selector(socket:didReceiveText:)]) [delegate socket:self didReceiveText:text ?: @""];
         });
     } else if (opcode == 0x2) {
         NSData *copy = [payload copy];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            id<RBSocketDelegate> delegate = self.delegate;
-            if (self.running && [delegate respondsToSelector:@selector(socket:didReceiveBinary:)]) [delegate socket:self didReceiveBinary:copy];
-        });
+        // Media must never transit UIKit's main queue. At 30 video AUs plus
+        // 50 audio packets per second, posting every packet there created a
+        // persistent queue behind touch handling and display-link callbacks;
+        // latency echoes routinely arrived 1s late even on a healthy LAN.
+        // This method already runs on the socket's single read thread, while
+        // RBVideoDecoder immediately hands AUs to its own serial queue and
+        // RBAudioPlayer protects its AudioQueue state with a lock.
+        id<RBSocketDelegate> delegate = self.delegate;
+        if (self.running && [delegate respondsToSelector:@selector(socket:didReceiveBinary:)]) {
+            [delegate socket:self didReceiveBinary:copy];
+        }
     }
 }
 

@@ -15,66 +15,6 @@ func (w *countingWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func nal(start4 bool, typ byte, payload ...byte) []byte {
-	var b []byte
-	if start4 {
-		b = append(b, 0, 0, 0, 1)
-	} else {
-		b = append(b, 0, 0, 1)
-	}
-	b = append(b, typ&0x1F|0x60) // nal_ref_idc bits set, type in low 5
-	if typ == 5 || typ == 9 {
-		b[len(b)-1] = typ // AUD/IDR exactly as x264 emits (ref idc varies; type bits are what we scan)
-	}
-	return append(b, payload...)
-}
-
-func TestSplitterCutsOnAUD(t *testing.T) {
-	// AU1: AUD SPS PPS IDR — AU2: AUD P — AU3 (incomplete): AUD
-	au1 := bytes.Join([][]byte{
-		nal(true, 9, 0x10),
-		nal(true, 7, 0x42, 0x00, 0x1f),
-		nal(true, 8, 0xce),
-		nal(false, 5, 0x88, 0x84, 0x00),
-	}, nil)
-	au2 := bytes.Join([][]byte{
-		nal(true, 9, 0x30),
-		nal(false, 1, 0x9a, 0x00),
-	}, nil)
-	tail := nal(true, 9, 0x10)
-
-	full := bytes.Join([][]byte{au1, au2, tail}, nil)
-
-	// Feed in awkward chunk sizes to exercise split start codes.
-	for _, chunk := range []int{1, 3, 7, 1000} {
-		sp := newAUSplitter()
-		var got []AU
-		for i := 0; i < len(full); i += chunk {
-			end := min(i+chunk, len(full))
-			aus, err := sp.feed(full[i:end])
-			if err != nil {
-				t.Fatalf("chunk=%d: feed error: %v", chunk, err)
-			}
-			got = append(got, aus...)
-		}
-		if len(got) != 2 {
-			t.Fatalf("chunk=%d: got %d AUs, want 2", chunk, len(got))
-		}
-		if !bytes.Equal(got[0].Data, au1) {
-			t.Errorf("chunk=%d: AU1 bytes mismatch", chunk)
-		}
-		if !bytes.Equal(got[1].Data, au2) {
-			t.Errorf("chunk=%d: AU2 bytes mismatch", chunk)
-		}
-		if !got[0].IDR {
-			t.Errorf("chunk=%d: AU1 should be IDR", chunk)
-		}
-		if got[1].IDR {
-			t.Errorf("chunk=%d: AU2 should not be IDR", chunk)
-		}
-	}
-}
-
 func TestSubBackpressureResyncsOnIDR(t *testing.T) {
 	s := New(Config{W: 64, H: 64, FPS: 15, BitrateK: 100, MaxrateK: 100, BufsizeK: 50})
 	sub := &Sub{C: make(chan AU, 2), s: s, fresh: true, dropped: true, gen: 1}
@@ -109,7 +49,7 @@ func TestSubBackpressureResyncsOnIDR(t *testing.T) {
 }
 
 func TestRestartMovesEverySubscriberToNewGeneration(t *testing.T) {
-	s := &Streamer{subs: map[*Sub]struct{}{}, gen: 3}
+	s := &VideoPipeline{subs: map[*Sub]struct{}{}, gen: 3}
 	a := &Sub{C: make(chan AU, 2), s: s, gen: 1}
 	b := &Sub{C: make(chan AU, 2), s: s, gen: 2}
 	a.C <- AU{Seq: 1}
@@ -134,7 +74,7 @@ func TestRestartMovesEverySubscriberToNewGeneration(t *testing.T) {
 // TestRequestKeyframeNoopWhenNotRunning exercises the guard clauses only —
 // actually restarting ffmpeg needs a real binary and display.
 func TestRequestKeyframeNoopWhenNotRunning(t *testing.T) {
-	s := &Streamer{subs: map[*Sub]struct{}{}}
+	s := &VideoPipeline{subs: map[*Sub]struct{}{}}
 	s.RequestKeyframe()
 	if s.running {
 		t.Fatal("RequestKeyframe started the encoder while not running")
@@ -145,7 +85,7 @@ func TestRequestKeyframeNoopWhenNotRunning(t *testing.T) {
 }
 
 func TestRequestKeyframeCooldown(t *testing.T) {
-	s := &Streamer{subs: map[*Sub]struct{}{}, running: true}
+	s := &VideoPipeline{subs: map[*Sub]struct{}{}, running: true}
 	recent := time.Now()
 	s.lastKeyframeReq = recent
 	s.RequestKeyframe() // within cooldown: must return before touching cmd/lastKeyframeReq
@@ -159,29 +99,25 @@ func TestRequestKeyframeCooldown(t *testing.T) {
 
 func TestArgsBuildsMjpegFromStdin(t *testing.T) {
 	s := New(Config{W: 1024, H: 768, FPS: 30, BitrateK: 6000, MaxrateK: 8000, BufsizeK: 1800})
-	args := s.args()
-	want := []string{
-		"-loglevel", "warning",
-		"-fflags", "nobuffer",
-		"-f", "mjpeg", "-framerate", "30", "-probesize", "32", "-analyzeduration", "0",
-		"-i", "pipe:0",
-	}
-	if len(args) < len(want) {
-		t.Fatalf("args=%v, too short", args)
-	}
-	for i := range want {
-		if args[i] != want[i] {
-			t.Fatalf("args[%d]=%q, want %q (full: %v)", i, args[i], want[i], args)
+	args := s.args("rtp://127.0.0.1:1234")
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"-loglevel warning", "-f image2pipe", "-vcodec mjpeg",
+		"-framerate 30", "-probesize 32",
+		"-analyzeduration 0", "-i pipe:0",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("args missing %q: %v", want, args)
 		}
 	}
-	if args[len(args)-1] != "pipe:1" {
-		t.Fatalf("last arg=%q, want pipe:1 (full: %v)", args[len(args)-1], args)
+	if args[len(args)-1] != "rtp://127.0.0.1:1234" {
+		t.Fatalf("last arg=%q, want RTP URL (full: %v)", args[len(args)-1], args)
 	}
 }
 
 func TestArgsPassesThroughUntimestampedFrames(t *testing.T) {
 	s := New(Config{W: 640, H: 480, FPS: 30, BitrateK: 1000, MaxrateK: 1200, BufsizeK: 500})
-	args := strings.Join(s.args(), " ")
+	args := strings.Join(s.args("rtp://127.0.0.1:1234"), " ")
 	if !strings.Contains(args, "-fps_mode passthrough") {
 		t.Fatalf("args must preserve every event-driven JPEG frame: %s", args)
 	}
@@ -192,7 +128,7 @@ func TestArgsPassesThroughUntimestampedFrames(t *testing.T) {
 
 func TestArgsAddsScaleFilterWhenDownscaling(t *testing.T) {
 	s := New(Config{W: 1024, H: 1024, ScaleMaxW: 512, ScaleMaxH: 512, FPS: 30, BitrateK: 100, MaxrateK: 100, BufsizeK: 50})
-	args := s.args()
+	args := s.args("rtp://127.0.0.1:1234")
 	found := false
 	for i, a := range args {
 		if a == "-vf" && i+1 < len(args) && strings.HasPrefix(args[i+1], "scale=512:512") {
@@ -215,8 +151,8 @@ func TestPushIsNoopWhenNotRunning(t *testing.T) {
 // prevent: an earlier version wrote straight to ffmpeg's stdin from Push,
 // which runs on the CDP event dispatch goroutine — confirmed live that a
 // real interactive page (bigger, more frequent frames than any synthetic
-// test used) filled the pipe and froze frame delivery entirely, JPEG lane
-// included. pushState.set must stay O(1) regardless of how fast the writer
+// test used) filled the pipe and froze frame delivery entirely. pushState.set
+// must stay O(1) regardless of how fast the writer
 // goroutine drains it — here, not at all — by coalescing to the latest
 // frame instead of blocking.
 func TestPushStateNeverBlocksSender(t *testing.T) {
@@ -257,7 +193,7 @@ func TestPushStatePacesWrites(t *testing.T) {
 }
 
 func TestSeedLatestRequiresMatchingCaptureSize(t *testing.T) {
-	s := &Streamer{
+	s := &VideoPipeline{
 		cfg:       Config{CaptureW: 800, CaptureH: 600},
 		push:      newPushState(30),
 		lastJPEG:  []byte{1, 2, 3},
@@ -289,8 +225,7 @@ func TestSeedLatestRequiresMatchingCaptureSize(t *testing.T) {
 // "dropped" waiting for an IDR, but nothing forced one — with scenecut=0
 // the next periodic IDR was up to keyint frames away, and since frames
 // only arrive when CDP's screencast actually produces one, a subscriber
-// landing on an already-static page could wait forever, silently falling
-// back to JPEG (confirmed live: "no AU within 6s, lane unavailable" after
+// landing on an already-static page could wait forever and become unavailable
 // navigating a lingering session to a settled page). Subscribe must now
 // force a restart whenever it joins a running encoder instead of trusting
 // one to show up on its own.
@@ -331,11 +266,8 @@ func TestSubscribeForcesRestartWhenAlreadyRunning(t *testing.T) {
 	}
 }
 
-// TestSubscribeFailsImmediatelyWhenFFmpegMissing guards the one remaining
-// startup-failure path: mjpeg-from-stdin has no platform-specific
-// "unsupported" case anymore (unlike the old x11grab/gdigrab CaptureArgs
-// hook), so the only way Subscribe can fail now is ffmpeg itself not
-// existing.
+// TestSubscribeFailsImmediatelyWhenFFmpegMissing guards encoder startup
+// failure when the configured executable does not exist.
 func TestSubscribeFailsImmediatelyWhenFFmpegMissing(t *testing.T) {
 	s := New(Config{
 		FFmpegPath: "surf-definitely-does-not-exist-xyz",

@@ -30,21 +30,31 @@ make backend-binary
 ./backend/surf-backend doctor
 ```
 
-Install any missing required tools listed by the doctor output.
+Surf installs managed Chrome and FFmpeg automatically. If a download is
+blocked, permit access to Google Chrome for Testing storage and GitHub
+Releases, or set `CHROME`/`FFMPEG` to explicit local executables. Linux audio
+also requires the PulseAudio-compatible tools reported by `doctor`.
 
-## Chromium Window Is Visible
+## Managed Runtime Download Fails
 
-Rebuild the backend and make sure you are not overriding the private display:
+Retry with the default managed runtime settings:
 
 ```sh
 make backend-binary
-unset SURF_MANAGE_DISPLAY SURF_DISPLAY
+unset CHROME FFMPEG SURF_BROWSER_DOWNLOAD SURF_FFMPEG_DOWNLOAD
 SURF_PASSWORD='change-me' ./backend/surf-backend serve
 ```
 
-On Wayland desktops, Surf should still run Chromium inside private Xvfb. A
-visible host window usually means an old binary is running or the display was
-explicitly overridden.
+Downloads are checksum-verified and stored below `SURF_HOME/runtime`. Set
+`SURF_BROWSER_DOWNLOAD=0` or `SURF_FFMPEG_DOWNLOAD=0` only when provisioning
+the corresponding runtime yourself.
+
+## Browser Is Visible Or Frames Stop When Unfocused
+
+The current backend always uses Chrome `--headless=new`; it does not use Xvfb
+or desktop capture. A visible window means an old backend process or an
+explicitly launched browser is still running. Stop all old `surf-backend`
+processes, rebuild, and start the current binary.
 
 ## App Installed But Icon Did Not Update
 

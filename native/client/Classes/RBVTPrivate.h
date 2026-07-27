@@ -1,7 +1,7 @@
 /* Minimal VideoToolbox declarations for iOS 6, where the framework exists
  * but is private (public API arrived in iOS 8). We never link against it —
  * every entry point is resolved with dlopen/dlsym at runtime and the app
- * falls back to the JPEG lane if resolution fails.
+ * reports video unavailable if resolution fails.
  *
  * Sources for these declarations:
  *  - public iOS 8 SDK VTDecompressionSession.h / VTErrors.h (ABI-compatible

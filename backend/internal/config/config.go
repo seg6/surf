@@ -29,28 +29,28 @@ var Caps = []string{
 	"reader",      // reader-mode extraction
 	"security",    // TLS state on url messages
 	"pageerror",   // native error surface messages
-	"lat",         // latency echo
+	"clock",       // NTP-style monotonic clock synchronization
+	"diagnostics", // authenticated trace capture and bundles
 	"dlprogress",  // download progress events
 	"dldel",       // delete a download from the server
 	"reqkeyframe", // on-demand IDR request (decode error / resync)
+	"video-retry", // explicit retry after an unavailable encoder state
 }
 
 type Config struct {
-	BindAddr      string
-	Port          int
-	ChromePath    string
-	StartURL      string
-	Profile       string
-	ViewW         int
-	ViewH         int
-	Quality       int // steady-state screencast JPEG quality
-	MotionQuality int // JPEG quality while scrolling/typing (cheap frames, low latency)
-	SharpQuality  int // quality of the post-settle captureScreenshot
-	SettleMS      int // how long after the last input before we consider motion over
-	SurfPassword  string
-	AuthDays      int
-	DownloadsDir  string
-	UploadsDir    string
+	SurfHome          string
+	BindAddr          string
+	Port              int
+	ChromePath        string
+	StartURL          string
+	Profile           string
+	ViewW             int
+	ViewH             int
+	SourceJPEGQuality int // internal CDP-to-FFmpeg JPEG quality
+	SurfPassword      string
+	AuthDays          int
+	DownloadsDir      string
+	UploadsDir        string
 
 	PulseServer     string
 	PulseSink       string
@@ -142,8 +142,8 @@ func LoadForDiagnostics() (*Config, error) {
 
 func load(requireAuth bool) (*Config, error) {
 	home := surfHome()
-	viewW := envInt("VW", 1024)
-	viewH := envInt("VH", 768)
+	viewW := envInt("VW", 768)
+	viewH := envInt("VH", 934)
 	pulseSink := envStr("PULSE_SINK", "surf_output")
 	pactlPath := envStr("PACTL", "pactl")
 	managePulseDefault := true
@@ -156,35 +156,33 @@ func load(requireAuth bool) (*Config, error) {
 		pulseServerDefault = "unix:/tmp/pulse/native"
 	}
 	cfg := &Config{
-		BindAddr:        envStr("BIND_ADDR", "0.0.0.0"),
-		Port:            envInt("PORT", 18080),
-		ChromePath:      envStr("CHROME", "chromium"),
-		StartURL:        envStr("START_URL", "https://www.google.com"),
-		Profile:         envStr("PROFILE", filepath.Join(home, "profile")),
-		ViewW:           viewW,
-		ViewH:           viewH,
-		Quality:         envInt("QUALITY", 100),
-		MotionQuality:   envInt("MOTION_QUALITY", 85),
-		SharpQuality:    envInt("SHARP_QUALITY", 82),
-		SettleMS:        envInt("SETTLE_MS", 180),
-		SurfPassword:    os.Getenv("SURF_PASSWORD"),
-		AuthDays:        envInt("AUTH_DAYS", 180),
-		DownloadsDir:    envStr("DOWNLOADS", filepath.Join(home, "downloads")),
-		UploadsDir:      envStr("UPLOADS", filepath.Join(home, "uploads")),
-		PulseServer:     envStr("PULSE_SERVER", pulseServerDefault),
-		PulseSink:       pulseSink,
-		AudioSource:     envStr("AUDIO_SOURCE", pulseSink+".monitor"),
-		FFmpegPath:      envStr("FFMPEG", "ffmpeg"),
-		PulseaudioPath:  envStr("PULSEAUDIO", "pulseaudio"),
-		PactlPath:       pactlPath,
-		ManagePulse:     managePulse,
-		EnsurePulseSink: envBool("SURF_ENSURE_PULSE_SINK", !managePulse),
-		ChromeNoSandbox: envBool("CHROME_NO_SANDBOX", os.Geteuid() == 0),
-		StreamFPS:       envInt("STREAM_FPS", 30),
-		StreamScale:     envStr("STREAM_SCALE", "1024x1024"),
-		StreamBitrateK:  envInt("STREAM_BITRATE", 6000),
-		StreamMaxrateK:  envInt("STREAM_MAXRATE", 8000),
-		StreamBufsizeK:  envInt("STREAM_BUFSIZE", 1800),
+		SurfHome:          home,
+		BindAddr:          envStr("BIND_ADDR", "0.0.0.0"),
+		Port:              envInt("PORT", 18080),
+		ChromePath:        os.Getenv("CHROME"),
+		StartURL:          envStr("START_URL", "https://www.google.com"),
+		Profile:           envStr("PROFILE", filepath.Join(home, "profile")),
+		ViewW:             viewW,
+		ViewH:             viewH,
+		SourceJPEGQuality: envInt("SOURCE_JPEG_QUALITY", 100),
+		SurfPassword:      os.Getenv("SURF_PASSWORD"),
+		AuthDays:          envInt("AUTH_DAYS", 180),
+		DownloadsDir:      envStr("DOWNLOADS", filepath.Join(home, "downloads")),
+		UploadsDir:        envStr("UPLOADS", filepath.Join(home, "uploads")),
+		PulseServer:       envStr("PULSE_SERVER", pulseServerDefault),
+		PulseSink:         pulseSink,
+		AudioSource:       envStr("AUDIO_SOURCE", pulseSink+".monitor"),
+		FFmpegPath:        os.Getenv("FFMPEG"),
+		PulseaudioPath:    envStr("PULSEAUDIO", "pulseaudio"),
+		PactlPath:         pactlPath,
+		ManagePulse:       managePulse,
+		EnsurePulseSink:   envBool("SURF_ENSURE_PULSE_SINK", !managePulse),
+		ChromeNoSandbox:   envBool("CHROME_NO_SANDBOX", os.Geteuid() == 0),
+		StreamFPS:         envInt("STREAM_FPS", 30),
+		StreamScale:       envStr("STREAM_SCALE", "1024x1024"),
+		StreamBitrateK:    envInt("STREAM_BITRATE", 6000),
+		StreamMaxrateK:    envInt("STREAM_MAXRATE", 8000),
+		StreamBufsizeK:    envInt("STREAM_BUFSIZE", 1800),
 	}
 	if requireAuth && cfg.SurfPassword == "" {
 		return nil, fmt.Errorf("SURF_PASSWORD is required")

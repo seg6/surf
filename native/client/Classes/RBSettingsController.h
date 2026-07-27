@@ -10,6 +10,7 @@
 - (void)settings:(RBSettingsController *)settings clearData:(NSString *)what;
 // ABOUT section: diagnostics overlay switch.
 - (void)settings:(RBSettingsController *)settings setDiagnosticsVisible:(BOOL)visible;
+- (void)settingsStartDiagnosticsCapture:(RBSettingsController *)settings;
 @end
 
 // App configuration as a real grouped settings screen (chrome rethink):

@@ -61,7 +61,10 @@ func (c *Client) CaptureJPEG(sessionID string, quality int) ([]byte, error) {
 	var p struct {
 		Data string `json:"data"`
 	}
-	if err := c.CallInto(sessionID, "Page.captureScreenshot", map[string]any{"format": "jpeg", "quality": quality}, &p); err != nil {
+	if err := c.CallInto(sessionID, "Page.captureScreenshot", map[string]any{
+		"format": "jpeg", "quality": quality,
+		"fromSurface": true, "captureBeyondViewport": false, "optimizeForSpeed": true,
+	}, &p); err != nil {
 		return nil, err
 	}
 	return base64.StdEncoding.DecodeString(p.Data)
@@ -81,6 +84,29 @@ func (c *Client) NavigateToHistoryEntry(sessionID string, id int) error {
 func (c *Client) SetDeviceMetrics(sessionID string, width, height int, deviceScaleFactor float64) error {
 	_, err := c.Call(sessionID, "Emulation.setDeviceMetricsOverride", map[string]any{
 		"width": width, "height": height, "deviceScaleFactor": deviceScaleFactor, "mobile": false,
+	})
+	return err
+}
+
+// SetContentsSize resizes full Chrome's real (hidden in headless mode)
+// platform window content area. Page emulation alone changes CSS metrics but
+// does not necessarily resize that compositor surface.
+func (c *Client) SetContentsSize(targetID string, width, height int) error {
+	var window struct {
+		WindowID int `json:"windowId"`
+	}
+	if err := c.CallInto("", "Browser.getWindowForTarget", map[string]any{
+		"targetId": targetID,
+	}, &window); err != nil {
+		return err
+	}
+	if window.WindowID == 0 {
+		return nil
+	}
+	_, err := c.Call("", "Browser.setContentsSize", map[string]any{
+		"windowId": window.WindowID,
+		"width":    width,
+		"height":   height,
 	})
 	return err
 }

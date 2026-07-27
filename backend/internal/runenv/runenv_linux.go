@@ -106,7 +106,15 @@ func (lh *linuxHandle) Shutdown() {
 // AudioCaptureArgs grabs the PulseAudio-compatible monitor source Chromium's
 // output was routed to.
 func (lh *linuxHandle) AudioCaptureArgs(source string) []string {
-	return []string{"-loglevel", "warning", "-f", "pulse", "-i", source}
+	// Request the wire format at the source and keep Pulse's read fragment to
+	// exactly one 20ms packet. Letting the demuxer use its larger default
+	// fragment created burst delivery, audible underruns, and A/V drift that
+	// disappeared only after reconnecting the old client.
+	return []string{
+		"-loglevel", "warning", "-f", "pulse",
+		"-sample_rate", "16000", "-channels", "1", "-fragment_size", "640",
+		"-i", source,
+	}
 }
 
 func cleanupChromeSingletons(profile string) error {

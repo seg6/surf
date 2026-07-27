@@ -1,5 +1,6 @@
 #import "RBVideoDecoder.h"
 #import "RBLog.h"
+#import "RBProtocol.h"
 #import "RBVTPrivate.h"
 
 #import <QuartzCore/QuartzCore.h>
@@ -11,6 +12,13 @@
 
 typedef struct {
     CFTimeInterval submittedAt;
+    unsigned long long interactionID;
+    unsigned int auSequence;
+    unsigned int sourceSequence;
+    unsigned int encoderGeneration;
+    unsigned long long sourceReceiveNS;
+    unsigned long long encodeCompleteNS;
+    unsigned long long socketWriteNS;
 } RBFrameTiming;
 
 // ---- runtime symbol resolution ---------------------------------------------
@@ -78,7 +86,7 @@ static CGImageRef RBCreateImageFromPixelBuffer(CVPixelBufferRef pb) {
 
 // Above this many queued-but-undecoded AUs we drop to the next IDR: the A5
 // fell behind and P-frames only pile onto stale state.
-static const int kRBMaxQueuedAUs = 8;
+static const int kRBMaxQueuedAUs = 3;
 // This many resyncs inside 30s means the lane is hurting more than helping.
 static const int kRBMaxResyncs = 3;
 
@@ -114,6 +122,17 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
     RBFrameTiming *timing = (RBFrameTiming *)frameRefcon;
     CFTimeInterval now = CACurrentMediaTime();
     double callbackMS = timing ? (now - timing->submittedAt) * 1000.0 : 0.0;
+    unsigned long long interactionID = timing ? timing->interactionID : 0;
+    RBFrameMetadata *metadata = [[RBFrameMetadata alloc] init];
+    metadata.interactionID = interactionID;
+    if (timing) {
+        metadata.auSequence = timing->auSequence;
+        metadata.sourceSequence = timing->sourceSequence;
+        metadata.encoderGeneration = timing->encoderGeneration;
+        metadata.sourceReceiveNS = timing->sourceReceiveNS;
+        metadata.encodeCompleteNS = timing->encodeCompleteNS;
+        metadata.socketWriteNS = timing->socketWriteNS;
+    }
     if (timing) free(timing);
     if (status != noErr || !imageBuffer) return;
     RBVideoDecoder *decoder = (__bridge RBVideoDecoder *)refcon;
@@ -127,7 +146,7 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
     decoder.lastWrapMS = wrapMS;
     decoder.averageWrapMS = decoder.averageWrapMS <= 0.0 ? wrapMS : decoder.averageWrapMS * 0.85 + wrapMS * 0.15;
     dispatch_async(dispatch_get_main_queue(), ^{
-        [decoder.delegate videoDecoder:decoder didDecodeImage:image];
+        [decoder.delegate videoDecoder:decoder didDecodeImage:image metadata:metadata];
         CGImageRelease(image);
     });
 }
@@ -155,21 +174,30 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
     [self teardownSession];
 }
 
-- (void)feedAU:(NSData *)au idr:(BOOL)idr {
+- (void)feedAU:(NSData *)au idr:(BOOL)idr metadata:(RBFrameMetadata *)metadata {
     if (self.failed || ![RBVideoDecoder available]) return;
     // Latest-wins is illegal for P-frames; when the queue backs up we drop
     // whole GOPs instead: skip until the next IDR drains through.
     if (OSAtomicIncrement32(&_queued) > kRBMaxQueuedAUs) {
-        OSAtomicDecrement32(&_queued);
         if (!idr) {
+            OSAtomicDecrement32(&_queued);
             self.droppedAUs++;
             dispatch_async(self.queue, ^{ self.waitingForIDR = YES; });
+            // Do not wait up to the normal two-second GOP after shedding a
+            // dependent frame. The backend coalesces repeated requests behind
+            // its restart cooldown.
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self.delegate videoDecoderNeedsKeyframe:self];
+            });
             return;
         }
+        // Keep an overflowing IDR: it is the recovery boundary needed by all
+        // later frames. Its queued count is consumed by the decode block
+        // below; decrementing here as well used to drive the gauge negative.
     }
     dispatch_async(self.queue, ^{
         OSAtomicDecrement32(&_queued);
-        [self decodeAU:au idr:idr];
+        [self decodeAU:au idr:idr metadata:metadata];
     });
 }
 
@@ -223,8 +251,8 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
         return;
     }
     // Ask the server for an early IDR rather than wait up to 2s for the next
-    // scheduled one. Skipped on the give-up path above — the lane is about to
-    // fall back to JPEG, so a restart would just be wasted server work.
+    // scheduled one. Skipped on the give-up path above because recovery then
+    // requires the user's explicit retry.
     dispatch_async(dispatch_get_main_queue(), ^{ [self.delegate videoDecoderNeedsKeyframe:self]; });
 }
 
@@ -289,7 +317,7 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
     return YES;
 }
 
-- (void)decodeAU:(NSData *)au idr:(BOOL)idr {
+- (void)decodeAU:(NSData *)au idr:(BOOL)idr metadata:(RBFrameMetadata *)metadata {
     if (self.failed) return;
     if (self.waitingForIDR && !idr) return;
 
@@ -335,7 +363,16 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
 
     VTDecodeInfoFlags flagsOut = 0;
     RBFrameTiming *timing = malloc(sizeof(RBFrameTiming));
-    if (timing) timing->submittedAt = CACurrentMediaTime();
+    if (timing) {
+        timing->submittedAt = CACurrentMediaTime();
+        timing->interactionID = metadata.interactionID;
+        timing->auSequence = metadata.auSequence;
+        timing->sourceSequence = metadata.sourceSequence;
+        timing->encoderGeneration = metadata.encoderGeneration;
+        timing->sourceReceiveNS = metadata.sourceReceiveNS;
+        timing->encodeCompleteNS = metadata.encodeCompleteNS;
+        timing->socketWriteNS = metadata.socketWriteNS;
+    }
     CFTimeInterval submitStart = CACurrentMediaTime();
     status = rbVTDecode(_session, sample, 0 /* sync — fine at 15fps */, timing, &flagsOut);
     double submitMS = (CACurrentMediaTime() - submitStart) * 1000.0;

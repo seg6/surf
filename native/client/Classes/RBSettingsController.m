@@ -226,7 +226,7 @@ static const NSInteger kEditServerAlertTag = 1001;
         case RBSectionServer: return [self.statusText length] ? 4 : 3; // url, password, connect, (status)
         case RBSectionSaved: return (NSInteger)[self.savedServers count] + 1; // + Find Local Surf
         case RBSectionData: return 3;
-        case RBSectionAbout: return 2; // version, diagnostics
+        case RBSectionAbout: return 3; // version, overlay, capture
     }
     return 0;
 }
@@ -326,11 +326,15 @@ static const NSInteger kEditServerAlertTag = 1001;
     if (r == 0) {
         cell.textLabel.text = @"Version";
         cell.detailTextLabel.text = [NSString stringWithFormat:@"native %@", RBNativeVersion];
-    } else {
+    } else if (r == 1) {
         cell.textLabel.text = @"Diagnostics Overlay";
         cell.detailTextLabel.text = nil;
         self.diagSwitch.on = self.diagnosticsVisible;
         cell.accessoryView = self.diagSwitch;
+    } else {
+        cell.textLabel.text = @"Start Diagnostics Capture";
+        cell.detailTextLabel.text = @"30 seconds";
+        cell.selectionStyle = self.connected ? UITableViewCellSelectionStyleBlue : UITableViewCellSelectionStyleNone;
     }
     return cell;
 }
@@ -359,6 +363,12 @@ static const NSInteger kEditServerAlertTag = 1001;
         if ([self.delegate respondsToSelector:@selector(settings:clearData:)]) {
             [self.delegate settings:self clearData:whats[r]];
         }
+        return;
+    }
+    if (s == RBSectionAbout && r == 2 && self.connected &&
+        [self.delegate respondsToSelector:@selector(settingsStartDiagnosticsCapture:)]) {
+        [self.delegate settingsStartDiagnosticsCapture:self];
+        [self setStatusText:@"Diagnostics capture started for 30 seconds" isError:NO];
         return;
     }
 }

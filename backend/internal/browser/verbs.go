@@ -37,7 +37,7 @@ var errUploadTooLarge = errors.New("upload file too large")
 // Without this, one confirm() soft-locks the page: Chromium blocks the
 // renderer until the dialog is handled, and nothing on screen says why.
 
-func (b *Browser) onJavascriptDialog(ev cdp.Event) {
+func (b *Controller) onJavascriptDialog(ev cdp.Event) {
 	var p struct {
 		Message       string `json:"message"`
 		Type          string `json:"type"` // alert|confirm|prompt|beforeunload
@@ -55,23 +55,23 @@ func (b *Browser) onJavascriptDialog(ev cdp.Event) {
 	b.verbMu.Lock()
 	b.dialogSessions[ev.SessionID] = true
 	b.verbMu.Unlock()
-	b.hub.BroadcastJSON(map[string]any{
-		"t": "dialog", "kind": p.Type, "text": p.Message, "def": p.DefaultPrompt,
+	b.hub.BroadcastJSON(protocol.DialogEvent{
+		Type: "dialog", Kind: p.Type, Text: p.Message, Default: p.DefaultPrompt,
 	})
 }
 
-func (b *Browser) onJavascriptDialogClosed(ev cdp.Event) {
+func (b *Controller) onJavascriptDialogClosed(ev cdp.Event) {
 	b.verbMu.Lock()
 	delete(b.dialogSessions, ev.SessionID)
 	b.verbMu.Unlock()
 	// Covers dialogs dismissed by navigation etc. so the client UI can drop.
-	b.hub.BroadcastJSON(map[string]any{"t": "dialogdone"})
+	b.hub.BroadcastJSON(protocol.EmptyEvent{Type: "dialogdone"})
 }
 
 // handleDialogReply answers whichever session is showing a dialog. In
 // practice that's the active tab; if several tabs dialog at once, answer all
 // pending ones identically rather than wedge.
-func (b *Browser) handleDialogReply(m *protocol.ClientMessage) {
+func (b *Controller) handleDialogReply(m *protocol.DialogReplyCommand) {
 	b.verbMu.Lock()
 	sessions := make([]string, 0, len(b.dialogSessions))
 	for s := range b.dialogSessions {
@@ -94,12 +94,12 @@ func (b *Browser) handleDialogReply(m *protocol.ClientMessage) {
 // Page.fileChooserOpened with the input's backendNodeId. The client picks
 // files, POSTs them to /upload, and we attach them via DOM.setFileInputFiles.
 
-func (b *Browser) setupFileChooser(session string) {
-	_, _ = b.cdp.Call(session, "DOM.enable", nil) // setFileInputFiles wants the DOM agent
-	_, _ = b.cdp.Call(session, "Page.setInterceptFileChooserDialog", map[string]any{"enabled": true})
+func (b *Controller) setupFileChooser(session string) {
+	_ = b.cdp.Dispatch(session, "DOM.enable", nil) // setFileInputFiles wants the DOM agent
+	_ = b.cdp.Dispatch(session, "Page.setInterceptFileChooserDialog", map[string]any{"enabled": true})
 }
 
-func (b *Browser) onFileChooserOpened(ev cdp.Event) {
+func (b *Controller) onFileChooserOpened(ev cdp.Event) {
 	var p struct {
 		Mode          string `json:"mode"` // selectSingle|selectMultiple
 		BackendNodeID int64  `json:"backendNodeId"`
@@ -111,14 +111,14 @@ func (b *Browser) onFileChooserOpened(ev cdp.Event) {
 	b.chooserSession = ev.SessionID
 	b.chooserNode = p.BackendNodeID
 	b.verbMu.Unlock()
-	b.hub.BroadcastJSON(map[string]any{
-		"t": "filechooser", "multiple": p.Mode == "selectMultiple",
+	b.hub.BroadcastJSON(protocol.FileChooserEvent{
+		Type: "filechooser", Multiple: p.Mode == "selectMultiple",
 	})
 }
 
 // handleUpload is the POST /upload route: multipart files land in UploadsDir
 // and get attached to the intercepted input. An empty form cancels.
-func (b *Browser) handleUpload(w http.ResponseWriter, r *http.Request) {
+func (b *Controller) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
 		return
@@ -258,7 +258,7 @@ const hitExpr = `(function(x,y){
 })(%d,%d)`
 
 // handleHit answers a long-press hit-test: what's under the finger?
-func (b *Browser) handleHit(c *ws.Client, session string, x, y float64) {
+func (b *Controller) handleHit(c *ws.ClientTransport, session string, x, y float64) {
 	res, err := b.cdp.Call(session, "Runtime.evaluate", map[string]any{
 		"expression": fmt.Sprintf(hitExpr, int(x), int(y)), "returnByValue": true,
 	})
@@ -278,24 +278,24 @@ func (b *Browser) handleHit(c *ws.Client, session string, x, y float64) {
 		return
 	}
 	v := p.Result.Value
-	c.SendJSON(map[string]any{"t": "linkinfo", "href": v.Href, "img": v.Img, "text": v.Text})
+	c.SendJSON(protocol.LinkInfoEvent{Type: "linkinfo", Href: v.Href, Img: v.Img, Text: v.Text})
 }
 
 // openInNewTab backgrounds nothing: new tabs auto-focus by design (popups).
-func (b *Browser) openInNewTab(rawURL string) {
+func (b *Controller) openInNewTab(rawURL string) {
 	if rawURL == "" {
 		return
 	}
-	_, _ = b.cdp.Call("", "Target.createTarget", map[string]any{"url": rawURL})
+	_, _ = b.cdp.Call("", "Target.createTarget", b.newTargetParams(rawURL))
 }
 
 // ---- TLS state (M2.5) ----------------------------------------------------
 
-func (b *Browser) setupSecurity(session string) {
-	_, _ = b.cdp.Call(session, "Security.enable", nil)
+func (b *Controller) setupSecurity(session string) {
+	_ = b.cdp.Dispatch(session, "Security.enable", nil)
 }
 
-func (b *Browser) onSecurityStateChanged(ev cdp.Event) {
+func (b *Controller) onSecurityStateChanged(ev cdp.Event) {
 	var p struct {
 		SecurityState string `json:"securityState"` // secure|insecure|neutral|...
 	}
@@ -310,7 +310,7 @@ func (b *Browser) onSecurityStateChanged(ev cdp.Event) {
 	active := t != nil && t.ID == b.activeID
 	b.mu.Unlock()
 	if active {
-		b.hub.BroadcastJSON(map[string]any{"t": "security", "state": p.SecurityState})
+		b.hub.BroadcastJSON(protocol.SecurityEvent{Type: "security", State: p.SecurityState})
 	}
 }
 
@@ -318,13 +318,13 @@ func (b *Browser) onSecurityStateChanged(ev cdp.Event) {
 
 // noteNavigationError fires when a main frame lands on chrome-error://; the
 // caller kept the tab's previous URL so the omnibox doesn't show garbage.
-func (b *Browser) noteNavigationError(t *Tab) {
+func (b *Controller) noteNavigationError(t *Tab) {
 	b.mu.Lock()
 	active := t.ID == b.activeID
 	u := t.URL
 	b.mu.Unlock()
 	if active {
-		b.hub.BroadcastJSON(map[string]any{"t": "pageerror", "url": u})
+		b.hub.BroadcastJSON(protocol.URLStateEvent{Type: "pageerror", URL: u})
 	}
 }
 
@@ -356,7 +356,7 @@ const readerExpr = `(function(){
   return JSON.stringify({title:document.title||'', html:root.innerHTML.slice(0,600000)});
 })()`
 
-func (b *Browser) handleReader(c *ws.Client, t *Tab, session string) {
+func (b *Controller) handleReader(c *ws.ClientTransport, t *Tab, session string) {
 	b.mu.Lock()
 	u := t.URL
 	b.mu.Unlock()
@@ -366,7 +366,7 @@ func (b *Browser) handleReader(c *ws.Client, t *Tab, session string) {
 	raw, err := b.cdp.EvaluateString(session, readerExpr)
 	if err != nil {
 		if b.isActiveSession(session) {
-			c.SendJSON(map[string]any{"t": "reader", "ok": false})
+			c.SendJSON(protocol.ReaderEvent{Type: "reader"})
 		}
 		return
 	}
@@ -378,29 +378,29 @@ func (b *Browser) handleReader(c *ws.Client, t *Tab, session string) {
 		return
 	}
 	if json.Unmarshal([]byte(raw), &article) != nil || strings.TrimSpace(article.HTML) == "" {
-		c.SendJSON(map[string]any{"t": "reader", "ok": false})
+		c.SendJSON(protocol.ReaderEvent{Type: "reader"})
 		return
 	}
-	c.SendJSON(map[string]any{
-		"t": "reader", "ok": true, "title": article.Title, "html": article.HTML, "url": u,
+	c.SendJSON(protocol.ReaderEvent{
+		Type: "reader", OK: true, Title: article.Title, HTML: article.HTML, URL: u,
 	})
 }
 
 // ---- data clearing (M3.4) ------------------------------------------------
 
-func (b *Browser) handleClear(c *ws.Client, session, what string) {
+func (b *Controller) handleClear(c *ws.ClientTransport, session, what string) {
 	switch what {
 	case "history":
 		b.store.ClearHistory()
-		c.SendJSON(map[string]any{"t": "toast", "text": "history cleared"})
+		c.SendJSON(protocol.TextEvent{Type: "toast", Text: "history cleared"})
 	case "cookies":
 		_, err := b.cdp.Call(session, "Network.clearBrowserCookies", nil)
 		if err != nil {
 			log.Printf("clear cookies: %v", err)
 		}
-		c.SendJSON(map[string]any{"t": "toast", "text": "cookies cleared"})
+		c.SendJSON(protocol.TextEvent{Type: "toast", Text: "cookies cleared"})
 	case "cache":
 		_, _ = b.cdp.Call(session, "Network.clearBrowserCache", nil)
-		c.SendJSON(map[string]any{"t": "toast", "text": "cache cleared"})
+		c.SendJSON(protocol.TextEvent{Type: "toast", Text: "cache cleared"})
 	}
 }

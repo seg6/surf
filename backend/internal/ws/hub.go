@@ -1,9 +1,5 @@
-// Package ws owns the client-facing WebSocket side: connection lifecycle,
-// keepalive, and pipelined-but-coalesced frame delivery: up to maxInflight
-// frames ride the pipe unacked (so throughput isn't bound by RTT), the
-// client acks every frame it receives ({t:'ready'}, even ones it skips
-// rendering), and only the LATEST undelivered frame is kept. The final
-// frame of any change is always delivered and the pipe can never wedge.
+// Package ws owns client-facing WebSocket connection lifecycle and media
+// scheduling. JPEG capture frames never cross this boundary.
 package ws
 
 import (
@@ -13,11 +9,13 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
 
 	"surf-backend/internal/protocol"
+	"surf-backend/internal/telemetry"
 )
 
 var (
@@ -26,34 +24,36 @@ var (
 )
 
 const (
-	pingInterval = 30 * time.Second
-	pongWait     = 75 * time.Second
-	writeWait    = 20 * time.Second
-	readLimit    = 64 << 10
-
-	// maxInflight is the frame pipelining window. 3 covers ~200ms of RTT at
-	// 15fps without letting a stalled client accumulate a backlog.
-	maxInflight = 3
+	pingInterval  = 30 * time.Second
+	pongWait      = 75 * time.Second
+	writeWait     = 20 * time.Second
+	readLimit     = 64 << 10
+	audioQueueCap = 11 // 220ms, plus the AudioPipeline's one-packet handoff
 )
 
 // Handler is implemented by the browser side.
 type Handler interface {
-	ClientConnected(c *Client)
-	ClientDisconnected(c *Client)
-	HandleMessage(c *Client, m *protocol.ClientMessage)
+	ClientConnected(c *ClientTransport)
+	ClientDisconnected(c *ClientTransport)
+	HandleMessage(c *ClientTransport, command protocol.Command)
 }
 
 type Hub struct {
 	mu       sync.Mutex
-	clients  map[*Client]struct{}
+	clients  map[*ClientTransport]struct{}
 	frameSeq uint32
 	handler  Handler
 	upgrader websocket.Upgrader
+
+	controlFailures atomic.Uint64
+	videoDrops      atomic.Uint64
+	audioDrops      atomic.Uint64
+	socketWrites    atomic.Uint64
 }
 
 func NewHub() *Hub {
 	return &Hub{
-		clients: map[*Client]struct{}{},
+		clients: map[*ClientTransport]struct{}{},
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 32768,
@@ -82,69 +82,58 @@ func (h *Hub) ClientCount() int {
 	return len(h.clients)
 }
 
-// HasCastClient reports whether anyone still consumes the JPEG screencast —
-// when every connected client is in video mode (or none are connected), the
-// cast can stop and give its CPU to x264.
-func (h *Hub) HasCastClient() bool {
+func (h *Hub) Stats() map[string]uint64 {
 	h.mu.Lock()
-	targets := make([]*Client, 0, len(h.clients))
-	for c := range h.clients {
-		targets = append(targets, c)
+	var controlDepth, videoDepth, audioDepth uint64
+	for client := range h.clients {
+		controlDepth += uint64(len(client.control))
+		videoDepth += uint64(len(client.video))
+		audioDepth += uint64(len(client.audio))
 	}
 	h.mu.Unlock()
-	for _, c := range targets {
-		if !c.VideoMode() {
-			return true
-		}
+	return map[string]uint64{
+		"transport_control_failures": h.controlFailures.Load(),
+		"transport_video_drops":      h.videoDrops.Load(),
+		"transport_audio_drops":      h.audioDrops.Load(),
+		"transport_socket_writes":    h.socketWrites.Load(),
+		"control_queue_depth":        controlDepth,
+		"video_queue_depth":          videoDepth,
+		"audio_queue_depth":          audioDepth,
 	}
-	return false
 }
 
 type outMsg struct {
 	msgType int
 	data    []byte
+	clock   *clockReply
 }
 
-type Client struct {
+type clockReply struct {
+	clientSendNS  uint64
+	backendRecvNS uint64
+}
+
+type ClientTransport struct {
 	hub  *Hub
 	conn *websocket.Conn
 
-	// All writes go through a buffered outbox drained by one writer
-	// goroutine, so no caller (especially the CDP event dispatcher) can ever
-	// block on a slow client socket.
-	out  chan outMsg
-	done chan struct{}
+	control chan outMsg
+	video   chan outMsg
+	audio   chan outMsg
+	done    chan struct{}
 
-	mu        sync.Mutex
-	inflight  int
-	pending   *protocol.Frame
-	videoMode bool
+	mu            sync.Mutex
+	videoDropping bool
 }
 
-// SetVideoMode flips the client between the JPEG cast lane and the H.264
-// lane. In video mode the client receives no JPEG frames, only type-3 AUs.
-func (c *Client) SetVideoMode(on bool) {
-	c.mu.Lock()
-	c.videoMode = on
-	// The ack window belongs to the JPEG lane; entering/leaving video mode
-	// resets it so a stale window can't wedge the sharp-frame path.
-	c.inflight = 0
-	c.pending = nil
-	c.mu.Unlock()
-}
-
-func (c *Client) VideoMode() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.videoMode
-}
-
-// SendBinary enqueues a pre-encoded binary message (type-3/4 frames) on the
-// shared outbox, bypassing the type-1 ack window. Never blocks; an error
-// means the outbox was full and the message was dropped.
-func (c *Client) SendBinary(data []byte) error {
+// SendBinary enqueues a pre-encoded binary media message. It never blocks; an
+// error means the lane-specific queue applied its drop policy.
+func (c *ClientTransport) SendBinary(data []byte) error {
 	return c.write(websocket.BinaryMessage, data)
 }
+
+func (c *ClientTransport) Closed() <-chan struct{} { return c.done }
+func (c *ClientTransport) Close()                  { _ = c.conn.Close() }
 
 // Serve upgrades the request and runs the read loop until disconnect.
 //
@@ -161,7 +150,12 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conn.SetReadLimit(readLimit)
-	c := &Client{hub: h, conn: conn, out: make(chan outMsg, 32), done: make(chan struct{})}
+	c := &ClientTransport{
+		hub: h, conn: conn, done: make(chan struct{}),
+		control: make(chan outMsg, 64),
+		video:   make(chan outMsg, 4),
+		audio:   make(chan outMsg, audioQueueCap),
+	}
 	h.mu.Lock()
 	h.clients[c] = struct{}{}
 	h.mu.Unlock()
@@ -182,12 +176,17 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		_ = conn.SetReadDeadline(time.Now().Add(pongWait))
-		var m protocol.ClientMessage
-		if err := json.Unmarshal(data, &m); err != nil {
+		command, err := protocol.DecodeCommand(data)
+		if err != nil {
+			continue
+		}
+		if clock, ok := command.(*protocol.ClockCommand); ok {
+			received := telemetry.MonoNS()
+			c.sendClock(clock.ClientSendNS, received)
 			continue
 		}
 		if h.handler != nil {
-			h.handler.HandleMessage(c, &m)
+			h.handler.HandleMessage(c, command)
 		}
 	}
 
@@ -202,129 +201,178 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeLoop is the only goroutine touching the write side of the socket.
-func (c *Client) writeLoop() {
+func (c *ClientTransport) writeLoop() {
 	ping := time.NewTicker(pingInterval)
 	defer ping.Stop()
 	for {
 		var m outMsg
+		// Ordered control messages have priority over lossy media.
+		select {
+		case <-c.done:
+			return
+		case m = <-c.control:
+			if !c.writeOne(m) {
+				return
+			}
+			continue
+		default:
+		}
 		select {
 		case <-c.done:
 			return
 		case <-ping.C:
 			m = outMsg{msgType: websocket.PingMessage}
-		case m = <-c.out:
+		case m = <-c.control:
+		case m = <-c.video:
+		default:
+			select {
+			case <-c.done:
+				return
+			case <-ping.C:
+				m = outMsg{msgType: websocket.PingMessage}
+			case m = <-c.control:
+			case m = <-c.video:
+			case m = <-c.audio:
+			}
 		}
-		_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-		if err := c.conn.WriteMessage(m.msgType, m.data); err != nil {
-			_ = c.conn.Close() // unblocks the read loop; Serve cleans up
+		if !c.writeOne(m) {
 			return
 		}
+	}
+}
+
+func (c *ClientTransport) writeOne(m outMsg) bool {
+	_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+	if m.clock != nil {
+		// s2 is the time this reply actually reaches the head of the socket
+		// writer, not the earlier enqueue time. Queue dwell must be part of
+		// the NTP-style RTT sample rather than misreported as clock offset.
+		m.data, _ = json.Marshal(protocol.ClockEvent{
+			Type: "clock", ClientSendNS: m.clock.clientSendNS,
+			BackendRecvNS: m.clock.backendRecvNS, BackendSendNS: telemetry.MonoNS(),
+		})
+	}
+	if m.msgType == websocket.BinaryMessage {
+		protocol.StampSocketWrite(m.data, telemetry.MonoNS())
+	}
+	if err := c.conn.WriteMessage(m.msgType, m.data); err != nil {
+		_ = c.conn.Close() // unblocks the read loop; Serve cleans up
+		return false
+	}
+	if c.hub != nil {
+		c.hub.socketWrites.Add(1)
+	}
+	telemetry.Emit("socket_write", "transport", "websocket", map[string]any{"bytes": len(m.data), "binary": m.msgType == websocket.BinaryMessage})
+	return true
+}
+
+func (c *ClientTransport) sendClock(clientSendNS, backendRecvNS uint64) {
+	m := outMsg{msgType: websocket.TextMessage, clock: &clockReply{
+		clientSendNS: clientSendNS, backendRecvNS: backendRecvNS,
+	}}
+	select {
+	case c.control <- m:
+	case <-c.done:
+	default:
+		if c.hub != nil {
+			c.hub.controlFailures.Add(1)
+		}
+		_ = c.conn.Close()
 	}
 }
 
 // write enqueues without ever blocking; a client too slow to drain its
 // outbox loses messages (frames are coalesced anyway) and is eventually
 // reaped by the ping deadline.
-func (c *Client) write(msgType int, data []byte) error {
+func (c *ClientTransport) write(msgType int, data []byte) error {
+	m := outMsg{msgType: msgType, data: data}
+	if msgType == websocket.TextMessage || msgType == websocket.PingMessage {
+		select {
+		case c.control <- m:
+			return nil
+		case <-c.done:
+			return errClosed
+		default:
+			if c.hub != nil {
+				c.hub.controlFailures.Add(1)
+			}
+			_ = c.conn.Close() // control loss makes the connection unhealthy
+			return errBackpressure
+		}
+	}
+	if len(data) > 4 && data[4] == protocol.FrameTypeAudio {
+		select {
+		case c.audio <- m:
+			return nil
+		default:
+			// Audio is independently decodable: discard the oldest chunk.
+			if c.hub != nil {
+				c.hub.audioDrops.Add(1)
+			}
+			select {
+			case <-c.audio:
+			default:
+			}
+			select {
+			case c.audio <- m:
+				return nil
+			default:
+				return errBackpressure
+			}
+		}
+	}
+	if len(data) > 5 && data[4] == protocol.FrameTypeVideo {
+		idr := data[5]&1 != 0
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if c.videoDropping && !idr {
+			return errBackpressure
+		}
+		if idr {
+			c.videoDropping = false
+		}
+		select {
+		case c.video <- m:
+			return nil
+		default:
+			if c.hub != nil {
+				c.hub.videoDrops.Add(1)
+			}
+			for {
+				select {
+				case <-c.video:
+				default:
+					goto drained
+				}
+			}
+		drained:
+			c.videoDropping = !idr
+			if idr {
+				c.video <- m
+				return nil
+			}
+			return errBackpressure
+		}
+	}
 	select {
-	case c.out <- outMsg{msgType: msgType, data: data}:
+	case c.control <- m:
 		return nil
 	case <-c.done:
 		return errClosed
 	default:
+		if c.hub != nil {
+			c.hub.controlFailures.Add(1)
+		}
 		return errBackpressure
 	}
 }
 
-func (c *Client) SendJSON(v any) {
+func (c *ClientTransport) SendJSON(v any) {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return
 	}
 	_ = c.write(websocket.TextMessage, b)
-}
-
-// Ready is the client's per-frame ack (sent even for frames it skipped
-// rendering): shrink the window, flush the pending frame if any.
-func (c *Client) Ready() {
-	c.mu.Lock()
-	if c.inflight > 0 {
-		c.inflight--
-	}
-	f := c.takePendingLocked()
-	c.mu.Unlock()
-	c.sendFrame(f)
-}
-
-// PokeReset handles the client watchdog: assume acks were lost, reset the
-// window, and let the caller push a fresh frame.
-func (c *Client) PokeReset() {
-	c.mu.Lock()
-	c.inflight = 0
-	c.pending = nil
-	c.mu.Unlock()
-}
-
-func (c *Client) takePendingLocked() *protocol.Frame {
-	if c.pending == nil || c.inflight >= maxInflight {
-		return nil
-	}
-	c.inflight++
-	f := c.pending
-	c.pending = nil
-	return f
-}
-
-func (c *Client) sendFrame(f *protocol.Frame) {
-	if f == nil {
-		return
-	}
-	if c.write(websocket.BinaryMessage, f.Encode()) != nil {
-		// Frame dropped (backpressure/closing): give the window slot back so
-		// the next frame isn't gated on an ack that will never come.
-		c.mu.Lock()
-		if c.inflight > 0 {
-			c.inflight--
-		}
-		c.mu.Unlock()
-	}
-}
-
-func (c *Client) queue(f *protocol.Frame) {
-	c.mu.Lock()
-	c.pending = f
-	send := c.takePendingLocked()
-	c.mu.Unlock()
-	c.sendFrame(send)
-}
-
-// QueueFrame stamps a sequence number and delivers to one client (only != nil)
-// or all of them, replacing any not-yet-sent frame.
-func (h *Hub) QueueFrame(f *protocol.Frame, only *Client) {
-	h.mu.Lock()
-	h.frameSeq++
-	if h.frameSeq == 0 {
-		h.frameSeq = 1
-	}
-	f.Seq = h.frameSeq
-	targets := make([]*Client, 0, len(h.clients))
-	if only != nil {
-		targets = append(targets, only)
-	} else {
-		for c := range h.clients {
-			targets = append(targets, c)
-		}
-	}
-	h.mu.Unlock()
-	for _, c := range targets {
-		// Video-mode clients get no JPEGs at all. The old sharp-overlay JPEG path
-		// looked good when static, but on SPAs it contended with H.264 decode and
-		// caused visible hiccups on the A5.
-		if c.VideoMode() {
-			continue
-		}
-		c.queue(f)
-	}
 }
 
 func (h *Hub) BroadcastJSON(v any) {
@@ -333,7 +381,7 @@ func (h *Hub) BroadcastJSON(v any) {
 		return
 	}
 	h.mu.Lock()
-	targets := make([]*Client, 0, len(h.clients))
+	targets := make([]*ClientTransport, 0, len(h.clients))
 	for c := range h.clients {
 		targets = append(targets, c)
 	}
