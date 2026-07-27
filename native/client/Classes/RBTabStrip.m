@@ -168,11 +168,23 @@
 }
 
 - (void)rebuildCells {
-    for (UIView *sub in [self.scroller.subviews copy]) {
-        if ([sub isKindOfClass:[RBTabCell class]]) [sub removeFromSuperview];
-    }
+	// Reuse cells by tab ID. The old implementation destroyed and recreated
+	// every cell on every tabs broadcast and layoutSubviews pass; on the A5,
+	// that main-thread churn also delayed video AU delivery/presentation and
+	// made opening a tab feel substantially slower than the CDP operation.
+	NSMutableDictionary *existing = [NSMutableDictionary dictionary];
+	for (UIView *sub in self.scroller.subviews) {
+		if (![sub isKindOfClass:[RBTabCell class]]) continue;
+		RBTabCell *cell = (RBTabCell *)sub;
+		[existing setObject:cell forKey:[NSNumber numberWithInteger:cell.tabID]];
+	}
+	NSMutableSet *used = [NSMutableSet set];
     NSUInteger count = [self.tabs count];
-    if (!count) return;
+	if (!count) {
+		for (RBTabCell *cell in [existing allValues]) [cell removeFromSuperview];
+		self.scroller.contentSize = CGSizeZero;
+		return;
+	}
     CGFloat h = self.scroller.bounds.size.height;
     CGFloat available = self.scroller.bounds.size.width - 8.0;
     CGFloat cellW = MIN(220.0, MAX(110.0, available / count));
@@ -180,23 +192,40 @@
     for (NSUInteger i = 0; i < count; i++) {
         NSDictionary *tab = [self.tabs objectAtIndex:i];
         if (![tab isKindOfClass:[NSDictionary class]]) continue;
-        RBTabCell *cell = [[RBTabCell alloc] initWithFrame:CGRectMake(x, 2.0, cellW - 2.0, h - 2.0)];
-        cell.strip = self;
-        cell.tabID = [[tab objectForKey:@"id"] integerValue];
-        cell.active = [[tab objectForKey:@"active"] boolValue];
+		NSInteger tabID = [[tab objectForKey:@"id"] integerValue];
+		NSNumber *tabKey = [NSNumber numberWithInteger:tabID];
+		RBTabCell *cell = [existing objectForKey:tabKey];
+		if (!cell) {
+			cell = [[RBTabCell alloc] initWithFrame:CGRectZero];
+			cell.strip = self;
+			cell.tabID = tabID;
+			[self.scroller addSubview:cell];
+		}
+		[used addObject:tabKey];
+		cell.frame = CGRectMake(x, 2.0, cellW - 2.0, h - 2.0);
+		cell.active = [[tab objectForKey:@"active"] boolValue];
         NSString *title = [tab objectForKey:@"title"];
         if (![title length]) title = [tab objectForKey:@"url"];
         if (![title length]) title = @"Untitled";
         cell.titleLabel.text = title;
         NSString *iconPath = [tab objectForKey:@"icon"];
-        if ([iconPath isKindOfClass:[NSString class]] && [iconPath length]) {
-            UIImage *cached = [self.iconCache objectForKey:iconPath];
-            if (cached) cell.iconView.image = cached;
-            else [self fetchIcon:iconPath];
-        }
-        [self.scroller addSubview:cell];
-        x += cellW;
-    }
+		if ([iconPath isKindOfClass:[NSString class]] && [iconPath length]) {
+			UIImage *cached = [self.iconCache objectForKey:iconPath];
+			if (cached) cell.iconView.image = cached;
+			else {
+				cell.iconView.image = nil;
+				[self fetchIcon:iconPath];
+			}
+		} else {
+			cell.iconView.image = nil;
+		}
+		[cell setNeedsLayout];
+		[cell setNeedsDisplay];
+		x += cellW;
+	}
+	for (NSNumber *tabKey in existing) {
+		if (![used containsObject:tabKey]) [[existing objectForKey:tabKey] removeFromSuperview];
+	}
     self.scroller.contentSize = CGSizeMake(x + 4.0, h);
     // Keep the active tab on screen.
     for (RBTabCell *cell in self.scroller.subviews) {
