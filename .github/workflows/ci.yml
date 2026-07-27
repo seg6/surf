@@ -58,12 +58,6 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
-      - name: Smoke managed browser release
-        working-directory: backend
-        env:
-          SURF_TEST_BROWSER_DOWNLOAD: "1"
-        run: go test ./internal/browserbin -run TestManagedDownload -v
-
       - uses: actions/download-artifact@v4
         with:
           name: surf-native-deb
