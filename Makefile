@@ -79,7 +79,7 @@ surf-dist: surf-binary
 			fi; \
 		else \
 			tar -C dist -czf "dist/$(SURF_ARCHIVE)" "$(SURF_DIST)"; \
-			if [ -n "$${APPIMAGETOOL:-}" ]; then \
+			if [ "$(SURF_GOARCH)" = "amd64" ] && [ -n "$${APPIMAGETOOL:-}" ]; then \
 				rm -rf dist/Surf.AppDir; \
 				mkdir -p dist/Surf.AppDir/usr/bin dist/Surf.AppDir/usr/share/doc/surf; \
 				cp backend/surf dist/Surf.AppDir/usr/bin/surf; \
