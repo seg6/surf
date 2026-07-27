@@ -34,6 +34,13 @@ func Start(path string, args []string, opts Options) (*Started, error) {
 	cmd := Command(path, args...)
 	cmd.Env = opts.Env
 	started := &Started{}
+	if opts.Stdin {
+		w, err := cmd.StdinPipe()
+		if err != nil {
+			return nil, err
+		}
+		started.Stdin = w
+	}
 	if opts.Stdout {
 		r, err := cmd.StdoutPipe()
 		if err != nil {
