@@ -1,17 +1,36 @@
 //go:build windows
 
-// Package runenv's Windows platform runs Chromium directly on the desktop
-// session: no virtual display or audio sink to manage. Chromium launches
-// visible on the real desktop, pinned at the same --window-position=0,0/
-// --window-size flags cdp.LaunchConfig always passes, so gdigrab can grab
-// that fixed screen region for the H.264 lane.
+// Package runenv's Windows platform runs Chromium on a hidden desktop: a
+// second, non-interactive desktop object inside the same window station as
+// the caller (WinSta0), created via CreateDesktopW. Chromium is launched
+// onto it via STARTUPINFO.lpDesktop, so it never renders to the user's real
+// screen or can steal focus — stronger than moving/hiding a window, since
+// the window manager never puts it in front of anything to begin with.
+// Confirmed live: a normally-launched Chromium shows a real MainWindowHandle
+// and title from the interactive desktop; the same Chromium launched with
+// lpDesktop set to the hidden one shows MainWindowHandle=0 for every one of
+// its processes — genuinely invisible, not just minimized.
 //
-// This is the "visible window" version, not the hidden-desktop one: a true
-// stealth capture (CreateDesktop + a custom SetThreadDesktop/BitBlt or DXGI
-// duplication capturer feeding raw frames into ffmpeg's stdin) needs Win32
-// syscalls neither the standard library nor golang.org/x/sys/windows expose
-// today (no Desktop field on syscall.SysProcAttr, no CreateDesktopW wrapper,
-// no window-enumeration helpers). That's a real follow-up, not this pass.
+// The H.264 lane doesn't survive the trip, though: gdigrab's
+// GetDC(NULL)/BitBlt fails with ERROR_ACCESS_DENIED against a desktop that
+// has never been the foreground one — confirmed live, including with an
+// explicitly permissive DACL on the desktop (so it isn't a plain
+// permissions problem), and confirmed to be exactly that by switching the
+// hidden desktop to foreground with SwitchDesktop, which made capture work
+// immediately. Windows only fully composites the active desktop; a hidden
+// one never gets to be foreground without briefly flashing on screen and
+// defeating the entire point. So VideoCaptureArgs returns nil whenever a
+// hidden desktop is active, and browsing falls back to the JPEG/CDP
+// screencast lane, which operates at the Chromium compositor level over
+// the DevTools protocol and doesn't care which desktop the process is on.
+//
+// Neither the standard library nor golang.org/x/sys/windows expose
+// STARTUPINFO.lpDesktop or CreateDesktopW (confirmed against the Go 1.26
+// source: syscall.SysProcAttr on Windows has no Desktop field at all), so
+// this bypasses os/exec for the Chromium launch — see internal/proc's
+// Start/Options.Desktop and this file's createHiddenDesktop. If desktop
+// creation fails for any reason, Prepare falls back to launching visible
+// (HiddenDesktop returns ""), same as before this existed.
 //
 // The PCM lane is still unsupported here: dshow only exposes physical input
 // devices (microphones) on a stock Windows box, not a loopback/monitor
@@ -27,6 +46,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -47,7 +67,18 @@ func (windowsPlatform) Doctor(cfg *config.Config) []Check {
 
 func (windowsPlatform) Prepare(cfg *config.Config) (Handle, error) {
 	cfg.ChromePath = resolveChromePath(cfg.ChromePath)
-	return &windowsHandle{job: createKillOnCloseJob()}, nil
+	wh := &windowsHandle{job: createKillOnCloseJob()}
+	if cfg.HiddenDesktop {
+		name, handle, err := createHiddenDesktop(hiddenDesktopName)
+		if err != nil {
+			log.Printf("runtime: hidden desktop unavailable, launching visible: %v", err)
+		} else {
+			wh.desktopName = name
+			wh.desktopHandle = handle
+			log.Printf("runtime: chromium/ffmpeg will run on the hidden desktop %q", name)
+		}
+	}
+	return wh, nil
 }
 
 // createKillOnCloseJob puts our own process into a Job Object configured to
@@ -138,28 +169,108 @@ func findChromium() string {
 	return ""
 }
 
-// windowsHandle holds the kill-on-close Job Object (if it could be set up);
-// nothing else Prepare does needs teardown.
+// --- hidden desktop -------------------------------------------------------
+//
+// CreateDesktopW/CloseDesktop are USER32 functions; neither the standard
+// library's syscall package nor golang.org/x/sys/windows wrap them (both
+// focus on kernel32/advapi32-level primitives), so they're loaded by hand
+// here the same way x/sys/windows itself wraps functions internally.
+
+var (
+	modUser32          = syscall.NewLazyDLL("user32.dll")
+	procCreateDesktopW = modUser32.NewProc("CreateDesktopW")
+	procCloseDesktop   = modUser32.NewProc("CloseDesktop")
+)
+
+// hiddenDesktopName is the bare desktop name passed to CreateDesktopW; the
+// window-station-qualified form ("WinSta0\SurfHidden") is what
+// STARTUPINFO.lpDesktop and gdigrab's launch both need.
+const hiddenDesktopName = "SurfHidden"
+
+const (
+	desktopReadObjects   = 0x0001
+	desktopCreateWindow  = 0x0002
+	desktopCreateMenu    = 0x0004
+	desktopHookControl   = 0x0008
+	desktopJournalRecord = 0x0010
+	desktopJournalPlay   = 0x0020
+	desktopEnumerate     = 0x0040
+	desktopWriteObjects  = 0x0080
+	desktopSwitchDesktop = 0x0100
+	genericAll           = 0x10000000
+
+	desktopFullAccess = desktopReadObjects | desktopCreateWindow | desktopCreateMenu |
+		desktopHookControl | desktopJournalRecord | desktopJournalPlay |
+		desktopEnumerate | desktopWriteObjects | desktopSwitchDesktop | genericAll
+)
+
+// createHiddenDesktop creates (or, on a second run with a stale profile
+// dir, opens) a non-interactive desktop in the caller's own window station.
+// It returns the window-station-qualified name to pass as
+// STARTUPINFO.lpDesktop, plus the handle so Shutdown can close it.
+func createHiddenDesktop(name string) (qualifiedName string, handle windows.Handle, err error) {
+	namePtr, err := syscall.UTF16PtrFromString(name)
+	if err != nil {
+		return "", 0, err
+	}
+	r1, _, e1 := procCreateDesktopW.Call(
+		uintptr(unsafe.Pointer(namePtr)),
+		0, // device: reserved, must be NULL
+		0, // devmode: reserved, must be NULL
+		0, // flags
+		uintptr(desktopFullAccess),
+		0, // security attributes: NULL, default ACL
+	)
+	if r1 == 0 {
+		return "", 0, fmt.Errorf("CreateDesktopW: %w", e1)
+	}
+	return `WinSta0\` + name, windows.Handle(r1), nil
+}
+
+func closeDesktop(h windows.Handle) {
+	if h != 0 {
+		procCloseDesktop.Call(uintptr(h))
+	}
+}
+
+// windowsHandle holds the kill-on-close Job Object and hidden desktop (if
+// either could be set up).
 type windowsHandle struct {
-	job windows.Handle
+	job           windows.Handle
+	desktopName   string
+	desktopHandle windows.Handle
 }
 
 func (wh *windowsHandle) Shutdown() {
 	if wh.job != 0 {
 		_ = windows.CloseHandle(wh.job)
 	}
+	closeDesktop(wh.desktopHandle)
 }
 
 // ChromeArgs is empty: Chromium uses its normal Windows windowing backend,
 // no ozone/X11 flag needed.
 func (wh *windowsHandle) ChromeArgs() []string { return nil }
 
-// VideoCaptureArgs grabs a fixed on-screen region with gdigrab. w/h match
-// the --window-size Chromium was launched with, and the capture offset
-// matches --window-position=0,0, so this only works while that window is
-// visible and un-occluded at its launch position (see the package doc for
-// the hidden-desktop follow-up).
+// VideoCaptureArgs grabs the whole screen with gdigrab. Without a hidden
+// desktop this captures a fixed on-screen region matching Chromium's
+// --window-position=0,0/--window-size, which only works while that window
+// stays visible and un-occluded.
+//
+// With a hidden desktop, the H.264 lane is unsupported (nil): confirmed
+// live that gdigrab's GetDC(NULL)/BitBlt fails with ERROR_ACCESS_DENIED
+// against a desktop that has never been made the foreground one, DACL
+// notwithstanding — switching the hidden desktop to foreground (which would
+// flash it visibly on screen, defeating the point) made capture succeed
+// immediately, confirming this is Windows only fully compositing the
+// active desktop, not a permissions problem this code can fix. Browsing
+// still works via the JPEG/CDP screencast lane, which operates at the
+// Chromium compositor level over the DevTools protocol and doesn't care
+// which desktop the process is attached to.
 func (wh *windowsHandle) VideoCaptureArgs(surface string, w, h, fps int) []string {
+	if wh.desktopName != "" {
+		return nil
+	}
 	return []string{
 		"-loglevel", "warning",
 		"-f", "gdigrab",
@@ -175,5 +286,11 @@ func (wh *windowsHandle) VideoCaptureArgs(surface string, w, h, fps int) []strin
 func (wh *windowsHandle) AudioCaptureArgs(source string) []string { return nil }
 
 // ResizeSurface is a no-op: the capture region is fixed at launch time via
-// --window-size; a live client resize won't retarget it yet.
+// --window-size (or, in hidden-desktop mode, gdigrab already grabs the
+// whole hidden desktop regardless of viewport size); a live client resize
+// won't retarget either.
 func (wh *windowsHandle) ResizeSurface(w, h int) error { return nil }
+
+// HiddenDesktop returns the window-station-qualified desktop name Chromium
+// and the capture ffmpeg should launch onto, or "" if none was set up.
+func (wh *windowsHandle) HiddenDesktop() string { return wh.desktopName }

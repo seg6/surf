@@ -70,6 +70,13 @@ type Config struct {
 	ChromeNoSandbox bool
 	ChildEnv        []string
 
+	// HiddenDesktop gates the Windows hidden-desktop launch (see
+	// runenv_windows.go): Chromium and the capture ffmpeg run on a second,
+	// non-interactive desktop instead of the real one. Ignored on every
+	// other platform. Default on; SURF_HIDDEN_DESKTOP=0 forces the older
+	// visible-window launch, useful when debugging capture issues.
+	HiddenDesktop bool
+
 	// H.264 lane. The encoder only runs while a native video-mode client
 	// is subscribed.
 	StreamFPS      int    // STREAM_FPS
@@ -199,6 +206,7 @@ func load(requireAuth bool) (*Config, error) {
 		ManagePulse:     managePulse,
 		EnsurePulseSink: envBool("SURF_ENSURE_PULSE_SINK", !managePulse),
 		ChromeNoSandbox: envBool("CHROME_NO_SANDBOX", os.Geteuid() == 0),
+		HiddenDesktop:   envBool("SURF_HIDDEN_DESKTOP", true),
 		StreamFPS:       envInt("STREAM_FPS", 30),
 		StreamScale:     envStr("STREAM_SCALE", "1024x1024"),
 		StreamBitrateK:  envInt("STREAM_BITRATE", 6000),

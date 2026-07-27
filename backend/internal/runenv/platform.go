@@ -42,4 +42,11 @@ type Handle interface {
 	// (xrandr's job on Linux); a no-op where there's no virtual display to
 	// resize.
 	ResizeSurface(w, h int) error
+	// HiddenDesktop names a launch surface (e.g. Windows's
+	// `WinSta0\SurfHidden`) that Chromium and its capture companion should
+	// be created on instead of the interactive one, so neither ever
+	// appears on screen or can steal focus. Empty means there's no such
+	// concept here (Linux/macOS) or it couldn't be set up (best effort) —
+	// either way the caller launches normally, visible.
+	HiddenDesktop() string
 }
