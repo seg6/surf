@@ -45,7 +45,7 @@ func TestHealthStatsRequiresAuth(t *testing.T) {
 	}
 }
 
-func TestNativeConfigOffersEmbeddedClientOnProtocolMismatch(t *testing.T) {
+func TestNativeConfigOffersNewerEmbeddedClientOnProtocolMismatch(t *testing.T) {
 	a, err := auth.New(t.TempDir(), "test-password", 1)
 	if err != nil {
 		t.Fatal(err)
@@ -88,6 +88,68 @@ func TestNativeConfigOffersEmbeddedClientOnProtocolMismatch(t *testing.T) {
 	srv.Handler().ServeHTTP(downloadResponse, download)
 	if downloadResponse.Code != http.StatusOK || downloadResponse.Body.String() != "package" {
 		t.Fatalf("client update response code=%d body=%q", downloadResponse.Code, downloadResponse.Body.String())
+	}
+}
+
+func TestNativeConfigOffersNewerEmbeddedClientWithCompatibleProtocol(t *testing.T) {
+	a, err := auth.New(t.TempDir(), "test-password", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(&config.Config{}, a, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.SetClientUpdate(&clientupdate.Bundle{
+		Version: "1.0.0", Protocol: config.NativeVersion, SHA256: "abc", Data: []byte("package"),
+	})
+	request := httptest.NewRequest(http.MethodGet, "/native-config?av=0.9.0&nv="+config.NativeVersion, nil)
+	cookies := httptest.NewRecorder()
+	a.SetCookie(cookies)
+	request.AddCookie(cookies.Result().Cookies()[0])
+	response := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(response, request)
+	var body struct {
+		Compatibility string `json:"compatibility"`
+		ClientUpdate  struct {
+			Version string `json:"version"`
+		} `json:"clientUpdate"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Compatibility != "client-update-required" || body.ClientUpdate.Version != "1.0.0" {
+		t.Fatalf("response=%+v", body)
+	}
+}
+
+func TestNativeConfigDoesNotOfferCurrentEmbeddedClient(t *testing.T) {
+	a, err := auth.New(t.TempDir(), "test-password", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(&config.Config{}, a, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.SetClientUpdate(&clientupdate.Bundle{
+		Version: "1.0.0", Protocol: config.NativeVersion, SHA256: "abc", Data: []byte("package"),
+	})
+	request := httptest.NewRequest(http.MethodGet, "/native-config?av=1.0.0&nv="+config.NativeVersion, nil)
+	cookies := httptest.NewRecorder()
+	a.SetCookie(cookies)
+	request.AddCookie(cookies.Result().Cookies()[0])
+	response := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(response, request)
+	var body struct {
+		Compatibility string         `json:"compatibility"`
+		ClientUpdate  map[string]any `json:"clientUpdate"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Compatibility != "compatible" || body.ClientUpdate != nil {
+		t.Fatalf("response=%+v", body)
 	}
 }
 
