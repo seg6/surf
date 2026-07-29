@@ -22,6 +22,7 @@ typedef UInt32 VTDecodeInfoFlags;
 /* VTErrors.h */
 enum {
     kVTInvalidSessionErr = -12903,
+    kVTDecodeFrame_EnableAsynchronousDecompression = 1 << 0,
 };
 
 /* Output callback: fires once per decoded frame (VT's own thread). */

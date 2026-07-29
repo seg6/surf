@@ -19,6 +19,7 @@ typedef struct {
     unsigned long long sourceReceiveNS;
     unsigned long long encodeCompleteNS;
     unsigned long long socketWriteNS;
+    unsigned int decoderGeneration;
 } RBFrameTiming;
 
 // ---- runtime symbol resolution ---------------------------------------------
@@ -93,6 +94,8 @@ static const int kRBMaxResyncs = 3;
 @interface RBVideoDecoder () {
     VTDecompressionSessionRef _session;
     CMVideoFormatDescriptionRef _format;
+    int32_t _inFlight;
+    unsigned int _generation;
 }
 @property(nonatomic, strong) dispatch_queue_t queue;
 @property(nonatomic, strong) NSData *currentSPS;
@@ -113,6 +116,7 @@ static const int kRBMaxResyncs = 3;
 @property(nonatomic, assign) int resyncs;
 @property(nonatomic, assign) CFTimeInterval resyncWindowStart;
 @property(nonatomic, assign) BOOL failed;
+- (BOOL)completeFrameForGeneration:(unsigned int)generation;
 @end
 
 // VT output callback (VT's thread): wrap + hand the frame to the main thread.
@@ -120,6 +124,8 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
                              VTDecodeInfoFlags flags, CVImageBufferRef imageBuffer,
                              CMTime pts, CMTime duration) {
     RBFrameTiming *timing = (RBFrameTiming *)frameRefcon;
+    RBVideoDecoder *decoder = (__bridge RBVideoDecoder *)refcon;
+    BOOL currentGeneration = timing && [decoder completeFrameForGeneration:timing->decoderGeneration];
     CFTimeInterval now = CACurrentMediaTime();
     double callbackMS = timing ? (now - timing->submittedAt) * 1000.0 : 0.0;
     unsigned long long interactionID = timing ? timing->interactionID : 0;
@@ -134,13 +140,13 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
         metadata.socketWriteNS = timing->socketWriteNS;
     }
     if (timing) free(timing);
-    if (status != noErr || !imageBuffer) return;
-    RBVideoDecoder *decoder = (__bridge RBVideoDecoder *)refcon;
+    if (status != noErr || !imageBuffer || !currentGeneration) return;
     CFTimeInterval wrapStart = CACurrentMediaTime();
     CGImageRef image = RBCreateImageFromPixelBuffer((CVPixelBufferRef)imageBuffer);
     if (!image) return;
     double wrapMS = (CACurrentMediaTime() - wrapStart) * 1000.0;
     decoder.callbackFrames++;
+    decoder.decodedFrames++;
     decoder.lastCallbackMS = callbackMS;
     decoder.averageCallbackMS = decoder.averageCallbackMS <= 0.0 ? callbackMS : decoder.averageCallbackMS * 0.85 + callbackMS * 0.15;
     decoder.lastWrapMS = wrapMS;
@@ -153,8 +159,14 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
 
 @implementation RBVideoDecoder
 
+- (BOOL)completeFrameForGeneration:(unsigned int)generation {
+    if (generation != _generation) return NO;
+    OSAtomicDecrement32(&_inFlight);
+    return YES;
+}
+
 - (int)queuedAUs {
-    return _queued;
+    return _queued + _inFlight;
 }
 
 + (BOOL)available {
@@ -178,7 +190,7 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
     if (self.failed || ![RBVideoDecoder available]) return;
     // Latest-wins is illegal for P-frames; when the queue backs up we drop
     // whole GOPs instead: skip until the next IDR drains through.
-    if (OSAtomicIncrement32(&_queued) > kRBMaxQueuedAUs) {
+    if (OSAtomicIncrement32(&_queued) + _inFlight > kRBMaxQueuedAUs) {
         if (!idr) {
             OSAtomicDecrement32(&_queued);
             self.droppedAUs++;
@@ -204,6 +216,8 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
 - (void)reset {
     dispatch_async(self.queue, ^{
         [self teardownSession];
+        self->_generation++;
+        self->_inFlight = 0;
         self.currentSPS = nil;
         self.currentPPS = nil;
         self.waitingForIDR = YES;
@@ -372,13 +386,24 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
         timing->sourceReceiveNS = metadata.sourceReceiveNS;
         timing->encodeCompleteNS = metadata.encodeCompleteNS;
         timing->socketWriteNS = metadata.socketWriteNS;
+        timing->decoderGeneration = _generation;
+    }
+    if (!timing) {
+        CFRelease(sample);
+        self.decodeErrors++;
+        return;
     }
     CFTimeInterval submitStart = CACurrentMediaTime();
-    status = rbVTDecode(_session, sample, 0 /* sync — fine at 15fps */, timing, &flagsOut);
+    OSAtomicIncrement32(&_inFlight);
+    status = rbVTDecode(_session, sample, kVTDecodeFrame_EnableAsynchronousDecompression,
+                        timing, &flagsOut);
     double submitMS = (CACurrentMediaTime() - submitStart) * 1000.0;
     CFRelease(sample);
 
-    if (status != noErr && timing) free(timing);
+    if (status != noErr && timing) {
+        OSAtomicDecrement32(&_inFlight);
+        free(timing);
+    }
 
     if (status == kVTInvalidSessionErr) {
         // Classic after app resume: session died under us. Rebuild at the
@@ -400,7 +425,6 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
     self.submittedAUs++;
     self.lastSubmitMS = submitMS;
     self.averageSubmitMS = self.averageSubmitMS <= 0.0 ? submitMS : self.averageSubmitMS * 0.85 + submitMS * 0.15;
-    self.decodedFrames++;
 }
 
 @end
