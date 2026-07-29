@@ -203,7 +203,7 @@ func streamConfig(cfg *config.Config) stream.Config {
 		W: cfg.ViewW, H: cfg.ViewH,
 		CaptureW: cfg.ViewW, CaptureH: cfg.ViewH,
 		ScaleMaxW: maxW, ScaleMaxH: maxH,
-		FPS:      cfg.StreamFPS,
+		FPS: cfg.StreamFPS, Encoder: cfg.StreamEncoder,
 		BitrateK: cfg.StreamBitrateK, MaxrateK: cfg.StreamMaxrateK, BufsizeK: cfg.StreamBufsizeK,
 	}
 }

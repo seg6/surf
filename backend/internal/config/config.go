@@ -66,6 +66,7 @@ type Config struct {
 	// is subscribed.
 	StreamFPS      int    // STREAM_FPS
 	StreamScale    string // STREAM_SCALE, "960x720" to shrink; empty = VWxVH
+	StreamEncoder  string // STREAM_ENCODER
 	StreamBitrateK int    // STREAM_BITRATE
 	StreamMaxrateK int    // STREAM_MAXRATE
 	StreamBufsizeK int    // STREAM_BUFSIZE
@@ -179,6 +180,7 @@ func load(requireAuth bool) (*Config, error) {
 		ChromeNoSandbox:   envBool("CHROME_NO_SANDBOX", os.Geteuid() == 0),
 		StreamFPS:         envInt("STREAM_FPS", 30),
 		StreamScale:       envStr("STREAM_SCALE", "1024x1024"),
+		StreamEncoder:     envStr("STREAM_ENCODER", "libx264"),
 		StreamBitrateK:    envInt("STREAM_BITRATE", 6000),
 		StreamMaxrateK:    envInt("STREAM_MAXRATE", 8000),
 		StreamBufsizeK:    envInt("STREAM_BUFSIZE", 1800),

@@ -129,6 +129,23 @@ func TestArgsPassesThroughUntimestampedFrames(t *testing.T) {
 	}
 }
 
+func TestArgsBuildsLowLatencyNVENC(t *testing.T) {
+	s := New(Config{
+		W: 768, H: 934, FPS: 60, Encoder: "h264_nvenc",
+		BitrateK: 2000, MaxrateK: 3000, BufsizeK: 1800,
+	})
+	args := strings.Join(s.args("rtp://127.0.0.1:1234"), " ")
+	for _, want := range []string{
+		"-c:v h264_nvenc", "-preset p1", "-tune ull",
+		"-profile:v baseline", "-rc cbr", "-multipass disabled",
+		"-zerolatency 1", "-delay 0", "-bf 0", "-forced-idr 1", "-aud 1",
+	} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("NVENC args missing %q: %s", want, args)
+		}
+	}
+}
+
 func TestArgsAddsScaleFilterWhenDownscaling(t *testing.T) {
 	s := New(Config{W: 1024, H: 1024, ScaleMaxW: 512, ScaleMaxH: 512, FPS: 30, BitrateK: 100, MaxrateK: 100, BufsizeK: 50})
 	args := s.args("rtp://127.0.0.1:1234")

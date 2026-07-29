@@ -178,6 +178,8 @@ Common overrides:
 - `STREAM_SCALE`: maximum coded width and height, preserving aspect ratio;
   defaults to `1024x1024`. For the original iPad, `768x1024` reduces encoder
   and decoder work without scaling portrait content above its native width.
+- `STREAM_ENCODER`: H.264 encoder; defaults to portable `libx264`. Use
+  `h264_nvenc` on a host with a supported NVIDIA GPU and driver.
 - `STREAM_BITRATE`: target H.264 bitrate in kbit/s; defaults to `6000`.
 - `STREAM_MAXRATE`: H.264 VBV peak bitrate in kbit/s; defaults to `8000`.
 - `STREAM_BUFSIZE`: H.264 VBV buffer size in kbit; defaults to `1800`.

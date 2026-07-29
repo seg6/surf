@@ -65,6 +65,7 @@ type Config struct {
 	// whenever CDP's screencast produces one, not on a fixed clock): used
 	// only for the keyint/level math below.
 	FPS                          int
+	Encoder                      string
 	BitrateK, MaxrateK, BufsizeK int
 }
 
@@ -284,6 +285,9 @@ func New(cfg Config) *VideoPipeline {
 	}
 	if cfg.CaptureW == 0 || cfg.CaptureH == 0 {
 		cfg.CaptureW, cfg.CaptureH = cfg.W, cfg.H
+	}
+	if cfg.Encoder == "" {
+		cfg.Encoder = "libx264"
 	}
 	cfg.W, cfg.H = cfg.codedSize(cfg.CaptureW, cfg.CaptureH)
 	return &VideoPipeline{cfg: cfg, subs: map[*Sub]struct{}{}}
@@ -616,15 +620,27 @@ func (s *VideoPipeline) args(outputURL string) []string {
 		// strict one-input-frame -> one-output-frame transcoder; timing is
 		// intentionally owned by arrival order, not a synthetic media clock.
 		"-fps_mode", "passthrough",
-		"-c:v", "libx264",
-		// Let FFmpeg/x264 size its worker pool for the host. This is necessary
-		// for 60fps on smaller VPS cores; client diagnostics remain the guard
-		// against choosing a resolution the iPad cannot decode in time.
-		"-threads", "0",
-		"-profile:v", "baseline", "-level", c.h264Level(),
-		"-preset", x264Speed,
-		"-tune", "zerolatency",
-		"-x264-params", fmt.Sprintf("keyint=%d:min-keyint=%d:scenecut=0:repeat-headers=1:aud=1", keyint, keyint),
+		"-c:v", c.Encoder,
+	)
+	switch c.Encoder {
+	case "h264_nvenc":
+		args = append(args,
+			"-preset", "p1", "-tune", "ull",
+			"-profile:v", "baseline", "-level", c.h264Level(),
+			"-rc", "cbr", "-multipass", "disabled",
+			"-zerolatency", "1", "-delay", "0", "-bf", "0",
+			"-g", fmt.Sprintf("%d", keyint), "-forced-idr", "1", "-aud", "1",
+		)
+	default:
+		args = append(args,
+			"-threads", "0",
+			"-profile:v", "baseline", "-level", c.h264Level(),
+			"-preset", x264Speed,
+			"-tune", "zerolatency",
+			"-x264-params", fmt.Sprintf("keyint=%d:min-keyint=%d:scenecut=0:repeat-headers=1:aud=1", keyint, keyint),
+		)
+	}
+	args = append(args,
 		"-b:v", fmt.Sprintf("%dk", c.BitrateK),
 		"-maxrate", fmt.Sprintf("%dk", c.MaxrateK),
 		"-bufsize", fmt.Sprintf("%dk", c.BufsizeK),
@@ -684,8 +700,8 @@ func (s *VideoPipeline) startLocked() {
 	s.gen++
 	s.seedLatestLocked()
 	gen := s.gen
-	log.Printf("stream: encoder started pid=%d coded=%dx%d@%dfps %dk x264=%s",
-		started.Process.Pid, s.cfg.W, s.cfg.H, s.cfg.FPS, s.cfg.BitrateK, x264Speed)
+	log.Printf("stream: encoder started pid=%d coded=%dx%d@%dfps %dk encoder=%s",
+		started.Process.Pid, s.cfg.W, s.cfg.H, s.cfg.FPS, s.cfg.BitrateK, s.cfg.Encoder)
 	if started.Stderr != nil {
 		go logStderr(started.Stderr)
 	}
