@@ -8,14 +8,15 @@
 enum {
     RBSectionServer = 0,
     RBSectionSaved,
+    RBSectionBrowsing,
     RBSectionDiagnostics,
-    RBSectionMedia,
     RBSectionData,
     RBSectionAbout,
     RBSectionCount
 };
 
 static const NSInteger kEditServerAlertTag = 1001;
+static const NSInteger kClearDataAlertTag = 1002;
 
 @interface RBSettingsController () <UITextFieldDelegate, UIAlertViewDelegate, NSNetServiceBrowserDelegate, NSNetServiceDelegate>
 @property(nonatomic, copy) NSString *initialURL;
@@ -28,6 +29,7 @@ static const NSInteger kEditServerAlertTag = 1001;
 @property(nonatomic, strong) NSMutableArray *services;
 @property(nonatomic, strong) NSArray *savedServers; // [{title,url,password?}]
 @property(nonatomic, assign) NSInteger editingServerRow;
+@property(nonatomic, copy) NSString *pendingClearData;
 @end
 
 @implementation RBSettingsController
@@ -168,6 +170,15 @@ static const NSInteger kEditServerAlertTag = 1001;
     }
 }
 
+- (void)preferenceChanged:(UISwitch *)sender {
+    NSString *key = sender.tag == 1 ? RBDefaultsMobileLayoutKey : RBDefaultsOfferCopiedLinksKey;
+    [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:key];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+    if ([self.delegate respondsToSelector:@selector(settings:preference:enabled:)]) {
+        [self.delegate settings:self preference:key enabled:sender.on];
+    }
+}
+
 // ---- discovery -----------------------------------------------------------
 
 - (void)startDiscovery {
@@ -225,8 +236,8 @@ static const NSInteger kEditServerAlertTag = 1001;
     switch (section) {
         case RBSectionServer: return [self.statusText length] ? 4 : 3; // url, password, connect, (status)
         case RBSectionSaved: return (NSInteger)[self.savedServers count] + 1; // + Find Local Surf
+        case RBSectionBrowsing: return 3;
         case RBSectionDiagnostics: return 1;
-        case RBSectionMedia: return 2;
         case RBSectionData: return 3;
         case RBSectionAbout: return 1;
     }
@@ -237,8 +248,8 @@ static const NSInteger kEditServerAlertTag = 1001;
     switch (section) {
         case RBSectionServer: return @"Server";
         case RBSectionSaved: return @"Saved Servers";
+        case RBSectionBrowsing: return @"Browsing";
         case RBSectionDiagnostics: return @"Diagnostics";
-        case RBSectionMedia: return @"Media";
         case RBSectionData: return @"Data";
         case RBSectionAbout: return @"About";
     }
@@ -247,7 +258,7 @@ static const NSInteger kEditServerAlertTag = 1001;
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == RBSectionDiagnostics) return @"Shows live video, latency, decoder, network, and audio health over the page.";
-    if (section == RBSectionMedia) return self.connected ? @"Controls audio and video on the current page." : @"Connect to control page media.";
+    if (section == RBSectionBrowsing) return @"Request Mobile Sites uses a mobile Chrome identity and touch viewport. Changing it reloads the current page.";
     if (section == RBSectionData && !self.connected) return @"Connect to a server to manage its data.";
     return nil;
 }
@@ -316,6 +327,29 @@ static const NSInteger kEditServerAlertTag = 1001;
         return cell;
     }
 
+    if (s == RBSectionBrowsing) {
+        UITableViewCell *cell = [self cellWithID:@"browsing" style:UITableViewCellStyleSubtitle];
+        if (r == 0) {
+            cell.textLabel.text = @"Page Media Controls";
+            cell.detailTextLabel.text = @"playback, mute, and volume";
+            cell.accessoryType = self.connected ? UITableViewCellAccessoryDisclosureIndicator : UITableViewCellAccessoryNone;
+            cell.textLabel.textColor = self.connected ? [UIColor blackColor] : [UIColor colorWithWhite:0.6 alpha:1.0];
+            cell.selectionStyle = self.connected ? UITableViewCellSelectionStyleBlue : UITableViewCellSelectionStyleNone;
+            return cell;
+        }
+        BOOL mobile = r == 1;
+        cell.textLabel.text = mobile ? @"Request Mobile Sites" : @"Offer Copied Links";
+        cell.detailTextLabel.text = mobile ? @"identify as mobile Chrome" : @"ask to open copied web addresses";
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        UISwitch *toggle = [[UISwitch alloc] initWithFrame:CGRectZero];
+        toggle.tag = mobile ? 1 : 2;
+        toggle.on = [[NSUserDefaults standardUserDefaults] boolForKey:
+                     mobile ? RBDefaultsMobileLayoutKey : RBDefaultsOfferCopiedLinksKey];
+        [toggle addTarget:self action:@selector(preferenceChanged:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = toggle;
+        return cell;
+    }
+
     if (s == RBSectionDiagnostics) {
         UITableViewCell *cell = [self cellWithID:@"diagnostics" style:UITableViewCellStyleDefault];
         cell.textLabel.text = @"Performance Overlay";
@@ -324,14 +358,6 @@ static const NSInteger kEditServerAlertTag = 1001;
         toggle.on = self.diagnosticsVisible;
         [toggle addTarget:self action:@selector(diagnosticsChanged:) forControlEvents:UIControlEventValueChanged];
         cell.accessoryView = toggle;
-        return cell;
-    }
-
-    if (s == RBSectionMedia) {
-        UITableViewCell *cell = [self cellWithID:@"media" style:UITableViewCellStyleDefault];
-        cell.textLabel.text = r == 0 ? @"Play / Pause" : @"Mute / Unmute";
-        cell.textLabel.textColor = self.connected ? [UIColor blackColor] : [UIColor colorWithWhite:0.6 alpha:1.0];
-        cell.selectionStyle = self.connected ? UITableViewCellSelectionStyleBlue : UITableViewCellSelectionStyleNone;
         return cell;
     }
 
@@ -349,7 +375,7 @@ static const NSInteger kEditServerAlertTag = 1001;
     UITableViewCell *cell = [self cellWithID:@"about" style:UITableViewCellStyleValue1];
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
     cell.textLabel.text = @"Version";
-    cell.detailTextLabel.text = [NSString stringWithFormat:@"native %@", RBNativeVersion];
+    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · protocol %@", RBAppVersion, RBNativeVersion];
     return cell;
 }
 
@@ -372,17 +398,22 @@ static const NSInteger kEditServerAlertTag = 1001;
                  withRowAnimation:UITableViewRowAnimationNone];
         return;
     }
-    if (s == RBSectionMedia && self.connected) {
-        if ([self.delegate respondsToSelector:@selector(settings:mediaAction:)]) {
-            [self.delegate settings:self mediaAction:(r == 0 ? @"media-playpause" : @"media-mute")];
+    if (s == RBSectionBrowsing && r == 0 && self.connected) {
+        if ([self.delegate respondsToSelector:@selector(settingsWantsMediaControls:)]) {
+            [self.delegate settingsWantsMediaControls:self];
         }
         return;
     }
     if (s == RBSectionData && self.connected) {
         static NSString *const whats[] = {@"history", @"cookies", @"cache"};
-        if ([self.delegate respondsToSelector:@selector(settings:clearData:)]) {
-            [self.delegate settings:self clearData:whats[r]];
-        }
+        static NSString *const titles[] = {@"Clear History?", @"Clear Cookies?", @"Clear Cache?"};
+        self.pendingClearData = whats[r];
+        UIAlertView *alert = [[UIAlertView alloc] initWithTitle:titles[r]
+                                                       message:@"This affects the browser on the connected Surf server."
+                                                      delegate:self cancelButtonTitle:@"Cancel"
+                                             otherButtonTitles:@"Clear", nil];
+        alert.tag = kClearDataAlertTag;
+        [alert show];
         return;
     }
 }
@@ -434,6 +465,15 @@ forRowAtIndexPath:(NSIndexPath *)indexPath {
 }
 
 - (void)alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex {
+    if (alertView.tag == kClearDataAlertTag) {
+        NSString *what = self.pendingClearData;
+        self.pendingClearData = nil;
+        if (buttonIndex != alertView.cancelButtonIndex &&
+            [self.delegate respondsToSelector:@selector(settings:clearData:)]) {
+            [self.delegate settings:self clearData:what];
+        }
+        return;
+    }
     if (alertView.tag != kEditServerAlertTag) return;
     NSInteger row = self.editingServerRow;
     self.editingServerRow = -1;

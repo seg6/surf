@@ -9,7 +9,8 @@
 // DATA section: what = history|cookies|cache. Only offered while connected.
 - (void)settings:(RBSettingsController *)settings clearData:(NSString *)what;
 - (void)settings:(RBSettingsController *)settings diagnosticsVisible:(BOOL)visible;
-- (void)settings:(RBSettingsController *)settings mediaAction:(NSString *)action;
+- (void)settings:(RBSettingsController *)settings preference:(NSString *)key enabled:(BOOL)enabled;
+- (void)settingsWantsMediaControls:(RBSettingsController *)settings;
 @end
 
 // App configuration as a real grouped settings screen (chrome rethink):

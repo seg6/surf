@@ -3,6 +3,6 @@ Name: Surf
 Version: @VERSION@
 Architecture: iphoneos-arm
 Description: Native Surf browser client
-Maintainer: null <null@example.invalid>
+Maintainer: seg6 <hi@seg6.space>
 Author: null <null@example.invalid>
 Section: Applications

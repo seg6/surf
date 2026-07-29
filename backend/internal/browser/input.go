@@ -2,6 +2,7 @@ package browser
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"math"
 	"net/url"
@@ -123,6 +124,8 @@ func (b *Controller) handleCommand(c *ws.ClientTransport, command protocol.Comma
 	case *protocol.ToggleCommand:
 		if kind == "audio" {
 			b.handleAudio(c, m.On)
+		} else if kind == "mobile" {
+			b.handleMobileLayout(m.On)
 		}
 		return
 	case *protocol.DialogReplyCommand:
@@ -196,12 +199,16 @@ func (b *Controller) handleCommand(c *ws.ClientTransport, command protocol.Comma
 			b.mu.Unlock()
 			b.navigateHistory(s, kind == "back")
 		case "media-playpause":
-			b.controlPageMedia(s, false)
+			b.controlPageMedia(c, s, "playpause", 0)
 		case "media-mute":
-			b.controlPageMedia(s, true)
+			b.controlPageMedia(c, s, "mute", 0)
+		case "media-query":
+			go b.queryPageMedia(c, s)
 		default:
 			b.handleFeatureMessage(c, t, s, command)
 		}
+	case *protocol.VolumeCommand:
+		b.controlPageMedia(c, s, "volume", m.Value)
 	case *protocol.PointCommand:
 		switch kind {
 		case "click":
@@ -218,11 +225,14 @@ func (b *Controller) handleCommand(c *ws.ClientTransport, command protocol.Comma
 		default:
 			b.handleFeatureMessage(c, t, s, command)
 		}
-	case *protocol.WheelCommand:
-		_ = b.cdp.Dispatch(s, "Input.dispatchMouseEvent", map[string]any{
-			"type": "mouseWheel", "x": math.Round(m.X * cssW), "y": math.Round(m.Y * cssH),
-			"deltaX": m.DX * cssW, "deltaY": m.DY * cssH,
-		})
+	case *protocol.ScrollCommand:
+		if m.Phase != "begin" && m.Phase != "move" && m.Phase != "end" {
+			return
+		}
+		b.noteMotionPhase(m.Phase)
+		if m.Phase == "move" {
+			_ = b.cdp.Dispatch(s, "Input.dispatchMouseEvent", scrollEventParams(m, cssW, cssH))
+		}
 	case *protocol.LongPressUpCommand:
 		b.mouse(s, "mouseReleased", m.X*cssW, m.Y*cssH, 1)
 		b.finishLongpress(c, t, s, m.X*cssW, m.Y*cssH, m.Sel)
@@ -255,29 +265,163 @@ func (b *Controller) handleCommand(c *ws.ClientTransport, command protocol.Comma
 	}
 }
 
-func (b *Controller) controlPageMedia(session string, toggleMute bool) {
+func (b *Controller) handleMobileLayout(on bool) {
+	b.mu.Lock()
+	changed := b.mobile != on
+	b.mobile = on
+	t := b.tabs[b.activeID]
+	var sessions []string
+	for _, tab := range b.tabs {
+		if tab.Session != "" {
+			sessions = append(sessions, tab.Session)
+		}
+	}
+	userAgentParams := userAgentOverrideParams(b.userAgent, on)
+	b.mu.Unlock()
+	log.Printf("layout: request mobile sites=%t changed=%t", on, changed)
+	if !changed {
+		return
+	}
+	for _, session := range sessions {
+		_ = b.cdp.Dispatch(session, "Network.enable", nil)
+		if userAgentParams != nil {
+			_ = b.cdp.Dispatch(session, "Network.setUserAgentOverride", userAgentParams)
+		}
+	}
+	if t == nil {
+		return
+	}
+	b.applyView(t)
+	b.mu.Lock()
+	session, pageURL := t.Session, t.URL
+	b.mu.Unlock()
+	if strings.HasPrefix(pageURL, "http://") || strings.HasPrefix(pageURL, "https://") {
+		b.mu.Lock()
+		t.loading = true
+		b.mu.Unlock()
+		_ = b.cdp.Dispatch(session, "Page.reload", map[string]any{})
+	}
+}
+
+func (b *Controller) controlPageMedia(c *ws.ClientTransport, session, command string, value float64) {
 	action := `var media=document.querySelectorAll('video,audio');
 var shouldPause=Array.prototype.some.call(media,function(m){return !m.paused;});
 Array.prototype.forEach.call(media,function(m){
   if(shouldPause)m.pause();else{var p=m.play();if(p&&p.catch)p.catch(function(){});}
 });`
-	if toggleMute {
+	if command == "mute" {
 		action = `var media=document.querySelectorAll('video,audio');
 var shouldMute=Array.prototype.some.call(media,function(m){return !m.muted;});
 Array.prototype.forEach.call(media,function(m){m.muted=shouldMute;});`
+	} else if command == "volume" {
+		value = math.Max(0, math.Min(1, value))
+		action = fmt.Sprintf(`var media=document.querySelectorAll('video,audio');
+Array.prototype.forEach.call(media,function(m){m.volume=%0.4f;if(m.volume>0)m.muted=false;});`, value)
 	}
 	_ = b.cdp.Dispatch(session, "Runtime.evaluate", map[string]any{
 		"expression":  "(function(){" + action + "})()",
 		"userGesture": true,
 	})
+	time.AfterFunc(120*time.Millisecond, func() { b.queryPageMedia(c, session) })
+}
+
+const mediaStateExpr = `(function(){
+  var all=Array.prototype.slice.call(document.querySelectorAll('video,audio'));
+  if(!all.length)return {available:false,count:0,paused:true,muted:false,volume:1,currentTime:0,duration:0,title:''};
+  var active=all.filter(function(m){return !m.paused;})[0]||all[0];
+  var d=Number(active.duration), t=Number(active.currentTime);
+  return {
+    available:true,count:all.length,paused:all.every(function(m){return m.paused;}),
+    muted:all.every(function(m){return m.muted||m.volume===0;}),volume:Number(active.volume),
+    currentTime:isFinite(t)?t:0,duration:isFinite(d)?d:0,
+    title:(active.getAttribute('aria-label')||active.getAttribute('title')||document.title||'').slice(0,160)
+  };
+})()`
+
+func (b *Controller) queryPageMedia(c *ws.ClientTransport, session string) {
+	if c == nil || !b.isActiveSession(session) {
+		return
+	}
+	res, err := b.cdp.Call(session, "Runtime.evaluate", map[string]any{
+		"expression": mediaStateExpr, "returnByValue": true,
+	})
+	if err != nil || !b.isActiveSession(session) {
+		return
+	}
+	var reply struct {
+		Result struct {
+			Value protocol.MediaStateEvent `json:"value"`
+		} `json:"result"`
+	}
+	if json.Unmarshal(res, &reply) != nil {
+		return
+	}
+	reply.Result.Value.Type = "media-state"
+	c.SendJSON(reply.Result.Value)
 }
 
 func renderCommand(t string) bool {
 	switch t {
-	case "click", "wheel", "lpdown", "lpmove", "lpup", "key", "paste", "nav", "reload", "back", "fwd", "zoom":
+	case "click", "scroll", "lpdown", "lpmove", "lpup", "key", "paste", "nav", "reload", "back", "fwd", "zoom":
 		return true
 	}
 	return false
+}
+
+func (b *Controller) noteMotionPhase(phase string) {
+	b.perfMu.Lock()
+	switch phase {
+	case "begin":
+		b.motionActive = true
+		b.motionLastSourceAt = time.Time{}
+		b.motionStallLogged = false
+	case "move":
+		if !b.motionActive {
+			b.motionActive = true
+			b.motionLastSourceAt = time.Time{}
+			b.motionStallLogged = false
+		}
+	case "end":
+		b.motionActive = false
+		b.motionStallLogged = false
+	}
+	b.perfMu.Unlock()
+}
+
+func scrollEventParams(command *protocol.ScrollCommand, cssW, cssH float64) map[string]any {
+	return map[string]any{
+		"type":   "mouseWheel",
+		"x":      math.Round(math.Max(0, math.Min(1, command.X)) * cssW),
+		"y":      math.Round(math.Max(0, math.Min(1, command.Y)) * cssH),
+		"deltaX": command.DX * cssW,
+		"deltaY": command.DY * cssH,
+	}
+}
+
+func (b *Controller) checkMotionStall(now time.Time) {
+	b.perfMu.Lock()
+	if !b.motionActive || b.motionStallLogged {
+		b.perfMu.Unlock()
+		return
+	}
+	since := b.motionLastSourceAt
+	age := now.Sub(since)
+	// A scroll can begin on a non-scrollable page or against its boundary.
+	// Until Chromium emits one changed frame there is no active source
+	// cadence to stall; input-to-first-frame is measured separately.
+	if since.IsZero() || age < 75*time.Millisecond {
+		b.perfMu.Unlock()
+		return
+	}
+	b.motionStallLogged = true
+	b.motionStalls++
+	stalls := b.motionStalls
+	b.perfMu.Unlock()
+	telemetry.Emit("motion_source_stall", "capture", "cdp", map[string]any{
+		"age_ms": float64(age.Microseconds()) / 1000.0,
+	})
+	log.Printf("capture: no source frame for %.1fms during scroll motion (stalls=%d)",
+		float64(age.Microseconds())/1000.0, stalls)
 }
 
 func (b *Controller) noteClientMessage(t string) {
@@ -296,11 +440,13 @@ func (b *Controller) noteClientMessage(t string) {
 	latN, latSumMS, latMaxMS := b.perfLatN, b.perfLatSumMS, b.perfLatMaxMS
 	aLatN, aLatSumMS, aLatMaxMS := b.perfALatN, b.perfALatSumMS, b.perfALatMaxMS
 	sourceN, sourceSumMS, sourceMaxMS := b.sourceLatN, b.sourceLatSumMS, b.sourceLatMaxMS
+	motionN, motionSumMS, motionMaxMS := b.motionGapN, b.motionGapSumMS, b.motionGapMaxMS
 	encodeN, encodeSumMS, encodeMaxMS := b.encodeLatN, b.encodeLatSumMS, b.encodeLatMaxMS
 	b.perfCounts = map[string]int{}
 	b.perfLatN, b.perfLatSumMS, b.perfLatMaxMS = 0, 0, 0
 	b.perfALatN, b.perfALatSumMS, b.perfALatMaxMS = 0, 0, 0
 	b.sourceLatN, b.sourceLatSumMS, b.sourceLatMaxMS = 0, 0, 0
+	b.motionGapN, b.motionGapSumMS, b.motionGapMaxMS = 0, 0, 0
 	b.encodeLatN, b.encodeLatSumMS, b.encodeLatMaxMS = 0, 0, 0
 	b.perfSince = now
 	b.perfMu.Unlock()
@@ -321,15 +467,20 @@ func (b *Controller) noteClientMessage(t string) {
 	if encodeN > 0 {
 		encodeMeanMS = encodeSumMS / float64(encodeN)
 	}
-	log.Printf("perf input %.1fs: click=%.1f/s wheel=%.1f/s key=%.1f/s nav=%d size=%d lp=%d other=%d | input->source mean=%.1fms max=%.1fms n=%d | source->encode mean=%.1fms max=%.1fms n=%d | video queue mean=%.1fms max=%.1fms n=%d | audio lat mean=%.1fms max=%.1fms n=%d",
+	motionMeanMS := 0.0
+	if motionN > 0 {
+		motionMeanMS = motionSumMS / float64(motionN)
+	}
+	log.Printf("perf input %.1fs: click=%.1f/s scroll=%.1f/s key=%.1f/s nav=%d size=%d lp=%d other=%d | input->source mean=%.1fms max=%.1fms n=%d | motion source gap mean=%.1fms max=%.1fms n=%d | source->encode mean=%.1fms max=%.1fms n=%d | video queue mean=%.1fms max=%.1fms n=%d | audio lat mean=%.1fms max=%.1fms n=%d",
 		dt,
 		float64(counts["click"])/dt,
-		float64(counts["wheel"])/dt,
+		float64(counts["scroll"])/dt,
 		float64(counts["key"])/dt,
 		counts["nav"], counts["size"],
 		counts["lpdown"]+counts["lpmove"]+counts["lpup"],
 		otherInputCount(counts),
 		sourceMeanMS, sourceMaxMS, sourceN,
+		motionMeanMS, motionMaxMS, motionN,
 		encodeMeanMS, encodeMaxMS, encodeN,
 		latMeanMS, latMaxMS, latN,
 		aLatMeanMS, aLatMaxMS, aLatN)
@@ -358,6 +509,18 @@ func (b *Controller) noteRenderInput() {
 func (b *Controller) noteSourceFrame() {
 	now := time.Now()
 	b.perfMu.Lock()
+	if b.motionActive {
+		if !b.motionLastSourceAt.IsZero() {
+			gapMS := float64(now.Sub(b.motionLastSourceAt).Microseconds()) / 1000.0
+			b.motionGapN++
+			b.motionGapSumMS += gapMS
+			if gapMS > b.motionGapMaxMS {
+				b.motionGapMaxMS = gapMS
+			}
+		}
+		b.motionLastSourceAt = now
+		b.motionStallLogged = false
+	}
 	if !b.lastRenderInputAt.IsZero() {
 		ms := float64(now.Sub(b.lastRenderInputAt).Microseconds()) / 1000.0
 		b.sourceLatN++
@@ -405,7 +568,7 @@ func (b *Controller) noteAudioLatency(d time.Duration) {
 
 func otherInputCount(counts map[string]int) int {
 	known := map[string]bool{
-		"click": true, "wheel": true, "key": true, "nav": true, "size": true,
+		"click": true, "scroll": true, "key": true, "nav": true, "size": true,
 		"lpdown": true, "lpmove": true, "lpup": true,
 	}
 	n := 0

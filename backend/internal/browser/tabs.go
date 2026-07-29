@@ -2,6 +2,7 @@ package browser
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"sort"
 	"strings"
@@ -88,9 +89,6 @@ func (b *Controller) attachTarget(info targetInfo) {
 	}
 	t.Session = att.SessionID
 	b.bySession[att.SessionID] = t
-	if strings.HasPrefix(info.URL, "about:blank#surf-new") {
-		b.newTabNav[att.SessionID] = b.cfg.StartURL
-	}
 	b.mu.Unlock()
 
 	s := att.SessionID
@@ -100,11 +98,12 @@ func (b *Controller) attachTarget(info targetInfo) {
 	// new tab continuously from frame one.
 	_ = b.cdp.Dispatch(s, "Page.enable", nil)
 	_ = b.cdp.Dispatch(s, "Runtime.enable", nil)
-	if b.userAgent != "" {
+	b.mu.Lock()
+	userAgentParams := userAgentOverrideParams(b.userAgent, b.mobile)
+	b.mu.Unlock()
+	if userAgentParams != nil {
 		_ = b.cdp.Dispatch(s, "Network.enable", nil)
-		_ = b.cdp.Dispatch(s, "Network.setUserAgentOverride", map[string]any{
-			"userAgent": b.userAgent,
-		})
+		_ = b.cdp.Dispatch(s, "Network.setUserAgentOverride", userAgentParams)
 	}
 	b.installCompatScripts(s)
 	b.setupFeatures(t)
@@ -121,6 +120,62 @@ func NormalizeHeadlessUserAgent(userAgent string) string {
 	return strings.ReplaceAll(userAgent, "HeadlessChrome/", "Chrome/")
 }
 
+func chromeVersionFromUserAgent(userAgent string) string {
+	const marker = "Chrome/"
+	start := strings.Index(userAgent, marker)
+	if start < 0 {
+		return ""
+	}
+	version := userAgent[start+len(marker):]
+	if end := strings.IndexByte(version, ' '); end >= 0 {
+		version = version[:end]
+	}
+	return version
+}
+
+func userAgentOverrideParams(desktopUserAgent string, mobile bool) map[string]any {
+	if desktopUserAgent == "" {
+		return nil
+	}
+	if !mobile {
+		return map[string]any{"userAgent": desktopUserAgent}
+	}
+	version := chromeVersionFromUserAgent(desktopUserAgent)
+	if version == "" {
+		return map[string]any{"userAgent": desktopUserAgent}
+	}
+	major := version
+	if dot := strings.IndexByte(major, '.'); dot >= 0 {
+		major = major[:dot]
+	}
+	mobileUserAgent := fmt.Sprintf(
+		"Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 "+
+			"(KHTML, like Gecko) Chrome/%s Mobile Safari/537.36", version)
+	return map[string]any{
+		"userAgent": mobileUserAgent,
+		"platform":  "Linux armv8l",
+		"userAgentMetadata": map[string]any{
+			"brands": []any{
+				map[string]any{"brand": "Chromium", "version": major},
+				map[string]any{"brand": "Not_A Brand", "version": "99"},
+			},
+			"fullVersionList": []any{
+				map[string]any{"brand": "Chromium", "version": version},
+				map[string]any{"brand": "Not_A Brand", "version": "99.0.0.0"},
+			},
+			"fullVersion":     version,
+			"platform":        "Android",
+			"platformVersion": "13.0.0",
+			"architecture":    "",
+			"model":           "Pixel 7",
+			"mobile":          true,
+			"bitness":         "",
+			"wow64":           false,
+			"formFactors":     []any{"Mobile"},
+		},
+	}
+}
+
 func (b *Controller) dropTarget(targetID string) {
 	b.mu.Lock()
 	t := b.byTarget[targetID]
@@ -132,7 +187,6 @@ func (b *Controller) dropTarget(targetID string) {
 	delete(b.byTarget, targetID)
 	if t.Session != "" {
 		delete(b.bySession, t.Session)
-		delete(b.newTabNav, t.Session)
 	}
 	wasActive := b.activeID == t.ID
 	if wasActive {
@@ -153,7 +207,7 @@ func (b *Controller) dropTarget(targetID string) {
 			b.switchActive(nextID)
 		} else {
 			// Never leave zero tabs; targetCreated re-activates.
-			_, _ = b.cdp.Call("", "Target.createTarget", b.newTargetParams(b.cfg.StartURL))
+			_, _ = b.cdp.Call("", "Target.createTarget", b.newTargetParams("about:blank#surf-new"))
 		}
 	}
 	b.broadcastTabs()
@@ -173,6 +227,7 @@ func (b *Controller) targetInfoChanged(info targetInfo) {
 	}
 	if urlChanged {
 		t.URL = info.URL
+		t.awaitingPageFrame = true
 	}
 	active := t.ID == b.activeID
 	url := t.URL
@@ -211,6 +266,7 @@ func (b *Controller) tabNavigated(session, url string) {
 		return
 	}
 	t.URL = url
+	t.awaitingPageFrame = true
 	active := t.ID == b.activeID
 	b.mu.Unlock()
 	if active {
@@ -366,15 +422,23 @@ func (b *Controller) applyView(t *Tab) {
 	w := int(float64(b.viewW)/z + 0.5)
 	h := int(float64(b.viewH)/z + 0.5)
 	pixelW, pixelH := b.viewW, b.viewH
+	mobile := b.mobile
 	s := t.Session
 	b.mu.Unlock()
+	orientation, angle := "portraitPrimary", 0
+	if w > h {
+		orientation, angle = "landscapePrimary", 90
+	}
 	// Surf always runs headless-new. Browser.setContentsSize targets a
 	// platform window and Chrome rejects it in this mode (notably after an
 	// orientation change). Device metrics are the sole viewport authority;
 	// screencast startup is queued after this command on the same CDP writer.
 	b.setTouchMode(s)
 	_ = b.cdp.Dispatch(s, "Emulation.setDeviceMetricsOverride", map[string]any{
-		"width": w, "height": h, "deviceScaleFactor": z, "mobile": false,
+		"width": w, "height": h, "deviceScaleFactor": z, "mobile": mobile,
 		"screenWidth": pixelW, "screenHeight": pixelH,
+		"screenOrientation": map[string]any{
+			"type": orientation, "angle": angle,
+		},
 	})
 }

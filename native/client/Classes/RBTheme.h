@@ -35,5 +35,10 @@ typedef enum {
 + (UIColor *)stripBottomColor;
 + (UIColor *)iconColor;
 + (UIColor *)progressFillColor;
++ (UIColor *)pageBackgroundColor;
++ (UIColor *)primaryTextColor;
++ (UIColor *)secondaryTextColor;
++ (UIColor *)separatorColor;
++ (UIColor *)accentColor;
 + (UIFont *)fontOfSize:(CGFloat)size bold:(BOOL)bold;
 @end

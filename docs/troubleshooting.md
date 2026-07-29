@@ -101,5 +101,14 @@ cd backend
 go run ./tools/motionprobe -duration 30s
 ```
 
-This verifies capture, encoding, transport, decode, and presentation. It does
-not simulate an iPad touch, so use a real scroll to evaluate `INPUT → SCREEN`.
+This verifies capture, encoding, transport, decode, and presentation. Exercise
+Chromium's compositor scroll path separately with the same 60 Hz pixel-wheel
+events used by the native client:
+
+```sh
+go run ./tools/motionprobe -scroll -duration 30s
+```
+
+The scroll probe still bypasses the iPad input/network leg, so use a real
+finger drag to evaluate `INPUT → SCREEN` and the backend's motion-source gap
+and stall counters.

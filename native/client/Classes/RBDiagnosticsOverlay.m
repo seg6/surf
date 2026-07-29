@@ -123,7 +123,7 @@ static const NSUInteger kRBChartSamples = 60;
         self.fpsCaption = [self labelWithSize:10.0 color:secondary bold:YES];
         self.latencyCaption = [self labelWithSize:10.0 color:secondary bold:YES];
         self.rttCaption = [self labelWithSize:10.0 color:secondary bold:YES];
-        self.fpsCaption.text = @"PRESENTED FPS";
+        self.fpsCaption.text = @"MOTION FPS";
         self.latencyCaption.text = @"INPUT → SCREEN";
         self.rttCaption.text = @"NETWORK RTT";
         for (UIView *view in @[self.fpsValue, self.latencyValue, self.rttValue,
@@ -246,17 +246,19 @@ static const NSUInteger kRBChartSamples = 60;
     CFTimeInterval now = CACurrentMediaTime();
     unsigned long long presented = [[snapshot objectForKey:@"presented"] unsignedLongLongValue];
     unsigned long long aus = [[snapshot objectForKey:@"aus"] unsignedLongLongValue];
-    double fps = 0.0;
+    double sampledFPS = 0.0;
     double aups = 0.0;
     if (self.lastSampleAt > 0.0 && now > self.lastSampleAt) {
         double dt = now - self.lastSampleAt;
-        if (presented >= self.lastPresented) fps = (presented - self.lastPresented) / dt;
+        if (presented >= self.lastPresented) sampledFPS = (presented - self.lastPresented) / dt;
         if (aus >= self.lastAUs) aups = (aus - self.lastAUs) / dt;
     }
     self.lastSampleAt = now;
     self.lastPresented = presented;
     self.lastAUs = aus;
 
+    double motionFPS = [self number:snapshot key:@"motionFPS"];
+    double fps = motionFPS > 0.0 ? motionFPS : sampledFPS;
     double latency = [self number:snapshot key:@"latency"];
     double rtt = [self number:snapshot key:@"rtt"];
     [self.fpsChart addSample:fps];

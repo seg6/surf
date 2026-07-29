@@ -342,7 +342,7 @@ func (b *Controller) handleFeatureMessage(c *ws.ClientTransport, t *Tab, session
 		m := command.(*protocol.QueryCommand)
 		items, total := b.store.Search(m.Q, m.Offset, 50)
 		c.SendJSON(protocol.HistoryPageEvent{
-			Type: "history", Items: items, Offset: m.Offset, Total: total,
+			Type: "history", Query: m.Q, Items: items, Offset: m.Offset, Total: total,
 		})
 	case "histdel":
 		m := command.(*protocol.HistoryDeleteCommand)

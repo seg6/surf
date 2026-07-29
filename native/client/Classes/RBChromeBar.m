@@ -42,8 +42,8 @@
     [super layoutSubviews];
     CGFloat w = self.bounds.size.width;
     CGFloat h = self.bounds.size.height;
-    CGFloat buttonW = 44.0;
-    CGFloat fieldH = 31.0;
+    CGFloat buttonW = 40.0;
+    CGFloat fieldH = 28.0;
     // floorf, not plain division: this device is non-retina (1x scale), so a
     // fractional origin (e.g. 56-tall bar, 31-tall field -> y=12.5) renders on
     // a blurry half-pixel boundary. The omnibox and everything inside it then
@@ -51,14 +51,14 @@
     // pixels (y=0..h).
     CGFloat y = floorf((h - fieldH) / 2.0);
 
-    self.backButton.frame = CGRectMake(6.0, 0.0, buttonW, h);
-    self.fwdButton.frame = CGRectMake(6.0 + buttonW, 0.0, buttonW, h);
-    self.settingsButton.frame = CGRectMake(w - buttonW - 6.0, 0.0, buttonW, h);
-    self.libraryButton.frame = CGRectMake(w - buttonW * 2.0 - 6.0, 0.0, buttonW, h);
-    self.actionButton.frame = CGRectMake(w - buttonW * 3.0 - 6.0, 0.0, buttonW, h);
+    self.backButton.frame = CGRectMake(4.0, 0.0, buttonW, h);
+    self.fwdButton.frame = CGRectMake(4.0 + buttonW, 0.0, buttonW, h);
+    self.settingsButton.frame = CGRectMake(w - buttonW - 4.0, 0.0, buttonW, h);
+    self.libraryButton.frame = CGRectMake(w - buttonW * 2.0 - 4.0, 0.0, buttonW, h);
+    self.actionButton.frame = CGRectMake(w - buttonW * 3.0 - 4.0, 0.0, buttonW, h);
 
-    CGFloat left = 6.0 + buttonW * 2.0 + 10.0;
-    CGFloat right = w - buttonW * 3.0 - 16.0;
+    CGFloat left = 4.0 + buttonW * 2.0 + 6.0;
+    CGFloat right = w - buttonW * 3.0 - 10.0;
     self.omnibox.frame = CGRectMake(left, y, MAX(120.0, right - left), fieldH);
 }
 

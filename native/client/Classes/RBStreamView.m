@@ -6,6 +6,8 @@
 #import <OpenGLES/ES2/gl.h>
 #import <OpenGLES/ES2/glext.h>
 
+enum { kRBMotionRateSamples = 31 };
+
 @interface RBStreamView () {
     CVPixelBufferRef _pendingBuffer;
     CVPixelBufferRef _currentBuffer;
@@ -15,6 +17,9 @@
     GLuint _program;
     GLint _positionSlot;
     GLint _texCoordSlot;
+    CFTimeInterval _motionPresentationTimes[kRBMotionRateSamples];
+    NSUInteger _motionPresentationCount;
+    NSUInteger _motionPresentationCursor;
 }
 @property(nonatomic, strong) EAGLContext *glContext;
 @property(nonatomic, strong) CADisplayLink *videoDisplayLink;
@@ -24,6 +29,12 @@
 @property(nonatomic, assign) CFTimeInterval lastPresentationAt;
 @property(nonatomic, assign) double maximumPresentationGapMS;
 @property(nonatomic, assign) double recentMaximumPresentationGapMS;
+@property(nonatomic, assign) double motionPresentationFPS;
+@property(nonatomic, assign) unsigned int lastPresentedSourceSequence;
+@property(nonatomic, assign) NSUInteger motionEpoch;
+@property(nonatomic, assign) NSUInteger lastPresentedMotionEpoch;
+@property(nonatomic, assign) BOOL motionTracking;
+@property(nonatomic, assign) CFTimeInterval motionUntil;
 @end
 
 static GLuint RBCompileShader(GLenum type, const char *source) {
@@ -138,7 +149,39 @@ static GLuint RBCompileShader(GLenum type, const char *source) {
         if (_currentBuffer) { CVPixelBufferRelease(_currentBuffer); _currentBuffer = NULL; }
         self.pendingMetadata = nil;
         self.lastPresentationAt = 0.0;
+        self.lastPresentedSourceSequence = 0;
+        self.lastPresentedMotionEpoch = 0;
+        self.motionTracking = NO;
+        self.motionUntil = 0.0;
+        _motionPresentationCount = 0;
+        _motionPresentationCursor = 0;
+        self.motionPresentationFPS = 0.0;
     }
+}
+
+- (void)beginMotionWindow {
+    self.motionEpoch++;
+    if (self.motionEpoch == 0) self.motionEpoch = 1;
+    self.lastPresentedMotionEpoch = 0;
+    self.motionTracking = YES;
+    self.motionUntil = 0.0;
+    self.maximumPresentationGapMS = 0.0;
+    self.recentMaximumPresentationGapMS = 0.0;
+    _motionPresentationCount = 0;
+    _motionPresentationCursor = 0;
+}
+
+- (void)continueMotionWindow {
+    if (self.motionEpoch == 0) [self beginMotionWindow];
+    self.motionTracking = YES;
+}
+
+- (void)endMotionWindow {
+    self.motionTracking = NO;
+    // Client inertia has already ended. Allow only the final in-flight
+    // capture/encode/decode frame to land; a later static-page update is not
+    // a scroll hitch and must not inflate the motion gap.
+    self.motionUntil = CACurrentMediaTime() + 0.12;
 }
 
 - (void)displayVideoPixelBuffer:(CVPixelBufferRef)pixelBuffer metadata:(RBFrameMetadata *)metadata {
@@ -225,12 +268,32 @@ static GLuint RBCompileShader(GLenum type, const char *source) {
     }
     if (![self drawPixelBuffer:_currentBuffer]) return;
     CFTimeInterval now = CACurrentMediaTime();
-    if (self.lastPresentationAt > 0.0) {
+    BOOL inMotionWindow = self.motionTracking || now <= self.motionUntil;
+    if (inMotionWindow && self.lastPresentedMotionEpoch == self.motionEpoch &&
+        self.lastPresentationAt > 0.0) {
         double gapMS = (now - self.lastPresentationAt) * 1000.0;
         if (gapMS > self.maximumPresentationGapMS) self.maximumPresentationGapMS = gapMS;
         if (gapMS > self.recentMaximumPresentationGapMS) self.recentMaximumPresentationGapMS = gapMS;
     }
+    if (inMotionWindow) {
+        _motionPresentationTimes[_motionPresentationCursor] = now;
+        _motionPresentationCursor = (_motionPresentationCursor + 1) % kRBMotionRateSamples;
+        if (_motionPresentationCount < kRBMotionRateSamples) _motionPresentationCount++;
+        if (_motionPresentationCount >= 2) {
+            NSUInteger oldest = (_motionPresentationCursor + kRBMotionRateSamples -
+                                 _motionPresentationCount) % kRBMotionRateSamples;
+            NSUInteger newest = (_motionPresentationCursor + kRBMotionRateSamples - 1) %
+                                kRBMotionRateSamples;
+            CFTimeInterval elapsed = _motionPresentationTimes[newest] -
+                                     _motionPresentationTimes[oldest];
+            if (elapsed > 0.0) {
+                self.motionPresentationFPS = (_motionPresentationCount - 1) / elapsed;
+            }
+        }
+    }
+    self.lastPresentedMotionEpoch = inMotionWindow ? self.motionEpoch : 0;
     self.lastPresentationAt = now;
+    self.lastPresentedSourceSequence = metadata.sourceSequence;
     self.presentedFrames++;
     [self.presentationDelegate streamView:self didPresentMetadata:metadata];
 }

@@ -230,7 +230,7 @@ func (ps *pushState) setMetaFull(data []byte, sourceSeq uint32, interaction uint
 func (ps *pushState) run(w io.Writer) {
 	var timer *time.Timer
 	var timerC <-chan time.Time
-	var lastWrite time.Time
+	var nextWrite time.Time
 	for {
 		select {
 		case <-ps.done:
@@ -243,8 +243,8 @@ func (ps *pushState) run(w io.Writer) {
 			timerC = nil
 		}
 
-		if !lastWrite.IsZero() {
-			if delay := time.Until(lastWrite.Add(ps.period)); delay > 0 {
+		if !nextWrite.IsZero() {
+			if delay := time.Until(nextWrite); delay > 0 {
 				if timerC == nil {
 					if timer == nil {
 						timer = time.NewTimer(delay)
@@ -268,6 +268,9 @@ func (ps *pushState) run(w io.Writer) {
 		}
 		ps.mu.Unlock()
 		if len(data) == 0 {
+			// The source went idle. Start a fresh cadence when it moves again
+			// instead of trying to catch up missed slots with a burst.
+			nextWrite = time.Time{}
 			continue
 		}
 		// Publish correlation before the pipe write: FFmpeg can consume the
@@ -292,18 +295,25 @@ func (ps *pushState) run(w io.Writer) {
 		packet = append(packet, "\r\n\r\n"...)
 		packet = append(packet, data...)
 		packet = append(packet, "\r\n"...)
+		// Pace write starts on an absolute cadence, not write completions. A
+		// pipe write commonly takes 1–3ms for a full-resolution JPEG; adding
+		// that duration plus timer wake-up error to every 33.3ms period silently
+		// reduced a nominal 30fps stream to 27–29fps. Advance the intended
+		// deadline so small scheduler delays are recovered on the next slot.
+		now := time.Now()
+		if nextWrite.IsZero() || now.After(nextWrite.Add(ps.period)) {
+			nextWrite = now.Add(ps.period)
+		} else {
+			nextWrite = nextWrite.Add(ps.period)
+		}
 		if _, err := w.Write(packet); err != nil {
 			return
 		}
-		lastWrite = time.Now()
-		ps.mu.Lock()
-		more := len(ps.pending) != 0
-		ps.mu.Unlock()
-		if more {
-			select {
-			case ps.wake <- struct{}{}:
-			default:
-			}
+		// Always arm the next deadline. If no newer source frame arrives by
+		// then, that tick observes an empty mailbox and returns to true idle.
+		select {
+		case ps.wake <- struct{}{}:
+		default:
 		}
 	}
 }

@@ -13,6 +13,12 @@ The result is closer to a purpose-built remote browser than a remote desktop:
 Chromium does the web compatibility work, while the iOS app keeps the device
 experience native.
 
+The iOS client includes a native New Tab page, persistent tab strip and
+omnibox, searchable Bookmarks/History/Downloads Library, page media controls,
+server and browsing settings, explicit connection/video/page-error recovery,
+and an optional live performance overlay. Web content remains Chromium-rendered;
+browser chrome and browser-owned state stay native and responsive.
+
 ## Status
 
 Surf is a hobby project for jailbroken legacy iOS devices. It is usable, but
@@ -85,7 +91,7 @@ The Settings window shows the
 detected LAN address and stream status, lets you change the password and port,
 keeps logs behind a collapsed disclosure, and installs updates published on
 GitHub Releases. The password is saved under
-`SURF_HOME` so the iPad does not need to be reconfigured on every launch. The
+`SURF_HOME` so the iPad does not need to be reconfigured on every launch.
 If Chrome or Chromium is not installed, first launch downloads the latest
 verified ungoogled-chromium build maintained by its official GitHub
 organization. Surf keeps this private browser current without touching a

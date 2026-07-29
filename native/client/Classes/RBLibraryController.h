@@ -17,6 +17,7 @@
 @property(nonatomic, copy) void (^onDeleteDownload)(NSString *name);     // dldel
 // Any row navigation (history/bookmark tap)
 @property(nonatomic, copy) void (^onPick)(NSString *url);
+@property(nonatomic, copy) void (^onDismiss)(void);
 // Segment switched to a tab whose data hasn't loaded: root refreshes it.
 @property(nonatomic, copy) void (^onNeedsData)(NSString *kind); // "bookmarks"|"downloads"
 

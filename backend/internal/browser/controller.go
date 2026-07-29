@@ -40,7 +40,8 @@ type Tab struct {
 	Title    string
 	URL      string
 
-	loading bool
+	loading           bool
+	awaitingPageFrame bool
 
 	Zoom     float64 // page zoom, 1..3; applied via device metrics
 	IconKey  string  // favicon cache key (origin), "" when unknown
@@ -66,10 +67,7 @@ type Controller struct {
 	activeGen uint64
 	viewW     int
 	viewH     int
-	// newTabNav is keyed by session. User-created tabs start on a settled
-	// blank surface; their first captured frame consumes this URL and starts
-	// navigation, avoiding captureScreenshot during renderer creation.
-	newTabNav map[string]string
+	mobile    bool
 
 	store        *Store
 	icons        map[string]*favicon // origin -> icon, guarded by b.mu
@@ -122,6 +120,13 @@ type Controller struct {
 	sourceLatN         int
 	sourceLatSumMS     float64
 	sourceLatMaxMS     float64
+	motionActive       bool
+	motionLastSourceAt time.Time
+	motionStallLogged  bool
+	motionStalls       uint64
+	motionGapN         int
+	motionGapSumMS     float64
+	motionGapMaxMS     float64
 	encodeLatN         int
 	encodeLatSumMS     float64
 	encodeLatMaxMS     float64
@@ -148,7 +153,6 @@ func New(cfg *config.Config, hub *ws.Hub, platform runenv.Handle) *Controller {
 		tabs:                map[int]*Tab{},
 		byTarget:            map[string]*Tab{},
 		bySession:           map[string]*Tab{},
-		newTabNav:           map[string]string{},
 		viewW:               cfg.ViewW, viewH: cfg.ViewH,
 		store:           NewStore(cfg.Profile),
 		icons:           map[string]*favicon{},
@@ -172,6 +176,8 @@ func New(cfg *config.Config, hub *ws.Hub, platform runenv.Handle) *Controller {
 }
 
 func (b *Controller) runController() {
+	motionTicker := time.NewTicker(25 * time.Millisecond)
+	defer motionTicker.Stop()
 	for {
 		select {
 		case item := <-b.commands:
@@ -183,6 +189,8 @@ func (b *Controller) runController() {
 			}
 		case event := <-b.events:
 			b.onEvent(event)
+		case now := <-motionTicker.C:
+			b.checkMotionStall(now)
 		}
 	}
 }
@@ -324,6 +332,7 @@ func (b *Controller) Stats() map[string]any {
 	since := b.perfSince
 	latN, latSumMS, latMaxMS := b.perfLatN, b.perfLatSumMS, b.perfLatMaxMS
 	aLatN, aLatSumMS, aLatMaxMS := b.perfALatN, b.perfALatSumMS, b.perfALatMaxMS
+	motionStalls := b.motionStalls
 	b.perfMu.Unlock()
 	latMeanMS := 0.0
 	if latN > 0 {
@@ -344,6 +353,7 @@ func (b *Controller) Stats() map[string]any {
 		"inputCounts": counts, "inputWindowSec": windowSec,
 		"videoLatencyMeanMs": latMeanMS, "videoLatencyMaxMs": latMaxMS, "videoLatencyN": latN,
 		"audioLatencyMeanMs": aLatMeanMS, "audioLatencyMaxMs": aLatMaxMS, "audioLatencyN": aLatN,
+		"motionSourceStalls": motionStalls,
 	}
 	for key, value := range b.hub.Stats() {
 		stats[key] = value
@@ -463,32 +473,40 @@ func (b *Controller) onSourceFrame(frame SourceFrame) {
 	}
 	b.noteSourceFrame()
 	telemetry.Emit("source_frame", "capture", "cdp", nil)
-	b.onSourceJPEG(t, frame)
+	sourceSeq := b.onSourceJPEG(t, frame)
+	if sourceSeq == 0 {
+		return
+	}
 	b.mu.Lock()
-	navigate := b.newTabNav[frame.Session]
-	delete(b.newTabNav, frame.Session)
+	pageReady := t.awaitingPageFrame && b.tabs[t.ID] == t && b.activeID == t.ID
+	if pageReady {
+		t.awaitingPageFrame = false
+	}
 	b.mu.Unlock()
-	if navigate != "" {
-		log.Printf("tab %d first frame ready, navigating to %s", t.ID, navigate)
-		_ = b.cdp.Dispatch(frame.Session, "Page.navigate", map[string]any{"url": navigate})
+	if pageReady {
+		b.hub.BroadcastJSON(protocol.PageFrameEvent{Type: "pageframe", SourceSeq: sourceSeq})
 	}
 }
 
-func (b *Controller) onSourceJPEG(t *Tab, frame SourceFrame) {
+func (b *Controller) onSourceJPEG(t *Tab, frame SourceFrame) uint32 {
 	buf, session := frame.JPEG, frame.Session
 	if len(buf) == 0 || !b.isActiveSession(session) || b.hub.ClientCount() == 0 {
-		return
+		return 0
 	}
 	b.perfMu.Lock()
 	b.sourceSeq++
 	sourceSeq, interactionID := b.sourceSeq, b.interactionID
 	inputNS, cdpNS := b.interactionInputNS, b.interactionCDPNS
 	b.perfMu.Unlock()
-	b.pushVideoFrame(buf, session, sourceSeq, interactionID, stream.SourceMetadata{
+	accepted := b.pushVideoFrame(buf, session, sourceSeq, interactionID, stream.SourceMetadata{
 		InputReceiveNS: inputNS, CDPAcceptedNS: cdpNS,
 		ScrollX: frame.ScrollX, ScrollY: frame.ScrollY, PageScale: frame.PageScale,
 		Profile: uint8(b.profileIndex()),
 	})
+	if !accepted {
+		return 0
+	}
+	return sourceSeq
 }
 
 // pushVideoFrame feeds a CDP JPEG to the H.264 transcoder while keeping its
@@ -497,11 +515,11 @@ func (b *Controller) onSourceJPEG(t *Tab, frame SourceFrame) {
 // corrupt its pipeline, while restarting for every intermediate size causes
 // a restart storm. Once one size persists, restart off the CDP dispatch
 // goroutine and make that settled frame the new encoder's first input.
-func (b *Controller) pushVideoFrame(buf []byte, session string, sourceSeq uint32, interactionID uint64, metadata stream.SourceMetadata) {
+func (b *Controller) pushVideoFrame(buf []byte, session string, sourceSeq uint32, interactionID uint64, metadata stream.SourceMetadata) bool {
 	w, h, ok := jpegSize(buf)
 	if !ok {
 		b.video.PushSourceMeta(buf, sourceSeq, interactionID, metadata)
-		return
+		return true
 	}
 	b.mu.Lock()
 	wantW, wantH := b.viewW, b.viewH
@@ -518,7 +536,7 @@ func (b *Controller) pushVideoFrame(buf []byte, session string, sourceSeq uint32
 		if b.captureSizeSettled(w, h) {
 			b.requestVideoResize(w, h, buf, session)
 		}
-		return
+		return false
 	}
 	cur := b.video.Config()
 	if cur.CaptureW == w && cur.CaptureH == h {
@@ -532,11 +550,12 @@ func (b *Controller) pushVideoFrame(buf []byte, session string, sourceSeq uint32
 		} else {
 			b.video.PushSourceMeta(buf, sourceSeq, interactionID, metadata)
 		}
-		return
+		return true
 	}
 	if b.captureSizeSettled(w, h) {
 		b.requestVideoResize(w, h, buf, session)
 	}
+	return false
 }
 
 func (b *Controller) captureSizeSettled(w, h int) bool {

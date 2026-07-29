@@ -1,6 +1,8 @@
 #import "RBFindBar.h"
 #import "RBTheme.h"
 
+#include <math.h>
+
 @interface RBFindBar () <UITextFieldDelegate>
 @property(nonatomic, strong) RBGradientBar *background;
 @property(nonatomic, strong) UITextField *field;
@@ -57,13 +59,13 @@
     [super layoutSubviews];
     CGFloat w = self.bounds.size.width;
     CGFloat h = self.bounds.size.height;
-    CGFloat y = (h - 31.0) / 2.0;
-    self.field.frame = CGRectMake(10.0, y, MIN(320.0, w * 0.42), 31.0);
+    CGFloat y = floorf((h - 28.0) / 2.0);
+    self.field.frame = CGRectMake(8.0, y, MIN(320.0, w * 0.42), 28.0);
     CGFloat x = CGRectGetMaxX(self.field.frame) + 4.0;
-    self.prevButton.frame = CGRectMake(x, 0.0, 44.0, h);
-    self.nextButton.frame = CGRectMake(x + 44.0, 0.0, 44.0, h);
-    self.stateLabel.frame = CGRectMake(x + 96.0, 0.0, 120.0, h);
-    self.doneButton.frame = CGRectMake(w - 70.0, 0.0, 60.0, h);
+    self.prevButton.frame = CGRectMake(x, 0.0, 40.0, h);
+    self.nextButton.frame = CGRectMake(x + 40.0, 0.0, 40.0, h);
+    self.stateLabel.frame = CGRectMake(x + 88.0, 0.0, 120.0, h);
+    self.doneButton.frame = CGRectMake(w - 64.0, 0.0, 56.0, h);
 }
 
 - (void)focusField {

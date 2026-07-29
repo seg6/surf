@@ -52,13 +52,18 @@
 
 @implementation RBTheme
 
-+ (UIColor *)barTopColor { return [UIColor colorWithRed:0.76 green:0.79 blue:0.83 alpha:1.0]; }
-+ (UIColor *)barBottomColor { return [UIColor colorWithRed:0.58 green:0.62 blue:0.68 alpha:1.0]; }
-+ (UIColor *)barLineColor { return [UIColor colorWithRed:0.29 green:0.31 blue:0.35 alpha:1.0]; }
-+ (UIColor *)stripTopColor { return [UIColor colorWithRed:0.53 green:0.56 blue:0.61 alpha:1.0]; }
-+ (UIColor *)stripBottomColor { return [UIColor colorWithRed:0.44 green:0.47 blue:0.52 alpha:1.0]; }
-+ (UIColor *)iconColor { return [UIColor colorWithRed:0.24 green:0.27 blue:0.31 alpha:1.0]; }
-+ (UIColor *)progressFillColor { return [UIColor colorWithRed:0.60 green:0.72 blue:0.86 alpha:0.55]; }
++ (UIColor *)barTopColor { return [UIColor colorWithRed:0.91 green:0.93 blue:0.96 alpha:1.0]; }
++ (UIColor *)barBottomColor { return [UIColor colorWithRed:0.82 green:0.85 blue:0.89 alpha:1.0]; }
++ (UIColor *)barLineColor { return [UIColor colorWithRed:0.54 green:0.58 blue:0.64 alpha:1.0]; }
++ (UIColor *)stripTopColor { return [UIColor colorWithRed:0.47 green:0.52 blue:0.60 alpha:1.0]; }
++ (UIColor *)stripBottomColor { return [UIColor colorWithRed:0.35 green:0.40 blue:0.48 alpha:1.0]; }
++ (UIColor *)iconColor { return [UIColor colorWithRed:0.20 green:0.24 blue:0.30 alpha:1.0]; }
++ (UIColor *)progressFillColor { return [[self accentColor] colorWithAlphaComponent:0.30]; }
++ (UIColor *)pageBackgroundColor { return [UIColor colorWithRed:0.95 green:0.96 blue:0.97 alpha:1.0]; }
++ (UIColor *)primaryTextColor { return [UIColor colorWithRed:0.12 green:0.14 blue:0.17 alpha:1.0]; }
++ (UIColor *)secondaryTextColor { return [UIColor colorWithRed:0.39 green:0.43 blue:0.49 alpha:1.0]; }
++ (UIColor *)separatorColor { return [UIColor colorWithRed:0.76 green:0.79 blue:0.83 alpha:1.0]; }
++ (UIColor *)accentColor { return [UIColor colorWithRed:0.18 green:0.38 blue:0.66 alpha:1.0]; }
 
 + (UIFont *)fontOfSize:(CGFloat)size bold:(BOOL)bold {
     return bold ? [UIFont boldSystemFontOfSize:size] : [UIFont systemFontOfSize:size];
@@ -66,9 +71,9 @@
 
 + (UIButton *)barButtonWithIcon:(RBIcon)icon target:(id)target action:(SEL)action {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
-    UIImage *normal = [self icon:icon size:22.0 color:[self iconColor]];
-    UIImage *pressed = [self icon:icon size:22.0 color:[[self iconColor] colorWithAlphaComponent:0.4]];
-    UIImage *disabled = [self icon:icon size:22.0 color:[[self iconColor] colorWithAlphaComponent:0.25]];
+    UIImage *normal = [self icon:icon size:19.0 color:[self iconColor]];
+    UIImage *pressed = [self icon:icon size:19.0 color:[[self iconColor] colorWithAlphaComponent:0.4]];
+    UIImage *disabled = [self icon:icon size:19.0 color:[[self iconColor] colorWithAlphaComponent:0.25]];
     [button setImage:normal forState:UIControlStateNormal];
     [button setImage:pressed forState:UIControlStateHighlighted];
     [button setImage:disabled forState:UIControlStateDisabled];

@@ -25,7 +25,7 @@
 
         self.fieldBackground = [[UIView alloc] initWithFrame:CGRectZero];
         self.fieldBackground.backgroundColor = [UIColor whiteColor];
-        self.fieldBackground.layer.cornerRadius = 7.0;
+        self.fieldBackground.layer.cornerRadius = 5.0;
         self.fieldBackground.layer.borderWidth = 1.0;
         self.fieldBackground.layer.borderColor = [[UIColor colorWithRed:0.42 green:0.45 blue:0.50 alpha:1.0] CGColor];
         self.fieldBackground.layer.masksToBounds = YES;
@@ -41,7 +41,7 @@
         self.field.delegate = self;
         self.field.borderStyle = UITextBorderStyleNone;
         self.field.backgroundColor = [UIColor clearColor];
-        self.field.font = [RBTheme fontOfSize:15.0 bold:NO];
+        self.field.font = [RBTheme fontOfSize:14.0 bold:NO];
         self.field.textColor = [UIColor colorWithWhite:0.15 alpha:1.0];
         self.field.placeholder = @"Search or enter address";
         self.field.autocorrectionType = UITextAutocorrectionTypeNo;
@@ -122,7 +122,28 @@
 
 - (void)setURLText:(NSString *)url {
     self.committedURL = url;
-    if (![self.field isFirstResponder]) self.field.text = url;
+    if (![self.field isFirstResponder]) [self displayCommittedURL];
+}
+
+- (void)displayCommittedURL {
+    NSString *url = self.committedURL ?: @"";
+    NSURL *parsed = [NSURL URLWithString:url];
+    NSString *host = [parsed host];
+    if (![host length] || ![url length]) {
+        self.field.attributedText = nil;
+        self.field.text = url;
+        return;
+    }
+    NSMutableAttributedString *shown = [[NSMutableAttributedString alloc] initWithString:url
+        attributes:@{NSForegroundColorAttributeName: [RBTheme secondaryTextColor],
+                     NSFontAttributeName: [RBTheme fontOfSize:14.0 bold:NO]}];
+    NSRange hostRange = [url rangeOfString:host];
+    if (hostRange.location != NSNotFound) {
+        [shown addAttributes:@{NSForegroundColorAttributeName: [RBTheme primaryTextColor],
+                               NSFontAttributeName: [RBTheme fontOfSize:14.0 bold:YES]}
+                       range:hostRange];
+    }
+    self.field.attributedText = shown;
 }
 
 - (NSString *)currentText {
@@ -148,6 +169,10 @@
 
 - (void)dismissKeyboard {
     [self.field resignFirstResponder];
+}
+
+- (void)focus {
+    [self.field becomeFirstResponder];
 }
 
 // The server only reports loading on/off, so the fill is Safari-style
@@ -196,13 +221,17 @@
 }
 
 - (void)textFieldDidBeginEditing:(UITextField *)textField {
+    textField.attributedText = nil;
+    textField.font = [RBTheme fontOfSize:15.0 bold:NO];
+    textField.textColor = [RBTheme primaryTextColor];
+    textField.text = self.committedURL ?: @"";
     [self setNeedsLayout];
     [self.delegate omniboxEditingBegan:self];
     [textField performSelector:@selector(selectAll:) withObject:nil afterDelay:0.05];
 }
 
 - (void)textFieldDidEndEditing:(UITextField *)textField {
-    textField.text = self.committedURL;
+    [self displayCommittedURL];
     [self setNeedsLayout];
     [self.delegate omniboxEditingEnded:self];
 }

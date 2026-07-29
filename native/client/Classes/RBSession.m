@@ -207,8 +207,10 @@ static NSString *RBURLEscape(NSString *s) {
 }
 
 - (void)sendClickX:(CGFloat)x y:(CGFloat)y { [self sendMessage:@{@"t": @"click", @"x": [NSNumber numberWithFloat:x], @"y": [NSNumber numberWithFloat:y]}]; }
-- (void)sendWheelX:(CGFloat)x y:(CGFloat)y dx:(CGFloat)dx dy:(CGFloat)dy {
-    [self sendMessage:@{@"t": @"wheel", @"x": [NSNumber numberWithFloat:x], @"y": [NSNumber numberWithFloat:y], @"dx": [NSNumber numberWithFloat:dx], @"dy": [NSNumber numberWithFloat:dy]}];
+- (void)sendScrollPhase:(NSString *)phase x:(CGFloat)x y:(CGFloat)y dx:(CGFloat)dx dy:(CGFloat)dy {
+    [self sendMessage:@{@"t": @"scroll", @"phase": phase ?: @"end",
+                        @"x": [NSNumber numberWithFloat:x], @"y": [NSNumber numberWithFloat:y],
+                        @"dx": [NSNumber numberWithFloat:dx], @"dy": [NSNumber numberWithFloat:dy]}];
 }
 
 - (void)socketDidOpen:(RBSocket *)socket {

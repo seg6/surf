@@ -1,5 +1,6 @@
 #import "RBRootViewController.h"
 #import "RBChromeBar.h"
+#import "RBBrowserStateView.h"
 #import "RBConfig.h"
 #import "RBClockSync.h"
 #import "RBClientUpdater.h"
@@ -10,6 +11,8 @@
 #import "RBReaderController.h"
 #import "RBLog.h"
 #import "RBMediaPipeline.h"
+#import "RBMediaController.h"
+#import "RBNewTabView.h"
 #import "RBInteractionTracker.h"
 #import "RBOmnibox.h"
 #import "RBProtocol.h"
@@ -28,13 +31,15 @@
 #include <stdlib.h>
 
 
-static const CGFloat kRBTopBarHeight = 56.0;
-static const CGFloat kRBTabStripHeight = 34.0;
-static const CGFloat kRBFindBarHeight = 44.0;
+static const CGFloat kRBTopBarHeight = 44.0;
+static const CGFloat kRBTabStripHeight = 29.0;
+static const CGFloat kRBFindBarHeight = 38.0;
 
 @interface RBRootViewController () <UITextFieldDelegate, RBSessionDelegate, RBChromeBarDelegate,
                                     RBOmniboxDelegate, RBTabStripDelegate, RBSuggestPanelDelegate,
                                     RBFindBarDelegate, RBSettingsDelegate, RBMediaPipelineDelegate, RBStreamViewDelegate,
+                                    RBNewTabViewDelegate, RBBrowserStateViewDelegate,
+                                    RBMediaControllerDelegate,
                                     RBInteractionTrackerDelegate, RBClientUpdaterDelegate,
                                     UIDocumentInteractionControllerDelegate, UIPopoverControllerDelegate,
                                     UIAlertViewDelegate, UIActionSheetDelegate,
@@ -42,6 +47,8 @@ static const CGFloat kRBFindBarHeight = 44.0;
                                     MFMailComposeViewControllerDelegate>
 // Views
 @property(nonatomic, strong) RBStreamView *streamView;
+@property(nonatomic, strong) RBNewTabView *startPageView;
+@property(nonatomic, strong) RBBrowserStateView *browserStateView;
 @property(nonatomic, strong) RBChromeBar *chromeBar;
 @property(nonatomic, strong) RBTabStrip *tabStrip;
 @property(nonatomic, strong) RBFindBar *findBar;
@@ -56,6 +63,7 @@ static const CGFloat kRBFindBarHeight = 44.0;
 @property(nonatomic, strong) RBSettingsController *settingsController;
 @property(nonatomic, strong) UIPopoverController *popover;
 @property(nonatomic, strong) UIDocumentInteractionController *docController;
+@property(nonatomic, strong) RBMediaController *pageMediaController;
 // Connect flow
 @property(nonatomic, copy) NSString *pendingServerURL;
 @property(nonatomic, copy) NSString *pendingPassword;
@@ -79,11 +87,17 @@ static const CGFloat kRBFindBarHeight = 44.0;
 @property(nonatomic, assign) BOOL findVisible;
 @property(nonatomic, assign) BOOL debugVisible;
 @property(nonatomic, strong) NSArray *lastTabs;
+@property(nonatomic, strong) NSArray *bookmarks;
+@property(nonatomic, copy) NSString *currentURL;
+@property(nonatomic, copy) NSString *currentSecurity;
+@property(nonatomic, assign) BOOL currentStarred;
+@property(nonatomic, assign) BOOL awaitingPageFrame;
+@property(nonatomic, assign) unsigned int awaitedSourceSequence;
 // Copy menu
 @property(nonatomic, copy) NSString *pendingCopyText;
 @property(nonatomic, assign) CGPoint copyMenuPoint;
 // Gestures
-@property(nonatomic, assign) CGPoint panAnchor;
+@property(nonatomic, assign) CGPoint scrollAnchor;
 @property(nonatomic, assign) CGPoint lastPanPoint;
 @property(nonatomic, assign) CGPoint inertiaAnchor;
 @property(nonatomic, assign) CGPoint inertiaVelocity;
@@ -112,24 +126,16 @@ static const CGFloat kRBFindBarHeight = 44.0;
 @property(nonatomic, strong) NSDictionary *lastLinkInfo;
 @property(nonatomic, strong) UIActionSheet *linkSheet;
 @property(nonatomic, strong) NSArray *linkSheetActions;
-// Error card (M2.5)
-@property(nonatomic, strong) UIView *errorCard;
-@property(nonatomic, strong) UILabel *errorCardLabel;
 // Library (chrome rethink) / reader (M1.5)
 @property(nonatomic, strong) RBLibraryController *libraryController;
 @property(nonatomic, assign) BOOL readerPending;
 // Pasteboard banner (M4.2)
 @property(nonatomic, strong) UIAlertView *pasteboardAlert;
-@property(nonatomic, strong) UIAlertView *videoErrorAlert;
 @property(nonatomic, copy) NSString *pasteboardURL;
-// Latency echo (M1.1)
-// Wheel coalescing (M1.3)
-@property(nonatomic, assign) CGFloat wheelAccumX;
-@property(nonatomic, assign) CGFloat wheelAccumY;
-@property(nonatomic, assign) CFTimeInterval lastWheelSentAt;
 // Edge swipes (M2.6): 0 none, -1 left edge (back), 1 right edge (forward)
 @property(nonatomic, assign) int edgeSwipe;
 @property(nonatomic, assign) CGPoint edgeStart;
+@property(nonatomic, assign) BOOL scrollGestureActive;
 @end
 
 @implementation RBRootViewController
@@ -149,6 +155,15 @@ static const CGFloat kRBFindBarHeight = 44.0;
     self.streamView = [[RBStreamView alloc] initWithFrame:CGRectZero];
     self.streamView.presentationDelegate = self;
     [self.view addSubview:self.streamView];
+
+    self.startPageView = [[RBNewTabView alloc] initWithFrame:CGRectZero];
+    self.startPageView.delegate = self;
+    self.startPageView.hidden = YES;
+    [self.view addSubview:self.startPageView];
+
+    self.browserStateView = [[RBBrowserStateView alloc] initWithFrame:CGRectZero];
+    self.browserStateView.delegate = self;
+    [self.view addSubview:self.browserStateView];
     self.mediaPipeline = [[RBMediaPipeline alloc] init];
     self.mediaPipeline.delegate = self;
     self.clockSync = [[RBClockSync alloc] init];
@@ -284,6 +299,8 @@ static const CGFloat kRBFindBarHeight = 44.0;
     CGFloat streamH = MAX(1.0, h - contentTop);
     self.streamView.bounds = CGRectMake(0.0, 0.0, w, streamH);
     self.streamView.center = CGPointMake(w / 2.0, contentTop + streamH / 2.0);
+    self.startPageView.frame = CGRectMake(0.0, contentTop, w, streamH);
+    self.browserStateView.frame = CGRectMake(0.0, contentTop, w, streamH);
 
     CGRect omniboxFrame = [self.chromeBar convertRect:self.chromeBar.omnibox.frame toView:self.view];
     self.suggestPanel.frame = CGRectMake(omniboxFrame.origin.x, kRBTopBarHeight - 4.0,
@@ -380,8 +397,17 @@ static const CGFloat kRBFindBarHeight = 44.0;
     [self setDebugVisible:visible];
 }
 
-- (void)settings:(RBSettingsController *)settings mediaAction:(NSString *)action {
-    if ([action length]) [self.session sendMessage:@{@"t": action}];
+- (void)settings:(RBSettingsController *)settings preference:(NSString *)key enabled:(BOOL)enabled {
+    if ([key isEqualToString:RBDefaultsMobileLayoutKey]) {
+        [self.session sendMessage:@{@"t": @"mobile", @"on": [NSNumber numberWithBool:enabled]}];
+    }
+}
+
+- (void)settingsWantsMediaControls:(RBSettingsController *)settings {
+    self.settingsController = nil;
+    [self dismissViewControllerAnimated:YES completion:^{
+        [self presentMediaControlsFromButton:self.chromeBar.actionButton];
+    }];
 }
 
 - (void)settings:(RBSettingsController *)settings connectToURL:(NSString *)url password:(NSString *)password {
@@ -485,27 +511,36 @@ static const CGFloat kRBFindBarHeight = 44.0;
     switch (state) {
         case RBSessionStateOpen:
             self.connectionPill.hidden = YES;
+            if (self.browserStateView.state == RBBrowserStateConnecting ||
+                self.browserStateView.state == RBBrowserStateStartingVideo ||
+                self.browserStateView.state == RBBrowserStateReconnecting ||
+                self.browserStateView.state == RBBrowserStateDisconnected) {
+                [self.browserStateView showState:RBBrowserStateHidden detail:nil];
+            }
             [self.view setNeedsLayout];
             [self.view layoutIfNeeded];
             [self sendCurrentViewportSizeForced:YES];
+            [self.session sendMessage:@{@"t": @"mobile",
+                                        @"on": [NSNumber numberWithBool:
+                                                [[NSUserDefaults standardUserDefaults] boolForKey:RBDefaultsMobileLayoutKey]]}];
             self.audioRequested = NO;
             break;
         case RBSessionStateConnecting:
-            self.connectionPill.hidden = NO;
-            self.connectionPill.text = @"Connecting…";
+            self.connectionPill.hidden = YES;
+            [self.browserStateView showState:RBBrowserStateConnecting detail:nil];
             [self leaveVideoMode];
             [self.mediaPipeline stopAudio];
             self.audioRequested = NO;
             break;
         case RBSessionStateRetrying:
-            self.connectionPill.hidden = NO;
-            self.connectionPill.text = @"Reconnecting…";
+            self.connectionPill.hidden = YES;
+            [self.browserStateView showState:RBBrowserStateReconnecting detail:nil];
             [self leaveVideoMode];
             self.audioRequested = NO;
             break;
         case RBSessionStateIdle:
-            self.connectionPill.hidden = NO;
-            self.connectionPill.text = @"Disconnected";
+            self.connectionPill.hidden = YES;
+            [self.browserStateView showState:RBBrowserStateDisconnected detail:nil];
             [self leaveVideoMode];
             [self.mediaPipeline stopAudio];
             self.audioRequested = NO;
@@ -529,6 +564,8 @@ static const CGFloat kRBFindBarHeight = 44.0;
     NSString *state = [message objectForKey:@"state"];
     if ([state isEqualToString:@"starting"]) {
         self.videoStarting = YES;
+        if (!self.currentURL || ![self.currentURL hasPrefix:@"about:blank#surf-new"])
+            [self.browserStateView showState:RBBrowserStateStartingVideo detail:nil];
         return;
     }
     if ([state isEqualToString:@"unavailable"]) {
@@ -544,10 +581,9 @@ static const CGFloat kRBFindBarHeight = 44.0;
     }
     [self.mediaPipeline configureVideoWidth:[[message objectForKey:@"w"] intValue]
                                      height:[[message objectForKey:@"h"] intValue]];
-    if (self.videoErrorAlert) {
-        [self.videoErrorAlert dismissWithClickedButtonIndex:self.videoErrorAlert.cancelButtonIndex animated:YES];
-        self.videoErrorAlert = nil;
-    }
+    if (self.browserStateView.state == RBBrowserStateVideoUnavailable ||
+        self.browserStateView.state == RBBrowserStateStartingVideo)
+        [self.browserStateView showState:RBBrowserStateHidden detail:nil];
     self.videoActive = YES;
     self.streamView.videoActive = YES;
 }
@@ -559,6 +595,11 @@ static const CGFloat kRBFindBarHeight = 44.0;
 }
 
 - (void)streamView:(RBStreamView *)streamView didPresentMetadata:(RBFrameMetadata *)metadata {
+    if (self.awaitingPageFrame && self.awaitedSourceSequence > 0 &&
+        metadata.sourceSequence >= self.awaitedSourceSequence) {
+        self.awaitingPageFrame = NO;
+        self.startPageView.hidden = YES;
+    }
     // Starting AudioQueue while VideoToolbox, OpenGL, and the first IDR are
     // all initializing caused a short PCM burst and immediate drop-oldest
     // discontinuity on the A5. Start audio after the first displayed frame,
@@ -577,14 +618,10 @@ static const CGFloat kRBFindBarHeight = 44.0;
 }
 
 - (void)showVideoUnavailable:(NSString *)reason {
-    if (self.videoErrorAlert) return;
-    NSString *message = [NSString stringWithFormat:@"The browser session is still connected, but H.264 video is unavailable (%@).",
+    NSString *message = [NSString stringWithFormat:
+                         @"The browser is still connected, but its video stream stopped (%@).",
                          [reason length] ? reason : @"unknown"];
-    self.videoErrorAlert = [[UIAlertView alloc] initWithTitle:@"Video unavailable"
-                                                     message:message delegate:self
-                                           cancelButtonTitle:@"Dismiss"
-                                           otherButtonTitles:@"Retry Video", @"Reconnect", nil];
-    [self.videoErrorAlert show];
+    [self.browserStateView showState:RBBrowserStateVideoUnavailable detail:message];
 }
 
 - (void)mediaPipelineNeedsKeyframe:(RBMediaPipeline *)pipeline {
@@ -608,9 +645,24 @@ static const CGFloat kRBFindBarHeight = 44.0;
     NSString *t = [message objectForKey:@"t"];
     if ([t isEqualToString:@"url"]) {
         NSString *url = [message objectForKey:@"url"];
-        if (url) [self.chromeBar.omnibox setURLText:url];
-        [self.chromeBar.omnibox setStarred:[[message objectForKey:@"starred"] boolValue]];
-        [self.chromeBar.omnibox setSecurityState:[message objectForKey:@"security"]];
+        self.currentURL = url ?: @"";
+        self.currentStarred = [[message objectForKey:@"starred"] boolValue];
+        self.currentSecurity = [message objectForKey:@"security"];
+        BOOL newTab = [self.currentURL hasPrefix:@"about:blank#surf-new"];
+        if (newTab) {
+            self.startPageView.hidden = NO;
+            self.awaitingPageFrame = NO;
+            self.awaitedSourceSequence = 0;
+            if (self.browserStateView.state == RBBrowserStateStartingVideo)
+                [self.browserStateView showState:RBBrowserStateHidden detail:nil];
+            [self.chromeBar.omnibox setURLText:@""];
+            [self.session sendMessage:@{@"t": @"hist"}];
+        } else if (url) {
+            if (!self.awaitingPageFrame) self.startPageView.hidden = YES;
+            [self.chromeBar.omnibox setURLText:url];
+        }
+        [self.chromeBar.omnibox setStarred:self.currentStarred];
+        [self.chromeBar.omnibox setSecurityState:self.currentSecurity];
         [self hideErrorCard];
     } else if ([t isEqualToString:@"histstate"]) {
         [self.chromeBar setCanGoBack:[[message objectForKey:@"back"] boolValue]
@@ -654,9 +706,22 @@ static const CGFloat kRBFindBarHeight = 44.0;
         self.lastTabs = [tabs isKindOfClass:[NSArray class]] ? tabs : nil;
         [self.tabStrip setTabs:self.lastTabs baseURL:self.session.baseURL];
     } else if ([t isEqualToString:@"hist"]) {
-        [self.libraryController setBookmarks:[message objectForKey:@"bookmarks"]];
+        self.bookmarks = [[message objectForKey:@"bookmarks"] isKindOfClass:[NSArray class]]
+            ? [message objectForKey:@"bookmarks"] : @[];
+        [self.libraryController setBookmarks:self.bookmarks];
+        [self.startPageView setFavorites:self.bookmarks];
+    } else if ([t isEqualToString:@"media-state"]) {
+        [self.pageMediaController applyState:message];
+    } else if ([t isEqualToString:@"pageframe"]) {
+        self.awaitedSourceSequence = [[message objectForKey:@"sourceSeq"] unsignedIntValue];
+        if (self.awaitingPageFrame &&
+            self.streamView.lastPresentedSourceSequence >= self.awaitedSourceSequence) {
+            self.awaitingPageFrame = NO;
+            self.startPageView.hidden = YES;
+        }
     } else if ([t isEqualToString:@"starred"]) {
-        [self.chromeBar.omnibox setStarred:[[message objectForKey:@"on"] boolValue]];
+        self.currentStarred = [[message objectForKey:@"on"] boolValue];
+        [self.chromeBar.omnibox setStarred:self.currentStarred];
     } else if ([t isEqualToString:@"suggest"]) {
         if (self.chromeBar.omnibox.editing) {
             [self.suggestPanel showItems:[message objectForKey:@"items"]];
@@ -685,7 +750,8 @@ static const CGFloat kRBFindBarHeight = 44.0;
     } else if ([t isEqualToString:@"linkinfo"]) {
         self.lastLinkInfo = message;
     } else if ([t isEqualToString:@"security"]) {
-        [self.chromeBar.omnibox setSecurityState:[message objectForKey:@"state"]];
+        self.currentSecurity = [message objectForKey:@"state"];
+        [self.chromeBar.omnibox setSecurityState:self.currentSecurity];
     } else if ([t isEqualToString:@"pageerror"]) {
         [self showErrorCardForURL:[message objectForKey:@"url"]];
     } else if ([t isEqualToString:@"reader"]) {
@@ -747,33 +813,29 @@ static const CGFloat kRBFindBarHeight = 44.0;
         if (p.x < 24.0) self.edgeSwipe = -1;
         else if (p.x > w - 24.0) self.edgeSwipe = 1;
         self.edgeStart = p;
-        self.panAnchor = [self fractionForPoint:p];
-        self.inertiaAnchor = self.panAnchor;
-        self.lastPanPoint = p;
-        self.wheelAccumX = 0.0;
-        self.wheelAccumY = 0.0;
-        self.lastWheelSentAt = 0.0;
+        self.scrollGestureActive = self.edgeSwipe == 0;
+        if (self.scrollGestureActive) {
+            self.scrollAnchor = [self fractionForPoint:p];
+            self.inertiaAnchor = self.scrollAnchor;
+            self.lastPanPoint = p;
+            self.inertiaVelocity = CGPointZero;
+            [self.streamView beginMotionWindow];
+            [self.session sendScrollPhase:@"begin" x:self.scrollAnchor.x y:self.scrollAnchor.y dx:0.0 dy:0.0];
+        }
         return;
     }
     if (pan.state == UIGestureRecognizerStateChanged) {
         if (self.edgeSwipe != 0) return; // candidate history swipe: no scrolling
-        CGSize s = self.streamView.bounds.size;
-        CGFloat localDX = p.x - self.lastPanPoint.x;
-        CGFloat localDY = p.y - self.lastPanPoint.y;
-        CGFloat dx = -localDX / MAX(1.0, s.width);
-        CGFloat dy = -localDY / MAX(1.0, s.height);
-        self.lastPanPoint = p;
-        // Coalesce at ~30Hz (M1.3): halves the message rate of a flick with
-        // no perceptible feel change; the remainder flushes on gesture end.
-        self.wheelAccumX += dx;
-        self.wheelAccumY += dy;
-        CFTimeInterval now = CACurrentMediaTime();
-        if (now - self.lastWheelSentAt >= 1.0 / 30.0) {
-            [self flushWheelAccum];
-            self.lastWheelSentAt = now;
+        if (self.scrollGestureActive) {
+            CGSize size = self.streamView.bounds.size;
+            CGFloat dx = -(p.x - self.lastPanPoint.x) / MAX(1.0, size.width);
+            CGFloat dy = -(p.y - self.lastPanPoint.y) / MAX(1.0, size.height);
+            self.lastPanPoint = p;
+            [self.streamView continueMotionWindow];
+            [self.session sendScrollPhase:@"move" x:self.scrollAnchor.x y:self.scrollAnchor.y dx:dx dy:dy];
+            CGPoint velocity = [pan velocityInView:self.streamView];
+            self.inertiaVelocity = CGPointMake(-velocity.x, -velocity.y);
         }
-        CGPoint v = [pan velocityInView:self.streamView];
-        self.inertiaVelocity = CGPointMake(-v.x, -v.y);
         return;
     }
     if (pan.state == UIGestureRecognizerStateEnded || pan.state == UIGestureRecognizerStateCancelled) {
@@ -786,39 +848,57 @@ static const CGFloat kRBFindBarHeight = 44.0;
             self.edgeSwipe = 0;
             return;
         }
-        [self flushWheelAccum];
-        if (pan.state == UIGestureRecognizerStateEnded) [self startInertiaIfNeeded];
+        if (self.scrollGestureActive) {
+            if (pan.state != UIGestureRecognizerStateEnded || ![self startInertiaIfNeeded]) {
+                [self finishScrollMotion];
+            }
+        }
     }
 }
 
-- (void)flushWheelAccum {
-    if (fabs(self.wheelAccumX) < 0.0001 && fabs(self.wheelAccumY) < 0.0001) return;
-    [self.session sendWheelX:self.panAnchor.x y:self.panAnchor.y dx:self.wheelAccumX dy:self.wheelAccumY];
-    self.wheelAccumX = 0.0;
-    self.wheelAccumY = 0.0;
+- (BOOL)startInertiaIfNeeded {
+    CGFloat speed = sqrtf(self.inertiaVelocity.x * self.inertiaVelocity.x +
+                          self.inertiaVelocity.y * self.inertiaVelocity.y);
+    if (speed < 220.0) return NO;
+    self.inertiaTimer = [NSTimer timerWithTimeInterval:1.0 / 60.0
+                                                target:self
+                                              selector:@selector(inertiaTick:)
+                                              userInfo:nil
+                                               repeats:YES];
+    [[NSRunLoop mainRunLoop] addTimer:self.inertiaTimer forMode:NSRunLoopCommonModes];
+    return YES;
 }
 
-- (void)startInertiaIfNeeded {
-    CGFloat speed = sqrtf(self.inertiaVelocity.x * self.inertiaVelocity.x + self.inertiaVelocity.y * self.inertiaVelocity.y);
-    if (speed < 220.0) return;
-    [self stopInertia];
-    self.inertiaTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 / 60.0 target:self selector:@selector(inertiaTick:) userInfo:nil repeats:YES];
+- (void)finishScrollMotion {
+    if (!self.scrollGestureActive) return;
+    [self.session sendScrollPhase:@"end" x:self.inertiaAnchor.x y:self.inertiaAnchor.y dx:0.0 dy:0.0];
+    [self.streamView endMotionWindow];
+    self.scrollGestureActive = NO;
 }
 
 - (void)stopInertia {
+    if (!self.inertiaTimer) return;
     [self.inertiaTimer invalidate];
     self.inertiaTimer = nil;
+    [self finishScrollMotion];
 }
 
 - (void)inertiaTick:(NSTimer *)timer {
-    CGSize s = self.streamView.bounds.size;
+    CGSize size = self.streamView.bounds.size;
     CGFloat dt = 1.0 / 60.0;
-    CGFloat dx = self.inertiaVelocity.x * dt / MAX(1.0, s.width);
-    CGFloat dy = self.inertiaVelocity.y * dt / MAX(1.0, s.height);
-    [self.session sendWheelX:self.inertiaAnchor.x y:self.inertiaAnchor.y dx:dx dy:dy];
-    self.inertiaVelocity = CGPointMake(self.inertiaVelocity.x * 0.94, self.inertiaVelocity.y * 0.94);
-    CGFloat speed = sqrtf(self.inertiaVelocity.x * self.inertiaVelocity.x + self.inertiaVelocity.y * self.inertiaVelocity.y);
-    if (speed < 45.0) [self stopInertia];
+    CGFloat dx = self.inertiaVelocity.x * dt / MAX(1.0, size.width);
+    CGFloat dy = self.inertiaVelocity.y * dt / MAX(1.0, size.height);
+    [self.streamView continueMotionWindow];
+    [self.session sendScrollPhase:@"move" x:self.inertiaAnchor.x y:self.inertiaAnchor.y dx:dx dy:dy];
+    self.inertiaVelocity = CGPointMake(self.inertiaVelocity.x * 0.94,
+                                       self.inertiaVelocity.y * 0.94);
+    CGFloat speed = sqrtf(self.inertiaVelocity.x * self.inertiaVelocity.x +
+                          self.inertiaVelocity.y * self.inertiaVelocity.y);
+    if (speed < 45.0) {
+        [self.inertiaTimer invalidate];
+        self.inertiaTimer = nil;
+        [self finishScrollMotion];
+    }
 }
 
 - (void)longPressed:(UILongPressGestureRecognizer *)longPress {
@@ -893,15 +973,24 @@ static const CGFloat kRBFindBarHeight = 44.0;
 
 // Page actions (more button): everything scoped to the current page.
 - (void)chrome:(RBChromeBar *)bar actionsFromButton:(UIButton *)button {
-    NSArray *items = @[
+    NSArray *pageItems = @[
+        [RBListItem itemWithTitle:@"Media Controls" subtitle:@"playback and volume on this page" payload:@"media"],
         [RBListItem itemWithTitle:@"Reader" subtitle:@"read this page natively" payload:@"reader"],
         [RBListItem itemWithTitle:@"Find on Page" subtitle:nil payload:@"find"],
+        [RBListItem itemWithTitle:@"Page Information" subtitle:nil payload:@"pageinfo"],
         [RBListItem itemWithTitle:@"Paste to Page" subtitle:nil payload:@"paste"],
-        [RBListItem itemWithTitle:@"Copy Page URL" subtitle:nil payload:@"copyurl"],
-        [RBListItem itemWithTitle:@"Mail Link" subtitle:nil payload:@"maillink"],
         [RBListItem itemWithTitle:@"Fullscreen" subtitle:nil payload:@"fullscreen"],
     ];
-    RBListPopover *list = [[RBListPopover alloc] initWithSections:@[@{@"title": @"", @"items": items}]];
+    NSArray *shareItems = @[
+        [RBListItem itemWithTitle:(self.currentStarred ? @"Remove Bookmark" : @"Add Bookmark")
+                         subtitle:nil payload:@"bookmark"],
+        [RBListItem itemWithTitle:@"Copy Page URL" subtitle:nil payload:@"copyurl"],
+        [RBListItem itemWithTitle:@"Mail Link" subtitle:nil payload:@"maillink"],
+    ];
+    RBListPopover *list = [[RBListPopover alloc] initWithSections:@[
+        @{@"title": @"PAGE", @"items": pageItems},
+        @{@"title": @"SHARE", @"items": shareItems}
+    ]];
     __weak RBRootViewController *weakSelf = self;
     list.onSelect = ^(RBListItem *item) {
         [weakSelf dismissPopover];
@@ -911,7 +1000,9 @@ static const CGFloat kRBFindBarHeight = 44.0;
 }
 
 - (void)handlePageAction:(NSString *)action {
-    if ([action isEqualToString:@"reader"]) {
+    if ([action isEqualToString:@"media"]) {
+        [self presentMediaControlsFromButton:self.chromeBar.actionButton];
+    } else if ([action isEqualToString:@"reader"]) {
         self.readerPending = YES;
         [self.session sendMessage:@{@"t": @"reader"}];
         [self showToast:@"Preparing reader…"];
@@ -920,8 +1011,20 @@ static const CGFloat kRBFindBarHeight = 44.0;
         [self.view setNeedsLayout];
         [self.view layoutIfNeeded];
         [self.findBar focusField];
+    } else if ([action isEqualToString:@"pageinfo"]) {
+        NSURL *url = [NSURL URLWithString:self.currentURL ?: @""];
+        NSString *host = [url host] ?: (self.currentURL ?: @"This page");
+        NSString *security = [self.currentSecurity isEqualToString:@"secure"]
+            ? @"The connection to this site is secure."
+            : ([self.currentSecurity isEqualToString:@"insecure"]
+               ? @"The connection to this site is not secure."
+               : @"Connection security information is unavailable.");
+        [[[UIAlertView alloc] initWithTitle:host message:security delegate:nil
+                          cancelButtonTitle:@"Done" otherButtonTitles:nil] show];
     } else if ([action isEqualToString:@"paste"]) {
         [self pasteToPage];
+    } else if ([action isEqualToString:@"bookmark"]) {
+        [self.session sendMessage:@{@"t": @"bookmark"}];
     } else if ([action isEqualToString:@"copyurl"]) {
         NSString *url = [self.chromeBar.omnibox currentText];
         [UIPasteboard generalPasteboard].string = url ?: @"";
@@ -931,6 +1034,36 @@ static const CGFloat kRBFindBarHeight = 44.0;
     } else if ([action isEqualToString:@"fullscreen"]) {
         [self toggleFullscreen];
     }
+}
+
+- (void)presentMediaControlsFromButton:(UIButton *)button {
+    [self dismissPopover];
+    RBMediaController *controller = [[RBMediaController alloc] init];
+    controller.delegate = self;
+    self.pageMediaController = controller;
+    UIPopoverController *popover = [[UIPopoverController alloc] initWithContentViewController:controller];
+    popover.delegate = self;
+    self.popover = popover;
+    CGRect anchor = [button convertRect:button.bounds toView:self.view];
+    [popover presentPopoverFromRect:anchor inView:self.view
+           permittedArrowDirections:UIPopoverArrowDirectionUp animated:YES];
+    [self.session sendMessage:@{@"t": @"media-query"}];
+}
+
+- (void)mediaControllerTogglePlayback:(RBMediaController *)controller {
+    [self.session sendMessage:@{@"t": @"media-playpause"}];
+}
+
+- (void)mediaControllerToggleMute:(RBMediaController *)controller {
+    [self.session sendMessage:@{@"t": @"media-mute"}];
+}
+
+- (void)mediaController:(RBMediaController *)controller setVolume:(CGFloat)volume {
+    [self.session sendMessage:@{@"t": @"media-volume", @"value": [NSNumber numberWithFloat:volume]}];
+}
+
+- (void)mediaControllerRequestsRefresh:(RBMediaController *)controller {
+    [self.session sendMessage:@{@"t": @"media-query"}];
 }
 
 - (void)mailCurrentPage {
@@ -988,6 +1121,8 @@ static const CGFloat kRBFindBarHeight = 44.0;
 
 - (void)omnibox:(RBOmnibox *)omnibox navigateTo:(NSString *)text {
     [self.suggestPanel hide];
+    self.awaitingPageFrame = !self.startPageView.hidden;
+    self.awaitedSourceSequence = 0;
     [self.session sendMessage:@{@"t": @"nav", @"url": text}];
 }
 
@@ -1024,7 +1159,67 @@ static const CGFloat kRBFindBarHeight = 44.0;
 - (void)suggestPanel:(RBSuggestPanel *)panel pickedURL:(NSString *)url {
     [self.chromeBar.omnibox dismissKeyboard];
     [self.suggestPanel hide];
+    self.awaitingPageFrame = !self.startPageView.hidden;
+    self.awaitedSourceSequence = 0;
     [self.session sendMessage:@{@"t": @"nav", @"url": url}];
+}
+
+// ------------------------------------------------------------ native new tab
+
+- (void)newTabViewWantsOmnibox:(RBNewTabView *)view {
+    [self.chromeBar.omnibox focus];
+}
+
+- (void)newTabView:(RBNewTabView *)view openURL:(NSString *)url {
+    self.awaitingPageFrame = YES;
+    self.awaitedSourceSequence = 0;
+    [self.session sendMessage:@{@"t": @"nav", @"url": url ?: @""}];
+}
+
+- (void)newTabViewWantsLibrary:(RBNewTabView *)view {
+    [self presentLibrary];
+}
+
+// ------------------------------------------------------------ browser states
+
+- (void)reconnectCurrentServer {
+    NSString *url = self.pendingServerURL ?: [[NSUserDefaults standardUserDefaults] stringForKey:RBDefaultsServerURLKey];
+    NSString *password = self.pendingPassword ?: [[NSUserDefaults standardUserDefaults] stringForKey:RBDefaultsPasswordKey];
+    if ([url length]) [self connectToURL:url password:password ?: @""];
+}
+
+- (void)browserStateViewPrimaryAction:(RBBrowserStateView *)view {
+    switch (view.state) {
+        case RBBrowserStatePageError:
+            [view showState:RBBrowserStateHidden detail:nil];
+            [self.session sendMessage:@{@"t": @"reload"}];
+            break;
+        case RBBrowserStateVideoUnavailable:
+            [view showState:RBBrowserStateConnecting detail:@"Restarting the video stream…"];
+            [self.session sendMessage:@{@"t": @"video-retry"}];
+            break;
+        case RBBrowserStateReconnecting:
+        case RBBrowserStateDisconnected:
+            [self reconnectCurrentServer];
+            break;
+        default:
+            break;
+    }
+}
+
+- (void)browserStateViewSecondaryAction:(RBBrowserStateView *)view {
+    switch (view.state) {
+        case RBBrowserStatePageError:
+            [view showState:RBBrowserStateHidden detail:nil];
+            [self.session sendMessage:@{@"t": @"back"}];
+            break;
+        case RBBrowserStateVideoUnavailable:
+            [self reconnectCurrentServer];
+            break;
+        default:
+            [self presentSettingsAllowingCancel:YES message:nil];
+            break;
+    }
 }
 
 // -------------------------------------------------------------- tab strip
@@ -1068,10 +1263,14 @@ static const CGFloat kRBFindBarHeight = 44.0;
 - (void)dismissPopover {
     if (self.popover.popoverVisible) [self.popover dismissPopoverAnimated:NO];
     self.popover = nil;
+    self.pageMediaController = nil;
 }
 
 - (void)popoverControllerDidDismissPopover:(UIPopoverController *)popoverController {
-    if (popoverController == self.popover) self.popover = nil;
+    if (popoverController == self.popover) {
+        self.popover = nil;
+        self.pageMediaController = nil;
+    }
     if (popoverController == self.uploadPopover) {
         // Swiped away without picking: cancel the pending server chooser.
         self.uploadPopover = nil;
@@ -1112,6 +1311,9 @@ static const CGFloat kRBFindBarHeight = 44.0;
         [weakSelf dismissViewControllerAnimated:YES completion:nil];
         weakSelf.libraryController = nil;
         [weakSelf.session sendMessage:@{@"t": @"nav", @"url": url}];
+    };
+    library.onDismiss = ^{
+        weakSelf.libraryController = nil;
     };
     library.onNeedsData = ^(NSString *kind) {
         if ([kind isEqualToString:@"bookmarks"]) [weakSelf.session sendMessage:@{@"t": @"hist"}];
@@ -1344,16 +1546,6 @@ static const CGFloat kRBFindBarHeight = 44.0;
         self.updateInstalledAlert = nil;
         exit(0);
     }
-    if (alertView == self.videoErrorAlert) {
-        self.videoErrorAlert = nil;
-        if (buttonIndex == 1) {
-            self.videoStarting = YES;
-            [self.session sendMessage:@{@"t": @"video-retry"}];
-        } else if (buttonIndex == 2) {
-            [self connectToURL:self.pendingServerURL password:self.pendingPassword];
-        }
-        return;
-    }
     if (alertView == self.pasteboardAlert) {
         self.pasteboardAlert = nil;
         if (buttonIndex != alertView.cancelButtonIndex && [self.pasteboardURL length]) {
@@ -1526,57 +1718,18 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
     }];
 }
 
-// ---------------------------------------------------------- error card (M2.5)
+// ---------------------------------------------------------- page error state
 
 - (void)showErrorCardForURL:(NSString *)url {
-    if (!self.errorCard) {
-        UIView *card = [[UIView alloc] initWithFrame:CGRectZero];
-        card.backgroundColor = [UIColor colorWithWhite:0.13 alpha:0.96];
-        card.layer.cornerRadius = 12.0;
-        UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
-        label.backgroundColor = [UIColor clearColor];
-        label.textColor = [UIColor colorWithWhite:0.95 alpha:1.0];
-        label.font = [RBTheme fontOfSize:15.0 bold:NO];
-        label.numberOfLines = 3;
-        label.textAlignment = NSTextAlignmentCenter;
-        [card addSubview:label];
-        self.errorCardLabel = label;
-        UIButton *retry = [UIButton buttonWithType:UIButtonTypeCustom];
-        retry.tag = 1;
-        retry.backgroundColor = [UIColor colorWithRed:0.28 green:0.42 blue:0.62 alpha:1.0];
-        retry.layer.cornerRadius = 8.0;
-        retry.titleLabel.font = [RBTheme fontOfSize:16.0 bold:YES];
-        [retry setTitle:@"Try Again" forState:UIControlStateNormal];
-        [retry addTarget:self action:@selector(errorRetryTapped:) forControlEvents:UIControlEventTouchUpInside];
-        [card addSubview:retry];
-        UIButton *dismiss = [UIButton buttonWithType:UIButtonTypeCustom];
-        dismiss.tag = 2;
-        dismiss.titleLabel.font = [RBTheme fontOfSize:14.0 bold:NO];
-        [dismiss setTitle:@"Dismiss" forState:UIControlStateNormal];
-        [dismiss setTitleColor:[UIColor colorWithWhite:0.7 alpha:1.0] forState:UIControlStateNormal];
-        [dismiss addTarget:self action:@selector(hideErrorCard) forControlEvents:UIControlEventTouchUpInside];
-        [card addSubview:dismiss];
-        self.errorCard = card;
-        [self.view addSubview:card];
-    }
-    self.errorCardLabel.text = [NSString stringWithFormat:@"Couldn't load\n%@", url ?: @"this page"];
-    CGFloat w = 320.0;
-    CGFloat x = (self.view.bounds.size.width - w) / 2.0;
-    self.errorCard.frame = CGRectMake(x, self.view.bounds.size.height * 0.3, w, 170.0);
-    self.errorCardLabel.frame = CGRectMake(16.0, 14.0, w - 32.0, 62.0);
-    [self.errorCard viewWithTag:1].frame = CGRectMake(40.0, 86.0, w - 80.0, 40.0);
-    [self.errorCard viewWithTag:2].frame = CGRectMake(40.0, 132.0, w - 80.0, 28.0);
-    self.errorCard.hidden = NO;
-    [self.view bringSubviewToFront:self.errorCard];
-}
-
-- (void)errorRetryTapped:(id)sender {
-    [self hideErrorCard];
-    [self.session sendMessage:@{@"t": @"reload"}];
+    NSString *detail = [url length]
+        ? [NSString stringWithFormat:@"Surf could not open %@.", url]
+        : @"Surf could not open this page.";
+    [self.browserStateView showState:RBBrowserStatePageError detail:detail];
 }
 
 - (void)hideErrorCard {
-    self.errorCard.hidden = YES;
+    if (self.browserStateView.state == RBBrowserStatePageError)
+        [self.browserStateView showState:RBBrowserStateHidden detail:nil];
 }
 
 // ------------------------------------------------------------ reader (M1.5)
@@ -1608,6 +1761,7 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
 }
 
 - (void)checkPasteboard {
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:RBDefaultsOfferCopiedLinksKey]) return;
     NSString *text = [UIPasteboard generalPasteboard].string;
     if (![text hasPrefix:@"http://"] && ![text hasPrefix:@"https://"]) return;
     NSString *last = [[NSUserDefaults standardUserDefaults] stringForKey:RBDefaultsLastPasteboardKey];
@@ -1664,11 +1818,12 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
         @"version": [NSString stringWithFormat:@"%@  %@", RBNativeVersion, lane],
         @"state": state,
         @"presented": @(self.streamView.presentedFrames),
+        @"motionFPS": @(self.streamView.motionPresentationFPS),
         @"aus": @(self.mediaPipeline.videoAUs),
         @"latency": @(self.session.interactionTracker.lastInteractionToPresentMS),
         @"rtt": @(self.clockSync.lastRTTMS),
         @"age": @(age * 1000.0),
-        @"maxGap": @(self.perfRecentGapMS),
+        @"maxGap": @(self.streamView.maximumPresentationGapMS),
         @"queue": @(self.mediaPipeline.queuedAUs),
         @"gaps": @(self.mediaPipeline.sequenceGaps),
         @"overwritten": @(self.streamView.overwrittenVideoFrames),
@@ -1704,6 +1859,7 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
         NSUInteger drops = self.mediaPipeline.droppedAUs;
         NSUInteger presented = self.streamView.presentedFrames;
         double fps = presented >= self.perfLastFramesDisplayed ? (presented - self.perfLastFramesDisplayed) / dt : 0.0;
+        double motionFPS = self.streamView.motionPresentationFPS;
         double aups = self.mediaPipeline.videoAUs >= self.perfLastVideoAUs ?
             (self.mediaPipeline.videoAUs - self.perfLastVideoAUs) / dt : 0.0;
         double vtDone = decoded >= self.perfLastDecodedFrames ?
@@ -1718,7 +1874,7 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
             100.0 * dropDelta / (double)(self.mediaPipeline.videoAUs - self.perfLastVideoAUs) : 0.0;
         [self.session sendMessage:@{
             @"t": @"media-stats",
-            @"fps": @(fps),
+            @"fps": @(motionFPS > 0.0 ? motionFPS : fps),
             @"auRate": @(aups),
             @"callbackMs": @(self.mediaPipeline.averageCallbackMS),
             @"gapMs": @(recentGap),
@@ -1726,9 +1882,10 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
             @"memoryWarn": @(self.hadMemoryWarning)
         }];
         self.hadMemoryWarning = NO;
-        RBLog(@"perf lane=%@ presented_fps=%.1f aups=%.1f vt_done=%.1f/s q=%d drops+%u overwritten=%u max_gap=%.1fms vt_submit=%.2fms vt_callback=%.2fms wrap=%.2fms errs+%u audio_q=%d audio_drop=%u audio_underrun=%u audio_restart=%u age=%.2fs view=%.0fx%.0f",
+        RBLog(@"perf lane=%@ presented_fps=%.1f motion_fps=%.1f aups=%.1f vt_done=%.1f/s q=%d drops+%u overwritten=%u max_gap=%.1fms vt_submit=%.2fms vt_callback=%.2fms wrap=%.2fms errs+%u audio_q=%d audio_drop=%u audio_underrun=%u audio_restart=%u age=%.2fs view=%.0fx%.0f",
               self.videoActive ? @"video" : @"starting",
               fps,
+              motionFPS,
               aups,
               vtDone,
               queued,

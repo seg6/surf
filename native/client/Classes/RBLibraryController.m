@@ -2,12 +2,12 @@
 #import "RBTheme.h"
 
 typedef enum {
-    RBLibraryTabHistory = 0,
-    RBLibraryTabBookmarks = 1,
+    RBLibraryTabBookmarks = 0,
+    RBLibraryTabHistory = 1,
     RBLibraryTabDownloads = 2
 } RBLibraryTab;
 
-@interface RBLibraryController () <UISearchBarDelegate>
+@interface RBLibraryController () <UISearchBarDelegate, UIAlertViewDelegate>
 @property(nonatomic, strong) UISegmentedControl *segments;
 @property(nonatomic, strong) UISearchBar *searchBar;
 // history
@@ -22,6 +22,7 @@ typedef enum {
 @property(nonatomic, strong) NSMutableArray *downloadItems; // {name,size,ts}
 @property(nonatomic, assign) BOOL downloadsLoaded;
 @property(nonatomic, strong) NSMutableDictionary *dlProgress; // name -> pct NSNumber
+@property(nonatomic, strong) UILabel *emptyLabel;
 @end
 
 @implementation RBLibraryController
@@ -44,9 +45,10 @@ typedef enum {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.segments = [[UISegmentedControl alloc] initWithItems:@[@"History", @"Bookmarks", @"Downloads"]];
+    self.title = @"Library";
+    self.segments = [[UISegmentedControl alloc] initWithItems:@[@"Bookmarks", @"History", @"Downloads"]];
     self.segments.segmentedControlStyle = UISegmentedControlStyleBar;
-    self.segments.selectedSegmentIndex = RBLibraryTabHistory;
+    self.segments.selectedSegmentIndex = RBLibraryTabBookmarks;
     [self.segments addTarget:self action:@selector(segmentChanged:) forControlEvents:UIControlEventValueChanged];
     self.navigationItem.titleView = self.segments;
     self.navigationItem.rightBarButtonItem =
@@ -56,17 +58,25 @@ typedef enum {
 
     self.searchBar = [[UISearchBar alloc] initWithFrame:CGRectMake(0.0, 0.0, self.view.bounds.size.width, 44.0)];
     self.searchBar.delegate = self;
-    self.searchBar.placeholder = @"Search history";
+    self.searchBar.placeholder = @"Search bookmarks";
     self.tableView.tableHeaderView = self.searchBar;
     self.tableView.rowHeight = 54.0;
+
+    self.emptyLabel = [[UILabel alloc] initWithFrame:self.tableView.bounds];
+    self.emptyLabel.backgroundColor = [UIColor clearColor];
+    self.emptyLabel.textAlignment = NSTextAlignmentCenter;
+    self.emptyLabel.numberOfLines = 2;
+    self.emptyLabel.textColor = [RBTheme secondaryTextColor];
+    self.emptyLabel.font = [RBTheme fontOfSize:15.0 bold:NO];
 }
 
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
-    if (![self.history count]) [self requestHistoryFrom:0];
+    if (!self.bookmarksLoaded && self.onNeedsData) self.onNeedsData(@"bookmarks");
 }
 
 - (void)doneTapped:(id)sender {
+    if (self.onDismiss) self.onDismiss();
     [self.presentingViewController dismissViewControllerAnimated:YES completion:nil];
 }
 
@@ -76,19 +86,36 @@ typedef enum {
             [[UIBarButtonItem alloc] initWithTitle:@"Clear" style:UIBarButtonItemStylePlain
                                             target:self action:@selector(clearHistoryTapped:)];
     } else {
-        self.navigationItem.leftBarButtonItem = nil;
+        self.navigationItem.leftBarButtonItem = self.editButtonItem;
     }
 }
 
 - (void)segmentChanged:(id)sender {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(fireSearch) object:nil];
+    self.historyInFlight = NO;
     [self refreshLeftButton];
-    self.tableView.tableHeaderView = [self tab] == RBLibraryTabHistory ? self.searchBar : nil;
+    [self setEditing:NO animated:NO];
+    self.searchBar.text = @"";
+    self.query = @"";
+    static NSString *const placeholders[] = {@"Search bookmarks", @"Search history", @"Search downloads"};
+    self.searchBar.placeholder = placeholders[[self tab]];
+    self.tableView.tableHeaderView = self.searchBar;
     if ([self tab] == RBLibraryTabBookmarks && !self.bookmarksLoaded && self.onNeedsData) self.onNeedsData(@"bookmarks");
+    if ([self tab] == RBLibraryTabHistory && ![self.history count]) [self requestHistoryFrom:0];
     if ([self tab] == RBLibraryTabDownloads && !self.downloadsLoaded && self.onNeedsData) self.onNeedsData(@"downloads");
     [self.tableView reloadData];
 }
 
 - (void)clearHistoryTapped:(id)sender {
+    UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"Clear Browsing History?"
+                                                    message:@"This removes all history stored by the Surf server."
+                                                   delegate:self cancelButtonTitle:@"Cancel"
+                                          otherButtonTitles:@"Clear", nil];
+    [alert show];
+}
+
+- (void)alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex {
+    if (buttonIndex == alertView.cancelButtonIndex) return;
     if (self.onClearHistory) self.onClearHistory();
     [self.history removeAllObjects];
     self.historyTotal = 0;
@@ -104,6 +131,8 @@ typedef enum {
 }
 
 - (void)consumeHistoryReply:(NSDictionary *)message {
+    NSString *replyQuery = [message objectForKey:@"q"] ?: @"";
+    if (![replyQuery isEqualToString:self.query ?: @""]) return;
     self.historyInFlight = NO;
     NSArray *items = [[message objectForKey:@"items"] isKindOfClass:[NSArray class]] ? [message objectForKey:@"items"] : @[];
     NSInteger offset = [[message objectForKey:@"offset"] integerValue];
@@ -140,12 +169,16 @@ typedef enum {
     if ([self isViewLoaded] && [self tab] == RBLibraryTabDownloads) [self.tableView reloadData];
 }
 
-// ---- search (history only) -----------------------------------------------
+// ---- search ---------------------------------------------------------------
 
 - (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText {
     self.query = searchText ?: @"";
     [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(fireSearch) object:nil];
-    [self performSelector:@selector(fireSearch) withObject:nil afterDelay:0.3];
+    if ([self tab] == RBLibraryTabHistory) {
+        [self performSelector:@selector(fireSearch) withObject:nil afterDelay:0.3];
+    } else {
+        [self.tableView reloadData];
+    }
 }
 
 - (void)fireSearch {
@@ -164,16 +197,43 @@ typedef enum {
 }
 
 - (NSArray *)currentRows {
+    NSArray *source = nil;
     switch ([self tab]) {
-        case RBLibraryTabBookmarks: return self.bookmarkItems;
-        case RBLibraryTabDownloads: return self.downloadItems;
+        case RBLibraryTabBookmarks: source = self.bookmarkItems; break;
+        case RBLibraryTabDownloads: source = self.downloadItems; break;
         default: return self.history;
     }
+    NSString *needle = [self.query lowercaseString];
+    if (![needle length]) return source;
+    NSMutableArray *filtered = [NSMutableArray array];
+    for (NSDictionary *entry in source) {
+        NSString *primary = [self tab] == RBLibraryTabDownloads
+            ? [entry objectForKey:@"name"] : [entry objectForKey:@"title"];
+        NSString *secondary = [entry objectForKey:@"url"];
+        NSString *primaryText = primary ?: @"";
+        NSString *secondaryText = secondary ?: @"";
+        if ([[primaryText lowercaseString] rangeOfString:needle].location != NSNotFound ||
+            [[secondaryText lowercaseString] rangeOfString:needle].location != NSNotFound) {
+            [filtered addObject:entry];
+        }
+    }
+    return filtered;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     NSInteger n = (NSInteger)[[self currentRows] count];
     if ([self tab] == RBLibraryTabHistory && [self historyHasMore]) n++;
+    if (n == 0) {
+        static NSString *const emptyText[] = {
+            @"No bookmarks yet\nTap the star in the address bar to add one.",
+            @"No browsing history",
+            @"No downloads"
+        };
+        self.emptyLabel.text = emptyText[[self tab]];
+        self.tableView.backgroundView = self.emptyLabel;
+    } else {
+        self.tableView.backgroundView = nil;
+    }
     return n;
 }
 
@@ -181,6 +241,15 @@ static NSString *RBLibFormatSize(long long bytes) {
     if (bytes >= 1024 * 1024) return [NSString stringWithFormat:@"%.1f MB", bytes / (1024.0 * 1024.0)];
     if (bytes >= 1024) return [NSString stringWithFormat:@"%.0f KB", bytes / 1024.0];
     return [NSString stringWithFormat:@"%lld B", bytes];
+}
+
+static NSString *RBLibFormatDate(long long timestamp) {
+    if (timestamp <= 0) return @"";
+    NSDate *date = [NSDate dateWithTimeIntervalSince1970:timestamp];
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.dateStyle = NSDateFormatterShortStyle;
+    formatter.timeStyle = NSDateFormatterShortStyle;
+    return [formatter stringFromDate:date] ?: @"";
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -211,12 +280,16 @@ static NSString *RBLibFormatSize(long long bytes) {
         cell.textLabel.text = name;
         cell.detailTextLabel.text = pct
             ? [NSString stringWithFormat:@"downloading… %@%%", pct]
-            : RBLibFormatSize([[entry objectForKey:@"size"] longLongValue]);
+            : [NSString stringWithFormat:@"%@  ·  %@",
+               RBLibFormatSize([[entry objectForKey:@"size"] longLongValue]),
+               RBLibFormatDate([[entry objectForKey:@"ts"] longLongValue])];
     } else {
         NSString *title = [entry objectForKey:@"title"];
         NSString *url = [entry objectForKey:@"url"] ?: @"";
         cell.textLabel.text = [title length] ? title : url;
-        cell.detailTextLabel.text = url;
+        NSString *date = RBLibFormatDate([[entry objectForKey:@"ts"] longLongValue]);
+        cell.detailTextLabel.text = [date length]
+            ? [NSString stringWithFormat:@"%@  ·  %@", url, date] : url;
     }
     return cell;
 }
@@ -247,27 +320,26 @@ static NSString *RBLibFormatSize(long long bytes) {
 - (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle
                                             forRowAtIndexPath:(NSIndexPath *)indexPath {
     if (editingStyle != UITableViewCellEditingStyleDelete) return;
-    NSUInteger row = (NSUInteger)indexPath.row;
+    NSArray *rows = [self currentRows];
+    if (indexPath.row < 0 || indexPath.row >= (NSInteger)[rows count]) return;
+    NSDictionary *selected = [rows objectAtIndex:(NSUInteger)indexPath.row];
     switch ([self tab]) {
         case RBLibraryTabHistory: {
-            if (row >= [self.history count]) return;
-            NSDictionary *entry = [self.history objectAtIndex:row];
-            [self.history removeObjectAtIndex:row];
+            NSDictionary *entry = selected;
+            [self.history removeObject:entry];
             if (self.historyTotal > 0) self.historyTotal--;
             if (self.onDeleteHistory) self.onDeleteHistory(entry);
             break;
         }
         case RBLibraryTabBookmarks: {
-            if (row >= [self.bookmarkItems count]) return;
-            NSString *url = [[self.bookmarkItems objectAtIndex:row] objectForKey:@"url"] ?: @"";
-            [self.bookmarkItems removeObjectAtIndex:row];
+            NSString *url = [selected objectForKey:@"url"] ?: @"";
+            [self.bookmarkItems removeObject:selected];
             if (self.onDeleteBookmark) self.onDeleteBookmark(url);
             break;
         }
         case RBLibraryTabDownloads: {
-            if (row >= [self.downloadItems count]) return;
-            NSString *name = [[self.downloadItems objectAtIndex:row] objectForKey:@"name"] ?: @"";
-            [self.downloadItems removeObjectAtIndex:row];
+            NSString *name = [selected objectForKey:@"name"] ?: @"";
+            [self.downloadItems removeObject:selected];
             if (self.onDeleteDownload) self.onDeleteDownload(name);
             break;
         }

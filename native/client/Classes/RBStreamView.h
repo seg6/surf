@@ -15,7 +15,12 @@
 @property(nonatomic, readonly) NSUInteger overwrittenVideoFrames;
 @property(nonatomic, readonly) CFTimeInterval lastPresentationAt;
 @property(nonatomic, readonly) double maximumPresentationGapMS;
+@property(nonatomic, readonly) double motionPresentationFPS;
+@property(nonatomic, readonly) unsigned int lastPresentedSourceSequence;
 
 - (void)displayVideoPixelBuffer:(CVPixelBufferRef)pixelBuffer metadata:(RBFrameMetadata *)metadata;
+- (void)beginMotionWindow;
+- (void)continueMotionWindow;
+- (void)endMotionWindow;
 - (double)consumeRecentMaximumPresentationGapMS;
 @end

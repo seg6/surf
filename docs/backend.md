@@ -142,13 +142,26 @@ schedules ordered control, drop-oldest audio, and a four-AU GOP-aware video
 queue; `AudioPipeline` owns capture and bounded fan-out. Video overflow
 requests an immediate cooldown-protected IDR instead of accumulating delay.
 
-Protocol `20260729-1` uses a 96-byte extensible binary header carrying AU and
+Protocol `20260729-3` uses a 96-byte extensible binary header carrying AU and
 source sequences, coded size, interaction ID, backend timing stamps, encoder
 generation, CDP scroll metadata, and the active adaptive profile. The
 socket-write timestamp is stamped by the WebSocket writer immediately before
 the write. Input receive and CDP-dispatch timestamps make the input-to-source
 part of the path distinguishable from capture, encode, transport, decode, and
 display.
+
+Control messages are decoded into concrete command types. In addition to
+ordered navigation and input, pan gestures use ordered `scroll` begin/move/end
+commands carrying precise pixel deltas at UIKit's gesture callback cadence,
+followed by a short inertial tail after release. Chromium applies every delta
+to the page while the video pipeline independently selects the latest frame at
+its configured rate; the client never shifts stale video locally. The protocol also exposes stateful page-media
+controls (`media-query`, playback, mute, and volume) and a client-selected
+mobile browsing mode. Mobile mode applies a coherent Android Chrome user
+agent, client hints, touch viewport behavior, and reloads the active page so
+both server-rendered and responsive sites can select their mobile UI. A user-created tab stays on
+`about:blank#surf-new` until the native New Tab page chooses a destination;
+the backend never inserts a delayed homepage navigation.
 
 The client reports decode and presentation health every five seconds. Surf
 keeps the configured capture quality and coded size fixed by default, avoiding

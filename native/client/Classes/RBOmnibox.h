@@ -25,5 +25,6 @@
 // TLS indicator (M2.5): "secure" shows a padlock, "insecure" a struck one,
 // anything else hides it.
 - (void)setSecurityState:(NSString *)state;
+- (void)focus;
 - (void)dismissKeyboard;
 @end

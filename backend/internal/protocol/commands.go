@@ -49,12 +49,13 @@ type PointCommand struct {
 	X float64 `json:"x"`
 	Y float64 `json:"y"`
 }
-type WheelCommand struct {
+type ScrollCommand struct {
 	CommandBase
-	X  float64 `json:"x"`
-	Y  float64 `json:"y"`
-	DX float64 `json:"dx"`
-	DY float64 `json:"dy"`
+	Phase string  `json:"phase"`
+	X     float64 `json:"x,omitempty"`
+	Y     float64 `json:"y,omitempty"`
+	DX    float64 `json:"dx,omitempty"`
+	DY    float64 `json:"dy,omitempty"`
 }
 type LongPressUpCommand struct {
 	CommandBase
@@ -117,6 +118,10 @@ type MediaStatsCommand struct {
 	DropPercent  float64 `json:"dropPct"`
 	MemoryWarn   bool    `json:"memoryWarn"`
 }
+type VolumeCommand struct {
+	CommandBase
+	Value float64 `json:"value"`
+}
 
 // DecodeCommand is the sole JSON ingress. Unknown commands and trailing JSON
 // are rejected before browser state sees them.
@@ -137,14 +142,14 @@ func DecodeCommand(data []byte) (Command, error) {
 		} else {
 			dst = &URLCommand{}
 		}
-	case "audio":
+	case "audio", "mobile":
 		dst = &ToggleCommand{}
 	case "click", "lpdown", "lpmove", "hit":
 		dst = &PointCommand{}
+	case "scroll":
+		dst = &ScrollCommand{}
 	case "lpup":
 		dst = &LongPressUpCommand{}
-	case "wheel":
-		dst = &WheelCommand{}
 	case "key":
 		dst = &KeyCommand{}
 	case "paste":
@@ -165,8 +170,10 @@ func DecodeCommand(data []byte) (Command, error) {
 		dst = &ClockCommand{}
 	case "media-stats":
 		dst = &MediaStatsCommand{}
+	case "media-volume":
+		dst = &VolumeCommand{}
 	case "back", "fwd", "reload", "stop", "video-retry", "reqkeyframe",
-		"hist", "bookmark", "downloads", "reader", "media-playpause", "media-mute":
+		"hist", "bookmark", "downloads", "reader", "media-playpause", "media-mute", "media-query":
 		dst = &EmptyCommand{}
 	default:
 		return nil, fmt.Errorf("unknown command %q", header.T)

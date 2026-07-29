@@ -3,12 +3,12 @@ package protocol
 import "testing"
 
 func TestDecodeCommandProducesConcreteType(t *testing.T) {
-	command, err := DecodeCommand([]byte(`{"t":"wheel","x":0.5,"y":0.4,"dx":0,"dy":0.1,"iid":7,"clientNs":9}`))
+	command, err := DecodeCommand([]byte(`{"t":"scroll","phase":"move","x":0.5,"y":0.4,"dx":0,"dy":0.1,"iid":7,"clientNs":9}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	wheel, ok := command.(*WheelCommand)
-	if !ok || wheel.DY != 0.1 {
+	scroll, ok := command.(*ScrollCommand)
+	if !ok || scroll.Phase != "move" || scroll.X != 0.5 || scroll.Y != 0.4 || scroll.DY != 0.1 {
 		t.Fatalf("command = %#v", command)
 	}
 	iid, clientNS := command.Causal()
@@ -42,8 +42,12 @@ func TestDecodeEveryNativeCommand(t *testing.T) {
 		`{"t":"opennew","url":"https://example.test"}`, `{"t":"paste","text":"x"}`, `{"t":"reader"}`,
 		`{"t":"reload"}`, `{"t":"reqkeyframe"}`, `{"t":"size","w":768,"h":934}`,
 		`{"t":"suggest","q":"x","offset":0}`, `{"t":"tab","action":"select","id":1}`,
-		`{"t":"wheel","x":0.1,"y":0.2,"dx":0,"dy":0.3}`, `{"t":"zoom","scale":2,"cx":0.5,"cy":0.5}`,
+		`{"t":"scroll","phase":"begin","x":0.1,"y":0.2}`,
+		`{"t":"scroll","phase":"move","x":0.1,"y":0.3,"dx":0,"dy":0.1}`,
+		`{"t":"scroll","phase":"end"}`, `{"t":"zoom","scale":2,"cx":0.5,"cy":0.5}`,
 		`{"t":"video-retry"}`, `{"t":"stop"}`, `{"t":"dialogreply","accept":true,"text":""}`,
+		`{"t":"media-query"}`, `{"t":"media-playpause"}`, `{"t":"media-mute"}`,
+		`{"t":"media-volume","value":0.5}`, `{"t":"mobile","on":true}`,
 	}
 	for _, data := range cases {
 		command, err := DecodeCommand([]byte(data))

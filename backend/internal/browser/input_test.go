@@ -1,6 +1,11 @@
 package browser
 
-import "testing"
+import (
+	"testing"
+	"time"
+
+	"surf-backend/internal/protocol"
+)
 
 func TestNormalizeNavURL(t *testing.T) {
 	cases := map[string]string{
@@ -20,6 +25,38 @@ func TestNormalizeNavURL(t *testing.T) {
 		if got := NormalizeNavURL(in); got != want {
 			t.Errorf("NormalizeNavURL(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestMotionStallAccounting(t *testing.T) {
+	controller := &Controller{}
+	controller.noteMotionPhase("begin")
+	controller.perfMu.Lock()
+	controller.motionLastSourceAt = time.Now().Add(-100 * time.Millisecond)
+	controller.perfMu.Unlock()
+	controller.checkMotionStall(time.Now())
+	controller.perfMu.Lock()
+	defer controller.perfMu.Unlock()
+	if controller.motionStalls != 1 || !controller.motionStallLogged {
+		t.Fatalf("motion stalls=%d logged=%t", controller.motionStalls, controller.motionStallLogged)
+	}
+}
+
+func TestScrollEventParamsArePrecisePixels(t *testing.T) {
+	params := scrollEventParams(&protocol.ScrollCommand{
+		X:  1.2,
+		Y:  -0.1,
+		DX: -0.25,
+		DY: 0.1,
+	}, 768, 950)
+	if params["type"] != "mouseWheel" {
+		t.Fatalf("unexpected wheel envelope: %#v", params)
+	}
+	if params["x"] != float64(768) || params["y"] != float64(0) {
+		t.Fatalf("coordinates were not clamped and scaled: %#v", params)
+	}
+	if params["deltaX"] != float64(-192) || params["deltaY"] != float64(95) {
+		t.Fatalf("deltas were not scaled to CSS pixels: %#v", params)
 	}
 }
 

@@ -75,5 +75,5 @@ docker run --rm -v "$PWD:/src" surf-buildenv dpkg-deb -c /src/native/client/pack
 To build the unified release binary with a matching client package embedded:
 
 ```sh
-make surf-binary CLIENT_DEB=native/client/packages/space.seg6.surf_0.6.0-\*_iphoneos-arm.deb
+make surf-binary CLIENT_DEB=native/client/packages/space.seg6.surf_0.7.0-\*_iphoneos-arm.deb
 ```

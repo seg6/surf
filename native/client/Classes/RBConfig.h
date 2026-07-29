@@ -18,3 +18,5 @@
 #define RBDefaultsLastPasteboardKey @"RBLastPasteboard" // last URL offered from the pasteboard
 #define RBDefaultsReaderNightKey @"RBReaderNight" // NSNumber bool; reader dark mode
 #define RBDefaultsDiagnosticsKey @"RBDiagnosticsOverlay" // NSNumber bool; live performance panel
+#define RBDefaultsMobileLayoutKey @"RBMobileLayout" // NSNumber bool; request mobile sites and viewport behavior
+#define RBDefaultsOfferCopiedLinksKey @"RBOfferCopiedLinks" // NSNumber bool; prompt for clipboard URLs

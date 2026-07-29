@@ -22,6 +22,9 @@ func TestLaunchArgsSandboxDefault(t *testing.T) {
 	if !hasArg(args, "--enable-gpu") || hasArg(args, "--disable-gpu") {
 		t.Fatalf("GPU auto path not enabled: %v", args)
 	}
+	if hasArg(args, "--disable-smooth-scrolling") {
+		t.Fatalf("obsolete scroll override present: %v", args)
+	}
 	if !hasArg(args, "--user-data-dir=/tmp/profile") || !hasArg(args, "--window-size=1024,768") {
 		t.Fatalf("missing profile/window args: %v", args)
 	}

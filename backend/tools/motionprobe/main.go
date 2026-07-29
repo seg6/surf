@@ -26,6 +26,7 @@ func main() {
 	profile := flag.String("profile", defaultProfile(), "managed Chrome profile")
 	inspectMedia := flag.Bool("inspect-media", false, "print active page media state and exit")
 	expression := flag.String("eval", "", "evaluate JavaScript in the active page and print its value")
+	scroll := flag.Bool("scroll", false, "run a deterministic compositor scroll instead of the block animation")
 	flag.Parse()
 
 	socket, err := pageSocket(*profile)
@@ -57,6 +58,12 @@ func main() {
 		fmt.Println(value)
 		return
 	}
+	if *scroll {
+		if err := runScrollProbe(conn, *duration); err != nil {
+			fatal(err)
+		}
+		return
+	}
 
 	const install = `(() => {
 	  document.getElementById('__surf_probe')?.remove();
@@ -85,6 +92,74 @@ func main() {
 	})()`
 	if err := evaluate(conn, 2, remove); err != nil {
 		fatal(err)
+	}
+}
+
+func runScrollProbe(conn *websocket.Conn, duration time.Duration) error {
+	const page = `(() => {
+	  document.open();
+	  document.write('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">' +
+	    '<style>html,body{margin:0}body{height:12000px;background:repeating-linear-gradient(' +
+	    '180deg,#0b1220 0,#0b1220 120px,#1d4ed8 120px,#1d4ed8 240px)}' +
+	    '.mark{position:fixed;left:24px;top:24px;padding:12px 16px;color:white;background:#111827;' +
+	    'font:700 18px sans-serif;border-radius:8px}</style><div class="mark">Surf scroll probe</div>');
+	  document.close();
+	  scrollTo(0, 0);
+	  return true;
+	})()`
+	if err := evaluate(conn, 1, page); err != nil {
+		return err
+	}
+	fmt.Printf("scroll probe active for %s\n", duration)
+	deadline := time.Now().Add(duration)
+	ticker := time.NewTicker(time.Second / 60)
+	defer ticker.Stop()
+	delta := 20.0
+	frames := 0
+	id := 2
+	for time.Now().Before(deadline) {
+		<-ticker.C
+		err := call(conn, id, "Input.dispatchMouseEvent", map[string]any{
+			"type":   "mouseWheel",
+			"x":      384,
+			"y":      700,
+			"deltaX": 0,
+			"deltaY": delta,
+		})
+		if err != nil {
+			return err
+		}
+		id++
+		frames++
+		// Reverse every two seconds, well before either document boundary.
+		// That keeps the viewport changing for the full probe instead of
+		// measuring a correctly static frame after reaching the top/bottom.
+		if frames%120 == 0 {
+			delta = -delta
+		}
+	}
+	return nil
+}
+
+func call(conn *websocket.Conn, id int, method string, params any) error {
+	if err := conn.WriteJSON(map[string]any{"id": id, "method": method, "params": params}); err != nil {
+		return err
+	}
+	for {
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			return err
+		}
+		var message struct {
+			ID    int             `json:"id"`
+			Error json.RawMessage `json:"error"`
+		}
+		if json.Unmarshal(data, &message) == nil && message.ID == id {
+			if len(message.Error) != 0 {
+				return fmt.Errorf("%s: %s", method, message.Error)
+			}
+			return nil
+		}
 	}
 }
 

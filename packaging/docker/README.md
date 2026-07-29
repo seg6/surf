@@ -6,7 +6,7 @@ and runs `surf serve` with system Chromium and Surf's bundled FFmpeg.
 Create `.env` beside the Compose file:
 
 ```dotenv
-SURF_VERSION=0.6.6
+SURF_VERSION=0.7.0
 SURF_ARCH=amd64
 SURF_ARCHIVE_SHA256=replace-with-the-release-archive-sha256
 SURF_PASSWORD=replace-me

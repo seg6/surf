@@ -32,6 +32,9 @@
     if (self) {
         self.backgroundColor = [UIColor clearColor];
         self.opaque = NO;
+        self.layer.cornerRadius = 5.0;
+        self.layer.borderWidth = 1.0;
+        self.layer.masksToBounds = YES;
 
         self.closeButton = [UIButton buttonWithType:UIButtonTypeCustom];
         [self.closeButton setImage:[RBTheme icon:RBIconClose size:11.0 color:[UIColor colorWithWhite:0.35 alpha:1.0]]
@@ -45,7 +48,7 @@
 
         self.titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
         self.titleLabel.backgroundColor = [UIColor clearColor];
-        self.titleLabel.font = [RBTheme fontOfSize:12.0 bold:NO];
+        self.titleLabel.font = [RBTheme fontOfSize:11.0 bold:NO];
         self.titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
         [self addSubview:self.titleLabel];
 
@@ -59,53 +62,18 @@
     [super layoutSubviews];
     CGFloat h = self.bounds.size.height;
     CGFloat x = 8.0;
-    self.closeButton.frame = CGRectMake(x, 0.0, 26.0, h);
-    x += 26.0;
+    self.closeButton.frame = CGRectMake(self.bounds.size.width - 27.0, 0.0, 26.0, h);
     BOOL hasIcon = self.iconView.image != nil;
-    self.iconView.frame = CGRectMake(x, (h - 14.0) / 2.0, hasIcon ? 14.0 : 0.0, 14.0);
-    if (hasIcon) x += 19.0;
-    self.titleLabel.frame = CGRectMake(x, 0.0, MAX(10.0, self.bounds.size.width - x - 10.0), h);
+    self.iconView.frame = CGRectMake(x, (h - 13.0) / 2.0, hasIcon ? 13.0 : 0.0, 13.0);
+    if (hasIcon) x += 17.0;
+    self.titleLabel.frame = CGRectMake(x, 0.0, MAX(10.0, self.bounds.size.width - x - 28.0), h);
     self.titleLabel.textColor = self.active ? [UIColor colorWithWhite:0.12 alpha:1.0]
                                             : [UIColor colorWithWhite:0.92 alpha:1.0];
-    self.titleLabel.shadowColor = self.active ? nil : [UIColor colorWithWhite:0.0 alpha:0.4];
-    self.titleLabel.shadowOffset = CGSizeMake(0.0, -1.0);
-    [self setNeedsDisplay];
-}
-
-// Trapezoid tab shape with rounded top corners; active tabs are light and
-// join the page, inactive tabs sit darker in the strip.
-- (void)drawRect:(CGRect)rect {
-    CGContextRef ctx = UIGraphicsGetCurrentContext();
-    CGFloat w = self.bounds.size.width;
-    CGFloat h = self.bounds.size.height;
-    CGFloat slant = 6.0, r = 5.0;
-
-    CGMutablePathRef path = CGPathCreateMutable();
-    CGPathMoveToPoint(path, NULL, 0.0, h);
-    CGPathAddLineToPoint(path, NULL, slant - r * 0.3, r);
-    CGPathAddQuadCurveToPoint(path, NULL, slant, 0.0, slant + r, 0.0);
-    CGPathAddLineToPoint(path, NULL, w - slant - r, 0.0);
-    CGPathAddQuadCurveToPoint(path, NULL, w - slant, 0.0, w - slant + r * 0.3, r);
-    CGPathAddLineToPoint(path, NULL, w, h);
-    CGPathCloseSubpath(path);
-
-    CGContextSaveGState(ctx);
-    CGContextAddPath(ctx, path);
-    CGContextClip(ctx);
-    CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
-    CGFloat lightParts[8] = {0.93, 0.94, 0.96, 1.0, 0.85, 0.87, 0.90, 1.0};
-    CGFloat darkParts[8] = {0.60, 0.63, 0.68, 1.0, 0.49, 0.52, 0.57, 1.0};
-    CGGradientRef grad = CGGradientCreateWithColorComponents(space, self.active ? lightParts : darkParts, NULL, 2);
-    CGContextDrawLinearGradient(ctx, grad, CGPointMake(0.0, 0.0), CGPointMake(0.0, h), 0);
-    CGGradientRelease(grad);
-    CGColorSpaceRelease(space);
-    CGContextRestoreGState(ctx);
-
-    CGContextAddPath(ctx, path);
-    CGContextSetStrokeColorWithColor(ctx, [[UIColor colorWithRed:0.28 green:0.30 blue:0.34 alpha:1.0] CGColor]);
-    CGContextSetLineWidth(ctx, 1.0);
-    CGContextStrokePath(ctx);
-    CGPathRelease(path);
+    self.titleLabel.shadowColor = nil;
+    self.backgroundColor = self.active ? [RBTheme pageBackgroundColor]
+                                       : [UIColor colorWithWhite:1.0 alpha:0.08];
+    self.layer.borderColor = [(self.active ? [RBTheme pageBackgroundColor]
+                                           : [UIColor colorWithWhite:1.0 alpha:0.14]) CGColor];
 }
 
 - (void)tapped:(UITapGestureRecognizer *)tap {
@@ -151,7 +119,7 @@
     [super layoutSubviews];
     CGFloat w = self.bounds.size.width;
     CGFloat h = self.bounds.size.height;
-    CGFloat plusW = 40.0;
+    CGFloat plusW = 36.0;
     self.addTabButton.frame = CGRectMake(w - plusW, 0.0, plusW, h);
     self.scroller.frame = CGRectMake(0.0, 0.0, w - plusW, h);
     [self rebuildCells];
@@ -187,8 +155,8 @@
 	}
     CGFloat h = self.scroller.bounds.size.height;
     CGFloat available = self.scroller.bounds.size.width - 8.0;
-    CGFloat cellW = MIN(220.0, MAX(110.0, available / count));
-    CGFloat x = 4.0;
+    CGFloat cellW = MIN(190.0, MAX(96.0, available / count));
+    CGFloat x = 3.0;
     for (NSUInteger i = 0; i < count; i++) {
         NSDictionary *tab = [self.tabs objectAtIndex:i];
         if (![tab isKindOfClass:[NSDictionary class]]) continue;
@@ -202,9 +170,11 @@
 			[self.scroller addSubview:cell];
 		}
 		[used addObject:tabKey];
-		cell.frame = CGRectMake(x, 2.0, cellW - 2.0, h - 2.0);
+		cell.frame = CGRectMake(x, 2.0, cellW - 3.0, h - 3.0);
 		cell.active = [[tab objectForKey:@"active"] boolValue];
         NSString *title = [tab objectForKey:@"title"];
+        NSString *tabURL = [tab objectForKey:@"url"];
+        if ([tabURL hasPrefix:@"about:blank#surf-new"]) title = @"New Tab";
         if (![title length]) title = [tab objectForKey:@"url"];
         if (![title length]) title = @"Untitled";
         cell.titleLabel.text = title;
@@ -226,7 +196,7 @@
 	for (NSNumber *tabKey in existing) {
 		if (![used containsObject:tabKey]) [[existing objectForKey:tabKey] removeFromSuperview];
 	}
-    self.scroller.contentSize = CGSizeMake(x + 4.0, h);
+    self.scroller.contentSize = CGSizeMake(x + 3.0, h);
     // Keep the active tab on screen.
     for (RBTabCell *cell in self.scroller.subviews) {
         if ([cell isKindOfClass:[RBTabCell class]] && cell.active) {

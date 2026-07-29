@@ -94,6 +94,7 @@ type LibraryEvent struct {
 
 type HistoryPageEvent struct {
 	Type   string         `json:"t"`
+	Query  string         `json:"q,omitempty"`
 	Items  []LibraryEntry `json:"items"`
 	Offset int            `json:"offset"`
 	Total  int            `json:"total"`
@@ -152,4 +153,21 @@ type EditableEvent struct {
 	On   bool      `json:"on"`
 	Kind string    `json:"kind,omitempty"`
 	Rect []float64 `json:"rect,omitempty"`
+}
+
+type MediaStateEvent struct {
+	Type        string  `json:"t"`
+	Available   bool    `json:"available"`
+	Count       int     `json:"count"`
+	Paused      bool    `json:"paused"`
+	Muted       bool    `json:"muted"`
+	Volume      float64 `json:"volume"`
+	CurrentTime float64 `json:"currentTime"`
+	Duration    float64 `json:"duration"`
+	Title       string  `json:"title,omitempty"`
+}
+
+type PageFrameEvent struct {
+	Type      string `json:"t"`
+	SourceSeq uint32 `json:"sourceSeq"`
 }

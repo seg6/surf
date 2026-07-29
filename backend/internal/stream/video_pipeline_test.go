@@ -15,6 +15,17 @@ func (w *countingWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+type slowCountingWriter struct {
+	n     atomic.Int64
+	delay time.Duration
+}
+
+func (w *slowCountingWriter) Write(p []byte) (int, error) {
+	w.n.Add(1)
+	time.Sleep(w.delay)
+	return len(p), nil
+}
+
 func TestSubBackpressureResyncsOnIDR(t *testing.T) {
 	s := New(Config{W: 64, H: 64, FPS: 15, BitrateK: 100, MaxrateK: 100, BufsizeK: 50})
 	sub := &Sub{C: make(chan AU, 2), s: s, fresh: true, dropped: true, gen: 1}
@@ -209,6 +220,21 @@ func TestPushStatePacesWrites(t *testing.T) {
 	got := w.n.Load()
 	if got < 8 || got > 15 {
 		t.Fatalf("paced writer made %d writes in about 135ms at 100fps, want 8..15", got)
+	}
+}
+
+func TestPushStateDoesNotAddWriteDurationToFramePeriod(t *testing.T) {
+	ps := newPushState(50) // 20ms period
+	w := &slowCountingWriter{delay: 8 * time.Millisecond}
+	ps.setRepeats([]byte{1}, 30)
+	go ps.run(w)
+	defer close(ps.done)
+
+	// Pacing from write completion yields only about 9 writes here
+	// (20ms period + 8ms write). Pacing from write start yields about 13.
+	time.Sleep(255 * time.Millisecond)
+	if got := w.n.Load(); got < 11 || got > 15 {
+		t.Fatalf("paced writer made %d writes with an 8ms sink delay; write time leaked into the frame period", got)
 	}
 }
 
