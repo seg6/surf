@@ -135,17 +135,18 @@ func (s *Server) handleNativeConfig(w http.ResponseWriter, r *http.Request) {
 	clientProtocol := r.URL.Query().Get("nv")
 	compatibility := "compatible"
 	var update map[string]any
-	if clientProtocol != "" && clientProtocol != config.NativeVersion {
-		compatibility = "server-update-required"
-		if s.client != nil && s.client.Protocol == config.NativeVersion &&
-			updater.CompareVersions(s.client.Version, clientVersion) > 0 {
-			compatibility = "client-update-required"
-			update = map[string]any{
-				"version": s.client.Version, "protocol": s.client.Protocol,
-				"size": len(s.client.Data), "sha256": s.client.SHA256,
-				"url": "/updates/v1/client",
-			}
+	canUpdateClient := clientVersion != "" && s.client != nil &&
+		s.client.Protocol == config.NativeVersion &&
+		updater.CompareVersions(s.client.Version, clientVersion) > 0
+	if canUpdateClient {
+		compatibility = "client-update-required"
+		update = map[string]any{
+			"version": s.client.Version, "protocol": s.client.Protocol,
+			"size": len(s.client.Data), "sha256": s.client.SHA256,
+			"url": "/updates/v1/client",
 		}
+	} else if clientProtocol != "" && clientProtocol != config.NativeVersion {
+		compatibility = "server-update-required"
 	}
 	response := map[string]any{
 		"ticket": s.auth.WSTicket(), "vw": s.cfg.ViewW, "vh": s.cfg.ViewH,
