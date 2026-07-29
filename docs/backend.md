@@ -173,6 +173,14 @@ Common overrides:
 - `PULSEAUDIO`, `PACTL`: Linux audio tool paths.
 - `SOURCE_JPEG_QUALITY`: quality of the internal CDP-to-FFmpeg capture;
   defaults to `100` and does not select a client wire format.
+- `STREAM_FPS`: capture and H.264 pacing target; defaults to `30`. Use `60`
+  only when the encoder host and client can sustain it.
+- `STREAM_SCALE`: maximum coded width and height, preserving aspect ratio;
+  defaults to `1024x1024`. For the original iPad, `768x1024` reduces encoder
+  and decoder work without scaling portrait content above its native width.
+- `STREAM_BITRATE`: target H.264 bitrate in kbit/s; defaults to `6000`.
+- `STREAM_MAXRATE`: H.264 VBV peak bitrate in kbit/s; defaults to `8000`.
+- `STREAM_BUFSIZE`: H.264 VBV buffer size in kbit; defaults to `1800`.
 - `SURF_MANAGE_PULSE=1`: force Surf to start a private PulseAudio process
   (Linux).
 - `SURF_ENSURE_PULSE_SINK=0`: do not create `PULSE_SINK` automatically when
@@ -198,3 +206,20 @@ against damaged or mismatched downloads; it is not a separate publisher
 signature. Release builds embed the native package built from the same commit.
 An authenticated native client with an older protocol can download that package
 from `/updates/v1/client`; media WebSockets are never used for update payloads.
+
+For a 60 FPS original-iPad experiment, start with:
+
+```sh
+SURF_PASSWORD='choose-a-password' \
+STREAM_FPS=60 \
+STREAM_SCALE=768x1024 \
+SOURCE_JPEG_QUALITY=75 \
+STREAM_BITRATE=2000 \
+STREAM_MAXRATE=3000 \
+./surf serve
+```
+
+Triple-tap the video on the iPad to open the diagnostics overlay. During
+continuous motion, `AU RATE` should approach 60 and `VT CALLBACK` should remain
+below the 16.7 ms frame budget. Lower `STREAM_SCALE` if decode time exceeds that
+budget.
