@@ -110,8 +110,8 @@ func TestArgsBuildsMjpegFromStdin(t *testing.T) {
 			t.Fatalf("args missing %q: %v", want, args)
 		}
 	}
-	if strings.Count(joined, "-threads 0") != 2 {
-		t.Fatalf("decoder and encoder must both use automatic thread counts: %v", args)
+	if strings.Count(joined, "-threads 0") != 1 || strings.Count(joined, "-threads 1") != 1 {
+		t.Fatalf("JPEG decode must be automatic and x264 encode single-threaded: %v", args)
 	}
 	if args[len(args)-1] != "rtp://127.0.0.1:1234" {
 		t.Fatalf("last arg=%q, want RTP URL (full: %v)", args[len(args)-1], args)

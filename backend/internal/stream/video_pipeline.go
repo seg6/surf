@@ -633,7 +633,11 @@ func (s *VideoPipeline) args(outputURL string) []string {
 		)
 	default:
 		args = append(args,
-			"-threads", "0",
+			// One encoder thread avoids x264's frame pipeline. Automatic
+			// threading improves throughput but adds roughly one frame of
+			// source-to-AU latency and produces slices that are expensive for
+			// the original iPad's VideoToolbox decoder.
+			"-threads", "1",
 			"-profile:v", "baseline", "-level", c.h264Level(),
 			"-preset", x264Speed,
 			"-tune", "zerolatency",
