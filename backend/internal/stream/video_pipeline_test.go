@@ -102,8 +102,8 @@ func TestArgsBuildsMjpegFromStdin(t *testing.T) {
 	args := s.args("rtp://127.0.0.1:1234")
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
-		"-loglevel warning", "-f image2pipe", "-vcodec mjpeg",
-		"-framerate 30", "-probesize 32",
+		"-loglevel warning", "-f mpjpeg", "-vcodec mjpeg",
+		"-r 30", "-probesize 32",
 		"-analyzeduration 0", "-threads 0", "-i pipe:0",
 	} {
 		if !strings.Contains(joined, want) {
@@ -124,7 +124,7 @@ func TestArgsPassesThroughUntimestampedFrames(t *testing.T) {
 	if !strings.Contains(args, "-fps_mode passthrough") {
 		t.Fatalf("args must preserve every event-driven JPEG frame: %s", args)
 	}
-	if !strings.Contains(args, "-framerate 30") {
+	if !strings.Contains(args, "-r 30") {
 		t.Fatalf("args must timestamp input at configured FPS: %s", args)
 	}
 }

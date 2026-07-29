@@ -19,6 +19,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -160,6 +161,7 @@ type pushState struct {
 
 type inputMeta struct {
 	sourceNS    uint64
+	writtenNS   uint64
 	sourceSeq   uint32
 	interaction uint64
 }
@@ -258,12 +260,23 @@ func (ps *pushState) run(w io.Writer) {
 		// bogus multi-second source→encode spikes. The bounded channel may
 		// backpressure only after 256 inputs without any output, which is an
 		// unhealthy encoder rather than a live path worth feeding further.
+		meta.writtenNS = telemetry.MonoNS()
 		select {
 		case ps.written <- meta:
 		case <-ps.done:
 			return
 		}
-		if _, err := w.Write(data); err != nil {
+		// Explicit MIME framing lets FFmpeg release this variable-length JPEG
+		// immediately. image2pipe's raw JPEG parser otherwise holds a complete
+		// image until bytes from the next frame arrive, adding one full frame
+		// of latency at the configured rate.
+		packet := make([]byte, 0, len(data)+96)
+		packet = append(packet, "--surf\r\nContent-Type: image/jpeg\r\nContent-Length: "...)
+		packet = strconv.AppendInt(packet, int64(len(data)), 10)
+		packet = append(packet, "\r\n\r\n"...)
+		packet = append(packet, data...)
+		packet = append(packet, "\r\n"...)
+		if _, err := w.Write(packet); err != nil {
 			return
 		}
 		lastWrite = time.Now()
@@ -599,11 +612,10 @@ func (s *VideoPipeline) args(outputURL string) []string {
 	keyint := 2 * c.FPS
 	args := []string{
 		"-loglevel", "warning",
-		// Each CDP payload is one complete JPEG image. image2pipe models that
-		// directly; the mjpeg demuxer treats stdin like a network MJPEG stream
-		// and was measured buffering multiple frames before decode.
-		"-f", "image2pipe", "-vcodec", "mjpeg",
-		"-framerate", fmt.Sprintf("%d", c.FPS),
+		// Content-Length framing makes each CDP JPEG an immediately complete
+		// packet instead of requiring the next JPEG to flush the parser.
+		"-f", "mpjpeg", "-vcodec", "mjpeg",
+		"-r", fmt.Sprintf("%d", c.FPS),
 		"-probesize", "32", "-analyzeduration", "0",
 		"-threads", "0",
 		"-i", "pipe:0",
@@ -820,8 +832,15 @@ func (s *VideoPipeline) rtpReadLoop(conn *net.UDPConn, gen int, written <-chan i
 				log.Printf("stream: RTP packet dropped: %v", depErr)
 			}
 			if complete {
-				s.accessUnits.Add(1)
+				count := s.accessUnits.Add(1)
 				nowNS := telemetry.MonoNS()
+				if count%150 == 0 && currentMeta.sourceNS != 0 && currentMeta.writtenNS >= currentMeta.sourceNS &&
+					nowNS >= currentMeta.writtenNS {
+					log.Printf("stream latency: source->stdin=%.1fms stdin->rtp=%.1fms total=%.1fms",
+						float64(currentMeta.writtenNS-currentMeta.sourceNS)/1e6,
+						float64(nowNS-currentMeta.writtenNS)/1e6,
+						float64(nowNS-currentMeta.sourceNS)/1e6)
+				}
 				if currentMeta.sourceNS != 0 &&
 					nowNS >= currentMeta.sourceNS &&
 					nowNS-currentMeta.sourceNS <= uint64(maxCorrelationAge) {
