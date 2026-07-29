@@ -16,6 +16,21 @@ import (
 var surfArchive = regexp.MustCompile(`^surf-.+-(linux|windows|darwin)-(amd64|arm64)\.(tar\.gz|zip)$`)
 var surfPackage = regexp.MustCompile(`^surf-.+-(linux|windows|darwin)-(amd64|arm64)(?:-setup)?\.(AppImage|dmg|exe)$`)
 
+var requiredArchives = []string{
+	"linux-amd64",
+	"linux-arm64",
+	"windows-amd64",
+	"darwin-amd64",
+	"darwin-arm64",
+}
+
+var requiredPackages = []string{
+	"linux-amd64",
+	"windows-amd64",
+	"darwin-amd64",
+	"darwin-arm64",
+}
+
 func main() {
 	if len(os.Args) != 6 {
 		fmt.Fprintln(os.Stderr, "usage: updatemanifest ASSET_DIR CLIENT_DEB VERSION PROTOCOL OUTPUT")
@@ -42,16 +57,28 @@ func main() {
 	}
 	client := inspect(clientPath, base)
 	manifest.Client = &updater.ClientAsset{Asset: client, Protocol: protocol}
-	if len(manifest.Assets) != 4 {
-		check(fmt.Errorf("found %d Surf archives, want 4", len(manifest.Assets)))
-	}
-	if len(manifest.Packages) != 4 {
-		check(fmt.Errorf("found %d Surf desktop packages, want 4", len(manifest.Packages)))
-	}
+	check(requirePlatforms("Surf archives", manifest.Assets, requiredArchives))
+	check(requirePlatforms("Surf desktop packages", manifest.Packages, requiredPackages))
 	data, err := json.MarshalIndent(manifest, "", "  ")
 	check(err)
 	data = append(data, '\n')
 	check(os.WriteFile(output, data, 0o644))
+}
+
+func requirePlatforms(kind string, assets map[string]updater.Asset, required []string) error {
+	var missing []string
+	for _, platform := range required {
+		if _, ok := assets[platform]; !ok {
+			missing = append(missing, platform)
+		}
+	}
+	if len(missing) != 0 {
+		return fmt.Errorf("%s missing required platforms: %s", kind, strings.Join(missing, ", "))
+	}
+	if len(assets) != len(required) {
+		return fmt.Errorf("found %d %s, want exactly %d", len(assets), kind, len(required))
+	}
+	return nil
 }
 
 func inspect(path, base string) updater.Asset {
