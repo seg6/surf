@@ -30,8 +30,9 @@ iPhones, and iPods may work, but layout and performance are less tested.
 The video/browsing backend supports Linux x86-64 and ARM64, Windows x86-64, and macOS
 Intel/Apple Silicon. It prefers an installed Chrome or Chromium and otherwise
 installs a verified ungoogled-chromium release into `SURF_HOME`. Release
-packages include the tested FFmpeg runtime. Audio capture currently requires Linux plus
-PulseAudio or PipeWire Pulse compatibility. See `docs/backend.md` for details.
+packages include the tested FFmpeg runtime. Audio capture supports Linux through
+PulseAudio or PipeWire Pulse compatibility and Windows 10 build 20348 or later
+through native per-process WASAPI loopback. See `docs/backend.md` for details.
 
 ## AI Disclosure
 
@@ -54,6 +55,7 @@ code, test your setup, and assume there are rough edges.
 - Filza, iFile, OpenSSH, or another way to install `.deb` packages.
 - A Linux, Windows, or macOS computer for `surf`.
 - On Linux, `pactl` with PulseAudio or PipeWire Pulse compatibility for audio.
+- On Windows, build 20348 or later for native Chromium process audio capture.
 - Enough disk space for Chromium and Surf's media runtime.
 - A low-latency network between the device and backend. LAN is best.
 

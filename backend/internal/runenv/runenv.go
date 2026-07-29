@@ -24,7 +24,8 @@ func (r *Runtime) Shutdown() {
 }
 
 // Start prepares whatever audio service the current OS needs — a PulseAudio
-// sink on Linux; nothing on Windows/macOS — via the matching implementation.
+// sink on Linux, a process-loopback handle on Windows, and nothing on macOS —
+// via the matching implementation.
 func Start(cfg *config.Config) (*Runtime, error) {
 	handle, err := newPlatform().Prepare(cfg)
 	if err != nil {

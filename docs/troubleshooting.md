@@ -34,7 +34,8 @@ Surf installs managed ungoogled-chromium when no compatible system Chrome or
 Chromium is present. Development builds may also download FFmpeg. If a download
 is blocked, permit access to GitHub
 Releases, or set `CHROME`/`FFMPEG` to explicit local executables. Linux audio
-also requires the PulseAudio-compatible tools reported by `doctor`.
+also requires the PulseAudio-compatible tools reported by `doctor`. Windows
+audio requires Windows build 20348 or later and the Windows Audio service.
 
 ## Managed Runtime Download Fails
 

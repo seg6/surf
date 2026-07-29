@@ -222,6 +222,9 @@ func (b *Controller) Start() error {
 	}
 	b.source = NewScreencastSource(client, b.onSourceFrame)
 	b.cmd = cmd
+	if aware, ok := b.platform.(runenv.BrowserProcessAware); ok {
+		aware.BrowserStarted(cmd.Pid)
+	}
 	client.OnEvent(func(event cdp.Event) {
 		if event.Method == "Page.screencastFrame" {
 			// Media is not controller state. Route it straight to the

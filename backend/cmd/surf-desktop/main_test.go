@@ -23,8 +23,12 @@ func TestDesktopConfigRoundTrip(t *testing.T) {
 		t.Fatalf("config=%+v err=%v", got, err)
 	}
 	info, err := os.Stat(filepath.Join(home, "desktop.json"))
-	if err != nil || info.Mode().Perm()&0o077 != 0 {
-		t.Fatalf("mode=%v err=%v", info.Mode(), err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Windows does not expose Unix permission bits through os.FileMode.
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+		t.Fatalf("mode=%v", info.Mode())
 	}
 
 	want = desktopConfig{Password: "replacement-secret", Port: 18080}

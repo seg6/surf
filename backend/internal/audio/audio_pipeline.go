@@ -29,6 +29,11 @@ type Config struct {
 	FFmpegPath string
 	Source     string
 	Env        []string
+	// Capture opens a native PCM source that already produces signed
+	// little-endian 16 kHz mono samples. Windows uses this for WASAPI
+	// process-loopback capture. When nil, the pipeline launches FFmpeg with
+	// CaptureArgs (the Linux PulseAudio path).
+	Capture func() (io.ReadCloser, error)
 	// CaptureArgs builds the ffmpeg arguments (up to and including "-i
 	// <source>") that grab this platform's system audio. Nil means the PCM
 	// lane is unsupported here; startLocked fails every subscriber
@@ -56,7 +61,9 @@ type AudioPipeline struct {
 	mu        sync.Mutex
 	subs      map[*Sub]struct{}
 	cmd       *exec.Cmd
+	capture   io.ReadCloser
 	running   bool
+	runID     uint64
 	seq       uint32
 	stopTimer *time.Timer
 	drops     atomic.Uint64
@@ -119,6 +126,21 @@ func (sub *Sub) Close() {
 }
 
 func (s *AudioPipeline) startLocked() {
+	if s.cfg.Capture != nil {
+		capture, err := s.cfg.Capture()
+		if err != nil {
+			log.Printf("audio: native capture failed: %v", err)
+			s.failAllLocked()
+			return
+		}
+		s.runID++
+		runID := s.runID
+		s.capture = capture
+		s.running = true
+		log.Printf("audio: native capture started %dHz mono", sampleRate)
+		go s.readLoop(capture, nil, runID)
+		return
+	}
 	var captureArgs []string
 	if s.cfg.CaptureArgs != nil {
 		captureArgs = s.cfg.CaptureArgs(s.cfg.Source)
@@ -144,16 +166,19 @@ func (s *AudioPipeline) startLocked() {
 		s.failAllLocked()
 		return
 	}
+	s.runID++
+	runID := s.runID
 	s.cmd = cmd
+	s.capture = stdout
 	s.running = true
 	log.Printf("audio: capture started pid=%d %dHz mono", cmd.Process.Pid, sampleRate)
 	if stderr != nil {
 		go logStderr(stderr)
 	}
-	go s.readLoop(stdout, cmd)
+	go s.readLoop(stdout, cmd, runID)
 }
 
-func (s *AudioPipeline) readLoop(r io.Reader, cmd *exec.Cmd) {
+func (s *AudioPipeline) readLoop(r io.Reader, cmd *exec.Cmd, runID uint64) {
 	buf := make([]byte, chunkBytes)
 	for {
 		if _, err := io.ReadFull(r, buf); err != nil {
@@ -161,7 +186,7 @@ func (s *AudioPipeline) readLoop(r io.Reader, cmd *exec.Cmd) {
 		}
 		data := append([]byte(nil), buf...)
 		s.mu.Lock()
-		if cmd != s.cmd || !s.running {
+		if runID != s.runID || !s.running {
 			s.mu.Unlock()
 			return
 		}
@@ -187,12 +212,15 @@ func (s *AudioPipeline) readLoop(r io.Reader, cmd *exec.Cmd) {
 		}
 		s.mu.Unlock()
 	}
-	_ = cmd.Wait()
+	if cmd != nil {
+		_ = cmd.Wait()
+	}
 	s.mu.Lock()
-	if cmd == s.cmd {
+	if runID == s.runID {
 		log.Printf("audio: capture stopped")
 		s.running = false
 		s.cmd = nil
+		s.capture = nil
 		s.failAllLocked()
 	}
 	s.mu.Unlock()
@@ -216,11 +244,16 @@ func logStderr(r io.Reader) {
 }
 
 func (s *AudioPipeline) stopLocked() {
+	s.runID++
+	if s.capture != nil {
+		_ = s.capture.Close()
+	}
 	if s.cmd != nil && s.cmd.Process != nil {
 		proc.Kill(s.cmd.Process.Pid)
 	}
 	s.running = false
 	s.cmd = nil
+	s.capture = nil
 }
 
 func (s *AudioPipeline) failAllLocked() {

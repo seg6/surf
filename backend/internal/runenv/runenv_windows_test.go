@@ -23,14 +23,25 @@ func TestWindowsDoctorChecksCommonToolsOnly(t *testing.T) {
 	}
 }
 
-func TestWindowsHandleHasNoAudioLane(t *testing.T) {
+func TestWindowsHandleUsesNativeAudioLane(t *testing.T) {
 	h, err := newPlatform().Prepare(&config.Config{ChromePath: `C:\custom\chrome.exe`})
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
 	defer h.Shutdown()
+	if _, ok := h.(NativeAudioCapturer); !ok {
+		t.Fatal("Windows handle does not implement NativeAudioCapturer")
+	}
+	aware, ok := h.(BrowserProcessAware)
+	if !ok {
+		t.Fatal("Windows handle does not implement BrowserProcessAware")
+	}
+	if _, err := h.(NativeAudioCapturer).OpenAudioCapture(); err == nil {
+		t.Fatal("OpenAudioCapture succeeded without a Chromium PID")
+	}
+	aware.BrowserStarted(1234)
 	if h.AudioCaptureArgs("") != nil {
-		t.Fatal("AudioCaptureArgs should be nil (PCM lane unsupported)")
+		t.Fatal("Windows should not use FFmpeg capture arguments")
 	}
 }
 

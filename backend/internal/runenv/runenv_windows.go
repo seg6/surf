@@ -15,24 +15,25 @@
 // created at all, not merely hidden) and removes a real, demonstrated risk
 // (SwitchDesktop-adjacent Win32 desktop APIs) along with it.
 //
-// The PCM lane is still unsupported here: dshow only exposes physical input
-// devices (microphones) on a stock Windows box, not a loopback/monitor
-// source. Capturing Chromium's own audio without also capturing the host's
-// speakers needs either a virtual audio cable or the Windows 10 2004+
-// per-process loopback API (ActivateAudioInterfaceAsync with
-// AUDIOCLIENT_ACTIVATION_PARAMS/PROCESS_LOOPBACK) — neither is wired up yet.
+// The PCM lane uses Windows process-loopback WASAPI capture. Unlike endpoint
+// loopback it follows Chromium's root PID and descendants across output
+// devices without recording unrelated host audio.
 package runenv
 
 import (
+	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync/atomic"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 
 	"surf-backend/internal/config"
+	"surf-backend/internal/winaudio"
 )
 
 func newPlatform() Platform { return windowsPlatform{} }
@@ -141,7 +142,8 @@ func findChromium() string {
 
 // windowsHandle holds the kill-on-close Job Object (if it could be set up).
 type windowsHandle struct {
-	job windows.Handle
+	job        windows.Handle
+	browserPID atomic.Uint32
 }
 
 func (wh *windowsHandle) Shutdown() {
@@ -150,6 +152,19 @@ func (wh *windowsHandle) Shutdown() {
 	}
 }
 
-// AudioCaptureArgs is unsupported for now: nil disables the PCM lane. See
-// the package doc for what a real implementation needs.
+func (wh *windowsHandle) BrowserStarted(pid int) {
+	if pid > 0 {
+		wh.browserPID.Store(uint32(pid))
+	}
+}
+
+func (wh *windowsHandle) OpenAudioCapture() (io.ReadCloser, error) {
+	pid := wh.browserPID.Load()
+	if pid == 0 {
+		return nil, fmt.Errorf("Chromium has not started")
+	}
+	return winaudio.OpenProcessLoopback(pid)
+}
+
+// Windows captures natively through WASAPI rather than an FFmpeg device.
 func (wh *windowsHandle) AudioCaptureArgs(source string) []string { return nil }

@@ -3,8 +3,8 @@
 The backend is started with `surf serve`. It runs managed Chrome in
 `--headless=new`, transcodes CDP screencast frames to H.264 with bundled
 FFmpeg, and streams video, audio, and control messages to the native client.
-Windows and macOS are also supported for the video/browsing path; audio
-capture is Linux-only for now.
+Audio capture supports Linux and Windows 10 build 20348 or later. macOS
+currently supports the video/browsing path without audio capture.
 
 ## Desktop app
 
@@ -57,7 +57,11 @@ sudo dnf install pulseaudio-utils pulseaudio
 sudo pacman -S pulseaudio
 ```
 
-Audio capture is not yet implemented on Windows and macOS.
+Windows audio uses the native process-loopback WASAPI API available in build
+20348 and later. It follows the managed Chromium process and all descendants,
+works across output-device changes, and excludes unrelated host audio. No
+virtual audio cable or FFmpeg input device is required. Audio capture is not
+yet implemented on macOS.
 
 ## Quick Start
 
@@ -127,7 +131,8 @@ reported as explicit `video-config` states and require `video-retry`.
 
 The Linux runtime uses a pinned BtbN GPL build because Surf needs both the
 Pulse input device and libx264. Windows and macOS use pinned `ffmpeg-static`
-executables; audio capture is not implemented on those platforms.
+executables. Windows audio bypasses FFmpeg input and reads 16 kHz mono PCM
+directly from the OS process-loopback capture API.
 
 There is no desktop capture, headful, headless-shell, or screenshot-polling
 mode. `CHROME=/path/to/browser` and `FFMPEG=/path/to/ffmpeg` remain explicit
@@ -142,7 +147,7 @@ schedules ordered control, drop-oldest audio, and a four-AU GOP-aware video
 queue; `AudioPipeline` owns capture and bounded fan-out. Video overflow
 requests an immediate cooldown-protected IDR instead of accumulating delay.
 
-Protocol `20260729-3` uses a 96-byte extensible binary header carrying AU and
+Protocol `20260729-4` uses a 96-byte extensible binary header carrying AU and
 source sequences, coded size, interaction ID, backend timing stamps, encoder
 generation, CDP scroll metadata, and the active adaptive profile. The
 socket-write timestamp is stamped by the WebSocket writer immediately before
@@ -171,10 +176,16 @@ back up. Static pages are excluded from FPS and presentation-gap decisions
 because CDP intentionally emits only sparse bootstrap frames when nothing
 changes.
 
-For audio (Linux only), Surf first checks whether `pactl info` can reach an
+For audio on Linux, Surf first checks whether `pactl info` can reach an
 existing PulseAudio-compatible server. On common PipeWire desktops this
 succeeds, so Surf creates a `surf_output` null sink there and unloads it on
 shutdown. If no server is available, Surf starts its own PulseAudio process.
+
+On Windows, Surf registers Chromium's root PID after launch and activates the
+`VAD\Process_Loopback` WASAPI virtual device for that process tree when the
+client subscribes. Windows converts the capture stream directly to signed
+16-bit, 16 kHz mono PCM before it enters the same bounded audio fan-out used
+on Linux.
 
 Data is stored under `~/.surf/` by default:
 
