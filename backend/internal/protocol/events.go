@@ -19,6 +19,7 @@ type VideoConfigEvent struct {
 	W          int    `json:"w,omitempty"`
 	H          int    `json:"h,omitempty"`
 	Generation uint32 `json:"generation,omitempty"`
+	Profile    string `json:"profile,omitempty"`
 }
 
 type AudioConfigEvent struct {

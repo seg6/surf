@@ -1,11 +1,12 @@
 #import <Foundation/Foundation.h>
+#import <CoreVideo/CoreVideo.h>
 #import <CoreGraphics/CoreGraphics.h>
 
 @class RBMediaPipeline;
 @class RBFrameMetadata;
 
 @protocol RBMediaPipelineDelegate <NSObject>
-- (void)mediaPipeline:(RBMediaPipeline *)pipeline didDecodeImage:(CGImageRef)image
+- (void)mediaPipeline:(RBMediaPipeline *)pipeline didDecodePixelBuffer:(CVPixelBufferRef)pixelBuffer
              metadata:(RBFrameMetadata *)metadata;
 - (void)mediaPipelineDidFailVideo:(RBMediaPipeline *)pipeline;
 - (void)mediaPipelineNeedsKeyframe:(RBMediaPipeline *)pipeline;

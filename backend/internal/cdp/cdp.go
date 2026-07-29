@@ -71,12 +71,14 @@ type envelope struct {
 var devtoolsRe = regexp.MustCompile(`DevTools listening on (ws://\S+)`)
 
 type LaunchConfig struct {
-	ChromePath string
-	Profile    string
-	W, H       int
-	Env        []string
-	NoSandbox  bool
-	ExtraArgs  []string
+	ChromePath    string
+	Profile       string
+	W, H          int
+	Env           []string
+	NoSandbox     bool
+	EnableGPU     bool
+	ExtensionPath string
+	ExtraArgs     []string
 }
 
 // Args builds the managed Chrome headless-new launch flags.
@@ -111,9 +113,23 @@ func (cfg LaunchConfig) Args() []string {
 		"--disable-features=Translate,MediaRouter,AcceptCHFrame,OptimizationHints",
 		fmt.Sprintf("--window-size=%d,%d", cfg.W, cfg.H),
 	}
-	args = append(args, "--disable-gpu", "--test-type", "--headless=new")
+	args = append(args, "--test-type", "--headless=new")
+	if cfg.EnableGPU {
+		// Modern headless otherwise forces SwiftShader for reproducibility.
+		// This merely permits native driver selection; Chromium can still
+		// fall back safely when the platform has no usable GPU.
+		args = append(args, "--enable-gpu")
+	} else {
+		args = append(args, "--disable-gpu")
+	}
 	if cfg.NoSandbox {
 		args = append(args, "--no-sandbox")
+	}
+	if cfg.ExtensionPath != "" {
+		args = append(args,
+			"--disable-extensions-except="+cfg.ExtensionPath,
+			"--load-extension="+cfg.ExtensionPath,
+		)
 	}
 	args = append(args, cfg.ExtraArgs...)
 	args = append(args, "about:blank")

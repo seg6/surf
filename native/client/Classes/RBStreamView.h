@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#import <CoreVideo/CoreVideo.h>
 
 @class RBStreamView;
 @class RBFrameMetadata;
@@ -15,5 +16,6 @@
 @property(nonatomic, readonly) CFTimeInterval lastPresentationAt;
 @property(nonatomic, readonly) double maximumPresentationGapMS;
 
-- (void)displayVideoImage:(CGImageRef)image metadata:(RBFrameMetadata *)metadata;
+- (void)displayVideoPixelBuffer:(CVPixelBufferRef)pixelBuffer metadata:(RBFrameMetadata *)metadata;
+- (double)consumeRecentMaximumPresentationGapMS;
 @end

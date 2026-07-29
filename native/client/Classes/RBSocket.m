@@ -3,6 +3,7 @@
 
 #import <CFNetwork/CFSocketStream.h>
 #import <CommonCrypto/CommonDigest.h>
+#import <QuartzCore/QuartzCore.h>
 #import <arpa/inet.h>
 #import <errno.h>
 #import <fcntl.h>
@@ -379,6 +380,7 @@ static BOOL RBReadAll(int fd, void *buf, NSUInteger len) {
     NSMutableData *fragment = nil;
     unsigned char fragmentOpcode = 0;
     while (self.running) {
+      @autoreleasepool {
         unsigned char h[2];
         if (![self readAll:h length:2]) break;
         BOOL fin = (h[0] & 0x80) != 0;
@@ -427,6 +429,7 @@ static BOOL RBReadAll(int fd, void *buf, NSUInteger len) {
                 fragmentOpcode = 0;
             }
         }
+      }
     }
     [self notifyClose:@"socket closed"];
 }
@@ -444,7 +447,6 @@ static BOOL RBReadAll(int fd, void *buf, NSUInteger len) {
             if (self.running && [delegate respondsToSelector:@selector(socket:didReceiveText:)]) [delegate socket:self didReceiveText:text ?: @""];
         });
     } else if (opcode == 0x2) {
-        NSData *copy = [payload copy];
         // Media must never transit UIKit's main queue. At 30 video AUs plus
         // 50 audio packets per second, posting every packet there created a
         // persistent queue behind touch handling and display-link callbacks;
@@ -454,7 +456,7 @@ static BOOL RBReadAll(int fd, void *buf, NSUInteger len) {
         // RBAudioPlayer protects its AudioQueue state with a lock.
         id<RBSocketDelegate> delegate = self.delegate;
         if (self.running && [delegate respondsToSelector:@selector(socket:didReceiveBinary:)]) {
-            [delegate socket:self didReceiveBinary:copy];
+            [delegate socket:self didReceiveBinary:payload];
         }
     }
 }
@@ -480,7 +482,12 @@ static BOOL RBReadAll(int fd, void *buf, NSUInteger len) {
     if (!self.running) return;
     NSData *payloadCopy = [payload copy];
     if (async) {
-        dispatch_async(self.writeQueue, ^{ [self sendFrameOpcode:opcode payload:payloadCopy async:NO]; });
+        CFTimeInterval enqueuedAt = CACurrentMediaTime();
+        dispatch_async(self.writeQueue, ^{
+            double dwellMS = (CACurrentMediaTime() - enqueuedAt) * 1000.0;
+            if (dwellMS >= 10.0) RBLog(@"socket control queue dwell %.1fms", dwellMS);
+            [self sendFrameOpcode:opcode payload:payloadCopy async:NO];
+        });
         return;
     }
     NSUInteger len = [payloadCopy length];

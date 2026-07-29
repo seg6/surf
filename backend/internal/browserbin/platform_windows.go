@@ -16,8 +16,8 @@ func systemCandidates() []candidate {
 	var result []candidate
 	for _, root := range []string{os.Getenv("PROGRAMFILES"), os.Getenv("PROGRAMFILES(X86)"), os.Getenv("LOCALAPPDATA")} {
 		if root != "" {
-			result = append(result, candidate{filepath.Join(root, "Google", "Chrome", "Application", "chrome.exe"), "system Google Chrome Stable"})
-			result = append(result, candidate{filepath.Join(root, "Chromium", "Application", "chrome.exe"), "system Chromium"})
+			result = append(result, candidate{path: filepath.Join(root, "Google", "Chrome", "Application", "chrome.exe"), label: "system Google Chrome Stable", branded: true})
+			result = append(result, candidate{path: filepath.Join(root, "Chromium", "Application", "chrome.exe"), label: "system Chromium"})
 		}
 	}
 	return result

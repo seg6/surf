@@ -91,14 +91,14 @@ func (b *Controller) ClientConnected(c *ws.ClientTransport) {
 // sole ordered executor (press before release, key order, tab commands).
 func (b *Controller) HandleMessage(c *ws.ClientTransport, command protocol.Command) {
 	select {
-	case b.commands <- controllerCommand{client: c, command: command}:
+	case b.commands <- controllerCommand{client: c, command: command, receivedNS: telemetry.MonoNS()}:
 	case <-c.Closed():
 	default:
 		c.Close()
 	}
 }
 
-func (b *Controller) handleCommand(c *ws.ClientTransport, command protocol.Command) {
+func (b *Controller) handleCommand(c *ws.ClientTransport, command protocol.Command, receivedNS uint64) {
 	kind := command.Kind()
 	telemetry.Emit("client_command", "input", "controller", map[string]any{"type": kind})
 	iid, _ := command.Causal()
@@ -108,6 +108,8 @@ func (b *Controller) handleCommand(c *ws.ClientTransport, command protocol.Comma
 		defer func() {
 			b.perfMu.Lock()
 			b.interactionID = iid
+			b.interactionInputNS = receivedNS
+			b.interactionCDPNS = telemetry.MonoNS()
 			b.perfMu.Unlock()
 		}()
 	}
@@ -125,6 +127,9 @@ func (b *Controller) handleCommand(c *ws.ClientTransport, command protocol.Comma
 		return
 	case *protocol.DialogReplyCommand:
 		b.handleDialogReply(m)
+		return
+	case *protocol.MediaStatsCommand:
+		b.handleMediaStats(m)
 		return
 	case *protocol.URLCommand:
 		if kind == "opennew" {
@@ -190,14 +195,18 @@ func (b *Controller) handleCommand(c *ws.ClientTransport, command protocol.Comma
 			t.loading = true
 			b.mu.Unlock()
 			b.navigateHistory(s, kind == "back")
+		case "media-playpause":
+			b.controlPageMedia(s, false)
+		case "media-mute":
+			b.controlPageMedia(s, true)
 		default:
 			b.handleFeatureMessage(c, t, s, command)
 		}
 	case *protocol.PointCommand:
 		switch kind {
 		case "click":
-			b.mouse(s, "mousePressed", m.X*cssW, m.Y*cssH, 1)
-			b.mouse(s, "mouseReleased", m.X*cssW, m.Y*cssH, 1)
+			x, y := m.X*cssW, m.Y*cssH
+			b.tap(s, x, y)
 			b.checkEditable(c, s)
 		case "lpdown":
 			b.mouse(s, "mousePressed", m.X*cssW, m.Y*cssH, 1)
@@ -244,6 +253,23 @@ func (b *Controller) handleCommand(c *ws.ClientTransport, command protocol.Comma
 	default:
 		b.handleFeatureMessage(c, t, s, command)
 	}
+}
+
+func (b *Controller) controlPageMedia(session string, toggleMute bool) {
+	action := `var media=document.querySelectorAll('video,audio');
+var shouldPause=Array.prototype.some.call(media,function(m){return !m.paused;});
+Array.prototype.forEach.call(media,function(m){
+  if(shouldPause)m.pause();else{var p=m.play();if(p&&p.catch)p.catch(function(){});}
+});`
+	if toggleMute {
+		action = `var media=document.querySelectorAll('video,audio');
+var shouldMute=Array.prototype.some.call(media,function(m){return !m.muted;});
+Array.prototype.forEach.call(media,function(m){m.muted=shouldMute;});`
+	}
+	_ = b.cdp.Dispatch(session, "Runtime.evaluate", map[string]any{
+		"expression":  "(function(){" + action + "})()",
+		"userGesture": true,
+	})
 }
 
 func renderCommand(t string) bool {
@@ -416,6 +442,9 @@ func (b *Controller) handleSize(m *protocol.SizeCommand) {
 	}
 	b.stopCast(t)
 	b.applyView(t)
+	profile := adaptiveProfiles[b.profileIndex()]
+	maxW, maxH := adaptiveScale(profile, w, h)
+	b.video.SetScaleLimit(maxW, maxH)
 	b.requestVideoResize(w, h, nil, "")
 	b.ensureCast(t)
 }
@@ -461,6 +490,27 @@ func (b *Controller) mouse(session, typ string, x, y float64, clicks int) {
 	_ = b.cdp.Dispatch(session, "Input.dispatchMouseEvent", map[string]any{
 		"type": typ, "x": math.Round(x), "y": math.Round(y),
 		"button": "left", "clickCount": clicks,
+	})
+}
+
+func (b *Controller) tap(session string, x, y float64) {
+	point := map[string]any{
+		"x": math.Round(x), "y": math.Round(y), "id": 0,
+		"radiusX": 1, "radiusY": 1, "force": 1,
+	}
+	_ = b.cdp.Dispatch(session, "Input.dispatchTouchEvent", map[string]any{
+		"type": "touchStart", "touchPoints": []any{point},
+	})
+	// Chrome synthesizes the compatibility click from this touch sequence.
+	// Sending an additional mouse event would activate controls twice.
+	_ = b.cdp.Dispatch(session, "Input.dispatchTouchEvent", map[string]any{
+		"type": "touchEnd", "touchPoints": []any{},
+	})
+}
+
+func (b *Controller) setTouchMode(session string) {
+	_ = b.cdp.Dispatch(session, "Emulation.setTouchEmulationEnabled", map[string]any{
+		"enabled": true, "maxTouchPoints": 1,
 	})
 }
 

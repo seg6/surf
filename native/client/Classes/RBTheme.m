@@ -244,26 +244,12 @@
             CGContextStrokePath(ctx);
             break;
         }
-        case RBIconShare: {
-            // Safari action glyph: box with an arrow rising out of the top.
-            CGFloat lw2 = MAX(1.5, lw * 0.65);
-            CGContextSetLineWidth(ctx, lw2);
-            CGFloat boxTop = s * 0.40;
-            CGContextMoveToPoint(ctx, mid - s * 0.14, boxTop);
-            CGContextAddLineToPoint(ctx, pad, boxTop);
-            CGContextAddLineToPoint(ctx, pad, s - pad * 0.9);
-            CGContextAddLineToPoint(ctx, s - pad, s - pad * 0.9);
-            CGContextAddLineToPoint(ctx, s - pad, boxTop);
-            CGContextAddLineToPoint(ctx, mid + s * 0.14, boxTop);
-            CGContextStrokePath(ctx);
-            // arrow shaft + head
-            CGContextMoveToPoint(ctx, mid, s * 0.62);
-            CGContextAddLineToPoint(ctx, mid, pad * 0.7);
-            CGContextStrokePath(ctx);
-            CGContextMoveToPoint(ctx, mid - s * 0.13, pad * 0.7 + s * 0.13);
-            CGContextAddLineToPoint(ctx, mid, pad * 0.7);
-            CGContextAddLineToPoint(ctx, mid + s * 0.13, pad * 0.7 + s * 0.13);
-            CGContextStrokePath(ctx);
+        case RBIconMore: {
+            CGFloat r = MAX(1.7, s * 0.075);
+            for (int i = -1; i <= 1; i++) {
+                CGFloat x = mid + i * s * 0.23;
+                CGContextFillEllipseInRect(ctx, CGRectMake(x - r, mid - r, r * 2.0, r * 2.0));
+            }
             break;
         }
         case RBIconShrink: {

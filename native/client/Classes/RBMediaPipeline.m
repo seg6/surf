@@ -76,9 +76,9 @@
     }
 }
 
-- (void)videoDecoder:(RBVideoDecoder *)decoder didDecodeImage:(CGImageRef)image
+- (void)videoDecoder:(RBVideoDecoder *)decoder didDecodePixelBuffer:(CVPixelBufferRef)pixelBuffer
             metadata:(RBFrameMetadata *)metadata {
-    if (self.videoActive) [self.delegate mediaPipeline:self didDecodeImage:image metadata:metadata];
+    if (self.videoActive) [self.delegate mediaPipeline:self didDecodePixelBuffer:pixelBuffer metadata:metadata];
 }
 
 - (void)videoDecoderDidFail:(RBVideoDecoder *)decoder {

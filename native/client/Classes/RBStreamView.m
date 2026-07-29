@@ -1,32 +1,93 @@
 #import "RBStreamView.h"
+#import "RBLog.h"
 #import "RBProtocol.h"
 
 #import <QuartzCore/QuartzCore.h>
+#import <OpenGLES/ES2/gl.h>
+#import <OpenGLES/ES2/glext.h>
 
-@interface RBStreamView ()
-@property(nonatomic, strong) CALayer *contentLayer;
+@interface RBStreamView () {
+    CVPixelBufferRef _pendingBuffer;
+    CVPixelBufferRef _currentBuffer;
+    CVOpenGLESTextureCacheRef _textureCache;
+    GLuint _framebuffer;
+    GLuint _renderbuffer;
+    GLuint _program;
+    GLint _positionSlot;
+    GLint _texCoordSlot;
+}
+@property(nonatomic, strong) EAGLContext *glContext;
 @property(nonatomic, strong) CADisplayLink *videoDisplayLink;
-@property(nonatomic, assign) CGImageRef pendingVideoImage;
 @property(nonatomic, strong) RBFrameMetadata *pendingMetadata;
 @property(nonatomic, assign) NSUInteger presentedFrames;
 @property(nonatomic, assign) NSUInteger overwrittenVideoFrames;
 @property(nonatomic, assign) CFTimeInterval lastPresentationAt;
 @property(nonatomic, assign) double maximumPresentationGapMS;
+@property(nonatomic, assign) double recentMaximumPresentationGapMS;
 @end
+
+static GLuint RBCompileShader(GLenum type, const char *source) {
+    GLuint shader = glCreateShader(type);
+    GLint length = (GLint)strlen(source);
+    glShaderSource(shader, 1, &source, &length);
+    glCompileShader(shader);
+    GLint ok = 0;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
+    if (!ok) {
+        glDeleteShader(shader);
+        return 0;
+    }
+    return shader;
+}
 
 @implementation RBStreamView
 
-- (void)startVideoDisplayLinkIfNeeded {
-	if (self.videoDisplayLink || !self.videoActive || !self.window) return;
-	self.videoDisplayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(displayVideoTick:)];
-	// Poll every physical refresh, even though the stream is nominally 30fps.
-	// A fixed every-second-tick schedule aliases badly with VideoToolbox's
-	// ~16ms callback latency: a frame arriving just after its 30Hz tick waits
-	// 33ms and is often overwritten by the following decode. A 60Hz poll
-	// presents each completed frame on the next refresh without duplicating
-	// work when no frame is pending.
-	self.videoDisplayLink.frameInterval = 1;
-	[self.videoDisplayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
++ (Class)layerClass { return [CAEAGLLayer class]; }
+
+- (BOOL)setupGL {
+    self.glContext = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES2];
+    if (!self.glContext || ![EAGLContext setCurrentContext:self.glContext]) return NO;
+    CAEAGLLayer *layer = (CAEAGLLayer *)self.layer;
+    layer.opaque = YES;
+    layer.drawableProperties = @{kEAGLDrawablePropertyRetainedBacking: @NO,
+                                 kEAGLDrawablePropertyColorFormat: kEAGLColorFormatRGBA8};
+    glGenFramebuffers(1, &_framebuffer);
+    glGenRenderbuffers(1, &_renderbuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, _framebuffer);
+    glBindRenderbuffer(GL_RENDERBUFFER, _renderbuffer);
+    [self.glContext renderbufferStorage:GL_RENDERBUFFER fromDrawable:layer];
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, _renderbuffer);
+
+    const char *vertex =
+        "attribute vec2 position; attribute vec2 texCoord;"
+        "varying vec2 uv;"
+        "void main(){ gl_Position=vec4(position,0.0,1.0); uv=texCoord; }";
+    const char *fragment =
+        "precision mediump float; varying vec2 uv;"
+        "uniform sampler2D luma; uniform sampler2D chroma;"
+        "void main(){ float y=texture2D(luma,uv).r-0.0625;"
+        "vec2 c=texture2D(chroma,uv).ra-vec2(0.5,0.5);"
+        "gl_FragColor=vec4(1.1643*y+1.5958*c.y,"
+        "1.1643*y-0.39173*c.x-0.81290*c.y,"
+        "1.1643*y+2.017*c.x,1.0); }";
+    GLuint vs = RBCompileShader(GL_VERTEX_SHADER, vertex);
+    GLuint fs = RBCompileShader(GL_FRAGMENT_SHADER, fragment);
+    if (!vs || !fs) return NO;
+    _program = glCreateProgram();
+    glAttachShader(_program, vs);
+    glAttachShader(_program, fs);
+    glLinkProgram(_program);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+    GLint linked = 0;
+    glGetProgramiv(_program, GL_LINK_STATUS, &linked);
+    if (!linked) return NO;
+    _positionSlot = glGetAttribLocation(_program, "position");
+    _texCoordSlot = glGetAttribLocation(_program, "texCoord");
+    CVReturn status = CVOpenGLESTextureCacheCreate(kCFAllocatorDefault, NULL,
+                                                   self.glContext,
+                                                   NULL, &_textureCache);
+    return status == kCVReturnSuccess;
 }
 
 - (id)initWithFrame:(CGRect)frame {
@@ -35,91 +96,160 @@
         self.backgroundColor = [UIColor blackColor];
         self.opaque = YES;
         self.multipleTouchEnabled = YES;
-
-        self.contentLayer = [CALayer layer];
-        self.contentLayer.contentsGravity = kCAGravityResize;
-        [self.layer addSublayer:self.contentLayer];
+        [self setupGL];
     }
     return self;
 }
 
-- (void)dealloc {
-	[self.videoDisplayLink invalidate];
-	if (_pendingVideoImage) CGImageRelease(_pendingVideoImage);
-}
-
 - (void)layoutSubviews {
     [super layoutSubviews];
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    self.contentLayer.frame = self.bounds;
-    [CATransaction commit];
+    if (!self.glContext) return;
+    [EAGLContext setCurrentContext:self.glContext];
+    glBindRenderbuffer(GL_RENDERBUFFER, _renderbuffer);
+    [self.glContext renderbufferStorage:GL_RENDERBUFFER fromDrawable:(CAEAGLLayer *)self.layer];
+    glBindFramebuffer(GL_FRAMEBUFFER, _framebuffer);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, _renderbuffer);
+}
+
+- (void)startVideoDisplayLinkIfNeeded {
+    if (self.videoDisplayLink || !self.videoActive || !self.window) return;
+    self.videoDisplayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(displayVideoTick:)];
+    self.videoDisplayLink.frameInterval = 1;
+    [self.videoDisplayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
 }
 
 - (void)didMoveToWindow {
-	[super didMoveToWindow];
-	if (self.window) {
-		[self startVideoDisplayLinkIfNeeded];
-	} else {
-		// Break CADisplayLink's retain on its target even if the controller is
-		// torn down without explicitly leaving video mode.
-		[self.videoDisplayLink invalidate];
-		self.videoDisplayLink = nil;
-	}
+    [super didMoveToWindow];
+    if (self.window) [self startVideoDisplayLinkIfNeeded];
+    else {
+        [self.videoDisplayLink invalidate];
+        self.videoDisplayLink = nil;
+    }
 }
 
 - (void)setVideoActive:(BOOL)videoActive {
     if (_videoActive == videoActive) return;
     _videoActive = videoActive;
-	if (videoActive) {
-		// Decode/network completion is bursty and carries no presentation
-		// timestamps. Keep only the newest decoded frame and commit it on the
-		// next physical display refresh.
-		[self startVideoDisplayLinkIfNeeded];
-	} else {
-		// CADisplayLink retains its target; invalidate and release it here
-		// rather than leaving a view -> link -> view retain cycle.
-		[self.videoDisplayLink invalidate];
-		self.videoDisplayLink = nil;
-		if (_pendingVideoImage) {
-			CGImageRelease(_pendingVideoImage);
-			_pendingVideoImage = NULL;
-		}
+    if (videoActive) [self startVideoDisplayLinkIfNeeded];
+    else {
+        [self.videoDisplayLink invalidate];
+        self.videoDisplayLink = nil;
+        if (_pendingBuffer) { CVPixelBufferRelease(_pendingBuffer); _pendingBuffer = NULL; }
+        if (_currentBuffer) { CVPixelBufferRelease(_currentBuffer); _currentBuffer = NULL; }
         self.pendingMetadata = nil;
-		self.lastPresentationAt = 0.0;
-	}
+        self.lastPresentationAt = 0.0;
+    }
 }
 
-- (void)displayVideoImage:(CGImageRef)image metadata:(RBFrameMetadata *)metadata {
-    if (!image) return;
-	CGImageRetain(image);
-	if (_pendingVideoImage) {
-		self.overwrittenVideoFrames++;
-		CGImageRelease(_pendingVideoImage);
-	}
-	_pendingVideoImage = image;
+- (void)displayVideoPixelBuffer:(CVPixelBufferRef)pixelBuffer metadata:(RBFrameMetadata *)metadata {
+    if (!pixelBuffer) return;
+    CVPixelBufferRetain(pixelBuffer);
+    if (_pendingBuffer) {
+        self.overwrittenVideoFrames++;
+        CVPixelBufferRelease(_pendingBuffer);
+    }
+    _pendingBuffer = pixelBuffer;
     self.pendingMetadata = metadata;
 }
 
+- (BOOL)drawPixelBuffer:(CVPixelBufferRef)pixelBuffer {
+    if (!pixelBuffer || !_textureCache || CVPixelBufferGetPlaneCount(pixelBuffer) < 2) return NO;
+    [EAGLContext setCurrentContext:self.glContext];
+    CVOpenGLESTextureRef yTexture = NULL;
+    CVOpenGLESTextureRef uvTexture = NULL;
+    size_t width = CVPixelBufferGetWidthOfPlane(pixelBuffer, 0);
+    size_t height = CVPixelBufferGetHeightOfPlane(pixelBuffer, 0);
+    CVReturn yStatus = CVOpenGLESTextureCacheCreateTextureFromImage(kCFAllocatorDefault, _textureCache,
+        pixelBuffer, NULL, GL_TEXTURE_2D, GL_LUMINANCE, (GLsizei)width, (GLsizei)height,
+        GL_LUMINANCE, GL_UNSIGNED_BYTE, 0, &yTexture);
+    CVReturn uvStatus = CVOpenGLESTextureCacheCreateTextureFromImage(kCFAllocatorDefault, _textureCache,
+        pixelBuffer, NULL, GL_TEXTURE_2D, GL_LUMINANCE_ALPHA, (GLsizei)(width / 2), (GLsizei)(height / 2),
+        GL_LUMINANCE_ALPHA, GL_UNSIGNED_BYTE, 1, &uvTexture);
+    if (yStatus != kCVReturnSuccess || uvStatus != kCVReturnSuccess) {
+        if (yTexture) CFRelease(yTexture);
+        if (uvTexture) CFRelease(uvTexture);
+        return NO;
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, _framebuffer);
+    glViewport(0, 0, (GLsizei)(self.bounds.size.width * self.contentScaleFactor),
+               (GLsizei)(self.bounds.size.height * self.contentScaleFactor));
+    glClearColor(0, 0, 0, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glUseProgram(_program);
+    const GLfloat vertices[] = {-1,-1, 1,-1, -1,1, 1,1};
+    const GLfloat texCoords[] = {0,1, 1,1, 0,0, 1,0};
+    glVertexAttribPointer(_positionSlot, 2, GL_FLOAT, GL_FALSE, 0, vertices);
+    glEnableVertexAttribArray(_positionSlot);
+    glVertexAttribPointer(_texCoordSlot, 2, GL_FLOAT, GL_FALSE, 0, texCoords);
+    glEnableVertexAttribArray(_texCoordSlot);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(CVOpenGLESTextureGetTarget(yTexture), CVOpenGLESTextureGetName(yTexture));
+    // CVOpenGLESTexture does not promise non-mipmapped sampling defaults on
+    // the PowerVR SGX. Without these parameters the planes are incomplete;
+    // sampling the UV texture returns (0,0,0,1), which our YUV matrix renders
+    // as a solid red frame.
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glUniform1i(glGetUniformLocation(_program, "luma"), 0);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(CVOpenGLESTextureGetTarget(uvTexture), CVOpenGLESTextureGetName(uvTexture));
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glUniform1i(glGetUniformLocation(_program, "chroma"), 1);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    GLenum drawError = glGetError();
+    glBindRenderbuffer(GL_RENDERBUFFER, _renderbuffer);
+    BOOL presented = drawError == GL_NO_ERROR &&
+        [self.glContext presentRenderbuffer:GL_RENDERBUFFER];
+    if (!presented) RBLog(@"video: OpenGL draw failed error=0x%x", drawError);
+    CFRelease(yTexture);
+    CFRelease(uvTexture);
+    CVOpenGLESTextureCacheFlush(_textureCache, 0);
+    return presented;
+}
+
 - (void)displayVideoTick:(CADisplayLink *)displayLink {
-	if (!self.videoActive || !_pendingVideoImage) return;
-	CGImageRef image = _pendingVideoImage;
-	_pendingVideoImage = NULL;
-    RBFrameMetadata *metadata = self.pendingMetadata;
-    self.pendingMetadata = nil;
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    self.contentLayer.contents = (__bridge id)image; // layer retains; pixel buffer unlocks on release
-    [CATransaction commit];
-	CFTimeInterval now = CACurrentMediaTime();
-	if (self.lastPresentationAt > 0.0) {
-		double gapMS = (now - self.lastPresentationAt) * 1000.0;
-		if (gapMS > self.maximumPresentationGapMS) self.maximumPresentationGapMS = gapMS;
-	}
-	self.lastPresentationAt = now;
-	self.presentedFrames++;
+    BOOL newFrame = _pendingBuffer != NULL;
+    if (!self.videoActive || !newFrame) return;
+    RBFrameMetadata *metadata = nil;
+    if (newFrame) {
+        if (_currentBuffer) CVPixelBufferRelease(_currentBuffer);
+        _currentBuffer = _pendingBuffer;
+        _pendingBuffer = NULL;
+        metadata = self.pendingMetadata;
+        self.pendingMetadata = nil;
+    }
+    if (![self drawPixelBuffer:_currentBuffer]) return;
+    CFTimeInterval now = CACurrentMediaTime();
+    if (self.lastPresentationAt > 0.0) {
+        double gapMS = (now - self.lastPresentationAt) * 1000.0;
+        if (gapMS > self.maximumPresentationGapMS) self.maximumPresentationGapMS = gapMS;
+        if (gapMS > self.recentMaximumPresentationGapMS) self.recentMaximumPresentationGapMS = gapMS;
+    }
+    self.lastPresentationAt = now;
+    self.presentedFrames++;
     [self.presentationDelegate streamView:self didPresentMetadata:metadata];
-	CGImageRelease(image);
+}
+
+- (double)consumeRecentMaximumPresentationGapMS {
+    double value = self.recentMaximumPresentationGapMS;
+    self.recentMaximumPresentationGapMS = 0.0;
+    return value;
+}
+
+- (void)dealloc {
+    [self.videoDisplayLink invalidate];
+    if (_pendingBuffer) CVPixelBufferRelease(_pendingBuffer);
+    if (_currentBuffer) CVPixelBufferRelease(_currentBuffer);
+    if (_textureCache) CFRelease(_textureCache);
+    if (_program) glDeleteProgram(_program);
+    if (_framebuffer) glDeleteFramebuffers(1, &_framebuffer);
+    if (_renderbuffer) glDeleteRenderbuffers(1, &_renderbuffer);
+    if ([EAGLContext currentContext] == self.glContext) [EAGLContext setCurrentContext:nil];
 }
 
 @end

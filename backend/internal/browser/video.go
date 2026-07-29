@@ -40,7 +40,7 @@ func (b *Controller) subscribeVideo(c *ws.ClientTransport) {
 	b.videoSubs[c] = sub
 	b.mediaMu.Unlock()
 	cfg := b.video.Config()
-	c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "starting", FPS: cfg.FPS, Generation: b.video.Generation()})
+	c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "starting", FPS: cfg.FPS, Generation: b.video.Generation(), Profile: b.profileName()})
 	log.Printf("video: client subscribed")
 	if t := b.active(); t != nil {
 		b.ensureCast(t) // converge the shared source to stable video quality
@@ -101,7 +101,7 @@ func (b *Controller) pumpVideo(c *ws.ClientTransport, sub *stream.Sub) {
 			b.videoFailed(c)
 			return
 		}
-		c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "ready", FPS: cfg.FPS, W: au.W, H: au.H, Generation: au.Generation})
+		c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "ready", FPS: cfg.FPS, W: au.W, H: au.H, Generation: au.Generation, Profile: b.profileName()})
 		if t := b.active(); t != nil {
 			b.ensureCast(t)
 		}
@@ -131,6 +131,10 @@ func (b *Controller) deliverAU(c *ws.ClientTransport, sub *stream.Sub, au stream
 		SourceReceiveNS:   au.SourceReceiveNS,
 		EncodeCompleteNS:  au.EncodeCompleteNS,
 		EncoderGeneration: au.Generation,
+		InputReceiveNS:    au.InputReceiveNS,
+		CDPAcceptedNS:     au.CDPAcceptedNS,
+		ScrollX:           au.ScrollX, ScrollY: au.ScrollY, PageScale: au.PageScale,
+		Profile: au.Profile,
 	}
 	if err := c.SendBinary(protocol.EncodeVideo(meta, au.IDR, au.Data)); err != nil {
 		// Outbox dropped the AU — every P-frame after it is garbage, so make

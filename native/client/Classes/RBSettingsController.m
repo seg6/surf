@@ -9,6 +9,7 @@ enum {
     RBSectionServer = 0,
     RBSectionSaved,
     RBSectionDiagnostics,
+    RBSectionMedia,
     RBSectionData,
     RBSectionAbout,
     RBSectionCount
@@ -225,6 +226,7 @@ static const NSInteger kEditServerAlertTag = 1001;
         case RBSectionServer: return [self.statusText length] ? 4 : 3; // url, password, connect, (status)
         case RBSectionSaved: return (NSInteger)[self.savedServers count] + 1; // + Find Local Surf
         case RBSectionDiagnostics: return 1;
+        case RBSectionMedia: return 2;
         case RBSectionData: return 3;
         case RBSectionAbout: return 1;
     }
@@ -236,6 +238,7 @@ static const NSInteger kEditServerAlertTag = 1001;
         case RBSectionServer: return @"Server";
         case RBSectionSaved: return @"Saved Servers";
         case RBSectionDiagnostics: return @"Diagnostics";
+        case RBSectionMedia: return @"Media";
         case RBSectionData: return @"Data";
         case RBSectionAbout: return @"About";
     }
@@ -244,6 +247,7 @@ static const NSInteger kEditServerAlertTag = 1001;
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == RBSectionDiagnostics) return @"Shows live video, latency, decoder, network, and audio health over the page.";
+    if (section == RBSectionMedia) return self.connected ? @"Controls audio and video on the current page." : @"Connect to control page media.";
     if (section == RBSectionData && !self.connected) return @"Connect to a server to manage its data.";
     return nil;
 }
@@ -323,6 +327,14 @@ static const NSInteger kEditServerAlertTag = 1001;
         return cell;
     }
 
+    if (s == RBSectionMedia) {
+        UITableViewCell *cell = [self cellWithID:@"media" style:UITableViewCellStyleDefault];
+        cell.textLabel.text = r == 0 ? @"Play / Pause" : @"Mute / Unmute";
+        cell.textLabel.textColor = self.connected ? [UIColor blackColor] : [UIColor colorWithWhite:0.6 alpha:1.0];
+        cell.selectionStyle = self.connected ? UITableViewCellSelectionStyleBlue : UITableViewCellSelectionStyleNone;
+        return cell;
+    }
+
     if (s == RBSectionData) {
         UITableViewCell *cell = [self cellWithID:@"data" style:UITableViewCellStyleDefault];
         static NSString *const titles[] = {@"Clear History", @"Clear Cookies", @"Clear Cache"};
@@ -358,6 +370,12 @@ static const NSInteger kEditServerAlertTag = 1001;
         [self setStatusText:@"Server selected — edit above or tap Connect" isError:NO];
         [tableView reloadSections:[NSIndexSet indexSetWithIndex:RBSectionSaved]
                  withRowAnimation:UITableViewRowAnimationNone];
+        return;
+    }
+    if (s == RBSectionMedia && self.connected) {
+        if ([self.delegate respondsToSelector:@selector(settings:mediaAction:)]) {
+            [self.delegate settings:self mediaAction:(r == 0 ? @"media-playpause" : @"media-mute")];
+        }
         return;
     }
     if (s == RBSectionData && self.connected) {

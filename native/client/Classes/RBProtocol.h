@@ -12,6 +12,12 @@
 @property(nonatomic, assign) unsigned long long encodeCompleteNS;
 @property(nonatomic, assign) unsigned long long socketWriteNS;
 @property(nonatomic, assign) unsigned int encoderGeneration;
+@property(nonatomic, assign) unsigned long long inputReceiveNS;
+@property(nonatomic, assign) unsigned long long cdpAcceptedNS;
+@property(nonatomic, assign) double scrollX;
+@property(nonatomic, assign) double scrollY;
+@property(nonatomic, assign) double pageScale;
+@property(nonatomic, assign) unsigned char profile;
 @property(nonatomic, strong) NSData *payload;
 @end
 
@@ -23,6 +29,12 @@
 @property(nonatomic, assign) unsigned long long sourceReceiveNS;
 @property(nonatomic, assign) unsigned long long encodeCompleteNS;
 @property(nonatomic, assign) unsigned long long socketWriteNS;
+@property(nonatomic, assign) unsigned long long inputReceiveNS;
+@property(nonatomic, assign) unsigned long long cdpAcceptedNS;
+@property(nonatomic, assign) double scrollX;
+@property(nonatomic, assign) double scrollY;
+@property(nonatomic, assign) double pageScale;
+@property(nonatomic, assign) unsigned char profile;
 + (RBFrameMetadata *)metadataFromFrame:(RBFrame *)frame;
 @end
 

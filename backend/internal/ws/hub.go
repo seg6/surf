@@ -28,7 +28,7 @@ const (
 	pongWait      = 75 * time.Second
 	writeWait     = 20 * time.Second
 	readLimit     = 64 << 10
-	audioQueueCap = 11 // 220ms, plus the AudioPipeline's one-packet handoff
+	audioQueueCap = 3 // 60ms; native owns the adaptive playout cushion
 )
 
 // Handler is implemented by the browser side.

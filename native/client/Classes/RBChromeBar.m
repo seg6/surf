@@ -4,7 +4,6 @@
 @interface RBChromeBar ()
 @property(nonatomic, strong) UIButton *backButton;
 @property(nonatomic, strong) UIButton *fwdButton;
-@property(nonatomic, strong) UIButton *keyboardButton;
 @property(nonatomic, strong) UIButton *settingsButton;
 @property(nonatomic, strong, readwrite) UIButton *actionButton;
 @property(nonatomic, strong, readwrite) UIButton *libraryButton;
@@ -22,15 +21,13 @@
     if (self) {
         self.backButton = [RBTheme barButtonWithIcon:RBIconBack target:self action:@selector(backTapped:)];
         self.fwdButton = [RBTheme barButtonWithIcon:RBIconForward target:self action:@selector(fwdTapped:)];
-        self.keyboardButton = [RBTheme barButtonWithIcon:RBIconKeyboard target:self action:@selector(keyboardTapped:)];
-        self.actionButton = [RBTheme barButtonWithIcon:RBIconShare target:self action:@selector(actionsTapped:)];
+        self.actionButton = [RBTheme barButtonWithIcon:RBIconMore target:self action:@selector(actionsTapped:)];
         self.libraryButton = [RBTheme barButtonWithIcon:RBIconBook target:self action:@selector(libraryTapped:)];
         self.settingsButton = [RBTheme barButtonWithIcon:RBIconGear target:self action:@selector(settingsTapped:)];
         self.backButton.enabled = NO;
         self.fwdButton.enabled = NO;
         [self addSubview:self.backButton];
         [self addSubview:self.fwdButton];
-        [self addSubview:self.keyboardButton];
         [self addSubview:self.actionButton];
         [self addSubview:self.libraryButton];
         [self addSubview:self.settingsButton];
@@ -59,10 +56,9 @@
     self.settingsButton.frame = CGRectMake(w - buttonW - 6.0, 0.0, buttonW, h);
     self.libraryButton.frame = CGRectMake(w - buttonW * 2.0 - 6.0, 0.0, buttonW, h);
     self.actionButton.frame = CGRectMake(w - buttonW * 3.0 - 6.0, 0.0, buttonW, h);
-    self.keyboardButton.frame = CGRectMake(w - buttonW * 4.0 - 6.0, 0.0, buttonW, h);
 
     CGFloat left = 6.0 + buttonW * 2.0 + 10.0;
-    CGFloat right = w - buttonW * 4.0 - 16.0;
+    CGFloat right = w - buttonW * 3.0 - 16.0;
     self.omnibox.frame = CGRectMake(left, y, MAX(120.0, right - left), fieldH);
 }
 
@@ -73,7 +69,6 @@
 
 - (void)backTapped:(id)sender { [self.delegate chromeBack:self]; }
 - (void)fwdTapped:(id)sender { [self.delegate chromeForward:self]; }
-- (void)keyboardTapped:(id)sender { [self.delegate chromeKeyboard:self]; }
 - (void)actionsTapped:(id)sender { [self.delegate chrome:self actionsFromButton:self.actionButton]; }
 - (void)libraryTapped:(id)sender { [self.delegate chrome:self libraryFromButton:self.libraryButton]; }
 - (void)settingsTapped:(id)sender { [self.delegate chromeSettings:self]; }

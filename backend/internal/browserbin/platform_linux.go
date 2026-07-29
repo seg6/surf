@@ -16,11 +16,11 @@ import (
 
 func systemCandidates() []candidate {
 	return []candidate{
-		{"google-chrome-stable", "system Google Chrome Stable"},
-		{"/opt/google/chrome/chrome", "system Google Chrome Stable"},
-		{"chromium", "system Chromium"},
-		{"chromium-browser", "system Chromium"},
-		{"/snap/bin/chromium", "system Chromium"},
+		{path: "google-chrome-stable", label: "system Google Chrome Stable", branded: true},
+		{path: "/opt/google/chrome/chrome", label: "system Google Chrome Stable", branded: true},
+		{path: "chromium", label: "system Chromium"},
+		{path: "chromium-browser", label: "system Chromium"},
+		{path: "/snap/bin/chromium", label: "system Chromium"},
 	}
 }
 

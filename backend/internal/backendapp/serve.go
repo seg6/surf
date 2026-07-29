@@ -18,6 +18,7 @@ import (
 	"surf-backend/internal/browserbin"
 	"surf-backend/internal/clientupdate"
 	"surf-backend/internal/config"
+	"surf-backend/internal/contentblocker"
 	"surf-backend/internal/ffmpegbin"
 	"surf-backend/internal/httpd"
 	"surf-backend/internal/runenv"
@@ -101,21 +102,36 @@ func EnsureRuntime(cfg *config.Config) error {
 func ensureBrowser(cfg *config.Config) error {
 	if cfg.ChromePath != "" {
 		log.Printf("runtime: using CHROME=%s", cfg.ChromePath)
-		return nil
+	} else {
+		log.Printf("runtime: resolving Chrome/Chromium (--headless=new)")
+		var path, source string
+		var err error
+		if cfg.ContentBlocker {
+			path, source, err = browserbin.ResolveExtensionCapable(cfg.SurfHome)
+		} else {
+			path, source, err = browserbin.Resolve(cfg.SurfHome)
+		}
+		if err != nil {
+			return err
+		}
+		cfg.ChromePath = path
+		log.Printf("runtime: using %s at %s", source, path)
+		if strings.HasPrefix(source, "managed ") {
+			go func() {
+				if err := browserbin.UpdateManaged(cfg.SurfHome); err != nil {
+					log.Printf("runtime: managed browser update check failed: %v", err)
+				}
+			}()
+		}
 	}
-	log.Printf("runtime: resolving Chrome/Chromium (--headless=new)")
-	path, source, err := browserbin.Resolve(cfg.SurfHome)
-	if err != nil {
-		return err
-	}
-	cfg.ChromePath = path
-	log.Printf("runtime: using %s at %s", source, path)
-	if strings.HasPrefix(source, "managed ") {
-		go func() {
-			if err := browserbin.UpdateManaged(cfg.SurfHome); err != nil {
-				log.Printf("runtime: managed browser update check failed: %v", err)
-			}
-		}()
+	if cfg.ContentBlocker {
+		log.Printf("runtime: ensuring uBlock Origin Lite %s", contentblocker.Version)
+		path, err := contentblocker.Ensure(cfg.SurfHome)
+		if err != nil {
+			return err
+		}
+		cfg.ContentBlockerPath = path
+		log.Printf("runtime: content blocker ready at %s", path)
 	}
 	return nil
 }

@@ -70,6 +70,9 @@ static const CGFloat kRBFindBarHeight = 44.0;
 @property(nonatomic, assign) NSUInteger perfLastDecodedFrames;
 @property(nonatomic, assign) NSUInteger perfLastDecodeErrors;
 @property(nonatomic, assign) NSUInteger perfLastVideoDrops;
+@property(nonatomic, assign) double perfRecentGapMS;
+@property(nonatomic, assign) BOOL audioRequested;
+@property(nonatomic, assign) BOOL hadMemoryWarning;
 // Page state
 @property(nonatomic, assign) BOOL loading;
 @property(nonatomic, assign) BOOL fullscreen;
@@ -246,6 +249,7 @@ static const CGFloat kRBFindBarHeight = 44.0;
 
 - (void)didReceiveMemoryWarning {
     [super didReceiveMemoryWarning];
+    self.hadMemoryWarning = YES;
     [self.tabStrip purgeIconCache];
 }
 
@@ -376,6 +380,10 @@ static const CGFloat kRBFindBarHeight = 44.0;
     [self setDebugVisible:visible];
 }
 
+- (void)settings:(RBSettingsController *)settings mediaAction:(NSString *)action {
+    if ([action length]) [self.session sendMessage:@{@"t": action}];
+}
+
 - (void)settings:(RBSettingsController *)settings connectToURL:(NSString *)url password:(NSString *)password {
     [self connectToURL:url password:password];
 }
@@ -480,24 +488,27 @@ static const CGFloat kRBFindBarHeight = 44.0;
             [self.view setNeedsLayout];
             [self.view layoutIfNeeded];
             [self sendCurrentViewportSizeForced:YES];
-            [self.session sendMessage:@{@"t": @"audio", @"on": @YES}];
+            self.audioRequested = NO;
             break;
         case RBSessionStateConnecting:
             self.connectionPill.hidden = NO;
             self.connectionPill.text = @"Connecting…";
             [self leaveVideoMode];
             [self.mediaPipeline stopAudio];
+            self.audioRequested = NO;
             break;
         case RBSessionStateRetrying:
             self.connectionPill.hidden = NO;
             self.connectionPill.text = @"Reconnecting…";
             [self leaveVideoMode];
+            self.audioRequested = NO;
             break;
         case RBSessionStateIdle:
             self.connectionPill.hidden = NO;
             self.connectionPill.text = @"Disconnected";
             [self leaveVideoMode];
             [self.mediaPipeline stopAudio];
+            self.audioRequested = NO;
             break;
     }
 }
@@ -541,13 +552,21 @@ static const CGFloat kRBFindBarHeight = 44.0;
     self.streamView.videoActive = YES;
 }
 
-- (void)mediaPipeline:(RBMediaPipeline *)pipeline didDecodeImage:(CGImageRef)image
+- (void)mediaPipeline:(RBMediaPipeline *)pipeline didDecodePixelBuffer:(CVPixelBufferRef)pixelBuffer
              metadata:(RBFrameMetadata *)metadata {
     if (!self.videoActive) return;
-    [self.streamView displayVideoImage:image metadata:metadata];
+    [self.streamView displayVideoPixelBuffer:pixelBuffer metadata:metadata];
 }
 
 - (void)streamView:(RBStreamView *)streamView didPresentMetadata:(RBFrameMetadata *)metadata {
+    // Starting AudioQueue while VideoToolbox, OpenGL, and the first IDR are
+    // all initializing caused a short PCM burst and immediate drop-oldest
+    // discontinuity on the A5. Start audio after the first displayed frame,
+    // when the visual pipeline is already warm.
+    if (!self.audioRequested && self.session.state == RBSessionStateOpen) {
+        self.audioRequested = YES;
+        [self.session sendMessage:@{@"t": @"audio", @"on": @YES}];
+    }
     [self.session.interactionTracker didPresentInteractionID:metadata.interactionID];
 }
 
@@ -872,12 +891,7 @@ static const CGFloat kRBFindBarHeight = 44.0;
 - (void)chromeBack:(RBChromeBar *)bar { [self.session sendMessage:@{@"t": @"back"}]; }
 - (void)chromeForward:(RBChromeBar *)bar { [self.session sendMessage:@{@"t": @"fwd"}]; }
 
-- (void)chromeKeyboard:(RBChromeBar *)bar {
-    if ([self.hiddenInput isFirstResponder]) [self.hiddenInput resignFirstResponder];
-    else [self showKeyboard];
-}
-
-// Page actions (share button): everything scoped to the current page.
+// Page actions (more button): everything scoped to the current page.
 - (void)chrome:(RBChromeBar *)bar actionsFromButton:(UIButton *)button {
     NSArray *items = @[
         [RBListItem itemWithTitle:@"Reader" subtitle:@"read this page natively" payload:@"reader"],
@@ -1654,7 +1668,7 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
         @"latency": @(self.session.interactionTracker.lastInteractionToPresentMS),
         @"rtt": @(self.clockSync.lastRTTMS),
         @"age": @(age * 1000.0),
-        @"maxGap": @(self.streamView.maximumPresentationGapMS),
+        @"maxGap": @(self.perfRecentGapMS),
         @"queue": @(self.mediaPipeline.queuedAUs),
         @"gaps": @(self.mediaPipeline.sequenceGaps),
         @"overwritten": @(self.streamView.overwrittenVideoFrames),
@@ -1697,6 +1711,21 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
         NSUInteger dropDelta = drops >= self.perfLastVideoDrops ? drops - self.perfLastVideoDrops : drops;
         NSUInteger errDelta = errors >= self.perfLastDecodeErrors ? errors - self.perfLastDecodeErrors : errors;
         int queued = self.mediaPipeline.queuedAUs;
+        double recentGap = [self.streamView consumeRecentMaximumPresentationGapMS];
+        self.perfRecentGapMS = recentGap;
+        double dropPercent = (self.mediaPipeline.videoAUs >= self.perfLastVideoAUs &&
+                              self.mediaPipeline.videoAUs - self.perfLastVideoAUs > 0) ?
+            100.0 * dropDelta / (double)(self.mediaPipeline.videoAUs - self.perfLastVideoAUs) : 0.0;
+        [self.session sendMessage:@{
+            @"t": @"media-stats",
+            @"fps": @(fps),
+            @"auRate": @(aups),
+            @"callbackMs": @(self.mediaPipeline.averageCallbackMS),
+            @"gapMs": @(recentGap),
+            @"dropPct": @(dropPercent),
+            @"memoryWarn": @(self.hadMemoryWarning)
+        }];
+        self.hadMemoryWarning = NO;
         RBLog(@"perf lane=%@ presented_fps=%.1f aups=%.1f vt_done=%.1f/s q=%d drops+%u overwritten=%u max_gap=%.1fms vt_submit=%.2fms vt_callback=%.2fms wrap=%.2fms errs+%u audio_q=%d audio_drop=%u audio_underrun=%u audio_restart=%u age=%.2fs view=%.0fx%.0f",
               self.videoActive ? @"video" : @"starting",
               fps,

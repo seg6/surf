@@ -84,12 +84,17 @@ type Controller struct {
 	videoSubs map[*ws.ClientTransport]*stream.Sub
 	audioSubs map[*ws.ClientTransport]*audio.Sub
 
-	videoResizeMu      sync.Mutex
-	videoResizeWake    chan struct{}
-	videoResizePending videoResizeJob
-	videoResizeSeq     uint64
-	resizeMismatchOnce sync.Once
-	startedAt          time.Time
+	videoResizeMu       sync.Mutex
+	videoResizeWake     chan struct{}
+	videoResizePending  videoResizeJob
+	videoResizeSeq      uint64
+	resizeMismatchOnce  sync.Once
+	startedAt           time.Time
+	adaptiveProfile     int
+	adaptiveBaseQuality int
+	adaptiveLastChange  time.Time
+	adaptiveHealthy     int
+	adaptiveUnhealthy   int
 	// userAgent is populated from Browser.getVersion for full Chrome
 	// headless-new. Chrome still exposes a HeadlessChrome token even though
 	// this is the ordinary browser binary; normalize that single token while
@@ -99,25 +104,27 @@ type Controller struct {
 	captureCandidateH int
 	captureCandidateN int
 
-	perfMu            sync.Mutex
-	perfSince         time.Time
-	perfCounts        map[string]int
-	perfLatN          int     // video AUs measured in the current window
-	perfLatSumMS      float64 // sum of per-subscriber queue-dwell time, for the mean
-	perfLatMaxMS      float64
-	perfALatN         int // audio chunks measured in the current window
-	perfALatSumMS     float64
-	perfALatMaxMS     float64
-	lastRenderInputAt time.Time
-	interactionID     uint64
-	sourceSeq         uint32
-	videoSession      string
-	sourceLatN        int
-	sourceLatSumMS    float64
-	sourceLatMaxMS    float64
-	encodeLatN        int
-	encodeLatSumMS    float64
-	encodeLatMaxMS    float64
+	perfMu             sync.Mutex
+	perfSince          time.Time
+	perfCounts         map[string]int
+	perfLatN           int     // video AUs measured in the current window
+	perfLatSumMS       float64 // sum of per-subscriber queue-dwell time, for the mean
+	perfLatMaxMS       float64
+	perfALatN          int // audio chunks measured in the current window
+	perfALatSumMS      float64
+	perfALatMaxMS      float64
+	interactionInputNS uint64
+	interactionCDPNS   uint64
+	lastRenderInputAt  time.Time
+	interactionID      uint64
+	sourceSeq          uint32
+	videoSession       string
+	sourceLatN         int
+	sourceLatSumMS     float64
+	sourceLatMaxMS     float64
+	encodeLatN         int
+	encodeLatSumMS     float64
+	encodeLatMaxMS     float64
 
 	// verbMu guards the small M2 state: pending JS dialogs and the pending
 	// file-chooser interception (one at a time is plenty for one user).
@@ -129,18 +136,20 @@ type Controller struct {
 }
 
 type controllerCommand struct {
-	client  *ws.ClientTransport
-	command protocol.Command
+	client     *ws.ClientTransport
+	command    protocol.Command
+	receivedNS uint64
 }
 
 func New(cfg *config.Config, hub *ws.Hub, platform runenv.Handle) *Controller {
 	b := &Controller{
 		cfg: cfg, hub: hub, platform: platform,
-		tabs:      map[int]*Tab{},
-		byTarget:  map[string]*Tab{},
-		bySession: map[string]*Tab{},
-		newTabNav: map[string]string{},
-		viewW:     cfg.ViewW, viewH: cfg.ViewH,
+		adaptiveBaseQuality: cfg.SourceJPEGQuality,
+		tabs:                map[int]*Tab{},
+		byTarget:            map[string]*Tab{},
+		bySession:           map[string]*Tab{},
+		newTabNav:           map[string]string{},
+		viewW:               cfg.ViewW, viewH: cfg.ViewH,
 		store:           NewStore(cfg.Profile),
 		icons:           map[string]*favicon{},
 		iconFetching:    map[string]bool{},
@@ -170,7 +179,7 @@ func (b *Controller) runController() {
 			case <-item.client.Closed():
 				continue
 			default:
-				b.handleCommand(item.client, item.command)
+				b.handleCommand(item.client, item.command, item.receivedNS)
 			}
 		case event := <-b.events:
 			b.onEvent(event)
@@ -182,12 +191,14 @@ func (b *Controller) runController() {
 // browser is ready to serve clients.
 func (b *Controller) Start() error {
 	client, cmd, err := cdp.Launch(cdp.LaunchConfig{
-		ChromePath: b.cfg.ChromePath,
-		Profile:    b.cfg.Profile,
-		W:          b.cfg.ViewW,
-		H:          b.cfg.ViewH,
-		Env:        b.cfg.ChildEnv,
-		NoSandbox:  b.cfg.ChromeNoSandbox,
+		ChromePath:    b.cfg.ChromePath,
+		Profile:       b.cfg.Profile,
+		W:             b.cfg.ViewW,
+		H:             b.cfg.ViewH,
+		Env:           b.cfg.ChildEnv,
+		NoSandbox:     b.cfg.ChromeNoSandbox,
+		EnableGPU:     b.cfg.ChromeGPU,
+		ExtensionPath: b.cfg.ContentBlockerPath,
 	})
 	if err != nil {
 		return err
@@ -452,7 +463,7 @@ func (b *Controller) onSourceFrame(frame SourceFrame) {
 	}
 	b.noteSourceFrame()
 	telemetry.Emit("source_frame", "capture", "cdp", nil)
-	b.onSourceJPEG(t, frame.Session, frame.JPEG)
+	b.onSourceJPEG(t, frame)
 	b.mu.Lock()
 	navigate := b.newTabNav[frame.Session]
 	delete(b.newTabNav, frame.Session)
@@ -463,15 +474,21 @@ func (b *Controller) onSourceFrame(frame SourceFrame) {
 	}
 }
 
-func (b *Controller) onSourceJPEG(t *Tab, session string, buf []byte) {
+func (b *Controller) onSourceJPEG(t *Tab, frame SourceFrame) {
+	buf, session := frame.JPEG, frame.Session
 	if len(buf) == 0 || !b.isActiveSession(session) || b.hub.ClientCount() == 0 {
 		return
 	}
 	b.perfMu.Lock()
 	b.sourceSeq++
 	sourceSeq, interactionID := b.sourceSeq, b.interactionID
+	inputNS, cdpNS := b.interactionInputNS, b.interactionCDPNS
 	b.perfMu.Unlock()
-	b.pushVideoFrame(buf, session, sourceSeq, interactionID)
+	b.pushVideoFrame(buf, session, sourceSeq, interactionID, stream.SourceMetadata{
+		InputReceiveNS: inputNS, CDPAcceptedNS: cdpNS,
+		ScrollX: frame.ScrollX, ScrollY: frame.ScrollY, PageScale: frame.PageScale,
+		Profile: uint8(b.profileIndex()),
+	})
 }
 
 // pushVideoFrame feeds a CDP JPEG to the H.264 transcoder while keeping its
@@ -480,10 +497,10 @@ func (b *Controller) onSourceJPEG(t *Tab, session string, buf []byte) {
 // corrupt its pipeline, while restarting for every intermediate size causes
 // a restart storm. Once one size persists, restart off the CDP dispatch
 // goroutine and make that settled frame the new encoder's first input.
-func (b *Controller) pushVideoFrame(buf []byte, session string, sourceSeq uint32, interactionID uint64) {
+func (b *Controller) pushVideoFrame(buf []byte, session string, sourceSeq uint32, interactionID uint64, metadata stream.SourceMetadata) {
 	w, h, ok := jpegSize(buf)
 	if !ok {
-		b.video.PushSource(buf, sourceSeq, interactionID)
+		b.video.PushSourceMeta(buf, sourceSeq, interactionID, metadata)
 		return
 	}
 	b.mu.Lock()
@@ -491,12 +508,16 @@ func (b *Controller) pushVideoFrame(buf []byte, session string, sourceSeq uint32
 	b.mu.Unlock()
 	if w != wantW || h != wantH {
 		b.resizeMismatchOnce.Do(func() {
-			log.Printf("capture: withholding mismatched frame got=%dx%d want=%dx%d", w, h, wantW, wantH)
+			log.Printf("capture: source size differs got=%dx%d viewport=%dx%d", w, h, wantW, wantH)
 		})
 		// Chromium emits several old/intermediate compositor sizes around
-		// viewport changes. The client viewport is authoritative; restarting
-		// FFmpeg for those stale frames creates a self-sustaining resize storm.
-		// Wait for the source to converge instead.
+		// viewport changes, but fullscreen content can also remain at a
+		// different compositor size indefinitely. Debounce three identical
+		// frames, then follow the actual source rather than black-holing every
+		// frame while the client's frame-age counter climbs.
+		if b.captureSizeSettled(w, h) {
+			b.requestVideoResize(w, h, buf, session)
+		}
 		return
 	}
 	cur := b.video.Config()
@@ -507,9 +528,9 @@ func (b *Controller) pushVideoFrame(buf []byte, session string, sourceSeq uint32
 		b.videoSession = session
 		b.mu.Unlock()
 		if sourceChanged {
-			b.video.SwitchSource(buf, sourceSeq, interactionID)
+			b.video.SwitchSourceMeta(buf, sourceSeq, interactionID, metadata)
 		} else {
-			b.video.PushSource(buf, sourceSeq, interactionID)
+			b.video.PushSourceMeta(buf, sourceSeq, interactionID, metadata)
 		}
 		return
 	}

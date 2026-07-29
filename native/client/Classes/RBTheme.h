@@ -15,8 +15,8 @@ typedef enum {
     RBIconShrink,
     RBIconChevronUp,
     RBIconChevronDown,
-    RBIconBook,  // library (history/bookmarks/downloads)
-    RBIconShare  // page actions (square with up arrow)
+    RBIconBook, // library (history/bookmarks/downloads)
+    RBIconMore  // page actions
 } RBIcon;
 
 // Gradient bar with a 1px dark bottom hairline; the iOS 6 toolbar look.

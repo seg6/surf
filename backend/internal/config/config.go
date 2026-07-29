@@ -34,6 +34,7 @@ var Caps = []string{
 	"dldel",       // delete a download from the server
 	"reqkeyframe", // on-demand IDR request (decode error / resync)
 	"video-retry", // explicit retry after an unavailable encoder state
+	"media-stats", // client decode/presentation health for adaptive profiles
 }
 
 type Config struct {
@@ -51,16 +52,20 @@ type Config struct {
 	DownloadsDir      string
 	UploadsDir        string
 
-	PulseServer     string
-	PulseSink       string
-	AudioSource     string
-	FFmpegPath      string
-	PulseaudioPath  string
-	PactlPath       string
-	ManagePulse     bool
-	EnsurePulseSink bool
-	ChromeNoSandbox bool
-	ChildEnv        []string
+	PulseServer        string
+	PulseSink          string
+	AudioSource        string
+	FFmpegPath         string
+	PulseaudioPath     string
+	PactlPath          string
+	ManagePulse        bool
+	EnsurePulseSink    bool
+	ChromeNoSandbox    bool
+	ChromeGPU          bool
+	ContentBlocker     bool
+	ContentBlockerPath string
+	AdaptiveVideo      bool
+	ChildEnv           []string
 
 	// H.264 lane. The encoder only runs while a native video-mode client
 	// is subscribed.
@@ -178,6 +183,9 @@ func load(requireAuth bool) (*Config, error) {
 		ManagePulse:       managePulse,
 		EnsurePulseSink:   envBool("SURF_ENSURE_PULSE_SINK", !managePulse),
 		ChromeNoSandbox:   envBool("CHROME_NO_SANDBOX", os.Geteuid() == 0),
+		ChromeGPU:         envBool("SURF_CHROME_GPU", true),
+		ContentBlocker:    envBool("SURF_CONTENT_BLOCKER", true),
+		AdaptiveVideo:     envBool("SURF_ADAPTIVE_VIDEO", false),
 		StreamFPS:         envInt("STREAM_FPS", 30),
 		StreamScale:       envStr("STREAM_SCALE", "1024x1024"),
 		StreamEncoder:     envStr("STREAM_ENCODER", "libx264"),

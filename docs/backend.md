@@ -107,9 +107,10 @@ SURF_PASSWORD='change-me' ./backend/surf serve
 
 ## Runtime Behavior
 
-Surf uses `CHROME` when explicitly set, otherwise a compatible installed Google
-Chrome Stable, then installed Chromium, and finally its managed
-ungoogled-chromium runtime. Managed releases are downloaded from the official
+Surf uses `CHROME` when explicitly set. With the default content blocker
+enabled, Surf prefers an extension-capable installed Chromium and then its
+managed ungoogled-chromium runtime; disabling the blocker also permits an
+installed Google Chrome Stable. Managed releases are downloaded from the official
 ungoogled-chromium GitHub organization, checked against GitHub's declared size
 and SHA-256 digest, installed atomically, and checked daily. One previous
 version is retained for rollback. Chrome for Testing is not used.
@@ -141,10 +142,21 @@ schedules ordered control, drop-oldest audio, and a four-AU GOP-aware video
 queue; `AudioPipeline` owns capture and bounded fan-out. Video overflow
 requests an immediate cooldown-protected IDR instead of accumulating delay.
 
-Protocol `20260728-3` uses a 64-byte extensible binary header carrying AU and
-source sequences, coded size, interaction ID, backend timing stamps, and
-encoder generation. The socket-write timestamp is stamped by the WebSocket
-writer immediately before the write.
+Protocol `20260729-1` uses a 96-byte extensible binary header carrying AU and
+source sequences, coded size, interaction ID, backend timing stamps, encoder
+generation, CDP scroll metadata, and the active adaptive profile. The
+socket-write timestamp is stamped by the WebSocket writer immediately before
+the write. Input receive and CDP-dispatch timestamps make the input-to-source
+part of the path distinguishable from capture, encode, transport, decode, and
+display.
+
+The client reports decode and presentation health every five seconds. Surf
+keeps the configured capture quality and coded size fixed by default, avoiding
+visible quality changes and encoder restarts. Experimental adaptive profiles
+can be enabled explicitly; they require 30 healthy seconds before stepping
+back up. Static pages are excluded from FPS and presentation-gap decisions
+because CDP intentionally emits only sparse bootstrap frames when nothing
+changes.
 
 For audio (Linux only), Surf first checks whether `pactl info` can reach an
 existing PulseAudio-compatible server. On common PipeWire desktops this
@@ -156,6 +168,8 @@ Data is stored under `~/.surf/` by default:
 - `~/.surf/profile`: Chromium profile.
 - `~/.surf/downloads`: browser downloads.
 - `~/.surf/uploads`: temporary upload files.
+- `~/.surf/runtime/ublock-origin-lite`: Surf's verified, managed content
+  blocker. It is loaded into the browser profile automatically.
 
 ## Configuration
 
@@ -168,8 +182,20 @@ Common overrides:
 - `CHROME`: explicit browser override. Setting this disables managed browser
   selection.
 - `SURF_BROWSER_DOWNLOAD=0`: prohibit downloading managed ungoogled-chromium.
+- `SURF_CONTENT_BLOCKER=0`: disable the managed uBlock Origin Lite extension.
+  It is enabled by default. Surf prefers an installed unbranded Chromium (or
+  its managed ungoogled-chromium) while it is enabled because current branded
+  Google Chrome ignores unpacked-extension launch flags.
+- `SURF_CONTENT_BLOCKER_DOWNLOAD=0`: prohibit downloading a missing pinned
+  uBlock Origin Lite release.
 - `FFMPEG`: explicit encoder override; otherwise Surf uses its bundled FFmpeg.
 - `SURF_FFMPEG_DOWNLOAD=0`: prohibit downloading a missing managed FFmpeg.
+- `SURF_CHROME_GPU=0`: disable Chrome GPU acceleration. GPU acceleration is
+  enabled by default; Chrome may still select a software renderer when the
+  host has no usable graphics device.
+- `SURF_ADAPTIVE_VIDEO=1`: opt in to automatic capture-quality and coded-size
+  reduction when two consecutive motion windows miss their performance
+  targets. Disabled by default to keep quality and resolution stable.
 - `PULSEAUDIO`, `PACTL`: Linux audio tool paths.
 - `SOURCE_JPEG_QUALITY`: quality of the internal CDP-to-FFmpeg capture;
   defaults to `100` and does not select a client wire format.

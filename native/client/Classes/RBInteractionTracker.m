@@ -1,4 +1,5 @@
 #import "RBInteractionTracker.h"
+#import "RBLog.h"
 #import <QuartzCore/QuartzCore.h>
 
 @interface RBInteractionTracker ()
@@ -51,11 +52,22 @@
     NSNumber *sent;
     @synchronized (self) {
         sent = [self.sentAt objectForKey:key];
-        if (sent) [self.sentAt removeObjectForKey:key];
+        if (sent) {
+            NSArray *keys = [[self.sentAt allKeys] copy];
+            for (NSNumber *candidate in keys) {
+                if ([candidate unsignedLongLongValue] <= interactionID) {
+                    [self.sentAt removeObjectForKey:candidate];
+                }
+            }
+        }
     }
     if (!sent) return;
     self.lastInteractionToPresentMS = (CACurrentMediaTime() - [sent doubleValue]) * 1000.0;
     self.presentedInteractions++;
+    if (self.presentedInteractions % 30 == 0 || self.lastInteractionToPresentMS >= 100.0) {
+        RBLog(@"interaction present iid=%llu latency=%.1fms pending=%u",
+              interactionID, self.lastInteractionToPresentMS, (unsigned)[self.sentAt count]);
+    }
 }
 
 @end

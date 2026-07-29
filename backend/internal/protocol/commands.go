@@ -108,6 +108,15 @@ type DialogReplyCommand struct {
 	Accept bool   `json:"accept"`
 	Text   string `json:"text"`
 }
+type MediaStatsCommand struct {
+	CommandBase
+	PresentedFPS float64 `json:"fps"`
+	AURate       float64 `json:"auRate"`
+	CallbackMS   float64 `json:"callbackMs"`
+	GapMS        float64 `json:"gapMs"`
+	DropPercent  float64 `json:"dropPct"`
+	MemoryWarn   bool    `json:"memoryWarn"`
+}
 
 // DecodeCommand is the sole JSON ingress. Unknown commands and trailing JSON
 // are rejected before browser state sees them.
@@ -154,8 +163,10 @@ func DecodeCommand(data []byte) (Command, error) {
 		dst = &DialogReplyCommand{}
 	case "clock":
 		dst = &ClockCommand{}
+	case "media-stats":
+		dst = &MediaStatsCommand{}
 	case "back", "fwd", "reload", "stop", "video-retry", "reqkeyframe",
-		"hist", "bookmark", "downloads", "reader":
+		"hist", "bookmark", "downloads", "reader", "media-playpause", "media-mute":
 		dst = &EmptyCommand{}
 	default:
 		return nil, fmt.Errorf("unknown command %q", header.T)

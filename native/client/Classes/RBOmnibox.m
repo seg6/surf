@@ -46,7 +46,9 @@
         self.field.placeholder = @"Search or enter address";
         self.field.autocorrectionType = UITextAutocorrectionTypeNo;
         self.field.autocapitalizationType = UITextAutocapitalizationTypeNone;
-        self.field.keyboardType = UIKeyboardTypeURL;
+        // This is an omnibox, not a URL-only field: ordinary text is sent to
+        // the backend as a search query, so the keyboard must include spaces.
+        self.field.keyboardType = UIKeyboardTypeDefault;
         self.field.returnKeyType = UIReturnKeyGo;
         self.field.clearButtonMode = UITextFieldViewModeWhileEditing;
         self.field.contentVerticalAlignment = UIControlContentVerticalAlignmentCenter;

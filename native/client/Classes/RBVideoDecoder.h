@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <CoreGraphics/CoreGraphics.h>
+#import <CoreVideo/CoreVideo.h>
 
 @class RBVideoDecoder;
 @class RBFrameMetadata;
@@ -7,7 +8,7 @@
 @protocol RBVideoDecoderDelegate <NSObject>
 // Main thread. The image wraps the decoder's pixel buffer zero-copy; display
 // it (retain via layer.contents) and let go — releasing it unlocks the buffer.
-- (void)videoDecoder:(RBVideoDecoder *)decoder didDecodeImage:(CGImageRef)image
+- (void)videoDecoder:(RBVideoDecoder *)decoder didDecodePixelBuffer:(CVPixelBufferRef)pixelBuffer
             metadata:(RBFrameMetadata *)metadata;
 // Main thread. The decode path is unrecoverable (too many resyncs); the
 // caller should surface video unavailable and offer an explicit retry.

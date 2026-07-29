@@ -18,8 +18,10 @@ type sourceCDP interface {
 // SourceFrame is an immutable frame produced by Chromium. JPEG remains an
 // internal capture representation; only VideoPipeline sees its bytes.
 type SourceFrame struct {
-	Session string
-	JPEG    []byte
+	Session          string
+	JPEG             []byte
+	ScrollX, ScrollY float64
+	PageScale        float64
 }
 
 type FrameSource interface {
@@ -217,6 +219,11 @@ func (s *ScreencastSource) Handle(ev cdp.Event) {
 	var payload struct {
 		Data      string `json:"data"`
 		SessionID int    `json:"sessionId"`
+		Metadata  struct {
+			ScrollOffsetX   float64 `json:"scrollOffsetX"`
+			ScrollOffsetY   float64 `json:"scrollOffsetY"`
+			PageScaleFactor float64 `json:"pageScaleFactor"`
+		} `json:"metadata"`
 	}
 	if json.Unmarshal(ev.Params, &payload) != nil {
 		return
@@ -232,7 +239,12 @@ func (s *ScreencastSource) Handle(ev cdp.Event) {
 	if err != nil {
 		return
 	}
-	s.onFrame(SourceFrame{Session: ev.SessionID, JPEG: data})
+	s.onFrame(SourceFrame{
+		Session: ev.SessionID, JPEG: data,
+		ScrollX:   payload.Metadata.ScrollOffsetX,
+		ScrollY:   payload.Metadata.ScrollOffsetY,
+		PageScale: payload.Metadata.PageScaleFactor,
+	})
 }
 
 func (b *Controller) ensureCast(t *Tab) {

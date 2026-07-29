@@ -67,6 +67,32 @@ func Resolve(home string) (string, string, error) {
 	return path, "managed ungoogled-chromium " + version, nil
 }
 
+// ResolveExtensionCapable prefers unbranded Chromium because current branded
+// Google Chrome ignores command-line requests to load unpacked extensions.
+func ResolveExtensionCapable(home string) (string, string, error) {
+	for _, candidate := range systemCandidates() {
+		if candidate.branded {
+			continue
+		}
+		path := candidate.path
+		if !filepath.IsAbs(path) {
+			resolved, err := exec.LookPath(path)
+			if err != nil {
+				continue
+			}
+			path = resolved
+		}
+		if compatible(path) {
+			return path, candidate.label, nil
+		}
+	}
+	path, version, err := EnsureManaged(home)
+	if err != nil {
+		return "", "", err
+	}
+	return path, "managed ungoogled-chromium " + version, nil
+}
+
 // FindSystem checks a deliberately bounded list of normal installation paths.
 func FindSystem() (string, string) {
 	for _, candidate := range systemCandidates() {
@@ -364,4 +390,7 @@ func executableOK(path string) bool {
 	return err == nil && !info.IsDir() && info.Size() > 0
 }
 
-type candidate struct{ path, label string }
+type candidate struct {
+	path, label string
+	branded     bool
+}

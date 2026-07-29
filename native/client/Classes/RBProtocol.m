@@ -13,6 +13,12 @@
     m.sourceReceiveNS = frame.sourceReceiveNS;
     m.encodeCompleteNS = frame.encodeCompleteNS;
     m.socketWriteNS = frame.socketWriteNS;
+    m.inputReceiveNS = frame.inputReceiveNS;
+    m.cdpAcceptedNS = frame.cdpAcceptedNS;
+    m.scrollX = frame.scrollX;
+    m.scrollY = frame.scrollY;
+    m.pageScale = frame.pageScale;
+    m.profile = frame.profile;
     return m;
 }
 @end
@@ -27,6 +33,10 @@ static unsigned int RBReadBE32(const unsigned char *p) {
 
 static unsigned long long RBReadBE64(const unsigned char *p) {
     return ((unsigned long long)RBReadBE32(p) << 32) | RBReadBE32(p + 4);
+}
+
+static double RBReadFixed16(const unsigned char *p) {
+    return ((double)(int32_t)RBReadBE32(p)) / 65536.0;
 }
 
 @implementation RBProtocol
@@ -69,6 +79,14 @@ static unsigned long long RBReadBE64(const unsigned char *p) {
     frame.encodeCompleteNS = RBReadBE64(b + 40);
     frame.socketWriteNS = RBReadBE64(b + 48);
     frame.encoderGeneration = RBReadBE32(b + 56);
+    if (headerLen >= 96) {
+        frame.inputReceiveNS = RBReadBE64(b + 64);
+        frame.cdpAcceptedNS = RBReadBE64(b + 72);
+        frame.scrollX = RBReadFixed16(b + 80);
+        frame.scrollY = RBReadFixed16(b + 84);
+        frame.pageScale = RBReadFixed16(b + 88);
+        frame.profile = b[92];
+    }
     frame.payload = [data subdataWithRange:NSMakeRange(headerLen, payloadLen)];
     return frame;
 }

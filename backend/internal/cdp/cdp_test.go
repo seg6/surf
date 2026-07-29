@@ -12,12 +12,15 @@ func hasArg(args []string, want string) bool {
 }
 
 func TestLaunchArgsSandboxDefault(t *testing.T) {
-	args := LaunchConfig{Profile: "/tmp/profile", W: 1024, H: 768}.Args()
+	args := LaunchConfig{Profile: "/tmp/profile", W: 1024, H: 768, EnableGPU: true}.Args()
 	if hasArg(args, "--no-sandbox") {
 		t.Fatal("--no-sandbox present when NoSandbox=false")
 	}
 	if !hasArg(args, "--headless=new") {
 		t.Fatalf("missing headless flag: %v", args)
+	}
+	if !hasArg(args, "--enable-gpu") || hasArg(args, "--disable-gpu") {
+		t.Fatalf("GPU auto path not enabled: %v", args)
 	}
 	if !hasArg(args, "--user-data-dir=/tmp/profile") || !hasArg(args, "--window-size=1024,768") {
 		t.Fatalf("missing profile/window args: %v", args)
@@ -41,5 +44,13 @@ func TestLaunchArgsExtraArgsAppendedBeforeURL(t *testing.T) {
 	}
 	if args[len(args)-1] != "about:blank" {
 		t.Fatalf("last arg=%q, want about:blank", args[len(args)-1])
+	}
+}
+
+func TestLaunchArgsContentBlocker(t *testing.T) {
+	args := LaunchConfig{Profile: "/tmp/profile", W: 1024, H: 768, ExtensionPath: "/tmp/ubol"}.Args()
+	if !hasArg(args, "--disable-extensions-except=/tmp/ubol") ||
+		!hasArg(args, "--load-extension=/tmp/ubol") {
+		t.Fatalf("missing content blocker args: %v", args)
 	}
 }

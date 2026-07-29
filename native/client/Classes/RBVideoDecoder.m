@@ -51,38 +51,6 @@ static BOOL RBResolveVT(void) {
     return ok;
 }
 
-// ---- zero-copy CGImage over a CVPixelBuffer --------------------------------
-
-static void RBReleasePixelBuffer(void *info, const void *data, size_t size) {
-    CVPixelBufferRef pb = (CVPixelBufferRef)info;
-    CVPixelBufferUnlockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
-    CVPixelBufferRelease(pb);
-}
-
-// Wraps a BGRA pixel buffer without copying; the CGImage owns a lock+retain
-// on the buffer, released when the image is destroyed.
-static CGImageRef RBCreateImageFromPixelBuffer(CVPixelBufferRef pb) {
-    if (CVPixelBufferLockBaseAddress(pb, kCVPixelBufferLock_ReadOnly) != kCVReturnSuccess) return NULL;
-    CVPixelBufferRetain(pb);
-    void *base = CVPixelBufferGetBaseAddress(pb);
-    size_t bpr = CVPixelBufferGetBytesPerRow(pb);
-    size_t w = CVPixelBufferGetWidth(pb);
-    size_t h = CVPixelBufferGetHeight(pb);
-    CGDataProviderRef provider = CGDataProviderCreateWithData(pb, base, bpr * h, RBReleasePixelBuffer);
-    if (!provider) {
-        CVPixelBufferUnlockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
-        CVPixelBufferRelease(pb);
-        return NULL;
-    }
-    CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
-    CGImageRef image = CGImageCreate(w, h, 8, 32, bpr, space,
-                                     kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst,
-                                     provider, NULL, false, kCGRenderingIntentDefault);
-    CGColorSpaceRelease(space);
-    CGDataProviderRelease(provider); // image holds its own reference
-    return image;
-}
-
 // ---- decoder ----------------------------------------------------------------
 
 // Above this many queued-but-undecoded AUs we drop to the next IDR: the A5
@@ -141,10 +109,8 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
     }
     if (timing) free(timing);
     if (status != noErr || !imageBuffer || !currentGeneration) return;
-    CFTimeInterval wrapStart = CACurrentMediaTime();
-    CGImageRef image = RBCreateImageFromPixelBuffer((CVPixelBufferRef)imageBuffer);
-    if (!image) return;
-    double wrapMS = (CACurrentMediaTime() - wrapStart) * 1000.0;
+    CVPixelBufferRetain((CVPixelBufferRef)imageBuffer);
+    double wrapMS = 0.0;
     decoder.callbackFrames++;
     decoder.decodedFrames++;
     decoder.lastCallbackMS = callbackMS;
@@ -152,8 +118,8 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
     decoder.lastWrapMS = wrapMS;
     decoder.averageWrapMS = decoder.averageWrapMS <= 0.0 ? wrapMS : decoder.averageWrapMS * 0.85 + wrapMS * 0.15;
     dispatch_async(dispatch_get_main_queue(), ^{
-        [decoder.delegate videoDecoder:decoder didDecodeImage:image metadata:metadata];
-        CGImageRelease(image);
+        [decoder.delegate videoDecoder:decoder didDecodePixelBuffer:(CVPixelBufferRef)imageBuffer metadata:metadata];
+        CVPixelBufferRelease((CVPixelBufferRef)imageBuffer);
     });
 }
 
@@ -303,9 +269,11 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
         return NO;
     }
 
-    // BGRA out: the decoder does YUV→RGB for us and rendering stays trivial.
-    int32_t bgra = kCVPixelFormatType_32BGRA;
-    CFNumberRef pixfmt = CFNumberCreate(NULL, kCFNumberSInt32Type, &bgra);
+    // Keep the hardware decoder's native bi-planar YUV surface. Converting
+    // every frame to BGRA inside VideoToolbox consumed most of one A5 frame
+    // budget and retained several 2.8MiB RGB buffers.
+    int32_t nv12 = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
+    CFNumberRef pixfmt = CFNumberCreate(NULL, kCFNumberSInt32Type, &nv12);
     CFStringRef pixfmtKey = kCVPixelBufferPixelFormatTypeKey;
     CFDictionaryRef destAttrs = CFDictionaryCreate(NULL, (const void **)&pixfmtKey, (const void **)&pixfmt, 1,
                                                    &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);

@@ -42,13 +42,13 @@ Retry with the default managed runtime settings:
 
 ```sh
 make surf-binary
-unset CHROME FFMPEG SURF_BROWSER_DOWNLOAD SURF_FFMPEG_DOWNLOAD
+unset CHROME FFMPEG SURF_BROWSER_DOWNLOAD SURF_FFMPEG_DOWNLOAD SURF_CONTENT_BLOCKER_DOWNLOAD
 SURF_PASSWORD='change-me' ./backend/surf serve
 ```
 
-Downloads are checksum-verified and stored below `SURF_HOME/runtime`. Set
-`SURF_BROWSER_DOWNLOAD=0` or `SURF_FFMPEG_DOWNLOAD=0` only when provisioning
-the corresponding runtime yourself.
+Downloads are checksum-verified and stored below `SURF_HOME/runtime`. This
+includes the browser, FFmpeg, and uBlock Origin Lite. Set the corresponding
+`*_DOWNLOAD=0` variable only when provisioning that runtime yourself.
 
 ## Browser Is Visible Or Frames Stop When Unfocused
 
@@ -82,3 +82,24 @@ Native app:
 ```text
 /var/mobile/Library/Surf/surf.log
 ```
+
+Triple-tap the streamed page to show the on-device performance overlay. Test
+FPS only while the page is visibly moving: a static page normally has a low AU
+rate because CDP does not resend identical frames. Useful signals are:
+
+- `AU RATE`: frames arriving from the backend.
+- `PRESENTED`: frames shown by the display link, rather than merely decoded.
+- `VT CALLBACK`: VideoToolbox decode completion time.
+- `INPUT → SCREEN`: the complete interaction-to-presentation duration.
+- `RTT`: current control connection round-trip time.
+
+For a reproducible motion-only check, run the repository's local probe while a
+development backend owns `~/.surf/profile`:
+
+```sh
+cd backend
+go run ./tools/motionprobe -duration 30s
+```
+
+This verifies capture, encoding, transport, decode, and presentation. It does
+not simulate an iPad touch, so use a real scroll to evaluate `INPUT → SCREEN`.

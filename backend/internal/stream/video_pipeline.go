@@ -88,6 +88,17 @@ type AU struct {
 	InteractionID    uint64
 	SourceReceiveNS  uint64
 	EncodeCompleteNS uint64
+	InputReceiveNS   uint64
+	CDPAcceptedNS    uint64
+	ScrollX, ScrollY float64
+	PageScale        float64
+	Profile          uint8
+}
+
+type SourceMetadata struct {
+	InputReceiveNS, CDPAcceptedNS uint64
+	ScrollX, ScrollY, PageScale   float64
+	Profile                       uint8
 }
 
 func (s *VideoPipeline) Generation() uint32 {
@@ -164,6 +175,7 @@ type inputMeta struct {
 	writtenNS   uint64
 	sourceSeq   uint32
 	interaction uint64
+	source      SourceMetadata
 }
 
 func newPushState(fps int) *pushState {
@@ -186,13 +198,17 @@ func (ps *pushState) setRepeats(data []byte, repeats int) {
 }
 
 func (ps *pushState) setMeta(data []byte, sourceSeq uint32, interaction uint64, repeats int) bool {
+	return ps.setMetaFull(data, sourceSeq, interaction, SourceMetadata{}, repeats)
+}
+
+func (ps *pushState) setMetaFull(data []byte, sourceSeq uint32, interaction uint64, source SourceMetadata, repeats int) bool {
 	if repeats < 1 {
 		repeats = 1
 	}
 	ps.mu.Lock()
 	replaced := len(ps.pending) != 0
 	ps.pending = data
-	ps.pendingMeta = inputMeta{sourceNS: telemetry.MonoNS(), sourceSeq: sourceSeq, interaction: interaction}
+	ps.pendingMeta = inputMeta{sourceNS: telemetry.MonoNS(), sourceSeq: sourceSeq, interaction: interaction, source: source}
 	ps.repeats = repeats
 	ps.mu.Unlock()
 	select {
@@ -340,6 +356,10 @@ func (s *VideoPipeline) Push(jpeg []byte) {
 
 // PushSource carries the source frame's causal metadata through the encoder.
 func (s *VideoPipeline) PushSource(jpeg []byte, sourceSeq uint32, interactionID uint64) {
+	s.PushSourceMeta(jpeg, sourceSeq, interactionID, SourceMetadata{})
+}
+
+func (s *VideoPipeline) PushSourceMeta(jpeg []byte, sourceSeq uint32, interactionID uint64, metadata SourceMetadata) {
 	if len(jpeg) == 0 {
 		return
 	}
@@ -351,7 +371,7 @@ func (s *VideoPipeline) PushSource(jpeg []byte, sourceSeq uint32, interactionID 
 	if ps == nil {
 		return
 	}
-	if ps.setMeta(jpeg, sourceSeq, interactionID, 1) {
+	if ps.setMetaFull(jpeg, sourceSeq, interactionID, metadata, 1) {
 		s.sourceReplacements.Add(1)
 	}
 }
@@ -361,6 +381,10 @@ func (s *VideoPipeline) PushSource(jpeg []byte, sourceSeq uint32, interactionID 
 // based encoder can request an immediate IDR instead of waiting up to the
 // normal two-second GOP boundary.
 func (s *VideoPipeline) SwitchSource(jpeg []byte, sourceSeq uint32, interactionID uint64) {
+	s.SwitchSourceMeta(jpeg, sourceSeq, interactionID, SourceMetadata{})
+}
+
+func (s *VideoPipeline) SwitchSourceMeta(jpeg []byte, sourceSeq uint32, interactionID uint64, metadata SourceMetadata) {
 	if len(jpeg) == 0 {
 		return
 	}
@@ -376,13 +400,13 @@ func (s *VideoPipeline) SwitchSource(jpeg []byte, sourceSeq uint32, interactionI
 	s.startLocked()
 	s.resetSubsForGenLocked()
 	if s.push != nil {
-		s.push.setMeta(jpeg, sourceSeq, interactionID, 3)
+		s.push.setMetaFull(jpeg, sourceSeq, interactionID, metadata, 1)
 	}
 }
 
-// PushBootstrap repeats an immutable still frame a few times. FFmpeg's MJPEG
-// demuxer needs more than one sample to finish probing on some versions, while
-// CDP screencasting is change-driven and may never emit a second static frame.
+// PushBootstrap supplies one immutable still frame for a static page. MIME
+// Content-Length framing lets the demuxer release the very first frame; a
+// historical three-frame probe burst only overloaded the native decoder.
 func (s *VideoPipeline) PushBootstrap(jpeg []byte) {
 	if len(jpeg) == 0 {
 		return
@@ -393,7 +417,7 @@ func (s *VideoPipeline) PushBootstrap(jpeg []byte) {
 	ps := s.push
 	s.mu.Unlock()
 	if ps != nil {
-		ps.setRepeats(jpeg, 3)
+		ps.setRepeats(jpeg, 1)
 	}
 }
 
@@ -420,6 +444,28 @@ func (s *VideoPipeline) SetSize(w, h int) {
 		s.startLocked()
 	}
 	s.resetSubsForGenLocked()
+}
+
+// SetScaleLimit changes only the coded-size bounding box. Chromium keeps the
+// full layout viewport, so adaptive resolution never changes page geometry.
+func (s *VideoPipeline) SetScaleLimit(maxW, maxH int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cfg.ScaleMaxW == maxW && s.cfg.ScaleMaxH == maxH {
+		return
+	}
+	s.cfg.ScaleMaxW, s.cfg.ScaleMaxH = maxW, maxH
+	w, h := s.cfg.codedSize(s.cfg.CaptureW, s.cfg.CaptureH)
+	if w == s.cfg.W && h == s.cfg.H {
+		return
+	}
+	s.cfg.W, s.cfg.H = w, h
+	if s.running {
+		log.Printf("stream: adaptive coded size %dx%d", w, h)
+		s.stopLocked()
+		s.startLocked()
+		s.resetSubsForGenLocked()
+	}
 }
 
 func even(v int) int {
@@ -525,7 +571,7 @@ func (s *VideoPipeline) RequestKeyframe() {
 func (s *VideoPipeline) seedLatestLocked() {
 	if s.push != nil && len(s.lastJPEG) > 0 &&
 		s.lastJPEGW == s.cfg.CaptureW && s.lastJPEGH == s.cfg.CaptureH {
-		s.push.setRepeats(s.lastJPEG, 3)
+		s.push.setRepeats(s.lastJPEG, 1)
 	}
 }
 
@@ -714,6 +760,9 @@ func (s *VideoPipeline) startLocked() {
 	go s.push.run(started.Stdin)
 	s.running = true
 	s.gen++
+	// The first encoded frame is already an IDR. Ignore decoder requests
+	// generated while VideoToolbox is still constructing its session.
+	s.lastKeyframeReq = time.Now()
 	s.seedLatestLocked()
 	gen := s.gen
 	log.Printf("stream: encoder started pid=%d coded=%dx%d@%dfps %dk encoder=%s",
@@ -847,6 +896,12 @@ func (s *VideoPipeline) rtpReadLoop(conn *net.UDPConn, gen int, written <-chan i
 					au.SourceReceiveNS = currentMeta.sourceNS
 					au.SourceSeq = currentMeta.sourceSeq
 					au.InteractionID = currentMeta.interaction
+					au.InputReceiveNS = currentMeta.source.InputReceiveNS
+					au.CDPAcceptedNS = currentMeta.source.CDPAcceptedNS
+					au.ScrollX = currentMeta.source.ScrollX
+					au.ScrollY = currentMeta.source.ScrollY
+					au.PageScale = currentMeta.source.PageScale
+					au.Profile = currentMeta.source.Profile
 				} else if currentMeta.sourceNS != 0 {
 					s.mappingFailures.Add(1)
 					telemetry.Emit("source_au_mapping_failure", "video", "metadata_expired", nil)

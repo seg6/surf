@@ -14,10 +14,10 @@ import (
 func systemCandidates() []candidate {
 	home, _ := os.UserHomeDir()
 	return []candidate{
-		{"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "system Google Chrome Stable"},
-		{filepath.Join(home, "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"), "system Google Chrome Stable"},
-		{"/Applications/Chromium.app/Contents/MacOS/Chromium", "system Chromium"},
-		{filepath.Join(home, "Applications/Chromium.app/Contents/MacOS/Chromium"), "system Chromium"},
+		{path: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", label: "system Google Chrome Stable", branded: true},
+		{path: filepath.Join(home, "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"), label: "system Google Chrome Stable", branded: true},
+		{path: "/Applications/Chromium.app/Contents/MacOS/Chromium", label: "system Chromium"},
+		{path: filepath.Join(home, "Applications/Chromium.app/Contents/MacOS/Chromium"), label: "system Chromium"},
 	}
 }
 

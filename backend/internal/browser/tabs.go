@@ -179,6 +179,7 @@ func (b *Controller) targetInfoChanged(info targetInfo) {
 	b.mu.Unlock()
 
 	if urlChanged && active {
+		b.setTouchMode(t.Session)
 		b.hub.BroadcastJSON(b.urlMessage(url))
 		b.pushNavState()
 	}
@@ -213,6 +214,7 @@ func (b *Controller) tabNavigated(session, url string) {
 	active := t.ID == b.activeID
 	b.mu.Unlock()
 	if active {
+		b.setTouchMode(session)
 		b.hub.BroadcastJSON(b.urlMessage(url))
 		b.pushNavState()
 	}
@@ -365,15 +367,14 @@ func (b *Controller) applyView(t *Tab) {
 	h := int(float64(b.viewH)/z + 0.5)
 	pixelW, pixelH := b.viewW, b.viewH
 	s := t.Session
-	targetID := t.TargetID
 	b.mu.Unlock()
-	if err := b.cdp.SetContentsSize(targetID, pixelW, pixelH); err != nil {
-		log.Printf("tab %d set contents %dx%d: %v", t.ID, pixelW, pixelH, err)
-	}
-	// Fire-and-order: screencast startup is written after this command, so its
-	// pixels use the new viewport without making tab activation wait here.
+	// Surf always runs headless-new. Browser.setContentsSize targets a
+	// platform window and Chrome rejects it in this mode (notably after an
+	// orientation change). Device metrics are the sole viewport authority;
+	// screencast startup is queued after this command on the same CDP writer.
+	b.setTouchMode(s)
 	_ = b.cdp.Dispatch(s, "Emulation.setDeviceMetricsOverride", map[string]any{
 		"width": w, "height": h, "deviceScaleFactor": z, "mobile": false,
-		"screenWidth": w, "screenHeight": h,
+		"screenWidth": pixelW, "screenHeight": pixelH,
 	})
 }
