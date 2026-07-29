@@ -127,8 +127,9 @@ static NSString *const RBUpdateResultPath = @"/var/mobile/Library/Surf/update-re
         int waitError = 0;
         if (spawnError == 0 && waitpid(pid, &status, 0) < 0) waitError = errno;
         NSDictionary *result = [self installResult];
+        NSString *schema = [result objectForKey:@"schema"];
         BOOL recordedSuccess =
-            [[result objectForKey:@"schema"] isEqualToString:@"1"] &&
+            ([schema isEqualToString:@"1"] || [schema isEqualToString:@"2"]) &&
             [[result objectForKey:@"stage"] isEqualToString:@"complete"] &&
             [[result objectForKey:@"result"] intValue] == 0 &&
             [[result objectForKey:@"version"] isEqualToString:version] &&
@@ -143,6 +144,14 @@ static NSString *const RBUpdateResultPath = @"/var/mobile/Library/Surf/update-re
             } else {
                 NSString *stage = [result objectForKey:@"stage"];
                 int code = [[result objectForKey:@"result"] intValue];
+                NSString *installerLog = [NSString stringWithContentsOfFile:
+                                          [result objectForKey:@"log"]
+                                                                  encoding:NSUTF8StringEncoding
+                                                                     error:nil];
+                if ([installerLog length] > 16384) {
+                    installerLog = [installerLog substringFromIndex:[installerLog length] - 16384];
+                }
+                if ([installerLog length]) RBLog(@"client update dpkg output:\n%@", installerLog);
                 if (![stage length]) stage = spawnError ? @"launch" : (waitError ? @"wait" : @"installer");
                 if (code == 0) code = spawnError ?: (waitError ?: exitCode);
                 [self fail:[NSString stringWithFormat:@"Installer failed during %@ (%d)", stage, code]];
