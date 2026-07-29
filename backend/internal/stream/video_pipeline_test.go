@@ -104,11 +104,14 @@ func TestArgsBuildsMjpegFromStdin(t *testing.T) {
 	for _, want := range []string{
 		"-loglevel warning", "-f image2pipe", "-vcodec mjpeg",
 		"-framerate 30", "-probesize 32",
-		"-analyzeduration 0", "-i pipe:0",
+		"-analyzeduration 0", "-threads 0", "-i pipe:0",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("args missing %q: %v", want, args)
 		}
+	}
+	if strings.Count(joined, "-threads 0") != 2 {
+		t.Fatalf("decoder and encoder must both use automatic thread counts: %v", args)
 	}
 	if args[len(args)-1] != "rtp://127.0.0.1:1234" {
 		t.Fatalf("last arg=%q, want RTP URL (full: %v)", args[len(args)-1], args)

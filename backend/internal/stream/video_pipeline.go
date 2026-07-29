@@ -601,7 +601,7 @@ func (s *VideoPipeline) args(outputURL string) []string {
 		"-f", "image2pipe", "-vcodec", "mjpeg",
 		"-framerate", fmt.Sprintf("%d", c.FPS),
 		"-probesize", "32", "-analyzeduration", "0",
-		"-threads", "1",
+		"-threads", "0",
 		"-i", "pipe:0",
 	}
 	if c.CaptureW != c.W || c.CaptureH != c.H {
@@ -617,10 +617,10 @@ func (s *VideoPipeline) args(outputURL string) []string {
 		// intentionally owned by arrival order, not a synthetic media clock.
 		"-fps_mode", "passthrough",
 		"-c:v", "libx264",
-		// A single encoder thread produces one compact slice. Multiple sliced
-		// workers benchmark faster on the host but roughly double
-		// VideoToolbox submit/callback time on the original iPad.
-		"-threads", "1",
+		// Let FFmpeg/x264 size its worker pool for the host. This is necessary
+		// for 60fps on smaller VPS cores; client diagnostics remain the guard
+		// against choosing a resolution the iPad cannot decode in time.
+		"-threads", "0",
 		"-profile:v", "baseline", "-level", c.h264Level(),
 		"-preset", x264Speed,
 		"-tune", "zerolatency",
