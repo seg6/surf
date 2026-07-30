@@ -1,10 +1,9 @@
 //go:build linux
 
-// Package runenv's Linux platform brings up a PulseAudio-compatible sink for
-// the PCM lane. Chromium runs headless (no display server needed at all —
-// see internal/cdp), and the H.264 lane transcodes CDP's own screencast
-// frames instead of grabbing the X display, so this is the only host
-// service left to manage here.
+// Package runenv's Linux platform keeps the PulseAudio-compatible fallback
+// available if Chromium tab capture cannot start. Chromium runs headless (no
+// display server needed; see internal/cdp), and the H.264 lane transcodes
+// CDP's own screencast frames instead of grabbing the X display.
 package runenv
 
 import (
@@ -104,7 +103,7 @@ func (lh *linuxHandle) Shutdown() {
 }
 
 // AudioCaptureArgs grabs the PulseAudio-compatible monitor source Chromium's
-// output was routed to.
+// output was routed to when the primary tab-capture lane is unavailable.
 func (lh *linuxHandle) AudioCaptureArgs(source string) []string {
 	// Request the wire format at the source and keep Pulse's read fragment to
 	// exactly one 20ms packet. Letting the demuxer use its larger default

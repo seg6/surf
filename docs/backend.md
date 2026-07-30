@@ -3,8 +3,7 @@
 The backend is started with `surf serve`. It runs managed Chrome in
 `--headless=new`, transcodes CDP screencast frames to H.264 with bundled
 FFmpeg, and streams video, audio, and control messages to the native client.
-Audio capture supports Linux and Windows 10 build 20348 or later. macOS
-currently supports the video/browsing path without audio capture.
+Audio capture uses Chromium's tab-capture API on Linux, Windows, and macOS.
 
 ## Desktop app
 
@@ -38,11 +37,12 @@ without a desktop session.
 
 ## Dependencies
 
-Surf resolves Chromium automatically. Linux audio additionally needs:
+Surf resolves Chromium automatically. Linux's fallback audio path additionally
+needs:
 
-- `pactl` with PulseAudio or PipeWire Pulse compatibility (Linux, for audio).
+- `pactl` with PulseAudio or PipeWire Pulse compatibility (Linux fallback).
 - `pulseaudio` when no existing PulseAudio-compatible server is available
-  (Linux, for audio).
+  (Linux fallback).
 
 Example package installs:
 
@@ -57,11 +57,12 @@ sudo dnf install pulseaudio-utils pulseaudio
 sudo pacman -S pulseaudio
 ```
 
-Windows audio uses the native process-loopback WASAPI API available in build
-20348 and later. It follows the managed Chromium process and all descendants,
-works across output-device changes, and excludes unrelated host audio. No
-virtual audio cable or FFmpeg input device is required. Audio capture is not
-yet implemented on macOS.
+Audio uses a built-in Manifest V3 extension and Chromium's tab capture API on
+every supported host. Capturing a tab suppresses its local playback, so audio
+is heard by the Surf client without also playing on the host. Surf converts it
+to signed 16-bit, 16 kHz mono PCM inside Chromium and carries it over a random,
+loopback-only WebSocket. No virtual audio cable or FFmpeg input device is
+required for the primary path.
 
 ## Quick Start
 
@@ -111,10 +112,10 @@ SURF_PASSWORD='change-me' ./backend/surf serve
 
 ## Runtime Behavior
 
-Surf uses `CHROME` when explicitly set. With the default content blocker
-enabled, Surf prefers an extension-capable installed Chromium and then its
-managed ungoogled-chromium runtime; disabling the blocker also permits an
-installed Google Chrome Stable. Managed releases are downloaded from the official
+Surf uses `CHROME` when explicitly set; that browser must permit unpacked
+extensions. Otherwise Surf prefers an extension-capable installed Chromium and
+then its managed ungoogled-chromium runtime because tab audio always uses the
+built-in extension. Managed releases are downloaded from the official
 ungoogled-chromium GitHub organization, checked against GitHub's declared size
 and SHA-256 digest, installed atomically, and checked daily. One previous
 version is retained for rollback. Chrome for Testing is not used.
@@ -131,8 +132,8 @@ reported as explicit `video-config` states and require `video-retry`.
 
 The Linux runtime uses a pinned BtbN GPL build because Surf needs both the
 Pulse input device and libx264. Windows and macOS use pinned `ffmpeg-static`
-executables. Windows audio bypasses FFmpeg input and reads 16 kHz mono PCM
-directly from the OS process-loopback capture API.
+executables. Primary audio capture bypasses FFmpeg input and receives 16 kHz
+mono PCM from the built-in Chromium tab-capture extension.
 
 There is no desktop capture, headful, headless-shell, or screenshot-polling
 mode. `CHROME=/path/to/browser` and `FFMPEG=/path/to/ffmpeg` remain explicit
@@ -181,11 +182,13 @@ existing PulseAudio-compatible server. On common PipeWire desktops this
 succeeds, so Surf creates a `surf_output` null sink there and unloads it on
 shutdown. If no server is available, Surf starts its own PulseAudio process.
 
-On Windows, Surf registers Chromium's root PID after launch and activates the
-`VAD\Process_Loopback` WASAPI virtual device for that process tree when the
-client subscribes. Windows converts the capture stream directly to signed
-16-bit, 16 kHz mono PCM before it enters the same bounded audio fan-out used
-on Linux.
+On every platform, Surf invokes its built-in extension for Chromium's active
+tab when the client subscribes. An offscreen extension document owns the media
+stream and an AudioWorklet converts it to signed 16-bit, 16 kHz mono PCM before
+it enters the bounded audio fan-out. Switching tabs moves the capture to the
+newly active tab; stopping the client subscription releases the tab capture.
+Linux retains its PulseAudio monitor source as a fallback if tab capture cannot
+start.
 
 Data is stored under `~/.surf/` by default:
 
@@ -194,6 +197,7 @@ Data is stored under `~/.surf/` by default:
 - `~/.surf/uploads`: temporary upload files.
 - `~/.surf/runtime/ublock-origin-lite`: Surf's verified, managed content
   blocker. It is loaded into the browser profile automatically.
+- `~/.surf/runtime/tab-audio-extension`: Surf's generated Chromium audio bridge.
 
 ## Configuration
 
@@ -203,13 +207,11 @@ Common overrides:
 - `PORT`: listen port; defaults to `18080`.
 - `BIND_ADDR`: listen address; defaults to `0.0.0.0`.
 - `SURF_HOME`: data root; defaults to `~/.surf`.
-- `CHROME`: explicit browser override. Setting this disables managed browser
-  selection.
+- `CHROME`: explicit extension-capable browser override. Setting this disables
+  managed browser selection.
 - `SURF_BROWSER_DOWNLOAD=0`: prohibit downloading managed ungoogled-chromium.
 - `SURF_CONTENT_BLOCKER=0`: disable the managed uBlock Origin Lite extension.
-  It is enabled by default. Surf prefers an installed unbranded Chromium (or
-  its managed ungoogled-chromium) while it is enabled because current branded
-  Google Chrome ignores unpacked-extension launch flags.
+  It is enabled by default. The built-in tab-audio extension remains enabled.
 - `SURF_CONTENT_BLOCKER_DOWNLOAD=0`: prohibit downloading a missing pinned
   uBlock Origin Lite release.
 - `FFMPEG`: explicit encoder override; otherwise Surf uses its bundled FFmpeg.

@@ -13,10 +13,22 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"syscall"
 )
 
+const createNoWindow = 0x08000000
+
 func Command(path string, args ...string) *exec.Cmd {
-	return exec.Command(path, args...)
+	return hiddenCommand(path, args...)
+}
+
+func hiddenCommand(path string, args ...string) *exec.Cmd {
+	cmd := exec.Command(path, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: createNoWindow,
+	}
+	return cmd
 }
 
 func Kill(pid int) {
@@ -26,17 +38,16 @@ func Kill(pid int) {
 	// Best effort: fall back to killing just the tracked process if taskkill
 	// itself is unavailable for some reason (it ships with every Windows
 	// install, so this should be unreachable in practice).
-	if err := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(pid)).Run(); err != nil {
+	if err := hiddenCommand("taskkill", "/T", "/F", "/PID", strconv.Itoa(pid)).Run(); err != nil {
 		if p, ferr := os.FindProcess(pid); ferr == nil {
 			_ = p.Kill()
 		}
 	}
 }
 
-// Start launches path with args via a normal exec.Command, dressed up in
-// the cross-platform Started shape.
+// Start launches path without allocating or showing a console window.
 func Start(path string, args []string, opts Options) (*Started, error) {
-	cmd := exec.Command(path, args...)
+	cmd := hiddenCommand(path, args...)
 	cmd.Env = opts.Env
 	started := &Started{}
 	if opts.Stdin {

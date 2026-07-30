@@ -51,9 +51,23 @@ func TestLaunchArgsExtraArgsAppendedBeforeURL(t *testing.T) {
 }
 
 func TestLaunchArgsContentBlocker(t *testing.T) {
-	args := LaunchConfig{Profile: "/tmp/profile", W: 1024, H: 768, ExtensionPath: "/tmp/ubol"}.Args()
+	args := LaunchConfig{
+		Profile: "/tmp/profile", W: 1024, H: 768,
+		ExtensionPaths: []string{"/tmp/ubol"},
+	}.Args()
 	if !hasArg(args, "--disable-extensions-except=/tmp/ubol") ||
 		!hasArg(args, "--load-extension=/tmp/ubol") {
 		t.Fatalf("missing content blocker args: %v", args)
+	}
+}
+
+func TestLaunchArgsMultipleExtensions(t *testing.T) {
+	args := LaunchConfig{
+		Profile: "/tmp/profile", W: 1024, H: 768,
+		ExtensionPaths: []string{"/tmp/ubol", "/tmp/audio"},
+	}.Args()
+	if !hasArg(args, "--disable-extensions-except=/tmp/ubol,/tmp/audio") ||
+		!hasArg(args, "--load-extension=/tmp/ubol,/tmp/audio") {
+		t.Fatalf("missing combined extension args: %v", args)
 	}
 }

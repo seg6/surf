@@ -23,9 +23,8 @@ func (r *Runtime) Shutdown() {
 	}
 }
 
-// Start prepares whatever audio service the current OS needs — a PulseAudio
-// sink on Linux, a process-loopback handle on Windows, and nothing on macOS —
-// via the matching implementation.
+// Start prepares optional platform fallback services and process-lifetime
+// safeguards. Chromium tab capture itself is initialized above this layer.
 func Start(cfg *config.Config) (*Runtime, error) {
 	handle, err := newPlatform().Prepare(cfg)
 	if err != nil {

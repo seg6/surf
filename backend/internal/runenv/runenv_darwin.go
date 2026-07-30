@@ -3,8 +3,8 @@
 // Package runenv's macOS platform needs nothing host-specific yet: Chromium
 // runs headless (see internal/cdp) and the H.264 lane transcodes CDP's own
 // screencast frames instead of grabbing the screen, so there's no
-// display/desktop bring-up needed. The PCM lane is unsupported here for now
-// (no capture source has been wired up).
+// display/desktop bring-up needed. Chromium tab capture owns the PCM lane
+// above this platform layer.
 package runenv
 
 import "surf-backend/internal/config"
@@ -29,5 +29,5 @@ type darwinHandle struct{}
 
 func (darwinHandle) Shutdown() {}
 
-// AudioCaptureArgs is unsupported for now: nil disables the PCM lane.
+// macOS has no platform fallback; Chromium tab capture is the primary lane.
 func (darwinHandle) AudioCaptureArgs(source string) []string { return nil }

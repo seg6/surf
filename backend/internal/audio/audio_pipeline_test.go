@@ -2,6 +2,7 @@ package audio
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"testing"
 )
@@ -55,5 +56,25 @@ func TestNativeCaptureFeedsPCMChunks(t *testing.T) {
 	}
 	if !bytes.Equal(chunk.Data, want) {
 		t.Fatalf("PCM chunk differs: got %d bytes, want %d", len(chunk.Data), len(want))
+	}
+}
+
+func TestPrimaryCaptureFailureConsultsPlatformFallback(t *testing.T) {
+	fallbackCalled := false
+	s := New(Config{
+		Capture: func() (io.ReadCloser, error) {
+			return nil, errors.New("primary unavailable")
+		},
+		CaptureArgs: func(string) []string {
+			fallbackCalled = true
+			return nil
+		},
+	})
+	sub := s.Subscribe()
+	if !fallbackCalled {
+		t.Fatal("platform fallback was not consulted after primary capture failed")
+	}
+	if _, ok := <-sub.C; ok {
+		t.Fatal("expected closed subscription when both capture paths fail")
 	}
 }

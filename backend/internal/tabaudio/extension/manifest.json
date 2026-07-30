@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Surf Audio Bridge",
+  "version": "1.0.0",
+  "permissions": [
+    "offscreen",
+    "tabCapture"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Capture tab audio"
+  }
+}

@@ -44,7 +44,10 @@ func Serve() error {
 		return fmt.Errorf("auth: %w", err)
 	}
 	hub := ws.NewHub()
-	b := browser.New(cfg, hub, rt.Handle())
+	b, err := browser.New(cfg, hub, rt.Handle())
+	if err != nil {
+		return err
+	}
 	hub.SetHandler(b)
 	defer b.Shutdown()
 	if err := b.Start(); err != nil {
@@ -106,11 +109,7 @@ func ensureBrowser(cfg *config.Config) error {
 		log.Printf("runtime: resolving Chrome/Chromium (--headless=new)")
 		var path, source string
 		var err error
-		if cfg.ContentBlocker {
-			path, source, err = browserbin.ResolveExtensionCapable(cfg.SurfHome)
-		} else {
-			path, source, err = browserbin.Resolve(cfg.SurfHome)
-		}
+		path, source, err = browserbin.ResolveExtensionCapable(cfg.SurfHome)
 		if err != nil {
 			return err
 		}

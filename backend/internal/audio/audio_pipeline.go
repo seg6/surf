@@ -30,9 +30,9 @@ type Config struct {
 	Source     string
 	Env        []string
 	// Capture opens a native PCM source that already produces signed
-	// little-endian 16 kHz mono samples. Windows uses this for WASAPI
-	// process-loopback capture. When nil, the pipeline launches FFmpeg with
-	// CaptureArgs (the Linux PulseAudio path).
+	// little-endian 16 kHz mono samples. Chromium tab capture uses this on
+	// every platform. When nil or unavailable, the pipeline launches FFmpeg
+	// with CaptureArgs (the Linux PulseAudio fallback).
 	Capture func() (io.ReadCloser, error)
 	// CaptureArgs builds the ffmpeg arguments (up to and including "-i
 	// <source>") that grab this platform's system audio. Nil means the PCM
@@ -128,18 +128,16 @@ func (sub *Sub) Close() {
 func (s *AudioPipeline) startLocked() {
 	if s.cfg.Capture != nil {
 		capture, err := s.cfg.Capture()
-		if err != nil {
-			log.Printf("audio: native capture failed: %v", err)
-			s.failAllLocked()
+		if err == nil {
+			s.runID++
+			runID := s.runID
+			s.capture = capture
+			s.running = true
+			log.Printf("audio: native capture started %dHz mono", sampleRate)
+			go s.readLoop(capture, nil, runID)
 			return
 		}
-		s.runID++
-		runID := s.runID
-		s.capture = capture
-		s.running = true
-		log.Printf("audio: native capture started %dHz mono", sampleRate)
-		go s.readLoop(capture, nil, runID)
-		return
+		log.Printf("audio: primary capture failed, trying platform fallback: %v", err)
 	}
 	var captureArgs []string
 	if s.cfg.CaptureArgs != nil {

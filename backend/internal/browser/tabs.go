@@ -391,6 +391,9 @@ func (b *Controller) switchActive(id int) {
 	if !b.isActiveGeneration(id, generation) {
 		return
 	}
+	if b.tabAudio != nil {
+		b.tabAudio.SwitchActive()
+	}
 	b.applyView(next)
 	if !b.isActiveGeneration(id, generation) {
 		return

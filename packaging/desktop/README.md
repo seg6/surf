@@ -14,9 +14,9 @@ downloads a verified ungoogled-chromium release into `~/.surf`
 (`%USERPROFILE%\.surf` on Windows). FFmpeg is included. Allow inbound TCP port
 18080 if the operating-system firewall asks.
 
-On Windows build 20348 or later, Surf captures only the managed Chromium
-process tree through native WASAPI process loopback. It does not require a
-virtual audio cable and does not record audio from unrelated applications.
+Surf captures the active Chromium tab through its built-in extension on every
+platform. The captured tab is silent on the host, and Surf does not require a
+virtual audio cable or record audio from unrelated applications.
 
 On first run, Surf asks whether to start when you sign in. Change that choice
 from Settings at any time. Starting Surf while it is already running simply

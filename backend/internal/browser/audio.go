@@ -30,14 +30,10 @@ func (b *Controller) handleAudio(c *ws.ClientTransport, on bool) {
 }
 
 func audioConfig(cfg *config.Config, platform runenv.Handle) audio.Config {
-	audioCfg := audio.Config{
+	return audio.Config{
 		FFmpegPath: cfg.FFmpegPath, Source: cfg.AudioSource, Env: cfg.ChildEnv,
 		CaptureArgs: platform.AudioCaptureArgs,
 	}
-	if native, ok := platform.(runenv.NativeAudioCapturer); ok {
-		audioCfg.Capture = native.OpenAudioCapture
-	}
-	return audioCfg
 }
 
 func (b *Controller) pumpAudio(c *ws.ClientTransport, sub *audio.Sub) {

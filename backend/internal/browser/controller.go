@@ -22,6 +22,7 @@ import (
 	"surf-backend/internal/protocol"
 	"surf-backend/internal/runenv"
 	"surf-backend/internal/stream"
+	"surf-backend/internal/tabaudio"
 	"surf-backend/internal/telemetry"
 	"surf-backend/internal/ws"
 )
@@ -54,7 +55,6 @@ type Controller struct {
 	source   FrameSource
 	cmd      *os.Process
 	hub      *ws.Hub
-	platform runenv.Handle
 	commands chan controllerCommand
 	events   chan cdp.Event
 
@@ -78,6 +78,7 @@ type Controller struct {
 
 	video     *stream.VideoPipeline
 	audio     *audio.AudioPipeline
+	tabAudio  *tabaudio.Source
 	mediaMu   sync.Mutex // guards client media subscriptions below
 	videoSubs map[*ws.ClientTransport]*stream.Sub
 	audioSubs map[*ws.ClientTransport]*audio.Sub
@@ -146,9 +147,15 @@ type controllerCommand struct {
 	receivedNS uint64
 }
 
-func New(cfg *config.Config, hub *ws.Hub, platform runenv.Handle) *Controller {
+func New(cfg *config.Config, hub *ws.Hub, platform runenv.Handle) (*Controller, error) {
+	audioCfg := audioConfig(cfg, platform)
+	tabAudio, err := tabaudio.New(cfg.SurfHome)
+	if err != nil {
+		return nil, fmt.Errorf("initialize tab audio: %w", err)
+	}
+	audioCfg.Capture = tabAudio.Open
 	b := &Controller{
-		cfg: cfg, hub: hub, platform: platform,
+		cfg: cfg, hub: hub,
 		adaptiveBaseQuality: cfg.SourceJPEGQuality,
 		tabs:                map[int]*Tab{},
 		byTarget:            map[string]*Tab{},
@@ -161,7 +168,8 @@ func New(cfg *config.Config, hub *ws.Hub, platform runenv.Handle) *Controller {
 		dialogSessions:  map[string]bool{},
 		dlLastPush:      map[string]time.Time{},
 		video:           stream.New(streamConfig(cfg)),
-		audio:           audio.New(audioConfig(cfg, platform)),
+		audio:           audio.New(audioCfg),
+		tabAudio:        tabAudio,
 		videoSubs:       map[*ws.ClientTransport]*stream.Sub{},
 		audioSubs:       map[*ws.ClientTransport]*audio.Sub{},
 		perfCounts:      map[string]int{},
@@ -172,7 +180,7 @@ func New(cfg *config.Config, hub *ws.Hub, platform runenv.Handle) *Controller {
 	}
 	go b.runVideoResize()
 	go b.runController()
-	return b
+	return b, nil
 }
 
 func (b *Controller) runController() {
@@ -198,20 +206,38 @@ func (b *Controller) runController() {
 // Start launches Chromium and wires target discovery; it returns once the
 // browser is ready to serve clients.
 func (b *Controller) Start() error {
+	extensionPaths := []string{}
+	if b.cfg.ContentBlockerPath != "" {
+		extensionPaths = append(extensionPaths, b.cfg.ContentBlockerPath)
+	}
+	var extraArgs []string
+	if b.tabAudio != nil {
+		extensionPaths = append(extensionPaths, b.tabAudio.ExtensionPath())
+		// Required by CDP's Extensions domain, used to invoke the audio
+		// extension action as the active tab's user gesture.
+		extraArgs = append(extraArgs, "--enable-unsafe-extension-debugging")
+	}
 	client, cmd, err := cdp.Launch(cdp.LaunchConfig{
-		ChromePath:    b.cfg.ChromePath,
-		Profile:       b.cfg.Profile,
-		W:             b.cfg.ViewW,
-		H:             b.cfg.ViewH,
-		Env:           b.cfg.ChildEnv,
-		NoSandbox:     b.cfg.ChromeNoSandbox,
-		EnableGPU:     b.cfg.ChromeGPU,
-		ExtensionPath: b.cfg.ContentBlockerPath,
+		ChromePath:     b.cfg.ChromePath,
+		Profile:        b.cfg.Profile,
+		W:              b.cfg.ViewW,
+		H:              b.cfg.ViewH,
+		Env:            b.cfg.ChildEnv,
+		NoSandbox:      b.cfg.ChromeNoSandbox,
+		EnableGPU:      b.cfg.ChromeGPU,
+		ExtensionPaths: extensionPaths,
+		ExtraArgs:      extraArgs,
 	})
 	if err != nil {
 		return err
 	}
 	b.cdp = client
+	b.cmd = cmd
+	if b.tabAudio != nil {
+		if err := b.tabAudio.Attach(client); err != nil {
+			return err
+		}
+	}
 	if raw, versionErr := client.Call("", "Browser.getVersion", nil); versionErr == nil {
 		var version struct {
 			UserAgent string `json:"userAgent"`
@@ -221,10 +247,6 @@ func (b *Controller) Start() error {
 		}
 	}
 	b.source = NewScreencastSource(client, b.onSourceFrame)
-	b.cmd = cmd
-	if aware, ok := b.platform.(runenv.BrowserProcessAware); ok {
-		aware.BrowserStarted(cmd.Pid)
-	}
 	client.OnEvent(func(event cdp.Event) {
 		if event.Method == "Page.screencastFrame" {
 			// Media is not controller state. Route it straight to the
@@ -301,6 +323,9 @@ func (b *Controller) Shutdown() {
 	}
 	if b.audio != nil {
 		b.audio.Shutdown()
+	}
+	if b.tabAudio != nil {
+		_ = b.tabAudio.Close()
 	}
 	if b.cdp != nil {
 		b.cdp.Close()

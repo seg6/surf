@@ -33,9 +33,10 @@ make surf-binary
 Surf installs managed ungoogled-chromium when no compatible system Chrome or
 Chromium is present. Development builds may also download FFmpeg. If a download
 is blocked, permit access to GitHub
-Releases, or set `CHROME`/`FFMPEG` to explicit local executables. Linux audio
-also requires the PulseAudio-compatible tools reported by `doctor`. Windows
-audio requires Windows build 20348 or later and the Windows Audio service.
+Releases, or set `CHROME`/`FFMPEG` to explicit local executables. Primary audio
+uses Surf's built-in Chromium extension on every platform and needs no capture
+driver. Linux also reports the PulseAudio-compatible tools used by its fallback
+path.
 
 ## Managed Runtime Download Fails
 

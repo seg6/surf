@@ -15,25 +15,19 @@
 // created at all, not merely hidden) and removes a real, demonstrated risk
 // (SwitchDesktop-adjacent Win32 desktop APIs) along with it.
 //
-// The PCM lane uses Windows process-loopback WASAPI capture. Unlike endpoint
-// loopback it follows Chromium's root PID and descendants across output
-// devices without recording unrelated host audio.
+// The PCM lane uses Chromium tab capture above this platform layer.
 package runenv
 
 import (
-	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync/atomic"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 
 	"surf-backend/internal/config"
-	"surf-backend/internal/winaudio"
 )
 
 func newPlatform() Platform { return windowsPlatform{} }
@@ -142,8 +136,7 @@ func findChromium() string {
 
 // windowsHandle holds the kill-on-close Job Object (if it could be set up).
 type windowsHandle struct {
-	job        windows.Handle
-	browserPID atomic.Uint32
+	job windows.Handle
 }
 
 func (wh *windowsHandle) Shutdown() {
@@ -152,19 +145,5 @@ func (wh *windowsHandle) Shutdown() {
 	}
 }
 
-func (wh *windowsHandle) BrowserStarted(pid int) {
-	if pid > 0 {
-		wh.browserPID.Store(uint32(pid))
-	}
-}
-
-func (wh *windowsHandle) OpenAudioCapture() (io.ReadCloser, error) {
-	pid := wh.browserPID.Load()
-	if pid == 0 {
-		return nil, fmt.Errorf("Chromium has not started")
-	}
-	return winaudio.OpenProcessLoopback(pid)
-}
-
-// Windows captures natively through WASAPI rather than an FFmpeg device.
+// Windows has no platform fallback; Chromium tab capture is the primary lane.
 func (wh *windowsHandle) AudioCaptureArgs(source string) []string { return nil }

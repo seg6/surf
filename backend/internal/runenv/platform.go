@@ -1,16 +1,12 @@
 package runenv
 
-import (
-	"io"
-
-	"surf-backend/internal/config"
-)
+import "surf-backend/internal/config"
 
 // Platform abstracts what's left that's genuinely host-OS-specific once
 // Chromium runs headless and the H.264 lane transcodes CDP's own screencast
-// frames instead of grabbing the OS display: bringing up an audio sink to
-// capture (Linux's PulseAudio null-sink) and describing how to grab system
-// audio for the PCM lane. Everything else (CDP, browser tabs, the ws hub,
+// frames instead of grabbing the OS display: maintaining the optional Linux
+// PulseAudio fallback and host process-lifetime behavior. Everything else
+// (CDP, browser tabs, the ws hub,
 // the wire protocol, stream fan-out, and even Chromium's own launch flags)
 // is identical on every OS and lives above this layer. One implementation
 // exists per supported GOOS, selected by newPlatform (build-tagged, one per
@@ -18,7 +14,7 @@ import (
 // management).
 type Platform interface {
 	// Prepare brings up whatever host services this platform needs (an
-	// audio sink on Linux; no separate service on Windows/macOS) and may mutate cfg
+	// fallback audio sink on Linux; no separate service on Windows/macOS) and may mutate cfg
 	// with whatever child processes need (PulseServer, ...). The returned
 	// Handle stays alive for the server's lifetime; Shutdown tears down
 	// whatever Prepare started.
@@ -32,19 +28,7 @@ type Platform interface {
 type Handle interface {
 	// Shutdown tears down whatever Prepare started.
 	Shutdown()
-	// AudioCaptureArgs builds the ffmpeg argument list — up to and including
-	// "-i <source>" — for the PCM lane. Nil means unsupported.
+	// AudioCaptureArgs builds the optional FFmpeg fallback argument list up to
+	// and including "-i <source>". Nil means no platform fallback.
 	AudioCaptureArgs(source string) []string
-}
-
-// BrowserProcessAware is implemented by platforms whose media capture is
-// scoped to the managed Chromium process tree.
-type BrowserProcessAware interface {
-	BrowserStarted(pid int)
-}
-
-// NativeAudioCapturer is implemented when the OS can provide the wire PCM
-// format directly without an FFmpeg input device.
-type NativeAudioCapturer interface {
-	OpenAudioCapture() (io.ReadCloser, error)
 }
