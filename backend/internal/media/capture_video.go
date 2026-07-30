@@ -13,7 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const videoHeaderBytes = 16
+const videoHeaderBytes = 20
 
 type EncoderConfig struct {
 	Codec    string `json:"codec"`
@@ -23,10 +23,12 @@ type EncoderConfig struct {
 }
 
 type VideoFrame struct {
-	Data   []byte
-	Key    bool
-	Width  int
-	Height int
+	Data      []byte
+	Key       bool
+	Fresh     bool
+	SourceSeq uint32
+	Width     int
+	Height    int
 }
 
 func (s *Capture) StartVideo(config EncoderConfig, handler func(VideoFrame)) error {
@@ -205,7 +207,7 @@ func (s *Capture) serveVideoBridge(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Capture) handleVideoFrame(message []byte) {
-	if len(message) < videoHeaderBytes || string(message[:4]) != "SVI1" {
+	if len(message) < videoHeaderBytes || string(message[:4]) != "SVI2" {
 		return
 	}
 	headerBytes := int(binary.BigEndian.Uint16(message[6:8]))
@@ -214,10 +216,12 @@ func (s *Capture) handleVideoFrame(message []byte) {
 		return
 	}
 	frame := VideoFrame{
-		Data:   append([]byte(nil), message[headerBytes:]...),
-		Key:    message[4]&1 != 0,
-		Width:  int(binary.BigEndian.Uint16(message[8:10])),
-		Height: int(binary.BigEndian.Uint16(message[10:12])),
+		Data:      append([]byte(nil), message[headerBytes:]...),
+		Key:       message[4]&1 != 0,
+		Fresh:     message[4]&2 != 0,
+		SourceSeq: binary.BigEndian.Uint32(message[16:20]),
+		Width:     int(binary.BigEndian.Uint16(message[8:10])),
+		Height:    int(binary.BigEndian.Uint16(message[10:12])),
 	}
 	s.mu.Lock()
 	handler, active := s.videoHandler, s.videoActive

@@ -15,8 +15,9 @@ downloads a verified ungoogled-chromium release into `~/.surf`
 operating-system firewall asks.
 
 Surf captures the active Chromium tab through its built-in extension on every
-platform. The captured tab is silent on the host, and Surf does not require a
-virtual audio cable or record audio from unrelated applications.
+platform. Chromium stays silent on the host even when the iPad disconnects or
+the capture parks. Surf does not require a virtual audio cable or record audio
+from unrelated applications.
 
 On first run, Surf asks whether to start when you sign in. Change that choice
 from Settings at any time. Starting Surf while it is already running simply

@@ -322,7 +322,7 @@ func (s *VideoPipeline) startLocked() {
 		s.failAllLocked()
 		return
 	}
-	log.Printf("stream: tab encoder started generation=%d %dx%d source-paced", gen, s.cfg.W, s.cfg.H)
+	log.Printf("stream: tab encoder started generation=%d %dx%d paced-30fps", gen, s.cfg.W, s.cfg.H)
 }
 
 func (s *VideoPipeline) stopLocked() {

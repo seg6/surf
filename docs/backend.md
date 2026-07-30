@@ -105,11 +105,15 @@ version is retained for rollback. Chrome for Testing is not used.
 The selected browser always runs with `--headless=new`. Surf's built-in
 Manifest V3 extension captures the active tab. An offscreen document feeds raw
 video frames to Chromium's H.264 WebCodecs encoder and sends complete Annex-B
-access units over a random, loopback-only WebSocket. The same document converts
-captured audio to 16-bit, 16 kHz mono PCM. Annex-B H.264 is the sole client-facing
-visual format. Clients subscribe automatically after connecting; encoder
-failures are reported as explicit `video-config` states and require
-`video-retry`.
+access units over a random, loopback-only WebSocket. It samples tabCapture at
+up to 60 Hz into a one-frame latest-only handoff, then emits H.264 on a stable
+30 Hz clock. Short compositor scheduling gaps repeat the most recent image
+instead of becoming transport and presentation gaps; repeats are marked
+internally and never counted as fresh interaction responses. The same
+document converts captured audio to 16-bit, 16 kHz mono PCM. Annex-B H.264 is
+the sole client-facing visual format. Clients subscribe automatically after
+connecting; encoder failures are reported as explicit `video-config` states
+and require `video-retry`.
 
 There is no desktop capture, headful, headless-shell, or screenshot-polling
 mode. `CHROME=/path/to/browser` remains an explicit development/recovery
@@ -167,6 +171,9 @@ tab when the client subscribes. An offscreen extension document owns the media
 stream and an AudioWorklet converts it to signed 16-bit, 16 kHz mono PCM before
 it enters the bounded audio fan-out. Switching tabs moves the capture to the
 newly active tab; stopping the client subscription releases the tab capture.
+Chromium remains muted for its entire process lifetime, including while no
+client is connected. This uses Chromium's own cross-platform audio-output
+mute and does not require a host audio service or virtual audio device.
 
 Data is stored under `~/.surf/` by default:
 
@@ -221,24 +228,21 @@ signature. Release builds embed the native package built from the same commit.
 An authenticated native client with an older protocol can download that package
 from `/updates/v1/client`; media WebSockets are never used for update payloads.
 
-Video capture is source-driven: Surf asks Chromium for the native client's
-60 Hz display rate and encodes frames as they arrive. Chromium otherwise
-selects its 30 FPS tab-capture default (including when asked for its generic
-1000 FPS media limit). Surf does not timer-pace frames. Latest-only
-capture/presentation slots and bounded encode/GOP transport queues discard
-stale work instead of accumulating latency. The final presentation rate is
-naturally limited by the iPad's display.
+Video output is fixed at 30 FPS. Surf asks tabCapture for up to 60 source
+frames per second, retains only the newest source image, and samples it on the
+30 Hz encoder clock. Latest-only capture/presentation slots and bounded
+encode/GOP transport queues discard stale work instead of accumulating
+latency. Backend diagnostics report paced AU gaps separately from fresh-source
+gaps and duplicate AUs, so a stable output clock cannot hide a Chromium
+compositor stall.
 
-For a lower-workload original-iPad configuration, start with:
+The defaults target the original iPad at its exact viewport and 12 Mbps:
 
 ```sh
-SURF_PASSWORD='choose-a-password' \
-STREAM_SCALE=768x1024 \
-STREAM_BITRATE=2000 \
-./surf serve
+SURF_PASSWORD='choose-a-password' ./surf serve
 ```
 
 Triple-tap the video on the iPad to open the diagnostics overlay. During
-continuous motion, `AU RATE` should approach the Chromium source rate and
-`VT CALLBACK` should remain below the display's frame budget (16.7 ms at
-60 Hz). Lower `STREAM_SCALE` if decode time exceeds that budget.
+continuous motion, `AU RATE` should approach 30 and `VT CALLBACK` should
+remain below the 33.3 ms frame budget. Lower `STREAM_SCALE` only if decode
+time exceeds that budget.

@@ -82,9 +82,9 @@ Native app:
 /var/mobile/Library/Surf/surf.log
 ```
 
-Triple-tap the streamed page to show the on-device performance overlay. Test
-FPS only while the page is visibly moving: a static page normally has a low AU
-rate. Useful signals are:
+Triple-tap the streamed page to show the on-device performance overlay. The
+H.264 lane remains paced at 30 FPS even on a static page; evaluate visible
+smoothness on a moving or scrolling page. Useful signals are:
 
 - `AU RATE`: frames arriving from the backend.
 - `PRESENTED`: frames shown by the display link, rather than merely decoded.
@@ -101,8 +101,8 @@ go run ./tools/motionprobe -duration 30s
 ```
 
 This verifies capture, encoding, transport, decode, and presentation. Exercise
-Chromium's compositor scroll path separately with the same 60 Hz pixel-wheel
-events used by the native client:
+Chromium's compositor scroll path separately with the same high-frequency
+pixel-wheel events used by the native client:
 
 ```sh
 go run ./tools/motionprobe -scroll -duration 30s

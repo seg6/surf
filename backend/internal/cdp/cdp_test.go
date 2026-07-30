@@ -19,6 +19,9 @@ func TestLaunchArgsSandboxDefault(t *testing.T) {
 	if !hasArg(args, "--headless=new") {
 		t.Fatalf("missing headless flag: %v", args)
 	}
+	if !hasArg(args, "--mute-audio") {
+		t.Fatalf("missing host-audio isolation flag: %v", args)
+	}
 	if !hasArg(args, "--enable-gpu") || hasArg(args, "--disable-gpu") {
 		t.Fatalf("GPU auto path not enabled: %v", args)
 	}

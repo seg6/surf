@@ -139,6 +139,9 @@ static BOOL RBReadAll(int fd, void *buf, NSUInteger len) {
 @property(nonatomic, assign) BOOL secure;
 @property(nonatomic, assign) int fd;
 @property(nonatomic, assign) BOOL running;
+@property(nonatomic, assign) BOOL connectStarted;
+@property(nonatomic, assign) BOOL closeNotified;
+@property(nonatomic, strong) NSLock *readLock;
 @property(nonatomic, strong) NSLock *writeLock;
 @property(nonatomic, strong) dispatch_queue_t writeQueue;
 @property(nonatomic, strong) NSInputStream *inputStream;
@@ -155,6 +158,7 @@ static BOOL RBReadAll(int fd, void *buf, NSUInteger len) {
         self.path = path;
         self.secure = secure;
         self.fd = -1;
+        self.readLock = [[NSLock alloc] init];
         self.writeLock = [[NSLock alloc] init];
         self.writeQueue = dispatch_queue_create("surf.socket.write", DISPATCH_QUEUE_SERIAL);
     }
@@ -162,7 +166,11 @@ static BOOL RBReadAll(int fd, void *buf, NSUInteger len) {
 }
 
 - (void)connect {
-    self.running = YES;
+    @synchronized (self) {
+        if (self.connectStarted) return;
+        self.connectStarted = YES;
+        self.running = YES;
+    }
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSString *error = nil;
         if (![self openAndHandshake:&error]) {
@@ -184,11 +192,14 @@ static BOOL RBReadAll(int fd, void *buf, NSUInteger len) {
 
 - (void)close {
     self.running = NO;
+
+    // CFNetwork on iOS 6 is not safe when one thread closes an NSInputStream
+    // while another is inside -read:maxLength:. Closing the output side first
+    // tears down the shared socket and wakes a blocked reader; readLock then
+    // guarantees the input object cannot be released underneath that reader.
     [self.writeLock lock];
-    if (self.inputStream || self.outputStream) {
-        [self.inputStream close];
+    if (self.outputStream) {
         [self.outputStream close];
-        self.inputStream = nil;
         self.outputStream = nil;
     }
     if (self.fd >= 0) {
@@ -197,6 +208,13 @@ static BOOL RBReadAll(int fd, void *buf, NSUInteger len) {
         self.fd = -1;
     }
     [self.writeLock unlock];
+
+    [self.readLock lock];
+    if (self.inputStream) {
+        [self.inputStream close];
+        self.inputStream = nil;
+    }
+    [self.readLock unlock];
 }
 
 - (BOOL)openAndHandshake:(NSString **)error {
@@ -215,7 +233,10 @@ static BOOL RBReadAll(int fd, void *buf, NSUInteger len) {
         @"GET %@ HTTP/1.1\r\nHost: %@\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %@\r\nSec-WebSocket-Version: 13\r\n\r\n",
         self.path, hostHeader, key];
     NSData *requestData = [request dataUsingEncoding:NSASCIIStringEncoding];
-    if (![self writeAll:[requestData bytes] length:[requestData length]]) {
+    [self.writeLock lock];
+    BOOL wroteRequest = [self writeAll:[requestData bytes] length:[requestData length]];
+    [self.writeLock unlock];
+    if (!wroteRequest) {
         if (error) *error = @"write upgrade failed";
         return NO;
     }
@@ -305,18 +326,28 @@ static BOOL RBReadAll(int fd, void *buf, NSUInteger len) {
     CFReadStreamSetProperty(readStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanTrue);
     CFWriteStreamSetProperty(writeStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanTrue);
 
+    [self.readLock lock];
     self.inputStream = (__bridge_transfer NSInputStream *)readStream;
-    self.outputStream = (__bridge_transfer NSOutputStream *)writeStream;
     [self.inputStream open];
+    [self.readLock unlock];
+    [self.writeLock lock];
+    self.outputStream = (__bridge_transfer NSOutputStream *)writeStream;
     [self.outputStream open];
+    [self.writeLock unlock];
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:RBSocketTimeoutSeconds];
-    while ([[NSDate date] compare:deadline] == NSOrderedAscending) {
-        NSStreamStatus inStatus = [self.inputStream streamStatus];
-        NSStreamStatus outStatus = [self.outputStream streamStatus];
+    while (self.running && [[NSDate date] compare:deadline] == NSOrderedAscending) {
+        [self.readLock lock];
+        NSStreamStatus inStatus = self.inputStream ? [self.inputStream streamStatus] : NSStreamStatusClosed;
+        [self.readLock unlock];
+        [self.writeLock lock];
+        NSStreamStatus outStatus = self.outputStream ? [self.outputStream streamStatus] : NSStreamStatusClosed;
+        [self.writeLock unlock];
         if (inStatus == NSStreamStatusError || outStatus == NSStreamStatusError) break;
         if ((inStatus == NSStreamStatusOpen || inStatus == NSStreamStatusReading) &&
             (outStatus == NSStreamStatusOpen || outStatus == NSStreamStatusWriting)) {
-            RBTryEnableTCPNoDelay((__bridge CFReadStreamRef)self.inputStream);
+            [self.readLock lock];
+            if (self.inputStream) RBTryEnableTCPNoDelay((__bridge CFReadStreamRef)self.inputStream);
+            [self.readLock unlock];
             return YES;
         }
         [NSThread sleepForTimeInterval:0.02];
@@ -330,7 +361,9 @@ static BOOL RBReadAll(int fd, void *buf, NSUInteger len) {
     unsigned char *p = (unsigned char *)buf;
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:RBSocketTimeoutSeconds];
     while (len > 0 && self.running) {
-        NSInteger n = [self.inputStream read:p maxLength:len];
+        [self.readLock lock];
+        NSInteger n = self.inputStream ? [self.inputStream read:p maxLength:len] : -1;
+        [self.readLock unlock];
         if (n < 0) return NO;
         if (n == 0) {
             if ([[NSDate date] compare:deadline] != NSOrderedAscending) return NO;
@@ -462,7 +495,12 @@ static BOOL RBReadAll(int fd, void *buf, NSUInteger len) {
 }
 
 - (void)notifyClose:(NSString *)error {
-    id<RBSocketDelegate> delegate = self.delegate;
+    __block id<RBSocketDelegate> delegate = nil;
+    @synchronized (self) {
+        if (self.closeNotified) return;
+        self.closeNotified = YES;
+        delegate = self.delegate;
+    }
     [self close];
     dispatch_async(dispatch_get_main_queue(), ^{
         if ([delegate respondsToSelector:@selector(socket:didCloseWithError:)]) [delegate socket:self didCloseWithError:error];

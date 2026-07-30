@@ -66,13 +66,20 @@ func (b *Controller) onVideoFrame(frame media.VideoFrame) {
 	if t == nil || b.hub.ClientCount() == 0 || !b.hasVideoSubscribers() {
 		return
 	}
-	b.noteEncodedAU()
-	telemetry.Emit("encoded_au_received", "capture", "webcodecs", nil)
+	b.noteEncodedAU(frame.Fresh)
+	telemetry.Emit("encoded_au_received", "capture", "webcodecs", map[string]any{
+		"fresh": frame.Fresh, "capture_sequence": frame.SourceSeq,
+	})
 
 	b.perfMu.Lock()
-	b.sourceSeq++
-	sourceSeq, interactionID := b.sourceSeq, b.interactionID
-	inputNS, cdpNS := b.interactionInputNS, b.interactionCDPNS
+	if frame.Fresh || b.sourceSeq == 0 {
+		b.sourceSeq++
+		b.sourceInteraction = b.interactionID
+		b.sourceInputNS = b.interactionInputNS
+		b.sourceCDPNS = b.interactionCDPNS
+	}
+	sourceSeq, interactionID := b.sourceSeq, b.sourceInteraction
+	inputNS, cdpNS := b.sourceInputNS, b.sourceCDPNS
 	b.perfMu.Unlock()
 	if !b.video.Push(frame.Data, frame.Key, frame.Width, frame.Height,
 		sourceSeq, interactionID, media.FrameMetadata{
@@ -83,7 +90,8 @@ func (b *Controller) onVideoFrame(frame media.VideoFrame) {
 	}
 
 	b.mu.Lock()
-	pageReady := t.awaitingPageFrame && b.tabs[t.ID] == t && b.activeID == t.ID
+	pageReady := frame.Fresh && t.awaitingPageFrame &&
+		b.tabs[t.ID] == t && b.activeID == t.ID
 	if pageReady {
 		t.awaitingPageFrame = false
 	}
@@ -95,9 +103,9 @@ func (b *Controller) onVideoFrame(frame media.VideoFrame) {
 
 func encoderCodec(width, height int) string {
 	// Level selection is decoder compatibility metadata, not a frame-rate
-	// limit. Size it for a 60 Hz source so the original iPad can accept the
-	// fastest stream it can display without forcing the encoder to 30 FPS.
-	const assumedSourceFPS = 60
+	// limit. Prefer Level 3.1 for the original iPad whenever the coded size at
+	// Surf's stable 30 FPS target fits its macroblock rate.
+	const assumedSourceFPS = 30
 	if ((width+15)/16)*((height+15)/16)*assumedSourceFPS > 108000 {
 		return "avc1.42E029" // constrained baseline, level 4.1
 	}

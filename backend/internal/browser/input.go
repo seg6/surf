@@ -384,11 +384,13 @@ func (b *Controller) noteMotionPhase(phase string) {
 	case "begin":
 		b.motionActive = true
 		b.motionLastAUAt = time.Time{}
+		b.motionLastSourceAt = time.Time{}
 		b.motionStallLogged = false
 	case "move":
 		if !b.motionActive {
 			b.motionActive = true
 			b.motionLastAUAt = time.Time{}
+			b.motionLastSourceAt = time.Time{}
 			b.motionStallLogged = false
 		}
 	case "end":
@@ -451,11 +453,15 @@ func (b *Controller) noteClientMessage(t string) {
 	aLatN, aLatSumMS, aLatMaxMS := b.perfALatN, b.perfALatSumMS, b.perfALatMaxMS
 	auN, auSumMS, auMaxMS := b.auLatN, b.auLatSumMS, b.auLatMaxMS
 	motionN, motionSumMS, motionMaxMS := b.motionGapN, b.motionGapSumMS, b.motionGapMaxMS
+	sourceN, sourceSumMS, sourceMaxMS := b.sourceGapN, b.sourceGapSumMS, b.sourceGapMaxMS
+	duplicateAUs := b.duplicateAUs
 	b.perfCounts = map[string]int{}
 	b.perfLatN, b.perfLatSumMS, b.perfLatMaxMS = 0, 0, 0
 	b.perfALatN, b.perfALatSumMS, b.perfALatMaxMS = 0, 0, 0
 	b.auLatN, b.auLatSumMS, b.auLatMaxMS = 0, 0, 0
 	b.motionGapN, b.motionGapSumMS, b.motionGapMaxMS = 0, 0, 0
+	b.sourceGapN, b.sourceGapSumMS, b.sourceGapMaxMS = 0, 0, 0
+	b.duplicateAUs = 0
 	b.perfSince = now
 	b.perfMu.Unlock()
 
@@ -475,7 +481,11 @@ func (b *Controller) noteClientMessage(t string) {
 	if motionN > 0 {
 		motionMeanMS = motionSumMS / float64(motionN)
 	}
-	log.Printf("perf input %.1fs: click=%.1f/s scroll=%.1f/s key=%.1f/s nav=%d size=%d lp=%d other=%d | input->AU mean=%.1fms max=%.1fms n=%d | motion AU gap mean=%.1fms max=%.1fms n=%d | video queue mean=%.1fms max=%.1fms n=%d | audio lat mean=%.1fms max=%.1fms n=%d",
+	sourceMeanMS := 0.0
+	if sourceN > 0 {
+		sourceMeanMS = sourceSumMS / float64(sourceN)
+	}
+	log.Printf("perf input %.1fs: click=%.1f/s scroll=%.1f/s key=%.1f/s nav=%d size=%d lp=%d other=%d | input->image mean=%.1fms max=%.1fms n=%d | motion AU gap mean=%.1fms max=%.1fms n=%d | source gap mean=%.1fms max=%.1fms n=%d dup=%d | video queue mean=%.1fms max=%.1fms n=%d | audio lat mean=%.1fms max=%.1fms n=%d",
 		dt,
 		float64(counts["click"])/dt,
 		float64(counts["scroll"])/dt,
@@ -485,6 +495,7 @@ func (b *Controller) noteClientMessage(t string) {
 		otherInputCount(counts),
 		auMeanMS, auMaxMS, auN,
 		motionMeanMS, motionMaxMS, motionN,
+		sourceMeanMS, sourceMaxMS, sourceN, duplicateAUs,
 		latMeanMS, latMaxMS, latN,
 		aLatMeanMS, aLatMaxMS, aLatN)
 }
@@ -495,7 +506,7 @@ func (b *Controller) noteRenderInput() {
 	b.perfMu.Unlock()
 }
 
-func (b *Controller) noteEncodedAU() {
+func (b *Controller) noteEncodedAU(fresh bool) {
 	now := time.Now()
 	b.perfMu.Lock()
 	if b.motionActive {
@@ -509,8 +520,25 @@ func (b *Controller) noteEncodedAU() {
 		}
 		b.motionLastAUAt = now
 		b.motionStallLogged = false
+		if fresh {
+			if !b.motionLastSourceAt.IsZero() {
+				gapMS := float64(now.Sub(b.motionLastSourceAt).Microseconds()) / 1000.0
+				b.sourceGapN++
+				b.sourceGapSumMS += gapMS
+				if gapMS > b.sourceGapMaxMS {
+					b.sourceGapMaxMS = gapMS
+				}
+			}
+			b.motionLastSourceAt = now
+		}
 	}
-	if !b.lastRenderInputAt.IsZero() {
+	if !fresh {
+		b.duplicateAUs++
+	}
+	// A paced duplicate keeps presentation fluid but does not contain the
+	// result of a new interaction. Only fresh compositor images may satisfy
+	// input-to-image latency accounting.
+	if fresh && !b.lastRenderInputAt.IsZero() {
 		ms := float64(now.Sub(b.lastRenderInputAt).Microseconds()) / 1000.0
 		b.auLatN++
 		b.auLatSumMS += ms

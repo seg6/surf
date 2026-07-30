@@ -96,16 +96,24 @@ type Controller struct {
 	lastRenderInputAt  time.Time
 	interactionID      uint64
 	sourceSeq          uint32
+	sourceInteraction  uint64
+	sourceInputNS      uint64
+	sourceCDPNS        uint64
 	auLatN             int
 	auLatSumMS         float64
 	auLatMaxMS         float64
 	motionActive       bool
 	motionLastAUAt     time.Time
+	motionLastSourceAt time.Time
 	motionStallLogged  bool
 	motionStalls       uint64
 	motionGapN         int
 	motionGapSumMS     float64
 	motionGapMaxMS     float64
+	sourceGapN         int
+	sourceGapSumMS     float64
+	sourceGapMaxMS     float64
+	duplicateAUs       int
 
 	// verbMu guards the small M2 state: pending JS dialogs and the pending
 	// file-chooser interception (one at a time is plenty for one user).

@@ -91,6 +91,10 @@ func (cfg LaunchConfig) Args() []string {
 		"--disable-popup-blocking", "--no-first-run", "--no-default-browser-check",
 		"--disable-session-crashed-bubble", "--hide-crash-restore-bubble", "--noerrdialogs",
 		"--hide-scrollbars",
+		// Tab capture suppresses local playback only while its MediaStream is
+		// alive. Keep Chromium itself muted so a disconnected or crashed
+		// client can never make a surviving tab audible on the host.
+		"--mute-audio",
 		"--disable-background-networking", "--disable-sync",
 		// The anti-throttling set puppeteer always passed: without these,
 		// Chromium can treat itself as backgrounded/occluded and throttle or

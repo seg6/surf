@@ -55,6 +55,10 @@ static NSString *RBURLEscape(NSString *s);
         return;
     }
     NSUInteger generation = ++self.generation;
+    self.socket.delegate = nil;
+    [self.socket close];
+    self.socket = nil;
+    self.socketOpen = NO;
     self.lastPassword = password;
     self.requiredClientUpdate = nil;
     self.requiredServerVersion = nil;
@@ -174,7 +178,10 @@ static NSString *RBURLEscape(NSString *s) {
 
 - (void)connectSocket {
     if (!self.lastPassword) return;
+    self.socket.delegate = nil;
     [self.socket close];
+    self.socket = nil;
+    self.socketOpen = NO;
     [self moveToState:RBSessionStateConnecting];
     NSString *host = [self.baseURL host];
     NSInteger port = [[self.baseURL port] integerValue];
@@ -219,6 +226,11 @@ static NSString *RBURLEscape(NSString *s) {
 }
 
 - (void)socketDidOpen:(RBSocket *)socket {
+    if (socket != self.socket) {
+        socket.delegate = nil;
+        [socket close];
+        return;
+    }
     self.socketOpen = YES;
     self.reconnectDelay = 1.0;
     [self moveToState:RBSessionStateOpen];
@@ -237,9 +249,10 @@ static NSString *RBURLEscape(NSString *s) {
         }
         NSTimeInterval delay = self.reconnectDelay;
         self.reconnectDelay = MIN(self.reconnectDelay * 1.7, 15.0);
+        NSUInteger generation = self.generation;
         [self.delegate session:self status:[NSString stringWithFormat:@"reconnecting in %.1fs", delay]];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (self.lastPassword) [self connectSocket];
+            if (generation == self.generation && self.lastPassword && self.socket == socket) [self connectSocket];
         });
     } else {
         [self moveToState:RBSessionStateIdle];
@@ -247,6 +260,7 @@ static NSString *RBURLEscape(NSString *s) {
 }
 
 - (void)socket:(RBSocket *)socket didReceiveText:(NSString *)text {
+    if (socket != self.socket) return;
     NSData *data = [text dataUsingEncoding:NSUTF8StringEncoding];
     NSDictionary *json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
     if (![json isKindOfClass:[NSDictionary class]]) return;
@@ -254,6 +268,7 @@ static NSString *RBURLEscape(NSString *s) {
 }
 
 - (void)socket:(RBSocket *)socket didReceiveBinary:(NSData *)data {
+    if (socket != self.socket) return;
     [self.delegate session:self didReceiveFrameData:data];
 }
 

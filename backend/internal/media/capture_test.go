@@ -60,7 +60,7 @@ func TestNewEnablesLoopbackVideoBridge(t *testing.T) {
 	}
 }
 
-func TestVideoCaptureIsSourcePaced(t *testing.T) {
+func TestVideoCaptureOversamplesAndPacesStableThirtyFPS(t *testing.T) {
 	source, err := NewCapture(t.TempDir())
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -78,20 +78,24 @@ func TestVideoCaptureIsSourcePaced(t *testing.T) {
 	}
 	for _, want := range []string{
 		"track.getCapabilities()",
-		"maxFrameRate: clientDisplayFrameRate",
-		"ideal: clientDisplayFrameRate",
-		"max: clientDisplayFrameRate",
+		"maxFrameRate: captureFrameRate",
+		"ideal: captureFrameRate",
+		"max: captureFrameRate",
 		`type: "video-warning"`,
 		"width: constraints.width",
 		"height: constraints.height",
 		"Math.max(videoConfig.width, videoConfig.height)",
 		"Math.min(videoConfig.width, videoConfig.height)",
-		"const clientDisplayFrameRate = 60",
+		"const captureFrameRate = 60",
+		"const outputFrameRate = 30",
 		"const maxCaptureDimension = 1024",
 		"maxWidth: maxCaptureDimension",
 		"maxHeight: maxCaptureDimension",
 		"frameTimestamp - videoLastKeyTimestamp >= 2000000",
 		"maxBufferSize: 1",
+		"videoLatestFrame.clone()",
+		"setTimeout(resolve, waitMS)",
+		"const fresh = sourceSequence !== lastEncodedSourceSequence",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("offscreen source pacing is missing %q", want)
@@ -107,16 +111,18 @@ func TestVideoFrameBridgeHeader(t *testing.T) {
 	}
 	payload := []byte{0, 0, 0, 1, 0x65, 1, 2, 3}
 	message := make([]byte, videoHeaderBytes+len(payload))
-	copy(message[:4], "SVI1")
-	message[4] = 1
+	copy(message[:4], "SVI2")
+	message[4] = 3
 	binary.BigEndian.PutUint16(message[6:8], videoHeaderBytes)
 	binary.BigEndian.PutUint16(message[8:10], 768)
 	binary.BigEndian.PutUint16(message[10:12], 950)
 	binary.BigEndian.PutUint32(message[12:16], uint32(len(payload)))
+	binary.BigEndian.PutUint32(message[16:20], 42)
 	copy(message[videoHeaderBytes:], payload)
 
 	source.handleVideoFrame(message)
-	if !got.Key || got.Width != 768 || got.Height != 950 ||
+	if !got.Key || !got.Fresh || got.SourceSeq != 42 ||
+		got.Width != 768 || got.Height != 950 ||
 		string(got.Data) != string(payload) {
 		t.Fatalf("decoded frame = %+v", got)
 	}

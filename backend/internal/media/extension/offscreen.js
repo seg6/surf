@@ -16,12 +16,16 @@ let videoNeedsKeyframe = true;
 let videoFrameNumber = 0;
 let videoLastKeyTimestamp = null;
 let videoOutputReported = false;
+let videoLatestFrame = null;
+let videoLatestSourceSequence = 0;
+let videoPendingFrames = [];
 
-// Chromium initializes display/tab capture at 30 FPS, and falls back to that
-// same default when given its generic 1000 FPS media limit. Request the native
-// client's 60 Hz display rate explicitly so tab capture exposes its 60 FPS
-// source format. Frames remain source-paced; Surf does not timer-pace them.
-const clientDisplayFrameRate = 60;
+// Oversample Chromium's compositor at 60 Hz, then encode the newest available
+// image on a strict 30 Hz clock. Asking the source for only 30 Hz made normal
+// compositor jitter visible verbatim on the iPad. The latest-only handoff
+// absorbs that jitter without ever building a queue of old pictures.
+const captureFrameRate = 60;
+const outputFrameRate = 30;
 // A tab-capture track survives viewport and orientation changes. Give that
 // long-lived track room for later resizes; exact current dimensions are still
 // applied in startVideoEncoder, so this ceiling does not increase frame size.
@@ -39,6 +43,11 @@ function stopVideoEncoder() {
     }
     videoEncoder = null;
   }
+  if (videoLatestFrame) {
+    videoLatestFrame.close();
+    videoLatestFrame = null;
+  }
+  videoPendingFrames = [];
 }
 
 function stopCapture() {
@@ -158,19 +167,21 @@ function connectVideoSocket() {
   return videoSocketPromise;
 }
 
-function encodedVideoMessage(chunk, config) {
+function encodedVideoMessage(chunk, config, source) {
   const payload = new Uint8Array(chunk.byteLength);
   chunk.copyTo(payload);
-  const message = new ArrayBuffer(16 + payload.byteLength);
+  const message = new ArrayBuffer(20 + payload.byteLength);
   const bytes = new Uint8Array(message);
-  bytes.set([0x53, 0x56, 0x49, 0x31], 0); // SVI1
+  bytes.set([0x53, 0x56, 0x49, 0x32], 0); // SVI2
   const view = new DataView(message);
-  view.setUint8(4, chunk.type === "key" ? 1 : 0);
-  view.setUint16(6, 16, false);
+  view.setUint8(4, (chunk.type === "key" ? 1 : 0) |
+    (source.fresh ? 2 : 0));
+  view.setUint16(6, 20, false);
   view.setUint16(8, config.width, false);
   view.setUint16(10, config.height, false);
   view.setUint32(12, payload.byteLength, false);
-  bytes.set(payload, 16);
+  view.setUint32(16, source.sequence, false);
+  bytes.set(payload, 20);
   return message;
 }
 
@@ -201,21 +212,20 @@ async function startVideoEncoder(track) {
     width: {exact: captureSize.width},
     height: {exact: captureSize.height},
   };
-  // Ask for the native display cadence. Chromium otherwise selects 30 FPS,
-  // while the latest-only queues below keep the requested 60 Hz source from
-  // building latency when display ticks and capture ticks drift slightly.
+  // Capture faster than the output clock so a compositor frame is normally
+  // waiting when the next 30 Hz encode tick arrives.
   const capabilities = typeof track.getCapabilities === "function" ?
     track.getCapabilities() : {};
   const availableRate = capabilities && capabilities.frameRate ?
     capabilities.frameRate.max : 0;
   constraints.frameRate = {
-    ideal: clientDisplayFrameRate,
-    max: clientDisplayFrameRate,
+    ideal: captureFrameRate,
+    max: captureFrameRate,
   };
   try {
     await track.applyConstraints(constraints);
   } catch (error) {
-    // Some Chromium builds advertise 60 Hz for tabCapture, then reject the
+    // Some Chromium builds advertise a rate for tabCapture, then reject the
     // combined size/rate constraint after an orientation change. Keep the
     // exact compositor dimensions and let the track choose its best cadence
     // instead of taking the whole video lane down.
@@ -251,6 +261,8 @@ async function startVideoEncoder(track) {
     output: (chunk, metadata) => {
       if (generation === videoGeneration &&
           activeSocket.readyState === WebSocket.OPEN) {
+        const source = videoPendingFrames.shift() ||
+          {sequence: 0, fresh: false};
         if (!videoOutputReported) {
           videoOutputReported = true;
           const decoder = metadata && metadata.decoderConfig ?
@@ -263,7 +275,8 @@ async function startVideoEncoder(track) {
             displayHeight: decoder.displayAspectHeight || 0,
           });
         }
-        activeSocket.send(encodedVideoMessage(chunk, videoConfig));
+        activeSocket.send(encodedVideoMessage(
+          chunk, videoConfig, source));
       }
     },
     error: (error) => {
@@ -284,6 +297,8 @@ async function startVideoEncoder(track) {
   videoFrameNumber = 0;
   videoLastKeyTimestamp = null;
   videoOutputReported = false;
+  videoLatestSourceSequence = 0;
+  videoPendingFrames = [];
   sendVideoJSON({
     type: "video-active",
     sourceWidth: settings.width || 0,
@@ -292,15 +307,59 @@ async function startVideoEncoder(track) {
     sourceCapabilityFPS: availableRate || 0,
   });
 
+  const readFrames = async () => {
+    try {
+      while (generation === videoGeneration) {
+        const {value: frame, done} = await reader.read();
+        if (done) {
+          break;
+        }
+        if (generation !== videoGeneration) {
+          frame.close();
+          break;
+        }
+        videoLatestSourceSequence++;
+        const previous = videoLatestFrame;
+        videoLatestFrame = frame;
+        if (previous) {
+          previous.close();
+        }
+      }
+    } catch (error) {
+      if (generation === videoGeneration) {
+        sendVideoJSON({type: "video-error", error: String(error)});
+      }
+    }
+  };
+  void readFrames();
+
+  const intervalMS = 1000 / outputFrameRate;
+  let nextTick = performance.now();
+  let lastEncodedSourceSequence = 0;
   try {
     while (generation === videoGeneration) {
-      const {value: frame, done} = await reader.read();
-      if (done) {
-        break;
+      nextTick += intervalMS;
+      const waitMS = nextTick - performance.now();
+      if (waitMS > 0) {
+        await new Promise((resolve) => setTimeout(resolve, waitMS));
+      } else if (waitMS < -intervalMS) {
+        // Do not burst several stale frames after the offscreen document was
+        // descheduled. Resume from the current wall-clock tick.
+        nextTick = performance.now();
       }
-      if (encoder.encodeQueueSize > 1) {
-        frame.close();
+      if (!videoLatestFrame || encoder.encodeQueueSize > 1) {
         continue;
+      }
+      let frame;
+      try {
+        frame = videoLatestFrame.clone();
+      } catch (_) {
+        continue;
+      }
+      const sourceSequence = videoLatestSourceSequence;
+      const fresh = sourceSequence !== lastEncodedSourceSequence;
+      if (fresh) {
+        lastEncodedSourceSequence = sourceSequence;
       }
       if (videoFrameNumber === 0) {
         sendVideoJSON({
@@ -311,8 +370,7 @@ async function startVideoEncoder(track) {
           displayHeight: frame.displayHeight,
         });
       }
-      const frameTimestamp = Number.isFinite(frame.timestamp) ?
-        frame.timestamp : performance.now() * 1000;
+      const frameTimestamp = performance.now() * 1000;
       const keyFrame = videoNeedsKeyframe ||
         videoLastKeyTimestamp === null ||
         frameTimestamp < videoLastKeyTimestamp ||
@@ -322,7 +380,17 @@ async function startVideoEncoder(track) {
         videoLastKeyTimestamp = frameTimestamp;
       }
       videoFrameNumber++;
-      encoder.encode(frame, {keyFrame});
+      videoPendingFrames.push({
+        sequence: sourceSequence,
+        fresh,
+      });
+      try {
+        encoder.encode(frame, {keyFrame});
+      } catch (error) {
+        videoPendingFrames.pop();
+        frame.close();
+        throw error;
+      }
       frame.close();
     }
   } catch (error) {
@@ -355,7 +423,7 @@ async function startCapture(streamId) {
           chromeMediaSourceId: streamId,
           maxWidth: maxCaptureDimension,
           maxHeight: maxCaptureDimension,
-          maxFrameRate: clientDisplayFrameRate,
+          maxFrameRate: captureFrameRate,
         },
       } : false,
     });
