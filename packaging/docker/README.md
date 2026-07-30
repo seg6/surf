@@ -6,7 +6,7 @@ and runs `surf serve` with system Chromium.
 Create `.env` beside the Compose file:
 
 ```dotenv
-SURF_VERSION=0.8.3
+SURF_VERSION=0.8.4
 SURF_ARCH=amd64
 SURF_ARCHIVE_SHA256=replace-with-the-release-archive-sha256
 SURF_PASSWORD=replace-me

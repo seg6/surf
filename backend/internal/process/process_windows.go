@@ -110,5 +110,11 @@ func Start(path string, args []string, opts Options) (*Started, error) {
 		return nil, err
 	}
 	started.Process = cmd.Process
+	done := make(chan error, 1)
+	started.Done = done
+	go func() {
+		done <- cmd.Wait()
+		close(done)
+	}()
 	return started, nil
 }

@@ -68,6 +68,7 @@ type Controller struct {
 	audio     *media.AudioPipeline
 	capture   *media.Capture
 	mediaMu   sync.Mutex // guards client media subscriptions below
+	shutdown  sync.Once
 	videoSubs map[*transport.Client]*media.VideoSubscription
 	audioSubs map[*transport.Client]*media.AudioSubscription
 
@@ -195,7 +196,13 @@ func (b *Controller) runController() {
 
 // Start launches Chromium and wires target discovery; it returns once the
 // browser is ready to serve clients.
-func (b *Controller) Start() error {
+func (b *Controller) Start() (err error) {
+	started := false
+	defer func() {
+		if !started {
+			b.Shutdown()
+		}
+	}()
 	extensionPaths := []string{}
 	if b.cfg.ContentBlockerPath != "" {
 		extensionPaths = append(extensionPaths, b.cfg.ContentBlockerPath)
@@ -226,6 +233,9 @@ func (b *Controller) Start() error {
 		if err := b.capture.Attach(client); err != nil {
 			return err
 		}
+		if err := b.capture.Start(); err != nil {
+			return fmt.Errorf("start host-isolating tab capture: %w", err)
+		}
 	}
 	if raw, versionErr := client.Call("", "Browser.getVersion", nil); versionErr == nil {
 		var version struct {
@@ -250,6 +260,7 @@ func (b *Controller) Start() error {
 	b.setupDownloads()
 	log.Printf("browser ready, view %dx%d (headless-new, source=tabCapture/WebCodecs, profile %s)",
 		b.viewW, b.viewH, b.cfg.Profile)
+	started = true
 	return nil
 }
 
@@ -294,21 +305,26 @@ func (b *Controller) newTargetParams(rawURL string) map[string]any {
 }
 
 func (b *Controller) Shutdown() {
-	if b.video != nil {
-		b.video.Shutdown()
-	}
-	if b.audio != nil {
-		b.audio.Shutdown()
-	}
-	if b.capture != nil {
-		_ = b.capture.Close()
-	}
-	if b.cdp != nil {
-		b.cdp.Close()
-	}
-	if b.cmd != nil {
-		process.Kill(b.cmd.Pid)
-	}
+	b.shutdown.Do(func() {
+		// Close the source first: encoder/audio startup may be waiting for an
+		// extension response while holding its pipeline lock. Closing capture
+		// wakes those waits so shutdown cannot inherit their 12-second timeout.
+		if b.capture != nil {
+			_ = b.capture.Close()
+		}
+		if b.video != nil {
+			b.video.Shutdown()
+		}
+		if b.audio != nil {
+			b.audio.Shutdown()
+		}
+		if b.cdp != nil {
+			b.cdp.Close()
+		}
+		if b.cmd != nil {
+			process.Kill(b.cmd.Pid)
+		}
+	})
 }
 
 // Died signals that the Chromium connection is gone (supervisor restarts us).

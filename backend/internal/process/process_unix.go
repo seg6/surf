@@ -9,12 +9,13 @@ import (
 )
 
 // ProtectChildren is unnecessary on Unix: Start creates a dedicated process
-// group and explicit shutdown kills that whole group.
+// group, Linux also requests a parent-death signal, and explicit shutdown
+// kills the whole group.
 func ProtectChildren() func() { return func() {} }
 
 func command(path string, args ...string) *exec.Cmd {
 	cmd := exec.Command(path, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	configureChild(cmd)
 	return cmd
 }
 
@@ -63,5 +64,11 @@ func Start(path string, args []string, opts Options) (*Started, error) {
 		return nil, err
 	}
 	started.Process = cmd.Process
+	done := make(chan error, 1)
+	started.Done = done
+	go func() {
+		done <- cmd.Wait()
+		close(done)
+	}()
 	return started, nil
 }

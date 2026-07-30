@@ -437,8 +437,5 @@ func (b *Controller) applyView(t *Tab) {
 			"type": orientation, "angle": angle,
 		},
 	}
-	// Capture startup must not race an old orientation. tabCapture reads the
-	// compositor directly and can otherwise begin with width/height transposed
-	// until the next resize.
 	_, _ = b.cdp.Call(s, "Emulation.setDeviceMetricsOverride", metrics)
 }

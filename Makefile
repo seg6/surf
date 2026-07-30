@@ -51,6 +51,7 @@ surf-dist: surf-binary
 		mkdir -p "dist/Surf.app/Contents/MacOS"; \
 		cp "backend/$(SURF_EXE)" "dist/Surf.app/Contents/MacOS/surf"; \
 		mkdir -p "dist/Surf.app/Contents/Resources"; \
+		cp CHANGELOG.md "dist/Surf.app/Contents/Resources/CHANGELOG.md"; \
 		rm -rf "dist/Surf.iconset"; mkdir -p "dist/Surf.iconset"; \
 		for size in 16 32 128 256 512; do \
 			sips -z $$size $$size backend/cmd/surf/surf-icon.png --out "dist/Surf.iconset/icon_$${size}x$${size}.png" >/dev/null; \
@@ -68,6 +69,7 @@ surf-dist: surf-binary
 		mkdir -p "dist/$(SURF_DIST)"; \
 		cp "backend/$(SURF_EXE)" "dist/$(SURF_DIST)/$(SURF_EXE)"; \
 		cp packaging/desktop/README.md "dist/$(SURF_DIST)/README.md"; \
+		cp CHANGELOG.md "dist/$(SURF_DIST)/CHANGELOG.md"; \
 		if [ "$(SURF_GOOS)" = "linux" ]; then cp packaging/backend/surf.service "dist/$(SURF_DIST)/surf.service"; fi; \
 		if [ "$(SURF_GOOS)" = "windows" ]; then \
 			rm -f "dist/$(SURF_ARCHIVE)"; \
@@ -82,8 +84,9 @@ surf-dist: surf-binary
 			tar -C dist -czf "dist/$(SURF_ARCHIVE)" "$(SURF_DIST)"; \
 			if [ "$(SURF_GOARCH)" = "amd64" ] && [ -n "$${APPIMAGETOOL:-}" ]; then \
 				rm -rf dist/Surf.AppDir; \
-				mkdir -p dist/Surf.AppDir/usr/bin; \
+				mkdir -p dist/Surf.AppDir/usr/bin dist/Surf.AppDir/usr/share/doc/surf; \
 				cp backend/surf dist/Surf.AppDir/usr/bin/surf; \
+				cp CHANGELOG.md dist/Surf.AppDir/usr/share/doc/surf/CHANGELOG.md; \
 				cp packaging/desktop/surf.desktop dist/Surf.AppDir/surf.desktop; \
 				cp backend/cmd/surf/surf-icon.png dist/Surf.AppDir/surf.png; \
 				ln -s usr/bin/surf dist/Surf.AppDir/AppRun; \

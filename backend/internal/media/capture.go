@@ -43,6 +43,7 @@ type Capture struct {
 	conn        *websocket.Conn
 	capture     *capture
 	ready       chan error
+	inactive    chan struct{}
 	mediaActive bool
 	closed      bool
 	writeMu     sync.Mutex
@@ -165,6 +166,44 @@ func (s *Capture) Attach(client *cdp.Client) error {
 	}
 }
 
+// Start parks a tab-capture stream immediately after Chromium launches.
+// Chromium suppresses local playback while that stream is alive, so host
+// audio is isolated even before the first client connects and between client
+// sessions. StartVideo reacquires the same tab with video when needed.
+func (s *Capture) Start() error {
+	s.mu.Lock()
+	if s.closed || s.client == nil || s.extensionID == "" {
+		s.mu.Unlock()
+		return errors.New("tab capture source is not attached")
+	}
+	if s.mediaActive {
+		s.mu.Unlock()
+		return nil
+	}
+	s.ready = make(chan error, 1)
+	ready := s.ready
+	s.mu.Unlock()
+
+	started, err := s.triggerActive(true)
+	if err != nil {
+		return err
+	}
+	if started {
+		log.Printf("audio: host-isolating tab capture parked")
+		return nil
+	}
+	select {
+	case err := <-ready:
+		if err != nil {
+			return err
+		}
+		log.Printf("audio: host-isolating tab capture parked")
+		return nil
+	case <-time.After(10 * time.Second):
+		return errors.New("tab capture extension did not start capture")
+	}
+}
+
 // OpenAudio starts capture of the active Chromium tab and returns signed
 // little-endian 16 kHz mono PCM.
 func (s *Capture) OpenAudio() (io.ReadCloser, error) {
@@ -185,7 +224,7 @@ func (s *Capture) OpenAudio() (io.ReadCloser, error) {
 	alreadyActive := s.mediaActive
 	s.mu.Unlock()
 	if previous != nil {
-		previous.close(false)
+		previous.close()
 	}
 
 	if alreadyActive {
@@ -195,7 +234,7 @@ func (s *Capture) OpenAudio() (io.ReadCloser, error) {
 
 	started, err := s.triggerActive(true)
 	if err != nil {
-		next.close(true)
+		next.close()
 		return nil, err
 	}
 	if started {
@@ -205,13 +244,13 @@ func (s *Capture) OpenAudio() (io.ReadCloser, error) {
 	select {
 	case err := <-ready:
 		if err != nil {
-			next.close(true)
+			next.close()
 			return nil, err
 		}
 		log.Printf("audio: Chromium tab capture active")
 		return next, nil
 	case <-time.After(10 * time.Second):
-		next.close(true)
+		next.close()
 		return nil, errors.New("tab capture extension did not start capture")
 	}
 }
@@ -219,7 +258,7 @@ func (s *Capture) OpenAudio() (io.ReadCloser, error) {
 // SwitchActive moves a running capture to Chromium's newly active tab.
 func (s *Capture) SwitchActive() {
 	s.mu.Lock()
-	active := s.capture != nil || s.videoActive
+	active := s.mediaActive || s.capture != nil || s.videoActive
 	s.mu.Unlock()
 	if !active {
 		return
@@ -411,6 +450,18 @@ func (s *Capture) handleBridgeMessage(data []byte) {
 		} else {
 			s.signalReady(nil)
 		}
+	case "inactive":
+		s.mu.Lock()
+		s.mediaActive = false
+		inactive := s.inactive
+		s.inactive = nil
+		s.mu.Unlock()
+		if inactive != nil {
+			select {
+			case inactive <- struct{}{}:
+			default:
+			}
+		}
 	case "error":
 		if strings.TrimSpace(message.Error) == "" {
 			message.Error = "unknown extension error"
@@ -434,11 +485,16 @@ func (s *Capture) signalReady(err error) {
 func (c *capture) Read(p []byte) (int, error) { return c.reader.Read(p) }
 
 func (c *capture) Close() error {
-	c.close(true)
+	c.close()
 	return nil
 }
 
-func (c *capture) close(stopExtension bool) {
+// close detaches the current PCM reader but deliberately leaves Chromium's
+// tab-capture MediaStream alive. Chrome suppresses local tab playback for the
+// lifetime of that stream, so parking it is both the cross-platform host-audio
+// isolation mechanism and the cheap reconnect path. Capture.Close performs
+// the final extension shutdown when the backend itself exits.
+func (c *capture) close() {
 	c.once.Do(func() {
 		s := c.source
 		s.mu.Lock()
@@ -446,19 +502,9 @@ func (c *capture) close(stopExtension bool) {
 			s.capture = nil
 			s.ready = nil
 		}
-		conn := s.conn
-		shouldStop := stopExtension && !s.videoActive
-		if shouldStop {
-			s.mediaActive = false
-		}
 		s.mu.Unlock()
 		_ = c.writer.Close()
 		_ = c.reader.Close()
-		if shouldStop && conn != nil {
-			s.writeMu.Lock()
-			_ = conn.WriteMessage(websocket.TextMessage, []byte("stop"))
-			s.writeMu.Unlock()
-		}
 	})
 }
 
@@ -470,12 +516,35 @@ func (s *Capture) Close() error {
 	}
 	s.closed = true
 	current, conn, videoConn := s.capture, s.conn, s.videoConn
+	ready, videoReady := s.ready, s.videoReady
 	s.capture, s.conn, s.videoConn = nil, nil, nil
+	s.mediaActive = false
+	s.videoActive = false
+	s.videoRunning = false
+	s.ready = nil
+	s.videoReady = nil
 	s.mu.Unlock()
+	closedErr := errors.New("tab capture source closed")
+	if ready != nil {
+		select {
+		case ready <- closedErr:
+		default:
+		}
+	}
+	if videoReady != nil {
+		select {
+		case videoReady <- closedErr:
+		default:
+		}
+	}
 	if current != nil {
-		current.close(false)
+		current.close()
 	}
 	if conn != nil {
+		s.writeMu.Lock()
+		_ = conn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("stop"))
+		s.writeMu.Unlock()
 		_ = conn.Close()
 	}
 	if videoConn != nil {

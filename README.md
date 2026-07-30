@@ -25,6 +25,8 @@ browser chrome and browser-owned state stay native and responsive.
 Surf is a hobby project for jailbroken legacy iOS devices. It is usable, but
 still experimental.
 
+See [CHANGELOG.md](CHANGELOG.md) for the history of each release.
+
 The main test target is the original iPad mini on iOS 6.1.3. Other iOS 6 iPads,
 iPhones, and iPods may work, but layout and performance are less tested.
 

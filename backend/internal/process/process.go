@@ -27,4 +27,7 @@ type Started struct {
 	Stdin   io.WriteCloser
 	Stdout  io.ReadCloser
 	Stderr  io.ReadCloser
+	// Done receives the result of exec.Cmd.Wait exactly once. Start always
+	// reaps the child, even when its caller only needs the OS process handle.
+	Done <-chan error
 }

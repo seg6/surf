@@ -2,6 +2,7 @@ package media
 
 import (
 	"encoding/binary"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,6 +42,34 @@ func TestOpenBeforeAttachFails(t *testing.T) {
 	defer source.Close()
 	if _, err := source.OpenAudio(); err == nil {
 		t.Fatal("Open succeeded before Attach")
+	}
+}
+
+func TestClosingAudioReaderParksCaptureForHostIsolation(t *testing.T) {
+	source := &Capture{mediaActive: true}
+	reader, writer := io.Pipe()
+	active := &capture{source: source, reader: reader, writer: writer}
+	source.capture = active
+
+	if err := active.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if source.capture != nil {
+		t.Fatal("closed PCM reader is still registered")
+	}
+	if !source.mediaActive {
+		t.Fatal("closing a client reader stopped the host-isolating tab capture")
+	}
+}
+
+func TestStoppingVideoParksSharedCapture(t *testing.T) {
+	source := &Capture{mediaActive: true, videoActive: true, videoRunning: true}
+	source.StopVideo()
+	if source.videoActive || source.videoRunning {
+		t.Fatal("video encoder was not stopped")
+	}
+	if !source.mediaActive {
+		t.Fatal("stopping video stopped the shared host-isolating tab capture")
 	}
 }
 
@@ -84,8 +113,8 @@ func TestVideoCaptureOversamplesAndPacesStableThirtyFPS(t *testing.T) {
 		`type: "video-warning"`,
 		"width: constraints.width",
 		"height: constraints.height",
-		"Math.max(videoConfig.width, videoConfig.height)",
-		"Math.min(videoConfig.width, videoConfig.height)",
+		"width: videoConfig.height",
+		"height: videoConfig.width",
 		"const captureFrameRate = 60",
 		"const outputFrameRate = 30",
 		"const maxCaptureDimension = 1024",
@@ -96,6 +125,8 @@ func TestVideoCaptureOversamplesAndPacesStableThirtyFPS(t *testing.T) {
 		"videoLatestFrame.clone()",
 		"setTimeout(resolve, waitMS)",
 		"const fresh = sourceSequence !== lastEncodedSourceSequence",
+		`event.data === "restart"`,
+		`sendJSON({type: "inactive"})`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("offscreen source pacing is missing %q", want)

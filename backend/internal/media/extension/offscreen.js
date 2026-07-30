@@ -98,6 +98,10 @@ function connectSocket() {
         if (event.data === "stop") {
           captureGeneration++;
           stopCapture();
+        } else if (event.data === "restart") {
+          captureGeneration++;
+          stopCapture();
+          sendJSON({type: "inactive"});
         }
       };
       next.onclose = () => {
@@ -186,12 +190,13 @@ function encodedVideoMessage(chunk, config, source) {
 }
 
 function captureVideoSize() {
-  // Chrome tabCapture normalizes the source track into landscape dimension
-  // order even when the captured compositor surface is portrait. Preserve
-  // that order in landscape instead of blindly transposing both orientations.
+  // Chromium's tab-capture source transposes the constrained track dimensions
+  // when it builds the VideoFrame visible rectangle (with rotation=0). Ask for
+  // the inverse of the desired encoded surface so both portrait and landscape
+  // arrive with the exact client aspect instead of a letterboxed transpose.
   return {
-    width: Math.max(videoConfig.width, videoConfig.height),
-    height: Math.min(videoConfig.width, videoConfig.height),
+    width: videoConfig.height,
+    height: videoConfig.width,
   };
 }
 
@@ -368,6 +373,9 @@ async function startVideoEncoder(track) {
           codedHeight: frame.codedHeight,
           displayWidth: frame.displayWidth,
           displayHeight: frame.displayHeight,
+          visibleWidth: frame.visibleRect ? frame.visibleRect.width : 0,
+          visibleHeight: frame.visibleRect ? frame.visibleRect.height : 0,
+          rotation: Number.isFinite(frame.rotation) ? frame.rotation : 0,
         });
       }
       const frameTimestamp = performance.now() * 1000;
@@ -404,7 +412,12 @@ async function startCapture(streamId) {
   const generation = ++captureGeneration;
   stopCapture();
   const activeSocket = await connectSocket();
-  await connectVideoSocket();
+  // Host-audio isolation starts before there is a video subscriber, so the
+  // audio capture must not wait for the video bridge's first configuration.
+  // StartVideo will reacquire this tab with a video track once configured.
+  void connectVideoSocket().catch((error) => {
+    sendJSON({type: "video-bridge-error", error: String(error)});
+  });
   let nextStream = null;
   let nextContext = null;
   try {

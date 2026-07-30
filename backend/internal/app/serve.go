@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -28,6 +29,15 @@ func Serve() error {
 	if err != nil {
 		return err
 	}
+	instance, acquired, err := process.AcquireInstanceLock(
+		filepath.Join(cfg.SurfHome, "server.lock"))
+	if err != nil {
+		return fmt.Errorf("lock Surf backend: %w", err)
+	}
+	if !acquired {
+		return fmt.Errorf("another Surf backend is already using %s", cfg.Profile)
+	}
+	defer instance.Close()
 	if err := Prepare(cfg); err != nil {
 		return err
 	}

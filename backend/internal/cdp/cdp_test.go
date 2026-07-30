@@ -1,6 +1,9 @@
 package cdp
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func hasArg(args []string, want string) bool {
 	for _, arg := range args {
@@ -19,8 +22,8 @@ func TestLaunchArgsSandboxDefault(t *testing.T) {
 	if !hasArg(args, "--headless=new") {
 		t.Fatalf("missing headless flag: %v", args)
 	}
-	if !hasArg(args, "--mute-audio") {
-		t.Fatalf("missing host-audio isolation flag: %v", args)
+	if hasArg(args, "--mute-audio") {
+		t.Fatalf("global mute makes tab-capture PCM silent: %v", args)
 	}
 	if !hasArg(args, "--enable-gpu") || hasArg(args, "--disable-gpu") {
 		t.Fatalf("GPU auto path not enabled: %v", args)
@@ -72,5 +75,22 @@ func TestLaunchArgsMultipleExtensions(t *testing.T) {
 	if !hasArg(args, "--disable-extensions-except=/tmp/ubol,/tmp/audio") ||
 		!hasArg(args, "--load-extension=/tmp/ubol,/tmp/audio") {
 		t.Fatalf("missing combined extension args: %v", args)
+	}
+}
+
+func TestActivePortStateRejectsStaleEndpoint(t *testing.T) {
+	stamp := time.Unix(123, 0)
+	previous := activePortState{data: "9222\n/devtools/browser/old", modTime: stamp, exists: true}
+	if previous.changedFrom(previous) {
+		t.Fatal("unchanged DevToolsActivePort was accepted")
+	}
+	rewritten := previous
+	rewritten.modTime = stamp.Add(time.Second)
+	if !rewritten.changedFrom(previous) {
+		t.Fatal("rewritten DevToolsActivePort was rejected")
+	}
+	fresh := activePortState{data: "9223\n/devtools/browser/new", modTime: stamp, exists: true}
+	if !fresh.changedFrom(previous) {
+		t.Fatal("new DevToolsActivePort was rejected")
 	}
 }

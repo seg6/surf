@@ -91,10 +91,6 @@ func (cfg LaunchConfig) Args() []string {
 		"--disable-popup-blocking", "--no-first-run", "--no-default-browser-check",
 		"--disable-session-crashed-bubble", "--hide-crash-restore-bubble", "--noerrdialogs",
 		"--hide-scrollbars",
-		// Tab capture suppresses local playback only while its MediaStream is
-		// alive. Keep Chromium itself muted so a disconnected or crashed
-		// client can never make a surviving tab audible on the host.
-		"--mute-audio",
 		"--disable-background-networking", "--disable-sync",
 		// The anti-throttling set puppeteer always passed: without these,
 		// Chromium can treat itself as backgrounded/occluded and throttle or
@@ -140,6 +136,10 @@ func (cfg LaunchConfig) Args() []string {
 // Launch starts headless Chromium (see Args) and returns a connected browser
 // client.
 func Launch(cfg LaunchConfig) (*Client, *os.Process, error) {
+	// A browser killed without a normal shutdown can leave this file behind.
+	// Snapshot it before launch so the fallback can never attach this Surf
+	// instance to an older Chromium that happens to use the same profile.
+	previousEndpoint := readActivePortState(cfg.Profile)
 	started, err := process.Start(cfg.ChromePath, cfg.Args(), process.Options{
 		Env:    append(os.Environ(), cfg.Env...),
 		Stderr: true,
@@ -162,7 +162,7 @@ func Launch(cfg LaunchConfig) (*Client, *os.Process, error) {
 		}
 	}()
 
-	url, err := waitForURL(wsURL, cfg.Profile)
+	url, err := waitForURL(wsURL, cfg.Profile, previousEndpoint, started.Done)
 	if err != nil {
 		process.Kill(started.Process.Pid)
 		return nil, nil, err
@@ -175,9 +175,40 @@ func Launch(cfg LaunchConfig) (*Client, *os.Process, error) {
 	return c, started.Process, nil
 }
 
+type activePortState struct {
+	data    string
+	modTime time.Time
+	exists  bool
+}
+
+func readActivePortState(profile string) activePortState {
+	path := filepath.Join(profile, "DevToolsActivePort")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return activePortState{}
+	}
+	state := activePortState{data: string(data), exists: true}
+	if info, err := os.Stat(path); err == nil {
+		state.modTime = info.ModTime()
+	}
+	return state
+}
+
+func (s activePortState) changedFrom(previous activePortState) bool {
+	if !previous.exists {
+		return s.exists
+	}
+	return s.exists && (s.data != previous.data || s.modTime.After(previous.modTime))
+}
+
 // waitForURL prefers the stderr banner; the DevToolsActivePort file in the
 // profile dir is the fallback (some builds log differently).
-func waitForURL(fromStderr <-chan string, profile string) (string, error) {
+func waitForURL(
+	fromStderr <-chan string,
+	profile string,
+	previous activePortState,
+	processDone <-chan error,
+) (string, error) {
 	deadline := time.After(30 * time.Second)
 	tick := time.NewTicker(200 * time.Millisecond)
 	defer tick.Stop()
@@ -185,14 +216,19 @@ func waitForURL(fromStderr <-chan string, profile string) (string, error) {
 		select {
 		case u := <-fromStderr:
 			return u, nil
+		case err := <-processDone:
+			if err == nil {
+				return "", fmt.Errorf("chromium exited before exposing a DevTools endpoint")
+			}
+			return "", fmt.Errorf("chromium exited before exposing a DevTools endpoint: %w", err)
 		case <-deadline:
 			return "", fmt.Errorf("chromium did not expose a DevTools endpoint within 30s")
 		case <-tick.C:
-			b, err := os.ReadFile(filepath.Join(profile, "DevToolsActivePort"))
-			if err != nil {
+			state := readActivePortState(profile)
+			if !state.changedFrom(previous) {
 				continue
 			}
-			lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+			lines := strings.Split(strings.TrimSpace(state.data), "\n")
 			if len(lines) < 2 {
 				continue
 			}

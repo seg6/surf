@@ -62,8 +62,14 @@ func (s *Capture) StartVideo(config EncoderConfig, handler func(VideoFrame)) err
 	s.mu.Unlock()
 
 	s.sendVideoConfig()
+	if reacquire {
+		if err := s.stopCaptureForReconfigure(); err != nil {
+			s.StopVideo()
+			return err
+		}
+	}
 	if !mediaActive || reacquire {
-		if _, err := s.triggerActive(!mediaActive); err != nil {
+		if _, err := s.triggerActive(true); err != nil {
 			s.StopVideo()
 			return err
 		}
@@ -96,6 +102,37 @@ func (s *Capture) StartVideo(config EncoderConfig, handler func(VideoFrame)) err
 	}
 }
 
+// stopCaptureForReconfigure releases the current audio-only (or differently
+// sized) tabCapture stream before requesting a new stream ID for the same tab.
+// Chromium does not allow two simultaneous captures of one tab, so merely
+// triggering the extension again leaves the video transition stuck forever.
+func (s *Capture) stopCaptureForReconfigure() error {
+	s.mu.Lock()
+	conn := s.conn
+	if conn == nil || !s.mediaActive {
+		s.mu.Unlock()
+		return nil
+	}
+	inactive := make(chan struct{}, 1)
+	s.inactive = inactive
+	s.mu.Unlock()
+
+	s.writeMu.Lock()
+	_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
+	err := conn.WriteMessage(websocket.TextMessage, []byte("restart"))
+	_ = conn.SetWriteDeadline(time.Time{})
+	s.writeMu.Unlock()
+	if err != nil {
+		return fmt.Errorf("stop tab capture for video reconfigure: %w", err)
+	}
+	select {
+	case <-inactive:
+		return nil
+	case <-time.After(2 * time.Second):
+		return errors.New("tab capture did not stop for video reconfigure")
+	}
+}
+
 func (s *Capture) StopVideo() {
 	s.mu.Lock()
 	if !s.videoActive {
@@ -107,20 +144,10 @@ func (s *Capture) StopVideo() {
 	s.videoHandler = nil
 	s.videoReady = nil
 	videoConn := s.videoConn
-	audioConn := s.conn
-	stopMedia := s.capture == nil
-	if stopMedia {
-		s.mediaActive = false
-	}
 	s.mu.Unlock()
 
 	if videoConn != nil {
 		s.writeVideoText(videoConn, map[string]any{"type": "stop-video"})
-	}
-	if stopMedia && audioConn != nil {
-		s.writeMu.Lock()
-		_ = audioConn.WriteMessage(websocket.TextMessage, []byte("stop"))
-		s.writeMu.Unlock()
 	}
 }
 
@@ -243,6 +270,9 @@ func (s *Capture) handleVideoMessage(data []byte) {
 		CodedHeight   int     `json:"codedHeight"`
 		DisplayWidth  int     `json:"displayWidth"`
 		DisplayHeight int     `json:"displayHeight"`
+		VisibleWidth  int     `json:"visibleWidth"`
+		VisibleHeight int     `json:"visibleHeight"`
+		Rotation      float64 `json:"rotation"`
 		Constraint    string  `json:"constraint"`
 	}
 	if json.Unmarshal(data, &message) != nil {
@@ -281,9 +311,10 @@ func (s *Capture) handleVideoMessage(data []byte) {
 		log.Printf("video: tabCapture constraint fallback constraint=%q: %s",
 			message.Constraint, message.Error)
 	case "video-frame":
-		log.Printf("video: raw tab frame coded=%dx%d display=%dx%d",
+		log.Printf("video: raw tab frame coded=%dx%d visible=%dx%d display=%dx%d rotation=%.0f",
 			message.CodedWidth, message.CodedHeight,
-			message.DisplayWidth, message.DisplayHeight)
+			message.VisibleWidth, message.VisibleHeight,
+			message.DisplayWidth, message.DisplayHeight, message.Rotation)
 	case "video-output":
 		log.Printf("video: WebCodecs output coded=%dx%d display=%dx%d",
 			message.CodedWidth, message.CodedHeight,
