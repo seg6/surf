@@ -27,6 +27,8 @@ Intel, and macOS Apple Silicon. Surf prefers a compatible system Chrome, then
 system Chromium, and otherwise downloads a verified ungoogled-chromium release
 into `SURF_HOME`.
 
+macOS packages require macOS 12 Monterey or newer.
+
 The desktop app accepts `SURF_HOME` and `SURF_PASSWORD` overrides. Its
 generated configuration is stored at
 `SURF_HOME/desktop.json`, and combined supervisor/backend output is written to

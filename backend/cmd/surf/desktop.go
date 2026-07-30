@@ -240,7 +240,6 @@ func newDesktopApp() (*desktopApp, error) {
 func (a *desktopApp) onReady() {
 	icon := trayIcon()
 	systray.SetIcon(icon)
-	systray.SetTitle("Surf")
 	systray.SetTooltip("Surf remote browser backend")
 
 	a.statusItem = systray.AddMenuItem("Starting Surf…", "Backend status")

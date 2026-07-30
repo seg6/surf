@@ -55,6 +55,7 @@ code, test your setup, and assume there are rough edges.
 - iOS 6 is the primary target.
 - Filza, iFile, OpenSSH, or another way to install `.deb` packages.
 - A Linux, Windows, or macOS computer for `surf`.
+- macOS 12 Monterey or newer when using macOS.
 - Enough disk space for Chromium and Surf's media runtime.
 - A low-latency network between the device and backend. LAN is best.
 
@@ -87,6 +88,14 @@ Download the matching Surf package from GitHub Releases:
 - macOS: open the DMG and copy `Surf.app`.
 - Linux desktop: run the AppImage; servers can use the tarball.
 
+The macOS app is not notarized. If macOS refuses to open it after you copy it
+to Applications, clear the downloaded quarantine metadata and open it again:
+
+```sh
+xattr -cr /Applications/Surf.app
+open /Applications/Surf.app
+```
+
 The tray/menu-bar menu opens Settings, restarts the backend, or quits Surf.
 The Settings window shows the
 detected LAN address and stream status, lets you change the password and port,
@@ -102,8 +111,9 @@ On first run Surf asks whether it should start when you sign in. The choice can
 be changed later in Settings. Launching Surf again while it is already running
 opens the existing Settings page instead of starting a second backend.
 
-The desktop app is presently unsigned, so Windows or macOS may display a
-security warning. For a server or terminal-only launch, use the same archive:
+The desktop app is not signed with a trusted publisher certificate or
+notarized, so Windows or macOS may display a security warning. For a server or
+terminal-only launch, use the same archive:
 
 ```sh
 tar xf surf-*-linux-*.tar.gz

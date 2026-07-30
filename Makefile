@@ -6,6 +6,15 @@ SURF_GOOS ?= $(shell go env GOOS)
 SURF_GOARCH ?= $(shell go env GOARCH)
 CLIENT_DEB ?=
 SURF_DIST := surf-$(VERSION)-$(SURF_GOOS)-$(SURF_GOARCH)
+SURF_CGO_ENV := CGO_ENABLED=1
+ifeq ($(SURF_GOOS),darwin)
+# Go 1.26 supports macOS 12 and newer. Pin both cgo compilation and external
+# linking so builds made with a newer SDK do not accidentally require the
+# build host's macOS version.
+SURF_MACOS_MIN ?= 12.0
+SURF_CGO_ENV += CGO_CFLAGS="-O2 -g -mmacosx-version-min=$(SURF_MACOS_MIN)"
+SURF_CGO_ENV += CGO_LDFLAGS="-O2 -g -mmacosx-version-min=$(SURF_MACOS_MIN)"
+endif
 ifeq ($(SURF_GOOS),windows)
 SURF_EXE := surf.exe
 SURF_ARCHIVE := $(SURF_DIST).zip
@@ -31,7 +40,7 @@ surf-binary:
 			--file-description "Surf remote browser backend" --product-name Surf \
 			--original-filename surf.exe; \
 	fi
-	cd backend && CGO_ENABLED=1 GOOS=$(SURF_GOOS) GOARCH=$(SURF_GOARCH) go build -trimpath \
+	cd backend && $(SURF_CGO_ENV) GOOS=$(SURF_GOOS) GOARCH=$(SURF_GOARCH) go build -trimpath \
 		$(if $(CLIENT_DEB),-tags=client_bundle) \
 		-ldflags="-s -w $(if $(filter windows,$(SURF_GOOS)),-H=windowsgui) -X surf-backend/internal/config.AppVersion=$(VERSION) -X surf-backend/internal/config.NativeVersion=$(PROTOCOL_VERSION)" \
 		-o "$(SURF_EXE)" ./cmd/surf
@@ -50,6 +59,8 @@ surf-dist: surf-binary
 		iconutil -c icns "dist/Surf.iconset" -o "dist/Surf.app/Contents/Resources/Surf.icns"; \
 		rm -rf "dist/Surf.iconset"; \
 		sed "s/@VERSION@/$(VERSION)/g" packaging/desktop/Info.plist > "dist/Surf.app/Contents/Info.plist"; \
+		codesign --force --sign - --timestamp=none "dist/Surf.app"; \
+		codesign --verify --deep --strict "dist/Surf.app"; \
 		if [ -n "$${CI:-}" ]; then (cd backend && go clean -cache -modcache); fi; \
 		hdiutil create -volname Surf -srcfolder "dist/Surf.app" -ov -format UDZO "dist/surf-$(VERSION)-darwin-$(SURF_GOARCH).dmg" >/dev/null; \
 		tar -C dist -czf "dist/$(SURF_ARCHIVE)" "Surf.app"; \

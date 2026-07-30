@@ -114,7 +114,12 @@ jobs:
               fi
               ;;
             windows) test -n "$(find dist -name '*-setup.exe' -type f -print -quit)" ;;
-            darwin) test -n "$(find dist -name '*.dmg' -type f -print -quit)" ;;
+            darwin)
+              test -n "$(find dist -name '*.dmg' -type f -print -quit)"
+              codesign --verify --deep --strict dist/Surf.app
+              test "$(otool -l dist/Surf.app/Contents/MacOS/surf |
+                awk '$1 == "minos" { print $2; exit }')" = "12.0"
+              ;;
           esac
 
       - uses: actions/upload-artifact@v4

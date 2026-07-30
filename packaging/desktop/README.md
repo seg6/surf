@@ -22,7 +22,16 @@ On first run, Surf asks whether to start when you sign in. Change that choice
 from Settings at any time. Starting Surf while it is already running simply
 opens the existing Settings page.
 
-The app is currently unsigned. Windows SmartScreen or macOS Gatekeeper may
-show a warning until signed release builds are available.
+The app is not signed with a trusted publisher certificate or notarized.
+Windows SmartScreen or macOS Gatekeeper may show a warning until signed release
+builds are available.
+
+After copying `Surf.app` from the DMG to Applications, macOS users can clear
+the downloaded quarantine metadata if the app is blocked:
+
+```sh
+xattr -cr /Applications/Surf.app
+open /Applications/Surf.app
+```
 
 Linux tray integration uses StatusNotifier/AppIndicator.
