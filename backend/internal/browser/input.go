@@ -146,8 +146,7 @@ func (b *Controller) handleCommand(c *transport.Client, command protocol.Command
 		_, subscribed := b.videoSubs[c]
 		b.mediaMu.Unlock()
 		if subscribed {
-			cfg := b.video.Config()
-			c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "starting", FPS: cfg.FPS, Generation: b.video.Generation(), Profile: b.profileName()})
+			c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "starting", Generation: b.video.Generation(), Profile: b.profileName()})
 			b.video.Restart()
 		} else {
 			// A failed first-AU wait removes this client's subscription while

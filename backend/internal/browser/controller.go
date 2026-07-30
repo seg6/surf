@@ -130,10 +130,10 @@ func New(cfg *config.Config, hub *transport.Hub) (*Controller, error) {
 	audioCfg := media.AudioConfig{Capture: capture.OpenAudio}
 	videoCfg := videoPipelineConfig(cfg)
 	var b *Controller
-	videoCfg.Start = func(width, height, fps, bitrateK int) error {
+	videoCfg.Start = func(width, height, bitrateK int) error {
 		return capture.StartVideo(media.EncoderConfig{
-			Codec: encoderCodec(width, height, fps),
-			Width: width, Height: height, FPS: fps, BitrateK: bitrateK,
+			Codec: encoderCodec(width, height),
+			Width: width, Height: height, BitrateK: bitrateK,
 		}, b.onVideoFrame)
 	}
 	videoCfg.Stop = capture.StopVideo

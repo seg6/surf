@@ -14,7 +14,18 @@ let videoEncoder = null;
 let videoGeneration = 0;
 let videoNeedsKeyframe = true;
 let videoFrameNumber = 0;
+let videoLastKeyTimestamp = null;
 let videoOutputReported = false;
+
+// Chromium initializes display/tab capture at 30 FPS, and falls back to that
+// same default when given its generic 1000 FPS media limit. Request the native
+// client's 60 Hz display rate explicitly so tab capture exposes its 60 FPS
+// source format. Frames remain source-paced; Surf does not timer-pace them.
+const clientDisplayFrameRate = 60;
+// A tab-capture track survives viewport and orientation changes. Give that
+// long-lived track room for later resizes; exact current dimensions are still
+// applied in startVideoEncoder, so this ceiling does not increase frame size.
+const maxCaptureDimension = 1024;
 
 function stopVideoEncoder() {
   videoGeneration++;
@@ -164,10 +175,13 @@ function encodedVideoMessage(chunk, config) {
 }
 
 function captureVideoSize() {
-  // Chrome tabCapture's constraint axes are transposed relative to the raw
-  // VideoFrame display axes. This is a dimension transform, not a device
-  // resolution: it applies to every client-provided width and height.
-  return {width: videoConfig.height, height: videoConfig.width};
+  // Chrome tabCapture normalizes the source track into landscape dimension
+  // order even when the captured compositor surface is portrait. Preserve
+  // that order in landscape instead of blindly transposing both orientations.
+  return {
+    width: Math.max(videoConfig.width, videoConfig.height),
+    height: Math.min(videoConfig.width, videoConfig.height),
+  };
 }
 
 async function startVideoEncoder(track) {
@@ -183,17 +197,44 @@ async function startVideoEncoder(track) {
   // optimize primarily for camera-like motion.
   track.contentHint = "detail";
   const captureSize = captureVideoSize();
-  await track.applyConstraints({
+  const constraints = {
     width: {exact: captureSize.width},
     height: {exact: captureSize.height},
-    frameRate: {ideal: videoConfig.fps, max: videoConfig.fps},
-  });
+  };
+  // Ask for the native display cadence. Chromium otherwise selects 30 FPS,
+  // while the latest-only queues below keep the requested 60 Hz source from
+  // building latency when display ticks and capture ticks drift slightly.
+  const capabilities = typeof track.getCapabilities === "function" ?
+    track.getCapabilities() : {};
+  const availableRate = capabilities && capabilities.frameRate ?
+    capabilities.frameRate.max : 0;
+  constraints.frameRate = {
+    ideal: clientDisplayFrameRate,
+    max: clientDisplayFrameRate,
+  };
+  try {
+    await track.applyConstraints(constraints);
+  } catch (error) {
+    // Some Chromium builds advertise 60 Hz for tabCapture, then reject the
+    // combined size/rate constraint after an orientation change. Keep the
+    // exact compositor dimensions and let the track choose its best cadence
+    // instead of taking the whole video lane down.
+    sendVideoJSON({
+      type: "video-warning",
+      error: String(error),
+      constraint: error && error.constraint ? String(error.constraint) : "",
+    });
+    await track.applyConstraints({
+      width: constraints.width,
+      height: constraints.height,
+    });
+  }
+  const settings = track.getSettings();
   const config = {
     codec: videoConfig.codec,
     width: videoConfig.width,
     height: videoConfig.height,
     bitrate: videoConfig.bitrateK * 1000,
-    framerate: videoConfig.fps,
     // Variable mode spends the same target bitrate where browser text and
     // scrolling are complex instead of padding static frames.
     bitrateMode: "variable",
@@ -241,13 +282,14 @@ async function startVideoEncoder(track) {
   videoReader = reader;
   videoNeedsKeyframe = true;
   videoFrameNumber = 0;
+  videoLastKeyTimestamp = null;
   videoOutputReported = false;
-  const settings = track.getSettings();
   sendVideoJSON({
     type: "video-active",
     sourceWidth: settings.width || 0,
     sourceHeight: settings.height || 0,
     sourceFPS: settings.frameRate || 0,
+    sourceCapabilityFPS: availableRate || 0,
   });
 
   try {
@@ -269,10 +311,16 @@ async function startVideoEncoder(track) {
           displayHeight: frame.displayHeight,
         });
       }
-      const keyInterval = Math.max(1, videoConfig.fps * 2);
+      const frameTimestamp = Number.isFinite(frame.timestamp) ?
+        frame.timestamp : performance.now() * 1000;
       const keyFrame = videoNeedsKeyframe ||
-        videoFrameNumber % keyInterval === 0;
+        videoLastKeyTimestamp === null ||
+        frameTimestamp < videoLastKeyTimestamp ||
+        frameTimestamp - videoLastKeyTimestamp >= 2000000;
       videoNeedsKeyframe = false;
+      if (keyFrame) {
+        videoLastKeyTimestamp = frameTimestamp;
+      }
       videoFrameNumber++;
       encoder.encode(frame, {keyFrame});
       frame.close();
@@ -292,8 +340,6 @@ async function startCapture(streamId) {
   let nextStream = null;
   let nextContext = null;
   try {
-    const maxVideoDimension = videoConfig ?
-      Math.max(videoConfig.width, videoConfig.height) : 0;
     nextStream = await navigator.mediaDevices.getUserMedia({
       audio: {
         mandatory: {
@@ -307,9 +353,9 @@ async function startCapture(streamId) {
         mandatory: {
           chromeMediaSource: "tab",
           chromeMediaSourceId: streamId,
-          maxWidth: maxVideoDimension,
-          maxHeight: maxVideoDimension,
-          maxFrameRate: videoConfig.fps,
+          maxWidth: maxCaptureDimension,
+          maxHeight: maxCaptureDimension,
+          maxFrameRate: clientDisplayFrameRate,
         },
       } : false,
     });

@@ -15,7 +15,6 @@ type VideoConfigEvent struct {
 	Type       string `json:"t"`
 	State      string `json:"state"`
 	Reason     string `json:"reason,omitempty"`
-	FPS        int    `json:"fps,omitempty"`
 	W          int    `json:"w,omitempty"`
 	H          int    `json:"h,omitempty"`
 	Generation uint32 `json:"generation,omitempty"`

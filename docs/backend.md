@@ -195,8 +195,6 @@ Common overrides:
 - `SURF_ADAPTIVE_VIDEO=1`: opt in to automatic coded-size
   reduction when two consecutive motion windows miss their performance
   targets. Disabled by default to keep quality and resolution stable.
-- `STREAM_FPS`: capture and H.264 pacing target; defaults to `30`. Use `60`
-  only when the encoder host and client can sustain it.
 - `STREAM_SCALE`: maximum coded width and height, preserving aspect ratio;
   unset by default so the encoded frame exactly follows the client viewport.
   Set `768x1024` to cap encoder and decoder work on an original iPad.
@@ -220,17 +218,24 @@ signature. Release builds embed the native package built from the same commit.
 An authenticated native client with an older protocol can download that package
 from `/updates/v1/client`; media WebSockets are never used for update payloads.
 
-For a 60 FPS original-iPad experiment, start with:
+Video capture is source-driven: Surf asks Chromium for the native client's
+60 Hz display rate and encodes frames as they arrive. Chromium otherwise
+selects its 30 FPS tab-capture default (including when asked for its generic
+1000 FPS media limit). Surf does not timer-pace frames. Latest-only
+capture/presentation slots and bounded encode/GOP transport queues discard
+stale work instead of accumulating latency. The final presentation rate is
+naturally limited by the iPad's display.
+
+For a lower-workload original-iPad configuration, start with:
 
 ```sh
 SURF_PASSWORD='choose-a-password' \
-STREAM_FPS=60 \
 STREAM_SCALE=768x1024 \
 STREAM_BITRATE=2000 \
 ./surf serve
 ```
 
 Triple-tap the video on the iPad to open the diagnostics overlay. During
-continuous motion, `AU RATE` should approach 60 and `VT CALLBACK` should remain
-below the 16.7 ms frame budget. Lower `STREAM_SCALE` if decode time exceeds that
-budget.
+continuous motion, `AU RATE` should approach the Chromium source rate and
+`VT CALLBACK` should remain below the display's frame budget (16.7 ms at
+60 Hz). Lower `STREAM_SCALE` if decode time exceeds that budget.

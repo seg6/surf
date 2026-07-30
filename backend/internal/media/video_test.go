@@ -34,10 +34,10 @@ func TestSubBackpressureResyncsOnIDR(t *testing.T) {
 func TestTabEncoderFeedsFanout(t *testing.T) {
 	var starts, stops, keyframes atomic.Int64
 	s := NewVideoPipeline(VideoPipelineConfig{
-		W: 768, H: 950, FPS: 30, BitrateK: 6000,
-		Start: func(width, height, fps, bitrateK int) error {
-			if width != 768 || height != 950 || fps != 30 || bitrateK != 6000 {
-				t.Fatalf("start config = %dx%d@%d %dk", width, height, fps, bitrateK)
+		W: 768, H: 950, BitrateK: 6000,
+		Start: func(width, height, bitrateK int) error {
+			if width != 768 || height != 950 || bitrateK != 6000 {
+				t.Fatalf("start config = %dx%d %dk", width, height, bitrateK)
 			}
 			starts.Add(1)
 			return nil
@@ -75,7 +75,7 @@ func TestTabEncoderFeedsFanout(t *testing.T) {
 func TestSubscribeFailsImmediatelyWhenEncoderCannotStart(t *testing.T) {
 	s := NewVideoPipeline(VideoPipelineConfig{
 		W: 64, H: 64,
-		Start: func(int, int, int, int) error { return errors.New("unavailable") },
+		Start: func(int, int, int) error { return errors.New("unavailable") },
 	})
 	sub := s.Subscribe()
 	select {
@@ -93,7 +93,7 @@ func TestResizeRestartsAtClientDerivedSize(t *testing.T) {
 	stops := 0
 	s := NewVideoPipeline(VideoPipelineConfig{
 		W: 768, H: 950,
-		Start: func(width, height, fps, bitrateK int) error {
+		Start: func(width, height, bitrateK int) error {
 			starts = append(starts, [2]int{width, height})
 			return nil
 		},
@@ -114,7 +114,7 @@ func TestExplicitRestartPreservesSubscriberAndRequiresNewIDR(t *testing.T) {
 	var starts, stops atomic.Int64
 	s := NewVideoPipeline(VideoPipelineConfig{
 		W: 64, H: 64,
-		Start: func(int, int, int, int) error {
+		Start: func(int, int, int) error {
 			starts.Add(1)
 			return nil
 		},

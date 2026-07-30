@@ -60,6 +60,45 @@ func TestNewEnablesLoopbackVideoBridge(t *testing.T) {
 	}
 }
 
+func TestVideoCaptureIsSourcePaced(t *testing.T) {
+	source, err := NewCapture(t.TempDir())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer source.Close()
+
+	script, err := os.ReadFile(filepath.Join(source.ExtensionPath(), "offscreen.js"))
+	if err != nil {
+		t.Fatalf("read offscreen script: %v", err)
+	}
+	text := string(script)
+	if strings.Contains(text, "videoConfig.fps") ||
+		strings.Contains(text, "config.framerate") {
+		t.Fatal("offscreen capture still contains an application FPS ceiling")
+	}
+	for _, want := range []string{
+		"track.getCapabilities()",
+		"maxFrameRate: clientDisplayFrameRate",
+		"ideal: clientDisplayFrameRate",
+		"max: clientDisplayFrameRate",
+		`type: "video-warning"`,
+		"width: constraints.width",
+		"height: constraints.height",
+		"Math.max(videoConfig.width, videoConfig.height)",
+		"Math.min(videoConfig.width, videoConfig.height)",
+		"const clientDisplayFrameRate = 60",
+		"const maxCaptureDimension = 1024",
+		"maxWidth: maxCaptureDimension",
+		"maxHeight: maxCaptureDimension",
+		"frameTimestamp - videoLastKeyTimestamp >= 2000000",
+		"maxBufferSize: 1",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("offscreen source pacing is missing %q", want)
+		}
+	}
+}
+
 func TestVideoFrameBridgeHeader(t *testing.T) {
 	var got VideoFrame
 	source := &Capture{

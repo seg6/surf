@@ -19,9 +19,8 @@ type VideoPipelineConfig struct {
 	W, H                 int
 	CaptureW, CaptureH   int
 	ScaleMaxW, ScaleMaxH int
-	FPS                  int
 	BitrateK             int
-	Start                func(width, height, fps, bitrateK int) error
+	Start                func(width, height, bitrateK int) error
 	Stop                 func()
 	Keyframe             func()
 }
@@ -76,9 +75,6 @@ type VideoPipeline struct {
 func NewVideoPipeline(cfg VideoPipelineConfig) *VideoPipeline {
 	if cfg.CaptureW == 0 || cfg.CaptureH == 0 {
 		cfg.CaptureW, cfg.CaptureH = cfg.W, cfg.H
-	}
-	if cfg.FPS < 1 {
-		cfg.FPS = 30
 	}
 	cfg.W, cfg.H = cfg.codedSize(cfg.CaptureW, cfg.CaptureH)
 	return &VideoPipeline{cfg: cfg, subs: map[*VideoSubscription]struct{}{}}
@@ -320,13 +316,13 @@ func (s *VideoPipeline) startLocked() {
 	s.gen++
 	gen := s.gen
 	s.running = true
-	if err := s.cfg.Start(s.cfg.W, s.cfg.H, s.cfg.FPS, s.cfg.BitrateK); err != nil {
+	if err := s.cfg.Start(s.cfg.W, s.cfg.H, s.cfg.BitrateK); err != nil {
 		s.running = false
 		log.Printf("stream: tab encoder start failed: %v", err)
 		s.failAllLocked()
 		return
 	}
-	log.Printf("stream: tab encoder started generation=%d %dx%d@%d", gen, s.cfg.W, s.cfg.H, s.cfg.FPS)
+	log.Printf("stream: tab encoder started generation=%d %dx%d source-paced", gen, s.cfg.W, s.cfg.H)
 }
 
 func (s *VideoPipeline) stopLocked() {

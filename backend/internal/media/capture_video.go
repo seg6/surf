@@ -19,7 +19,6 @@ type EncoderConfig struct {
 	Codec    string `json:"codec"`
 	Width    int    `json:"width"`
 	Height   int    `json:"height"`
-	FPS      int    `json:"fps"`
 	BitrateK int    `json:"bitrateK"`
 }
 
@@ -142,7 +141,7 @@ func (s *Capture) sendVideoConfig() {
 	s.writeVideoText(conn, map[string]any{
 		"type": "configure", "codec": config.Codec,
 		"width": config.Width, "height": config.Height,
-		"fps": config.FPS, "bitrateK": config.BitrateK,
+		"bitrateK": config.BitrateK,
 	})
 }
 
@@ -235,10 +234,12 @@ func (s *Capture) handleVideoMessage(data []byte) {
 		SourceWidth   int     `json:"sourceWidth"`
 		SourceHeight  int     `json:"sourceHeight"`
 		SourceFPS     float64 `json:"sourceFPS"`
+		CapabilityFPS float64 `json:"sourceCapabilityFPS"`
 		CodedWidth    int     `json:"codedWidth"`
 		CodedHeight   int     `json:"codedHeight"`
 		DisplayWidth  int     `json:"displayWidth"`
 		DisplayHeight int     `json:"displayHeight"`
+		Constraint    string  `json:"constraint"`
 	}
 	if json.Unmarshal(data, &message) != nil {
 		return
@@ -255,8 +256,9 @@ func (s *Capture) handleVideoMessage(data []byte) {
 			default:
 			}
 		}
-		log.Printf("video: tabCapture source %dx%d@%.1ffps",
-			message.SourceWidth, message.SourceHeight, message.SourceFPS)
+		log.Printf("video: tabCapture source %dx%d@%.1ffps capability=%.1ffps",
+			message.SourceWidth, message.SourceHeight,
+			message.SourceFPS, message.CapabilityFPS)
 	case "video-error":
 		if message.Error == "" {
 			message.Error = "unknown tab capture error"
@@ -271,6 +273,9 @@ func (s *Capture) handleVideoMessage(data []byte) {
 			default:
 			}
 		}
+	case "video-warning":
+		log.Printf("video: tabCapture constraint fallback constraint=%q: %s",
+			message.Constraint, message.Error)
 	case "video-frame":
 		log.Printf("video: raw tab frame coded=%dx%d display=%dx%d",
 			message.CodedWidth, message.CodedHeight,

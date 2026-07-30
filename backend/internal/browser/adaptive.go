@@ -39,17 +39,14 @@ func (b *Controller) handleMediaStats(stats *protocol.MediaStatsCommand) {
 	if !b.cfg.AdaptiveVideo {
 		return
 	}
-	// A long presentation gap and low FPS are healthy unless encoded AUs show
-	// that the page is actively producing motion.
+	// Static tabs naturally produce few access units. During motion, react to
+	// real decode/presentation pressure instead of comparing against a fixed
+	// source FPS: Chromium now drives capture at the source's available rate,
+	// which may exceed the client's display refresh rate.
 	activeMotion := stats.AURate >= 5.0
-	targetFPS := float64(b.cfg.StreamFPS)
-	if targetFPS <= 0 {
-		targetFPS = 30
-	}
 	unhealthy := stats.MemoryWarn || (activeMotion &&
 		(stats.DropPercent > 1.0 ||
-			stats.AURate < targetFPS*0.9 ||
-			stats.PresentedFPS < stats.AURate*0.95 ||
+			stats.GapMS > 50.0 ||
 			stats.CallbackMS > 24.0))
 	now := time.Now()
 	b.mu.Lock()

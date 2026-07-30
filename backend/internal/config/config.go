@@ -56,9 +56,7 @@ type Config struct {
 	ContentBlockerPath string
 	AdaptiveVideo      bool
 
-	// H.264 lane. The encoder only runs while a native video-mode client
-	// is subscribed.
-	StreamFPS      int    // STREAM_FPS
+	// H.264 lane. The encoder only runs while a native client is subscribed.
 	StreamScale    string // STREAM_SCALE, optional maximum; empty = client size
 	StreamBitrateK int    // STREAM_BITRATE
 }
@@ -131,7 +129,6 @@ func load(requireAuth bool) (*Config, error) {
 		ChromeGPU:       envBool("SURF_CHROME_GPU", true),
 		ContentBlocker:  envBool("SURF_CONTENT_BLOCKER", true),
 		AdaptiveVideo:   envBool("SURF_ADAPTIVE_VIDEO", false),
-		StreamFPS:       envInt("STREAM_FPS", 30),
 		StreamScale:     envStr("STREAM_SCALE", ""),
 		StreamBitrateK:  envInt("STREAM_BITRATE", 6000),
 	}

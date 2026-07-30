@@ -38,8 +38,7 @@ func (b *Controller) subscribeVideo(c *transport.Client) {
 	// the dormant encoder first so it never starts at the backend default and
 	// immediately restarts at the iPad size.
 	b.video.SetSize(viewW, viewH)
-	cfg := b.video.Config()
-	c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "starting", FPS: cfg.FPS, Generation: b.video.Generation(), Profile: b.profileName()})
+	c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "starting", Generation: b.video.Generation(), Profile: b.profileName()})
 	sub := b.video.Subscribe()
 	select {
 	case <-c.Closed():
@@ -94,8 +93,12 @@ func (b *Controller) onVideoFrame(frame media.VideoFrame) {
 	}
 }
 
-func encoderCodec(width, height, fps int) string {
-	if fps > 30 || ((width+15)/16)*((height+15)/16)*fps > 108000 {
+func encoderCodec(width, height int) string {
+	// Level selection is decoder compatibility metadata, not a frame-rate
+	// limit. Size it for a 60 Hz source so the original iPad can accept the
+	// fastest stream it can display without forcing the encoder to 30 FPS.
+	const assumedSourceFPS = 60
+	if ((width+15)/16)*((height+15)/16)*assumedSourceFPS > 108000 {
 		return "avc1.42E029" // constrained baseline, level 4.1
 	}
 	return "avc1.42E01F" // constrained baseline, level 3.1
@@ -104,14 +107,13 @@ func encoderCodec(width, height, fps int) string {
 // pumpVideo gates on encoder health, then relays AUs until the sub dies or
 // the client disconnects or explicitly retries.
 func (b *Controller) pumpVideo(c *transport.Client, sub *media.VideoSubscription) {
-	cfg := b.video.Config()
 	select {
 	case au, ok := <-sub.C:
 		if !ok {
 			b.videoFailed(c)
 			return
 		}
-		c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "ready", FPS: cfg.FPS, W: au.W, H: au.H, Generation: au.Generation, Profile: b.profileName()})
+		c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "ready", W: au.W, H: au.H, Generation: au.Generation, Profile: b.profileName()})
 		b.deliverAU(c, sub, au)
 	case <-time.After(firstAUWait):
 		log.Printf("video: no AU within %s, lane unavailable", firstAUWait)
@@ -123,7 +125,7 @@ func (b *Controller) pumpVideo(c *transport.Client, sub *media.VideoSubscription
 		b.deliverAU(c, sub, au)
 	}
 	// Channel closed: encoder gave up (or we unsubscribed).
-	c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "unavailable", Reason: "encoder-stopped", FPS: cfg.FPS})
+	c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "unavailable", Reason: "encoder-stopped"})
 	b.stopVideo(c)
 }
 
@@ -207,7 +209,6 @@ func videoPipelineConfig(cfg *config.Config) media.VideoPipelineConfig {
 		W: cfg.ViewW, H: cfg.ViewH,
 		CaptureW: cfg.ViewW, CaptureH: cfg.ViewH,
 		ScaleMaxW: maxW, ScaleMaxH: maxH,
-		FPS:      cfg.StreamFPS,
 		BitrateK: cfg.StreamBitrateK,
 	}
 }

@@ -14,15 +14,15 @@ func TestAdaptiveProfileHysteresis(t *testing.T) {
 	b := &Controller{
 		cfg: cfg,
 		video: media.NewVideoPipeline(media.VideoPipelineConfig{
-			W: 768, H: 934, CaptureW: 768, CaptureH: 934, FPS: 30,
+			W: 768, H: 934, CaptureW: 768, CaptureH: 934,
 		}),
 		tabs: map[int]*Tab{},
 	}
-	b.handleMediaStats(&protocol.MediaStatsCommand{PresentedFPS: 27, AURate: 30})
+	b.handleMediaStats(&protocol.MediaStatsCommand{PresentedFPS: 54, AURate: 60, GapMS: 80})
 	if b.adaptiveProfile != 0 {
 		t.Fatal("profile degraded after only one unhealthy report")
 	}
-	b.handleMediaStats(&protocol.MediaStatsCommand{PresentedFPS: 27, AURate: 30})
+	b.handleMediaStats(&protocol.MediaStatsCommand{PresentedFPS: 54, AURate: 60, GapMS: 80})
 	if b.adaptiveProfile != 1 {
 		t.Fatalf("unhealthy report did not degrade: profile=%d", b.adaptiveProfile)
 	}
@@ -44,7 +44,7 @@ func TestAdaptiveIgnoresStaticPageCadence(t *testing.T) {
 	b := &Controller{
 		cfg: cfg,
 		video: media.NewVideoPipeline(media.VideoPipelineConfig{
-			W: 768, H: 934, CaptureW: 768, CaptureH: 934, FPS: 30,
+			W: 768, H: 934, CaptureW: 768, CaptureH: 934,
 		}),
 		tabs: map[int]*Tab{},
 	}

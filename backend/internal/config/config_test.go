@@ -13,7 +13,7 @@ func clearConfigEnv(t *testing.T) {
 		"AUTH_DAYS", "DOWNLOADS", "UPLOADS",
 		"CHROME_NO_SANDBOX", "SURF_CHROME_GPU", "SURF_PASSWORD",
 		"SURF_ADAPTIVE_VIDEO",
-		"STREAM_FPS", "STREAM_SCALE", "STREAM_BITRATE",
+		"STREAM_SCALE", "STREAM_BITRATE",
 	} {
 		t.Setenv(key, "")
 	}
