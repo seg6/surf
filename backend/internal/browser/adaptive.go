@@ -9,14 +9,13 @@ import (
 
 type adaptiveProfile struct {
 	name               string
-	quality            int
 	scaleNum, scaleDen int
 }
 
 var adaptiveProfiles = [...]adaptiveProfile{
-	{name: "high", quality: 100, scaleNum: 1, scaleDen: 1},
-	{name: "balanced", quality: 85, scaleNum: 7, scaleDen: 8},
-	{name: "recovery", quality: 75, scaleNum: 25, scaleDen: 32},
+	{name: "high", scaleNum: 1, scaleDen: 1},
+	{name: "balanced", scaleNum: 7, scaleDen: 8},
+	{name: "recovery", scaleNum: 25, scaleDen: 32},
 }
 
 func (b *Controller) profileIndex() int {
@@ -36,20 +35,12 @@ func adaptiveScale(profile adaptiveProfile, w, h int) (int, int) {
 	return w * profile.scaleNum / profile.scaleDen, h * profile.scaleNum / profile.scaleDen
 }
 
-func (b *Controller) adaptiveQuality(profile adaptiveProfile) int {
-	if b.adaptiveBaseQuality > 0 && b.adaptiveBaseQuality < profile.quality {
-		return b.adaptiveBaseQuality
-	}
-	return profile.quality
-}
-
 func (b *Controller) handleMediaStats(stats *protocol.MediaStatsCommand) {
 	if !b.cfg.AdaptiveVideo {
 		return
 	}
-	// CDP emits only sparse bootstrap frames when a page is static. A long
-	// presentation gap and low FPS are therefore healthy unless encoded AUs
-	// show that the page is actively producing motion.
+	// A long presentation gap and low FPS are healthy unless encoded AUs show
+	// that the page is actively producing motion.
 	activeMotion := stats.AURate >= 5.0
 	targetFPS := float64(b.cfg.StreamFPS)
 	if targetFPS <= 0 {
@@ -93,13 +84,11 @@ func (b *Controller) handleMediaStats(stats *protocol.MediaStatsCommand) {
 	b.adaptiveProfile = next
 	b.adaptiveLastChange = now
 	profile := adaptiveProfiles[next]
-	quality := b.adaptiveQuality(profile)
-	b.cfg.SourceJPEGQuality = quality
 	viewW, viewH := b.viewW, b.viewH
 	b.mu.Unlock()
 
 	maxW, maxH := adaptiveScale(profile, viewW, viewH)
-	log.Printf("video: adaptive profile %s q=%d max=%dx%d", profile.name, quality, maxW, maxH)
+	log.Printf("video: adaptive profile %s max=%dx%d", profile.name, maxW, maxH)
 	b.video.SetScaleLimit(maxW, maxH)
 	if tab := b.active(); tab != nil {
 		b.ensureCast(tab)

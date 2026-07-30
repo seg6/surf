@@ -1,7 +1,7 @@
 # Docker deployment
 
 The image downloads a pinned Surf Linux release, verifies its SHA-256 digest,
-and runs `surf serve` with system Chromium and Surf's bundled FFmpeg.
+and runs `surf serve` with system Chromium.
 
 Create `.env` beside the Compose file:
 

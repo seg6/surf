@@ -5,7 +5,7 @@ package proc
 import "testing"
 
 func TestCommandSuppressesConsoleWindow(t *testing.T) {
-	cmd := Command("ffmpeg.exe", "-version")
+	cmd := Command("chromium.exe", "--version")
 	if cmd.SysProcAttr == nil {
 		t.Fatal("Command left SysProcAttr unset")
 	}

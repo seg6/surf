@@ -1,7 +1,7 @@
-// Package tabaudio captures Chromium's active tab on every supported host
-// without rendering that audio locally. A built-in extension sends 16 kHz
-// mono PCM over a loopback-only WebSocket to Surf's audio pipeline.
-package tabaudio
+// Package tabcapture captures Chromium's active tab on every supported host.
+// A built-in extension sends H.264 video and 16 kHz mono PCM to Surf over
+// loopback-only WebSockets without rendering the audio locally.
+package tabcapture
 
 import (
 	"crypto/rand"
@@ -27,7 +27,7 @@ import (
 	"surf-backend/internal/cdp"
 )
 
-const extensionName = "Surf Audio Bridge"
+const extensionName = "Surf Tab Capture"
 
 //go:embed extension/*
 var extensionFiles embed.FS
@@ -43,8 +43,17 @@ type Source struct {
 	conn        *websocket.Conn
 	capture     *capture
 	ready       chan error
+	mediaActive bool
 	closed      bool
 	writeMu     sync.Mutex
+
+	videoConn    *websocket.Conn
+	videoConfig  VideoConfig
+	videoHandler func(VideoFrame)
+	videoActive  bool
+	videoRunning bool
+	videoReady   chan error
+	videoWriteMu sync.Mutex
 }
 
 type capture struct {
@@ -63,15 +72,15 @@ type bridgeMessage struct {
 func New(home string) (*Source, error) {
 	var tokenBytes [32]byte
 	if _, err := rand.Read(tokenBytes[:]); err != nil {
-		return nil, fmt.Errorf("tab audio token: %w", err)
+		return nil, fmt.Errorf("tab capture token: %w", err)
 	}
 	token := hex.EncodeToString(tokenBytes[:])
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return nil, fmt.Errorf("tab audio listener: %w", err)
+		return nil, fmt.Errorf("tab capture listener: %w", err)
 	}
 	s := &Source{listener: listener}
-	extensionPath := filepath.Join(home, "runtime", "tab-audio-extension")
+	extensionPath := filepath.Join(home, "runtime", "tab-capture-extension")
 	if err := extractExtension(extensionPath, listener.Addr().String(), token); err != nil {
 		_ = listener.Close()
 		return nil, err
@@ -80,10 +89,11 @@ func New(home string) (*Source, error) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/audio/"+token, s.serveBridge)
+	mux.HandleFunc("/video/"+token, s.serveVideoBridge)
 	s.server = &http.Server{Handler: mux}
 	go func() {
 		if err := s.server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("tab audio bridge: %v", err)
+			log.Printf("tab capture bridge: %v", err)
 		}
 	}()
 	return s, nil
@@ -91,11 +101,11 @@ func New(home string) (*Source, error) {
 
 func extractExtension(dst, address, token string) error {
 	if err := os.MkdirAll(dst, 0o700); err != nil {
-		return fmt.Errorf("tab audio extension directory: %w", err)
+		return fmt.Errorf("tab capture extension directory: %w", err)
 	}
 	entries, err := fs.ReadDir(extensionFiles, "extension")
 	if err != nil {
-		return fmt.Errorf("tab audio extension assets: %w", err)
+		return fmt.Errorf("tab capture extension assets: %w", err)
 	}
 	for _, entry := range entries {
 		if entry.IsDir() || entry.Name() == "config.js" {
@@ -103,16 +113,18 @@ func extractExtension(dst, address, token string) error {
 		}
 		data, err := extensionFiles.ReadFile("extension/" + entry.Name())
 		if err != nil {
-			return fmt.Errorf("tab audio extension %s: %w", entry.Name(), err)
+			return fmt.Errorf("tab capture extension %s: %w", entry.Name(), err)
 		}
 		if err := os.WriteFile(filepath.Join(dst, entry.Name()), data, 0o600); err != nil {
-			return fmt.Errorf("tab audio extension %s: %w", entry.Name(), err)
+			return fmt.Errorf("tab capture extension %s: %w", entry.Name(), err)
 		}
 	}
 	url := "ws://" + address + "/audio/" + token
-	config := "globalThis.SURF_AUDIO_CONFIG = {url: " + strconv.Quote(url) + "};\n"
+	videoURL := "ws://" + address + "/video/" + token
+	config := "globalThis.SURF_CAPTURE_CONFIG = {audioUrl: " + strconv.Quote(url) +
+		", videoUrl: " + strconv.Quote(videoURL) + "};\n"
 	if err := os.WriteFile(filepath.Join(dst, "config.js"), []byte(config), 0o600); err != nil {
-		return fmt.Errorf("tab audio extension config: %w", err)
+		return fmt.Errorf("tab capture extension config: %w", err)
 	}
 	return nil
 }
@@ -145,9 +157,9 @@ func (s *Source) Attach(client *cdp.Client) error {
 		}
 		if time.Now().After(deadline) {
 			if err != nil {
-				return fmt.Errorf("tab audio extension: %w", err)
+				return fmt.Errorf("tab capture extension: %w", err)
 			}
-			return fmt.Errorf("tab audio extension %q was not loaded", extensionName)
+			return fmt.Errorf("tab capture extension %q was not loaded", extensionName)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -164,15 +176,21 @@ func (s *Source) Open() (io.ReadCloser, error) {
 		s.mu.Unlock()
 		_ = reader.Close()
 		_ = writer.Close()
-		return nil, errors.New("tab audio source is not attached")
+		return nil, errors.New("tab capture source is not attached")
 	}
 	previous := s.capture
 	s.capture = next
 	s.ready = make(chan error, 1)
 	ready := s.ready
+	alreadyActive := s.mediaActive
 	s.mu.Unlock()
 	if previous != nil {
 		previous.close(false)
+	}
+
+	if alreadyActive {
+		log.Printf("audio: reusing active Chromium tab capture")
+		return next, nil
 	}
 
 	started, err := s.triggerActive(true)
@@ -194,14 +212,14 @@ func (s *Source) Open() (io.ReadCloser, error) {
 		return next, nil
 	case <-time.After(10 * time.Second):
 		next.close(true)
-		return nil, errors.New("tab audio extension did not start capture")
+		return nil, errors.New("tab capture extension did not start capture")
 	}
 }
 
 // SwitchActive moves a running capture to Chromium's newly active tab.
 func (s *Source) SwitchActive() {
 	s.mu.Lock()
-	active := s.capture != nil
+	active := s.capture != nil || s.videoActive
 	s.mu.Unlock()
 	if !active {
 		return
@@ -216,7 +234,7 @@ func (s *Source) triggerActive(coldStart bool) (bool, error) {
 	client, extensionID := s.client, s.extensionID
 	s.mu.Unlock()
 	if client == nil || extensionID == "" {
-		return false, errors.New("tab audio source is not attached")
+		return false, errors.New("tab capture source is not attached")
 	}
 	targetID, err := activeTabTarget(client)
 	if err != nil {
@@ -229,7 +247,7 @@ func (s *Source) triggerActive(coldStart bool) (bool, error) {
 		return err
 	}
 	if err := trigger(); err != nil {
-		return false, fmt.Errorf("trigger tab audio extension: %w", err)
+		return false, fmt.Errorf("trigger tab capture extension: %w", err)
 	}
 	if !coldStart {
 		return false, nil
@@ -258,13 +276,13 @@ func (s *Source) triggerActive(coldStart bool) (bool, error) {
 		if extensionWorkerReady(client, extensionID) {
 			time.Sleep(50 * time.Millisecond)
 			if err := trigger(); err != nil {
-				return false, fmt.Errorf("trigger initialized tab audio extension: %w", err)
+				return false, fmt.Errorf("trigger initialized tab capture extension: %w", err)
 			}
 			return false, nil
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	return false, errors.New("tab audio extension service worker did not start")
+	return false, errors.New("tab capture extension service worker did not start")
 }
 
 func activeTabTarget(client *cdp.Client) (string, error) {
@@ -363,7 +381,7 @@ func (s *Source) serveBridge(w http.ResponseWriter, r *http.Request) {
 			s.mu.Unlock()
 			if current != nil {
 				if _, err := current.writer.Write(data); err != nil && !errors.Is(err, io.ErrClosedPipe) {
-					log.Printf("tab audio PCM bridge: %v", err)
+					log.Printf("tab capture PCM bridge: %v", err)
 				}
 			}
 		case websocket.TextMessage:
@@ -385,8 +403,11 @@ func (s *Source) handleBridgeMessage(data []byte) {
 	}
 	switch message.Type {
 	case "active":
+		s.mu.Lock()
+		s.mediaActive = true
+		s.mu.Unlock()
 		if message.SampleRate != 16000 {
-			s.signalReady(fmt.Errorf("tab audio sample rate is %d, want 16000", message.SampleRate))
+			s.signalReady(fmt.Errorf("tab capture sample rate is %d, want 16000", message.SampleRate))
 		} else {
 			s.signalReady(nil)
 		}
@@ -426,10 +447,14 @@ func (c *capture) close(stopExtension bool) {
 			s.ready = nil
 		}
 		conn := s.conn
+		shouldStop := stopExtension && !s.videoActive
+		if shouldStop {
+			s.mediaActive = false
+		}
 		s.mu.Unlock()
 		_ = c.writer.Close()
 		_ = c.reader.Close()
-		if stopExtension && conn != nil {
+		if shouldStop && conn != nil {
 			s.writeMu.Lock()
 			_ = conn.WriteMessage(websocket.TextMessage, []byte("stop"))
 			s.writeMu.Unlock()
@@ -444,14 +469,17 @@ func (s *Source) Close() error {
 		return nil
 	}
 	s.closed = true
-	current, conn := s.capture, s.conn
-	s.capture, s.conn = nil, nil
+	current, conn, videoConn := s.capture, s.conn, s.videoConn
+	s.capture, s.conn, s.videoConn = nil, nil, nil
 	s.mu.Unlock()
 	if current != nil {
 		current.close(false)
 	}
 	if conn != nil {
 		_ = conn.Close()
+	}
+	if videoConn != nil {
+		_ = videoConn.Close()
 	}
 	if s.server != nil {
 		_ = s.server.Close()

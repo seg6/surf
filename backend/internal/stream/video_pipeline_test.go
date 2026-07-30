@@ -2,330 +2,118 @@ package stream
 
 import (
 	"bytes"
-	"strings"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
-type countingWriter struct{ n atomic.Int64 }
-
-func (w *countingWriter) Write(p []byte) (int, error) {
-	w.n.Add(1)
-	return len(p), nil
-}
-
-type slowCountingWriter struct {
-	n     atomic.Int64
-	delay time.Duration
-}
-
-func (w *slowCountingWriter) Write(p []byte) (int, error) {
-	w.n.Add(1)
-	time.Sleep(w.delay)
-	return len(p), nil
-}
-
 func TestSubBackpressureResyncsOnIDR(t *testing.T) {
-	s := New(Config{W: 64, H: 64, FPS: 15, BitrateK: 100, MaxrateK: 100, BufsizeK: 50})
+	s := New(Config{W: 64, H: 64})
 	sub := &Sub{C: make(chan AU, 2), s: s, fresh: true, dropped: true, gen: 1}
 
-	// Fresh sub: P-frames before the first IDR are skipped.
-	sub.offer(AU{Seq: 1, IDR: false}, 1)
+	sub.offer(AU{Seq: 1}, 1)
 	if len(sub.C) != 0 {
 		t.Fatal("fresh sub accepted a P-frame")
 	}
 	sub.offer(AU{Seq: 2, IDR: true}, 1)
-	sub.offer(AU{Seq: 3, IDR: false}, 1)
-	if len(sub.C) != 2 {
-		t.Fatalf("want 2 queued, got %d", len(sub.C))
-	}
-	// Queue full: drop everything until the next IDR.
-	sub.offer(AU{Seq: 4, IDR: false}, 1)
-	sub.offer(AU{Seq: 5, IDR: true}, 1) // still full → stays dropped
+	sub.offer(AU{Seq: 3}, 1)
+	sub.offer(AU{Seq: 4}, 1)
 	<-sub.C
 	<-sub.C
-	sub.offer(AU{Seq: 6, IDR: false}, 1) // dropped: waiting for IDR
+	sub.offer(AU{Seq: 5}, 1)
 	if len(sub.C) != 0 {
 		t.Fatal("P-frame delivered while waiting for IDR")
 	}
-	sub.offer(AU{Seq: 7, IDR: true}, 0)
-	if len(sub.C) != 0 {
-		t.Fatal("stale generation delivered")
-	}
-	sub.offer(AU{Seq: 7, IDR: true}, 1)
-	if got := <-sub.C; got.Seq != 7 || !got.IDR {
-		t.Fatalf("resync frame = %+v, want IDR seq 7", got)
+	sub.offer(AU{Seq: 6, IDR: true}, 1)
+	if got := <-sub.C; got.Seq != 6 || !got.IDR {
+		t.Fatalf("resync frame = %+v", got)
 	}
 }
 
-func TestRestartMovesEverySubscriberToNewGeneration(t *testing.T) {
-	s := &VideoPipeline{subs: map[*Sub]struct{}{}, gen: 3}
-	a := &Sub{C: make(chan AU, 2), s: s, gen: 1}
-	b := &Sub{C: make(chan AU, 2), s: s, gen: 2}
-	a.C <- AU{Seq: 1}
-	b.C <- AU{Seq: 2}
-	s.subs[a] = struct{}{}
-	s.subs[b] = struct{}{}
-
+func TestTabEncoderFeedsFanout(t *testing.T) {
+	var starts, stops, keyframes atomic.Int64
+	s := New(Config{
+		W: 768, H: 950, FPS: 30, BitrateK: 6000,
+		Start: func(width, height, fps, bitrateK int) error {
+			if width != 768 || height != 950 || fps != 30 || bitrateK != 6000 {
+				t.Fatalf("start config = %dx%d@%d %dk", width, height, fps, bitrateK)
+			}
+			starts.Add(1)
+			return nil
+		},
+		Stop:     func() { stops.Add(1) },
+		Keyframe: func() { keyframes.Add(1) },
+	})
+	sub := s.Subscribe()
+	data := []byte{0, 0, 0, 1, 0x65, 1, 2, 3}
+	if !s.PushEncodedMeta(data, true, 768, 950, 7, 9, SourceMetadata{Profile: 2}) {
+		t.Fatal("access unit was rejected")
+	}
+	select {
+	case au := <-sub.C:
+		if !au.IDR || au.W != 768 || au.H != 950 || au.SourceSeq != 7 ||
+			au.InteractionID != 9 || au.Profile != 2 || !bytes.Equal(au.Data, data) {
+			t.Fatalf("access unit = %+v", au)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("access unit was not delivered")
+	}
 	s.mu.Lock()
-	s.resetSubsForGenLocked()
+	s.lastKeyframeReq = time.Time{}
 	s.mu.Unlock()
-
-	for name, sub := range map[string]*Sub{"a": a, "b": b} {
-		if sub.gen != 3 || !sub.dropped || !sub.fresh {
-			t.Fatalf("sub %s not reset for generation 3: gen=%d dropped=%t fresh=%t", name, sub.gen, sub.dropped, sub.fresh)
-		}
-		if len(sub.C) != 0 {
-			t.Fatalf("sub %s retained stale AUs", name)
-		}
-	}
-}
-
-// TestRequestKeyframeNoopWhenNotRunning exercises the guard clauses only —
-// actually restarting ffmpeg needs a real binary and display.
-func TestRequestKeyframeNoopWhenNotRunning(t *testing.T) {
-	s := &VideoPipeline{subs: map[*Sub]struct{}{}}
 	s.RequestKeyframe()
-	if s.running {
-		t.Fatal("RequestKeyframe started the encoder while not running")
+	if starts.Load() != 1 || keyframes.Load() != 1 {
+		t.Fatalf("starts=%d keyframes=%d", starts.Load(), keyframes.Load())
 	}
-	if !s.lastKeyframeReq.IsZero() {
-		t.Fatal("RequestKeyframe touched lastKeyframeReq on a no-op call")
-	}
-}
-
-func TestRequestKeyframeCooldown(t *testing.T) {
-	s := &VideoPipeline{subs: map[*Sub]struct{}{}, running: true}
-	recent := time.Now()
-	s.lastKeyframeReq = recent
-	s.RequestKeyframe() // within cooldown: must return before touching cmd/lastKeyframeReq
-	if s.cmd != nil {
-		t.Fatal("RequestKeyframe restarted the encoder within the cooldown window")
-	}
-	if !s.lastKeyframeReq.Equal(recent) {
-		t.Fatal("RequestKeyframe updated lastKeyframeReq despite being suppressed by cooldown")
+	s.Shutdown()
+	if stops.Load() != 1 {
+		t.Fatalf("stops=%d, want 1", stops.Load())
 	}
 }
 
-func TestArgsBuildsMjpegFromStdin(t *testing.T) {
-	s := New(Config{W: 1024, H: 768, FPS: 30, BitrateK: 6000, MaxrateK: 8000, BufsizeK: 1800})
-	args := s.args("rtp://127.0.0.1:1234")
-	joined := strings.Join(args, " ")
-	for _, want := range []string{
-		"-loglevel warning", "-f mpjpeg", "-vcodec mjpeg",
-		"-r 30", "-probesize 32",
-		"-analyzeduration 0", "-threads 0", "-i pipe:0",
-	} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("args missing %q: %v", want, args)
-		}
-	}
-	if strings.Count(joined, "-threads 0") != 1 || strings.Count(joined, "-threads 1") != 1 {
-		t.Fatalf("JPEG decode must be automatic and x264 encode single-threaded: %v", args)
-	}
-	if args[len(args)-1] != "rtp://127.0.0.1:1234" {
-		t.Fatalf("last arg=%q, want RTP URL (full: %v)", args[len(args)-1], args)
-	}
-}
-
-func TestArgsPassesThroughUntimestampedFrames(t *testing.T) {
-	s := New(Config{W: 640, H: 480, FPS: 30, BitrateK: 1000, MaxrateK: 1200, BufsizeK: 500})
-	args := strings.Join(s.args("rtp://127.0.0.1:1234"), " ")
-	if !strings.Contains(args, "-fps_mode passthrough") {
-		t.Fatalf("args must preserve every event-driven JPEG frame: %s", args)
-	}
-	if !strings.Contains(args, "-r 30") {
-		t.Fatalf("args must timestamp input at configured FPS: %s", args)
-	}
-}
-
-func TestArgsBuildsLowLatencyNVENC(t *testing.T) {
+func TestSubscribeFailsImmediatelyWhenEncoderCannotStart(t *testing.T) {
 	s := New(Config{
-		W: 768, H: 934, FPS: 60, Encoder: "h264_nvenc",
-		BitrateK: 2000, MaxrateK: 3000, BufsizeK: 1800,
-	})
-	args := strings.Join(s.args("rtp://127.0.0.1:1234"), " ")
-	for _, want := range []string{
-		"-c:v h264_nvenc", "-preset p1", "-tune ull",
-		"-profile:v baseline", "-rc cbr", "-multipass disabled",
-		"-zerolatency 1", "-delay 0", "-bf 0", "-forced-idr 1", "-aud 1",
-	} {
-		if !strings.Contains(args, want) {
-			t.Fatalf("NVENC args missing %q: %s", want, args)
-		}
-	}
-}
-
-func TestArgsAddsScaleFilterWhenDownscaling(t *testing.T) {
-	s := New(Config{W: 1024, H: 1024, ScaleMaxW: 512, ScaleMaxH: 512, FPS: 30, BitrateK: 100, MaxrateK: 100, BufsizeK: 50})
-	args := s.args("rtp://127.0.0.1:1234")
-	found := false
-	for i, a := range args {
-		if a == "-vf" && i+1 < len(args) && strings.HasPrefix(args[i+1], "scale=512:512") {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("expected a scale=512:512 filter in args: %v", args)
-	}
-}
-
-func TestPushIsNoopWhenNotRunning(t *testing.T) {
-	s := New(Config{W: 64, H: 64, FPS: 15, BitrateK: 100, MaxrateK: 100, BufsizeK: 50})
-	// Must not panic or block: no encoder has been started (no Subscribe
-	// call), so Push has nowhere to write and should just return.
-	s.Push([]byte("not a real jpeg"))
-}
-
-// TestPushStateNeverBlocksSender guards the actual bug this design exists to
-// prevent: an earlier version wrote straight to ffmpeg's stdin from Push,
-// which runs on the CDP event dispatch goroutine — confirmed live that a
-// real interactive page (bigger, more frequent frames than any synthetic
-// test used) filled the pipe and froze frame delivery entirely. pushState.set
-// must stay O(1) regardless of how fast the writer
-// goroutine drains it — here, not at all — by coalescing to the latest
-// frame instead of blocking.
-func TestPushStateNeverBlocksSender(t *testing.T) {
-	ps := newPushState(30)
-	// No writer goroutine is running at all: if set ever blocked on the
-	// consumer, this would hang forever instead of finishing quickly.
-	done := make(chan struct{})
-	go func() {
-		for i := 0; i < 100000; i++ {
-			ps.set([]byte{byte(i)})
-		}
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("pushState.set blocked despite nothing ever draining it")
-	}
-}
-
-func TestPushStatePacesWrites(t *testing.T) {
-	ps := newPushState(100)
-	w := &countingWriter{}
-	go ps.run(w)
-	defer close(ps.done)
-
-	deadline := time.Now().Add(120 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		ps.set([]byte{1})
-	}
-	// Allow the final scheduled tick, but nowhere near enough time for an
-	// unpaced writer to hide behind scheduler variance.
-	time.Sleep(15 * time.Millisecond)
-	got := w.n.Load()
-	if got < 8 || got > 15 {
-		t.Fatalf("paced writer made %d writes in about 135ms at 100fps, want 8..15", got)
-	}
-}
-
-func TestPushStateDoesNotAddWriteDurationToFramePeriod(t *testing.T) {
-	ps := newPushState(50) // 20ms period
-	w := &slowCountingWriter{delay: 8 * time.Millisecond}
-	ps.setRepeats([]byte{1}, 30)
-	go ps.run(w)
-	defer close(ps.done)
-
-	// Pacing from write completion yields only about 9 writes here
-	// (20ms period + 8ms write). Pacing from write start yields about 13.
-	time.Sleep(255 * time.Millisecond)
-	if got := w.n.Load(); got < 11 || got > 15 {
-		t.Fatalf("paced writer made %d writes with an 8ms sink delay; write time leaked into the frame period", got)
-	}
-}
-
-func TestSeedLatestRequiresMatchingCaptureSize(t *testing.T) {
-	s := &VideoPipeline{
-		cfg:       Config{CaptureW: 800, CaptureH: 600},
-		push:      newPushState(30),
-		lastJPEG:  []byte{1, 2, 3},
-		lastJPEGW: 800,
-		lastJPEGH: 600,
-	}
-	s.seedLatestLocked()
-	s.push.mu.Lock()
-	got := append([]byte(nil), s.push.pending...)
-	s.push.pending = nil
-	s.push.mu.Unlock()
-	if !bytes.Equal(got, s.lastJPEG) {
-		t.Fatalf("matching restart seed = %v, want %v", got, s.lastJPEG)
-	}
-
-	s.cfg.CaptureW = 1024
-	s.seedLatestLocked()
-	s.push.mu.Lock()
-	got = append([]byte(nil), s.push.pending...)
-	s.push.mu.Unlock()
-	if len(got) != 0 {
-		t.Fatalf("size-changing restart reused stale JPEG: %v", got)
-	}
-}
-
-// TestSubscribeForcesRestartWhenAlreadyRunning guards the fix for a real,
-// live bug: a subscriber joining an already-running encoder (e.g. still
-// alive within lingerStop's grace period from a previous viewer) started
-// "dropped" waiting for an IDR, but nothing forced one — with scenecut=0
-// the next periodic IDR was up to keyint frames away, and since frames
-// only arrive when CDP's screencast actually produces one, a subscriber
-// landing on an already-static page could wait forever and become unavailable
-// navigating a lingering session to a settled page). Subscribe must now
-// force a restart whenever it joins a running encoder instead of trusting
-// one to show up on its own.
-func TestSubscribeForcesRestartWhenAlreadyRunning(t *testing.T) {
-	s := New(Config{
-		FFmpegPath: "surf-definitely-does-not-exist-xyz",
-		W:          64, H: 64, FPS: 15, BitrateK: 100, MaxrateK: 100, BufsizeK: 50,
-	})
-	// Simulate an encoder that's already running (as if still lingering
-	// from a prior subscriber) without spawning a real process.
-	s.mu.Lock()
-	s.running = true
-	s.mu.Unlock()
-
-	sub := s.Subscribe()
-
-	// The bad FFmpegPath makes the forced restart's startLocked fail
-	// immediately — proving a restart was actually attempted (rather than
-	// Subscribe trusting the already-"running" encoder to eventually
-	// produce an IDR): running flips back to false and every subscriber,
-	// including this brand new one, gets closed via failAllLocked.
-	select {
-	case _, ok := <-sub.C:
-		if ok {
-			t.Fatal("expected closed channel, got a value")
-		}
-	default:
-		t.Fatal("expected sub.C already closed after the forced restart failed")
-	}
-	s.mu.Lock()
-	running, lastReq := s.running, s.lastKeyframeReq
-	s.mu.Unlock()
-	if running {
-		t.Fatal("streamer still marked running after the forced restart's startLocked failed")
-	}
-	if lastReq.IsZero() {
-		t.Fatal("Subscribe did not record the forced keyframe restart attempt")
-	}
-}
-
-// TestSubscribeFailsImmediatelyWhenFFmpegMissing guards encoder startup
-// failure when the configured executable does not exist.
-func TestSubscribeFailsImmediatelyWhenFFmpegMissing(t *testing.T) {
-	s := New(Config{
-		FFmpegPath: "surf-definitely-does-not-exist-xyz",
-		W:          64, H: 64, FPS: 15, BitrateK: 100, MaxrateK: 100, BufsizeK: 50,
+		W: 64, H: 64,
+		Start: func(int, int, int, int) error { return errors.New("unavailable") },
 	})
 	sub := s.Subscribe()
 	select {
 	case _, ok := <-sub.C:
 		if ok {
-			t.Fatal("expected closed channel, got a value")
+			t.Fatal("expected closed channel")
 		}
 	default:
-		t.Fatal("expected sub.C already closed after Subscribe")
+		t.Fatal("expected subscription to close immediately")
+	}
+}
+
+func TestResizeRestartsAtClientDerivedSize(t *testing.T) {
+	var starts [][2]int
+	stops := 0
+	s := New(Config{
+		W: 768, H: 950,
+		Start: func(width, height, fps, bitrateK int) error {
+			starts = append(starts, [2]int{width, height})
+			return nil
+		},
+		Stop: func() { stops++ },
+	})
+	defer s.Shutdown()
+	s.Subscribe()
+	s.SetSize(1024, 768)
+	if len(starts) != 2 || starts[1] != [2]int{1024, 768} {
+		t.Fatalf("starts=%v", starts)
+	}
+	if stops != 1 {
+		t.Fatalf("stops=%d, want 1 before shutdown", stops)
+	}
+}
+
+func TestScaleLimitPreservesAspectRatioAndEvenDimensions(t *testing.T) {
+	s := New(Config{W: 1023, H: 767, CaptureW: 1023, CaptureH: 767, ScaleMaxW: 768, ScaleMaxH: 768})
+	cfg := s.Config()
+	if cfg.W != 768 || cfg.H != 576 {
+		t.Fatalf("coded size=%dx%d, want 768x576", cfg.W, cfg.H)
 	}
 }

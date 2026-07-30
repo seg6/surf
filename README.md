@@ -7,7 +7,8 @@ obsolete system WebKit.
 The native app provides the touch-first browser UI, input handling, H.264 video
 decoding, audio playback, tabs, downloads, uploads, and device integration. The
 backend, `surf serve`, runs managed Chrome headlessly, captures compositor
-frames through CDP, and streams H.264 to the device over WebSocket.
+frames through Chromium's tab-capture API, and streams H.264 to the device
+over WebSocket.
 
 The result is closer to a purpose-built remote browser than a remote desktop:
 Chromium does the web compatibility work, while the iOS app keeps the device
@@ -30,9 +31,9 @@ iPhones, and iPods may work, but layout and performance are less tested.
 The video/browsing backend supports Linux x86-64 and ARM64, Windows x86-64, and macOS
 Intel/Apple Silicon. It prefers an installed Chrome or Chromium and otherwise
 installs a verified ungoogled-chromium release into `SURF_HOME`. Release
-packages include the tested FFmpeg runtime. Audio capture uses Chromium's tab
-capture API on Linux, Windows, and macOS; Linux retains a PulseAudio-compatible
-fallback. See `docs/backend.md` for details.
+packages need no separate media runtime. Audio and video capture use
+Chromium's tab capture API on Linux, Windows, and macOS. See `docs/backend.md`
+for details.
 
 ## AI Disclosure
 
@@ -54,8 +55,6 @@ code, test your setup, and assume there are rough edges.
 - iOS 6 is the primary target.
 - Filza, iFile, OpenSSH, or another way to install `.deb` packages.
 - A Linux, Windows, or macOS computer for `surf`.
-- On Linux, `pactl` with PulseAudio or PipeWire Pulse compatibility for the
-  fallback audio path.
 - Enough disk space for Chromium and Surf's media runtime.
 - A low-latency network between the device and backend. LAN is best.
 
@@ -148,8 +147,8 @@ By default, `surf serve`:
 - Advertises the backend on the local network for Surf discovery.
 - Reads required `SURF_PASSWORD` from the environment.
 - Prefers system Chrome/Chromium and manages ungoogled-chromium as a fallback.
-- Uses the FFmpeg runtime included in release packages.
-- Runs Chrome with `--headless=new` and uses CDP screencast capture.
+- Runs Chrome with `--headless=new` and captures the active tab through the
+  built-in extension.
 
 To run the binary directly:
 

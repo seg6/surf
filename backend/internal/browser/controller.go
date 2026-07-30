@@ -1,5 +1,5 @@
 // Package browser implements Surf's Controller: ordered client commands and
-// browser state. ScreencastSource, stream.VideoPipeline, ws.ClientTransport,
+// browser state. stream.VideoPipeline, ws.ClientTransport,
 // and audio.AudioPipeline own their latency-sensitive domains independently.
 //
 // Locking rule: b.mu guards all tab/view state and is NEVER held across a
@@ -20,19 +20,10 @@ import (
 	"surf-backend/internal/config"
 	"surf-backend/internal/proc"
 	"surf-backend/internal/protocol"
-	"surf-backend/internal/runenv"
 	"surf-backend/internal/stream"
-	"surf-backend/internal/tabaudio"
-	"surf-backend/internal/telemetry"
+	"surf-backend/internal/tabcapture"
 	"surf-backend/internal/ws"
 )
-
-type videoResizeJob struct {
-	w, h      int
-	jpeg      []byte
-	session   string
-	bootstrap bool
-}
 
 type Tab struct {
 	ID       int
@@ -76,32 +67,23 @@ type Controller struct {
 	dlMu    sync.Mutex
 	dlNames map[string]string // download guid -> final filename
 
-	video     *stream.VideoPipeline
-	audio     *audio.AudioPipeline
-	tabAudio  *tabaudio.Source
-	mediaMu   sync.Mutex // guards client media subscriptions below
-	videoSubs map[*ws.ClientTransport]*stream.Sub
-	audioSubs map[*ws.ClientTransport]*audio.Sub
+	video      *stream.VideoPipeline
+	audio      *audio.AudioPipeline
+	tabCapture *tabcapture.Source
+	mediaMu    sync.Mutex // guards client media subscriptions below
+	videoSubs  map[*ws.ClientTransport]*stream.Sub
+	audioSubs  map[*ws.ClientTransport]*audio.Sub
 
-	videoResizeMu       sync.Mutex
-	videoResizeWake     chan struct{}
-	videoResizePending  videoResizeJob
-	videoResizeSeq      uint64
-	resizeMismatchOnce  sync.Once
-	startedAt           time.Time
-	adaptiveProfile     int
-	adaptiveBaseQuality int
-	adaptiveLastChange  time.Time
-	adaptiveHealthy     int
-	adaptiveUnhealthy   int
+	startedAt          time.Time
+	adaptiveProfile    int
+	adaptiveLastChange time.Time
+	adaptiveHealthy    int
+	adaptiveUnhealthy  int
 	// userAgent is populated from Browser.getVersion for full Chrome
 	// headless-new. Chrome still exposes a HeadlessChrome token even though
 	// this is the ordinary browser binary; normalize that single token while
 	// preserving the real platform and version.
-	userAgent         string
-	captureCandidateW int
-	captureCandidateH int
-	captureCandidateN int
+	userAgent string
 
 	perfMu             sync.Mutex
 	perfSince          time.Time
@@ -117,7 +99,6 @@ type Controller struct {
 	lastRenderInputAt  time.Time
 	interactionID      uint64
 	sourceSeq          uint32
-	videoSession       string
 	sourceLatN         int
 	sourceLatSumMS     float64
 	sourceLatMaxMS     float64
@@ -147,38 +128,45 @@ type controllerCommand struct {
 	receivedNS uint64
 }
 
-func New(cfg *config.Config, hub *ws.Hub, platform runenv.Handle) (*Controller, error) {
-	audioCfg := audioConfig(cfg, platform)
-	tabAudio, err := tabaudio.New(cfg.SurfHome)
+func New(cfg *config.Config, hub *ws.Hub) (*Controller, error) {
+	tabCapture, err := tabcapture.New(cfg.SurfHome)
 	if err != nil {
-		return nil, fmt.Errorf("initialize tab audio: %w", err)
+		return nil, fmt.Errorf("initialize tab capture: %w", err)
 	}
-	audioCfg.Capture = tabAudio.Open
-	b := &Controller{
+	audioCfg := audio.Config{Capture: tabCapture.Open}
+	videoCfg := streamConfig(cfg)
+	var b *Controller
+	videoCfg.Start = func(width, height, fps, bitrateK int) error {
+		return tabCapture.StartVideo(tabcapture.VideoConfig{
+			Codec: tabCaptureCodec(width, height, fps),
+			Width: width, Height: height, FPS: fps, BitrateK: bitrateK,
+		}, b.onTabCaptureFrame)
+	}
+	videoCfg.Stop = tabCapture.StopVideo
+	videoCfg.Keyframe = tabCapture.RequestVideoKeyframe
+	b = &Controller{
 		cfg: cfg, hub: hub,
-		adaptiveBaseQuality: cfg.SourceJPEGQuality,
-		tabs:                map[int]*Tab{},
-		byTarget:            map[string]*Tab{},
-		bySession:           map[string]*Tab{},
-		viewW:               cfg.ViewW, viewH: cfg.ViewH,
-		store:           NewStore(cfg.Profile),
-		icons:           map[string]*favicon{},
-		iconFetching:    map[string]bool{},
-		dlNames:         map[string]string{},
-		dialogSessions:  map[string]bool{},
-		dlLastPush:      map[string]time.Time{},
-		video:           stream.New(streamConfig(cfg)),
-		audio:           audio.New(audioCfg),
-		tabAudio:        tabAudio,
-		videoSubs:       map[*ws.ClientTransport]*stream.Sub{},
-		audioSubs:       map[*ws.ClientTransport]*audio.Sub{},
-		perfCounts:      map[string]int{},
-		videoResizeWake: make(chan struct{}, 1),
-		commands:        make(chan controllerCommand, 256),
-		events:          make(chan cdp.Event, 512),
-		startedAt:       time.Now(),
+		tabs:           map[int]*Tab{},
+		byTarget:       map[string]*Tab{},
+		bySession:      map[string]*Tab{},
+		viewW:          cfg.ViewW,
+		viewH:          cfg.ViewH,
+		store:          NewStore(cfg.Profile),
+		icons:          map[string]*favicon{},
+		iconFetching:   map[string]bool{},
+		dlNames:        map[string]string{},
+		dialogSessions: map[string]bool{},
+		dlLastPush:     map[string]time.Time{},
+		video:          stream.New(videoCfg),
+		audio:          audio.New(audioCfg),
+		tabCapture:     tabCapture,
+		videoSubs:      map[*ws.ClientTransport]*stream.Sub{},
+		audioSubs:      map[*ws.ClientTransport]*audio.Sub{},
+		perfCounts:     map[string]int{},
+		commands:       make(chan controllerCommand, 256),
+		events:         make(chan cdp.Event, 512),
+		startedAt:      time.Now(),
 	}
-	go b.runVideoResize()
 	go b.runController()
 	return b, nil
 }
@@ -211,9 +199,9 @@ func (b *Controller) Start() error {
 		extensionPaths = append(extensionPaths, b.cfg.ContentBlockerPath)
 	}
 	var extraArgs []string
-	if b.tabAudio != nil {
-		extensionPaths = append(extensionPaths, b.tabAudio.ExtensionPath())
-		// Required by CDP's Extensions domain, used to invoke the audio
+	if b.tabCapture != nil {
+		extensionPaths = append(extensionPaths, b.tabCapture.ExtensionPath())
+		// Required by CDP's Extensions domain, used to invoke the capture
 		// extension action as the active tab's user gesture.
 		extraArgs = append(extraArgs, "--enable-unsafe-extension-debugging")
 	}
@@ -222,7 +210,6 @@ func (b *Controller) Start() error {
 		Profile:        b.cfg.Profile,
 		W:              b.cfg.ViewW,
 		H:              b.cfg.ViewH,
-		Env:            b.cfg.ChildEnv,
 		NoSandbox:      b.cfg.ChromeNoSandbox,
 		EnableGPU:      b.cfg.ChromeGPU,
 		ExtensionPaths: extensionPaths,
@@ -233,8 +220,8 @@ func (b *Controller) Start() error {
 	}
 	b.cdp = client
 	b.cmd = cmd
-	if b.tabAudio != nil {
-		if err := b.tabAudio.Attach(client); err != nil {
+	if b.tabCapture != nil {
+		if err := b.tabCapture.Attach(client); err != nil {
 			return err
 		}
 	}
@@ -246,21 +233,12 @@ func (b *Controller) Start() error {
 			b.userAgent = NormalizeHeadlessUserAgent(version.UserAgent)
 		}
 	}
-	b.source = NewScreencastSource(client, b.onSourceFrame)
-	client.OnEvent(func(event cdp.Event) {
-		if event.Method == "Page.screencastFrame" {
-			// Media is not controller state. Route it straight to the
-			// latest-frame pipeline so a blocking navigation/dialog/tab CDP
-			// effect can never stall capture credits or video delivery.
-			b.source.Handle(event)
-			return
-		}
-		b.events <- event
-	})
+	b.source = &tabCaptureSource{}
+	client.OnEvent(func(event cdp.Event) { b.events <- event })
 	// Full Chrome restores its previous pages and also creates the explicit
 	// about:blank launch target. Remove only those redundant startup blanks
 	// before discovery; otherwise an empty target can win the asynchronous
-	// attach race and make a healthy screencast look frozen.
+	// attach race and make a healthy capture look frozen.
 	b.normalizeStartupTargets()
 	// targetCreated also fires for pre-existing targets on subscribe, so
 	// startup and runtime tab discovery share one code path.
@@ -269,8 +247,8 @@ func (b *Controller) Start() error {
 		return err
 	}
 	b.setupDownloads()
-	log.Printf("browser ready, view %dx%d (headless-new, source=CDP screencast q%d, profile %s)",
-		b.viewW, b.viewH, b.cfg.SourceJPEGQuality, b.cfg.Profile)
+	log.Printf("browser ready, view %dx%d (headless-new, source=tabCapture/WebCodecs, profile %s)",
+		b.viewW, b.viewH, b.cfg.Profile)
 	return nil
 }
 
@@ -324,8 +302,8 @@ func (b *Controller) Shutdown() {
 	if b.audio != nil {
 		b.audio.Shutdown()
 	}
-	if b.tabAudio != nil {
-		_ = b.tabAudio.Close()
+	if b.tabCapture != nil {
+		_ = b.tabCapture.Close()
 	}
 	if b.cdp != nil {
 		b.cdp.Close()
@@ -432,10 +410,6 @@ func (b *Controller) onEvent(ev cdp.Event) {
 		if json.Unmarshal(ev.Params, &p) == nil {
 			b.targetInfoChanged(p.TargetInfo)
 		}
-	case "Page.screencastFrame":
-		if b.source != nil {
-			b.source.Handle(ev)
-		}
 	case "Page.frameNavigated":
 		var p struct {
 			Frame struct {
@@ -491,162 +465,5 @@ func (b *Controller) onEvent(ev cdp.Event) {
 		b.onFileChooserOpened(ev)
 	case "Security.securityStateChanged":
 		b.onSecurityStateChanged(ev)
-	}
-}
-
-func (b *Controller) onSourceFrame(frame SourceFrame) {
-	t, active := b.tabBySession(frame.Session)
-	if t == nil || !active || b.hub.ClientCount() == 0 {
-		return
-	}
-	b.noteSourceFrame()
-	telemetry.Emit("source_frame", "capture", "cdp", nil)
-	sourceSeq := b.onSourceJPEG(t, frame)
-	if sourceSeq == 0 {
-		return
-	}
-	b.mu.Lock()
-	pageReady := t.awaitingPageFrame && b.tabs[t.ID] == t && b.activeID == t.ID
-	if pageReady {
-		t.awaitingPageFrame = false
-	}
-	b.mu.Unlock()
-	if pageReady {
-		b.hub.BroadcastJSON(protocol.PageFrameEvent{Type: "pageframe", SourceSeq: sourceSeq})
-	}
-}
-
-func (b *Controller) onSourceJPEG(t *Tab, frame SourceFrame) uint32 {
-	buf, session := frame.JPEG, frame.Session
-	if len(buf) == 0 || !b.isActiveSession(session) || b.hub.ClientCount() == 0 {
-		return 0
-	}
-	b.perfMu.Lock()
-	b.sourceSeq++
-	sourceSeq, interactionID := b.sourceSeq, b.interactionID
-	inputNS, cdpNS := b.interactionInputNS, b.interactionCDPNS
-	b.perfMu.Unlock()
-	accepted := b.pushVideoFrame(buf, session, sourceSeq, interactionID, stream.SourceMetadata{
-		InputReceiveNS: inputNS, CDPAcceptedNS: cdpNS,
-		ScrollX: frame.ScrollX, ScrollY: frame.ScrollY, PageScale: frame.PageScale,
-		Profile: uint8(b.profileIndex()),
-	})
-	if !accepted {
-		return 0
-	}
-	return sourceSeq
-}
-
-// pushVideoFrame feeds a CDP JPEG to the H.264 transcoder while keeping its
-// configured input size synchronized with the actual image. Mismatched
-// transitional frames are withheld: feeding them to the old encoder can
-// corrupt its pipeline, while restarting for every intermediate size causes
-// a restart storm. Once one size persists, restart off the CDP dispatch
-// goroutine and make that settled frame the new encoder's first input.
-func (b *Controller) pushVideoFrame(buf []byte, session string, sourceSeq uint32, interactionID uint64, metadata stream.SourceMetadata) bool {
-	w, h, ok := jpegSize(buf)
-	if !ok {
-		b.video.PushSourceMeta(buf, sourceSeq, interactionID, metadata)
-		return true
-	}
-	b.mu.Lock()
-	wantW, wantH := b.viewW, b.viewH
-	b.mu.Unlock()
-	if w != wantW || h != wantH {
-		b.resizeMismatchOnce.Do(func() {
-			log.Printf("capture: source size differs got=%dx%d viewport=%dx%d", w, h, wantW, wantH)
-		})
-		// Chromium emits several old/intermediate compositor sizes around
-		// viewport changes, but fullscreen content can also remain at a
-		// different compositor size indefinitely. Debounce three identical
-		// frames, then follow the actual source rather than black-holing every
-		// frame while the client's frame-age counter climbs.
-		if b.captureSizeSettled(w, h) {
-			b.requestVideoResize(w, h, buf, session)
-		}
-		return false
-	}
-	cur := b.video.Config()
-	if cur.CaptureW == w && cur.CaptureH == h {
-		b.resetCaptureCandidate()
-		b.mu.Lock()
-		sourceChanged := b.videoSession != "" && b.videoSession != session
-		b.videoSession = session
-		b.mu.Unlock()
-		if sourceChanged {
-			b.video.SwitchSourceMeta(buf, sourceSeq, interactionID, metadata)
-		} else {
-			b.video.PushSourceMeta(buf, sourceSeq, interactionID, metadata)
-		}
-		return true
-	}
-	if b.captureSizeSettled(w, h) {
-		b.requestVideoResize(w, h, buf, session)
-	}
-	return false
-}
-
-func (b *Controller) captureSizeSettled(w, h int) bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.captureCandidateW == w && b.captureCandidateH == h {
-		b.captureCandidateN++
-	} else {
-		b.captureCandidateW, b.captureCandidateH, b.captureCandidateN = w, h, 1
-	}
-	return b.captureCandidateN >= 3
-}
-
-func (b *Controller) resetCaptureCandidate() {
-	b.mu.Lock()
-	b.captureCandidateW, b.captureCandidateH, b.captureCandidateN = 0, 0, 0
-	b.mu.Unlock()
-}
-
-// requestVideoResize serializes every browser-originated SetSize call through
-// one latest-wins worker. This prevents viewport changes, bootstrap captures,
-// and JPEG drift corrections from racing and applying an obsolete size last.
-func (b *Controller) requestVideoResize(w, h int, jpeg []byte, session string) {
-	b.requestVideoResizeMode(w, h, jpeg, session, false)
-}
-
-func (b *Controller) requestVideoResizeMode(w, h int, jpeg []byte, session string, bootstrap bool) {
-	job := videoResizeJob{w: w, h: h, jpeg: jpeg, session: session, bootstrap: bootstrap}
-	b.videoResizeMu.Lock()
-	b.videoResizePending = job
-	b.videoResizeSeq++
-	b.videoResizeMu.Unlock()
-	select {
-	case b.videoResizeWake <- struct{}{}:
-	default:
-	}
-}
-
-func (b *Controller) runVideoResize() {
-	for range b.videoResizeWake {
-		for {
-			b.videoResizeMu.Lock()
-			job, seq := b.videoResizePending, b.videoResizeSeq
-			b.videoResizeMu.Unlock()
-			if job.session != "" && !b.isActiveSession(job.session) {
-				break
-			}
-
-			b.video.SetSize(job.w, job.h)
-			if len(job.jpeg) > 0 && (job.session == "" || b.isActiveSession(job.session)) {
-				if job.bootstrap {
-					b.video.PushBootstrap(job.jpeg)
-				} else {
-					b.video.Push(job.jpeg)
-				}
-			}
-
-			b.videoResizeMu.Lock()
-			current := seq == b.videoResizeSeq
-			b.videoResizeMu.Unlock()
-			if current {
-				break
-			}
-		}
 	}
 }

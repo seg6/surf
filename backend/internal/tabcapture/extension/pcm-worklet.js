@@ -1,3 +1,4 @@
+// Converts captured tab audio to the native client's PCM format.
 class SurfPCMProcessor extends AudioWorkletProcessor {
   constructor() {
     super();

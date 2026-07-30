@@ -1,6 +1,6 @@
 //go:build windows
 
-// Chromium and ffmpeg both spawn their own child/helper process trees on
+// Chromium spawns its own child/helper process tree on
 // Windows (Chromium in particular forks GPU/utility/renderer/crashpad
 // processes under its top-level PID). Killing just the tracked process
 // leaves that whole tree running orphaned — confirmed live: a forced kill

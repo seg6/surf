@@ -186,7 +186,6 @@
               <div class="health-row"><span>Chromium capture</span><strong id="health-capture">—</strong></div>
               <div class="health-row"><span>H.264 subscribers</span><strong id="health-video">—</strong></div>
               <div class="health-row"><span>Audio subscribers</span><strong id="health-audio">—</strong></div>
-              <div class="health-row"><span>RTP errors</span><strong id="health-rtp">—</strong></div>
             </div>
         </div>
       </div>
@@ -250,7 +249,6 @@
         $('health-capture').textContent = stats.casting ? 'Active' : 'Idle';
         $('health-video').textContent = stats.videoSubs ?? 0;
         $('health-audio').textContent = stats.audioSubs ?? 0;
-        $('health-rtp').textContent = stats.rtp_errors ?? 0;
       } catch { setOnline(false); }
     }
     async function restart() {

@@ -2,13 +2,12 @@
 
 // Package runenv's Windows platform resolves a real Chromium/Edge path
 // (Windows has no "chromium" PATH convention) and sets up a Job Object so
-// the whole Chromium/ffmpeg process tree is killed automatically if
+// the whole Chromium process tree is killed automatically if
 // Surf itself is force-killed and never gets to run its own
 // cleanup.
 //
-// Chromium runs headless (see internal/cdp) and the H.264 lane transcodes
-// CDP's own screencast frames instead of grabbing the screen, so there's no
-// display/desktop bring-up needed here at all — an earlier version of this
+// Chromium runs headless (see internal/cdp), so there's no display/desktop
+// bring-up needed here at all — an earlier version of this
 // file created a hidden desktop and drove Chromium onto it via
 // STARTUPINFO.lpDesktop specifically to keep a headful Chromium invisible;
 // headless mode makes that unnecessary (confirmed live: no window is ever
@@ -37,7 +36,6 @@ type windowsPlatform struct{}
 func (windowsPlatform) Doctor(cfg *config.Config) []Check {
 	return []Check{
 		checkTool("chromium", resolveChromePath(cfg.ChromePath), true),
-		checkTool("ffmpeg", cfg.FFmpegPath, true),
 	}
 }
 
@@ -89,7 +87,7 @@ func createKillOnCloseJob() windows.Handle {
 		_ = windows.CloseHandle(job)
 		return 0
 	}
-	log.Printf("runtime: chromium/ffmpeg will be killed automatically if Surf exits unexpectedly")
+	log.Printf("runtime: chromium will be killed automatically if Surf exits unexpectedly")
 	return job
 }
 
@@ -144,6 +142,3 @@ func (wh *windowsHandle) Shutdown() {
 		_ = windows.CloseHandle(wh.job)
 	}
 }
-
-// Windows has no platform fallback; Chromium tab capture is the primary lane.
-func (wh *windowsHandle) AudioCaptureArgs(source string) []string { return nil }

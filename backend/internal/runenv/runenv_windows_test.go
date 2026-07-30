@@ -16,22 +16,19 @@ func TestResolveChromePathPassesThroughExplicitPath(t *testing.T) {
 	}
 }
 
-func TestWindowsDoctorChecksCommonToolsOnly(t *testing.T) {
-	checks := Doctor(&config.Config{ChromePath: `C:\missing\chrome.exe`, FFmpegPath: "missing-ffmpeg"})
-	if len(checks) != 2 {
-		t.Fatalf("checks=%v, want chromium+ffmpeg only", checks)
+func TestWindowsDoctorChecksChromium(t *testing.T) {
+	checks := Doctor(&config.Config{ChromePath: `C:\missing\chrome.exe`})
+	if len(checks) != 1 || checks[0].Name != "chromium" {
+		t.Fatalf("checks=%v, want chromium only", checks)
 	}
 }
 
-func TestWindowsHandleDoesNotUseFFmpegAudioInput(t *testing.T) {
+func TestWindowsPlatformPrepares(t *testing.T) {
 	h, err := newPlatform().Prepare(&config.Config{ChromePath: `C:\custom\chrome.exe`})
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
 	defer h.Shutdown()
-	if h.AudioCaptureArgs("") != nil {
-		t.Fatal("Windows should not use FFmpeg capture arguments")
-	}
 }
 
 // TestCreateKillOnCloseJobBestEffort is intentionally soft: whether a Job

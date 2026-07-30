@@ -8,20 +8,17 @@ import (
 	"surf-backend/internal/config"
 )
 
-func TestStubPlatformDoctorChecksCommonToolsOnly(t *testing.T) {
-	checks := Doctor(&config.Config{ChromePath: "missing-chromium", FFmpegPath: "missing-ffmpeg"})
-	if len(checks) != 2 {
-		t.Fatalf("checks=%v, want chromium+ffmpeg only", checks)
+func TestStubPlatformDoctorChecksChromium(t *testing.T) {
+	checks := Doctor(&config.Config{ChromePath: "missing-chromium"})
+	if len(checks) != 1 || checks[0].Name != "chromium" {
+		t.Fatalf("checks=%v, want chromium only", checks)
 	}
 }
 
-func TestStubPlatformHasNoAudioLane(t *testing.T) {
+func TestStubPlatformPrepares(t *testing.T) {
 	h, err := newPlatform().Prepare(&config.Config{})
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
 	defer h.Shutdown()
-	if h.AudioCaptureArgs("") != nil {
-		t.Fatal("AudioCaptureArgs should be nil (PCM lane unsupported)")
-	}
 }

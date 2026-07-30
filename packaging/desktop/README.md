@@ -11,8 +11,8 @@ advertises itself to iOS devices on the local network.
 
 Surf prefers an installed Chrome or Chromium. If neither is compatible, it
 downloads a verified ungoogled-chromium release into `~/.surf`
-(`%USERPROFILE%\.surf` on Windows). FFmpeg is included. Allow inbound TCP port
-18080 if the operating-system firewall asks.
+(`%USERPROFILE%\.surf` on Windows). Allow inbound TCP port 18080 if the
+operating-system firewall asks.
 
 Surf captures the active Chromium tab through its built-in extension on every
 platform. The captured tab is silent on the host, and Surf does not require a

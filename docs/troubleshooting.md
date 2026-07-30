@@ -31,12 +31,9 @@ make surf-binary
 ```
 
 Surf installs managed ungoogled-chromium when no compatible system Chrome or
-Chromium is present. Development builds may also download FFmpeg. If a download
-is blocked, permit access to GitHub
-Releases, or set `CHROME`/`FFMPEG` to explicit local executables. Primary audio
-uses Surf's built-in Chromium extension on every platform and needs no capture
-driver. Linux also reports the PulseAudio-compatible tools used by its fallback
-path.
+Chromium is present. If a download is blocked, permit access to GitHub Releases
+or set `CHROME` to an explicit local executable. Audio and video use Surf's
+built-in Chromium extension on every platform and need no capture driver.
 
 ## Managed Runtime Download Fails
 
@@ -44,12 +41,12 @@ Retry with the default managed runtime settings:
 
 ```sh
 make surf-binary
-unset CHROME FFMPEG SURF_BROWSER_DOWNLOAD SURF_FFMPEG_DOWNLOAD SURF_CONTENT_BLOCKER_DOWNLOAD
+unset CHROME SURF_BROWSER_DOWNLOAD SURF_CONTENT_BLOCKER_DOWNLOAD
 SURF_PASSWORD='change-me' ./backend/surf serve
 ```
 
 Downloads are checksum-verified and stored below `SURF_HOME/runtime`. This
-includes the browser, FFmpeg, and uBlock Origin Lite. Set the corresponding
+includes the browser and uBlock Origin Lite. Set the corresponding
 `*_DOWNLOAD=0` variable only when provisioning that runtime yourself.
 
 ## Browser Is Visible Or Frames Stop When Unfocused
@@ -87,7 +84,7 @@ Native app:
 
 Triple-tap the streamed page to show the on-device performance overlay. Test
 FPS only while the page is visibly moving: a static page normally has a low AU
-rate because CDP does not resend identical frames. Useful signals are:
+rate. Useful signals are:
 
 - `AU RATE`: frames arriving from the backend.
 - `PRESENTED`: frames shown by the display link, rather than merely decoded.

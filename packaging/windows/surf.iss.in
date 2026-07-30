@@ -20,7 +20,6 @@ WizardStyle=modern
 [Files]
 Source: "{#SurfSource}\surf.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SurfSource}\README.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SurfSource}\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Surf"; Filename: "{app}\surf.exe"

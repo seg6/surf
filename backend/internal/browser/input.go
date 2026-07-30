@@ -68,7 +68,7 @@ func (b *Controller) ClientConnected(c *ws.ClientTransport) {
 	c.SendJSON(protocol.HelloEvent{Type: "hello", W: w, H: h})
 	c.SendJSON(protocol.TabsEvent{Type: "tabs", Tabs: b.tabList()})
 	// The native controller sends its laid-out viewport immediately after the
-	// socket opens. Let that ordered message settle before spawning FFmpeg so
+	// socket opens. Let that ordered message settle before starting capture so
 	// startup does not encode at the config default and then restart twice.
 	time.AfterFunc(150*time.Millisecond, func() {
 		select {
@@ -590,6 +590,11 @@ func (b *Controller) handleSize(m *protocol.SizeCommand) {
 	b.mu.Lock()
 	w := clampDim(m.W, b.viewW)
 	h := clampDim(m.H, b.viewH)
+	// Chromium's H.264 WebCodecs implementation rejects odd dimensions.
+	// Normalize the viewport itself so the page, compositor surface, raw
+	// tab frame, encoder, and wire header all describe the same pixels.
+	w &^= 1
+	h &^= 1
 	changed := w != b.viewW || h != b.viewH
 	if changed {
 		b.viewW, b.viewH = w, h
@@ -608,7 +613,7 @@ func (b *Controller) handleSize(m *protocol.SizeCommand) {
 	profile := adaptiveProfiles[b.profileIndex()]
 	maxW, maxH := adaptiveScale(profile, w, h)
 	b.video.SetScaleLimit(maxW, maxH)
-	b.requestVideoResize(w, h, nil, "")
+	b.video.SetSize(w, h)
 	b.ensureCast(t)
 }
 

@@ -1,5 +1,5 @@
 // Package protocol defines the H.264/audio wire format shared with the native
-// client. JPEG is only an internal Chromium-to-encoder format.
+// client.
 //
 // Input coordinates travel as fractions of the remote viewport (0..1), not
 // pixels, so mid-gesture resolution switches can never misplace a tap.

@@ -5,9 +5,7 @@ import (
 	"time"
 
 	"surf-backend/internal/audio"
-	"surf-backend/internal/config"
 	"surf-backend/internal/protocol"
-	"surf-backend/internal/runenv"
 	"surf-backend/internal/ws"
 )
 
@@ -27,13 +25,6 @@ func (b *Controller) handleAudio(c *ws.ClientTransport, on bool) {
 	log.Printf("audio: client subscribed")
 	c.SendJSON(protocol.AudioConfigEvent{Type: "audio-config", OK: true, Rate: 16000, Channels: 1})
 	go b.pumpAudio(c, sub)
-}
-
-func audioConfig(cfg *config.Config, platform runenv.Handle) audio.Config {
-	return audio.Config{
-		FFmpegPath: cfg.FFmpegPath, Source: cfg.AudioSource, Env: cfg.ChildEnv,
-		CaptureArgs: platform.AudioCaptureArgs,
-	}
 }
 
 func (b *Controller) pumpAudio(c *ws.ClientTransport, sub *audio.Sub) {

@@ -94,9 +94,9 @@ func (cfg LaunchConfig) Args() []string {
 		"--disable-background-networking", "--disable-sync",
 		// The anti-throttling set puppeteer always passed: without these,
 		// Chromium can treat itself as backgrounded/occluded and throttle or
-		// stop producing compositor frames (dead screencast, multi-second
-		// screenshots) — headless removes most of the reasons this would
-		// happen, but these are harmless to keep as a safety margin.
+		// stop producing compositor frames. Headless removes most of the
+		// reasons this would happen, but these are harmless to keep as a
+		// safety margin.
 		"--disable-background-timer-throttling",
 		"--disable-backgrounding-occluded-windows",
 		"--disable-renderer-backgrounding",
@@ -223,7 +223,7 @@ func Dial(url string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	conn.SetReadLimit(64 << 20) // screencast frames are big
+	conn.SetReadLimit(8 << 20)
 	c := &Client{
 		conn:     conn,
 		pending:  map[int64]chan response{},

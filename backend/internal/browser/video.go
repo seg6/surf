@@ -8,6 +8,8 @@ import (
 	"surf-backend/internal/config"
 	"surf-backend/internal/protocol"
 	"surf-backend/internal/stream"
+	"surf-backend/internal/tabcapture"
+	"surf-backend/internal/telemetry"
 	"surf-backend/internal/ws"
 )
 
@@ -16,7 +18,7 @@ import (
 const firstAUWait = 6 * time.Second
 
 // hasVideoSubscribers reports whether any client currently has the H.264
-// lane subscribed. The internal CDP screencast exists only to feed it.
+// lane subscribed.
 func (b *Controller) hasVideoSubscribers() bool {
 	b.mediaMu.Lock()
 	defer b.mediaMu.Unlock()
@@ -32,63 +34,75 @@ func (b *Controller) subscribeVideo(c *ws.ClientTransport) {
 		b.mediaMu.Unlock()
 		return
 	}
+	b.mediaMu.Unlock()
 	// The client viewport is known before automatic subscription. Configure
 	// the dormant encoder first so it never starts at the backend default and
 	// immediately restarts at the iPad size.
 	b.video.SetSize(viewW, viewH)
-	sub := b.video.Subscribe()
-	b.videoSubs[c] = sub
-	b.mediaMu.Unlock()
 	cfg := b.video.Config()
 	c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "starting", FPS: cfg.FPS, Generation: b.video.Generation(), Profile: b.profileName()})
+	sub := b.video.Subscribe()
+	select {
+	case <-c.Closed():
+		sub.Close()
+		return
+	default:
+	}
+	b.mediaMu.Lock()
+	if _, exists := b.videoSubs[c]; exists {
+		b.mediaMu.Unlock()
+		sub.Close()
+		return
+	}
+	b.videoSubs[c] = sub
+	b.mediaMu.Unlock()
 	log.Printf("video: client subscribed")
 	if t := b.active(); t != nil {
 		b.ensureCast(t) // converge the shared source to stable video quality
 	}
 	go b.pumpVideo(c, sub)
-	go b.bootstrapVideoFrame()
 }
 
-// bootstrapVideoFrame pushes one JPEG into the encoder right after a
-// subscribe. CDP's screencast only emits frames when the compositor
-// actually produces new content, so a subscriber landing on an already-
-// static page would otherwise wait out firstAUWait for a frame that may
-// never arrive on its own.
-func (b *Controller) bootstrapVideoFrame() {
+// onTabCaptureFrame accepts an already encoded H.264 access unit from
+// tabCapture/WebCodecs. Browser control and interaction metadata still come
+// from CDP.
+func (b *Controller) onTabCaptureFrame(frame tabcapture.VideoFrame) {
 	t := b.active()
-	if t == nil {
+	if t == nil || b.hub.ClientCount() == 0 || !b.hasVideoSubscribers() {
 		return
 	}
+	b.noteSourceFrame()
+	telemetry.Emit("source_frame", "capture", "tab", nil)
+
+	b.perfMu.Lock()
+	b.sourceSeq++
+	sourceSeq, interactionID := b.sourceSeq, b.interactionID
+	inputNS, cdpNS := b.interactionInputNS, b.interactionCDPNS
+	b.perfMu.Unlock()
+	if !b.video.PushEncodedMeta(frame.Data, frame.Key, frame.Width, frame.Height,
+		sourceSeq, interactionID, stream.SourceMetadata{
+			InputReceiveNS: inputNS, CDPAcceptedNS: cdpNS,
+			Profile: uint8(b.profileIndex()),
+		}) {
+		return
+	}
+
 	b.mu.Lock()
-	s := t.Session
-	vw, vh := b.viewW, b.viewH
+	pageReady := t.awaitingPageFrame && b.tabs[t.ID] == t && b.activeID == t.ID
+	if pageReady {
+		t.awaitingPageFrame = false
+	}
 	b.mu.Unlock()
-	buf, err := b.cdp.CaptureJPEG(s, clampQuality(b.cfg.SourceJPEGQuality, 100))
-	if err != nil {
-		return
+	if pageReady {
+		b.hub.BroadcastJSON(protocol.PageFrameEvent{Type: "pageframe", SourceSeq: sourceSeq})
 	}
-	b.mu.Lock()
-	stillCurrent := t.ID == b.activeID && s == t.Session && vw == b.viewW && vh == b.viewH
-	b.mu.Unlock()
-	if !stillCurrent || !b.hasVideoSubscribers() {
-		return
+}
+
+func tabCaptureCodec(width, height, fps int) string {
+	if fps > 30 || ((width+15)/16)*((height+15)/16)*fps > 108000 {
+		return "avc1.42E029" // constrained baseline, level 4.1
 	}
-	if w, h, ok := jpegSize(buf); ok {
-		if w != vw || h != vh {
-			// Page.captureScreenshot can race the device-metrics update and
-			// return the previous viewport. Never let a bootstrap image
-			// override the client-authoritative encoder size.
-			return
-		}
-		current := b.video.Config()
-		if current.CaptureW == w && current.CaptureH == h {
-			b.video.PushBootstrap(buf)
-			return
-		}
-		b.requestVideoResizeMode(w, h, buf, s, true)
-		return
-	}
-	b.video.PushBootstrap(buf)
+	return "avc1.42E01F" // constrained baseline, level 3.1
 }
 
 // pumpVideo gates on encoder health, then relays AUs until the sub dies or
@@ -203,12 +217,11 @@ func streamConfig(cfg *config.Config) stream.Config {
 		}
 	}
 	return stream.Config{
-		FFmpegPath: cfg.FFmpegPath, Env: cfg.ChildEnv,
 		W: cfg.ViewW, H: cfg.ViewH,
 		CaptureW: cfg.ViewW, CaptureH: cfg.ViewH,
 		ScaleMaxW: maxW, ScaleMaxH: maxH,
-		FPS: cfg.StreamFPS, Encoder: cfg.StreamEncoder,
-		BitrateK: cfg.StreamBitrateK, MaxrateK: cfg.StreamMaxrateK, BufsizeK: cfg.StreamBufsizeK,
+		FPS:      cfg.StreamFPS,
+		BitrateK: cfg.StreamBitrateK,
 	}
 }
 

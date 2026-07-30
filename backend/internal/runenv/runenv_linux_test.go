@@ -3,62 +3,37 @@
 package runenv
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"surf-backend/internal/config"
 )
 
-func TestDoctorChecksCommonToolsWhenPulseUnmanaged(t *testing.T) {
+func TestLinuxDoctorChecksChromium(t *testing.T) {
 	checks := Doctor(&config.Config{
 		ChromePath: "missing-chromium",
-		FFmpegPath: "missing-ffmpeg",
 	})
-	if len(checks) != 2 {
-		t.Fatalf("checks=%v, want chromium+ffmpeg only", checks)
+	if len(checks) != 1 || checks[0].Name != "chromium" {
+		t.Fatalf("checks=%v, want chromium only", checks)
 	}
 }
 
-func TestDoctorRequiresPulseaudioAndPactlWhenManagingPulse(t *testing.T) {
-	checks := Doctor(&config.Config{
-		ChromePath:     "missing-chromium",
-		FFmpegPath:     "missing-ffmpeg",
-		PulseaudioPath: "missing-pulseaudio",
-		PactlPath:      "missing-pactl",
-		ManagePulse:    true,
-	})
-	for _, name := range []string{"pulseaudio", "pactl"} {
-		found := false
-		for _, check := range checks {
-			if check.Name == name {
-				found = true
-				if !check.Required {
-					t.Fatalf("%s should be required", name)
-				}
-			}
-		}
-		if !found {
-			t.Fatalf("doctor did not include %s", name)
-		}
+func TestLinuxPlatformPreparesDataDirectories(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{
+		Profile:      filepath.Join(root, "profile"),
+		DownloadsDir: filepath.Join(root, "downloads"),
+		UploadsDir:   filepath.Join(root, "uploads"),
 	}
-}
-
-func TestDoctorRequiresPactlWhenEnsuringExternalSink(t *testing.T) {
-	checks := Doctor(&config.Config{
-		ChromePath:      "missing-chromium",
-		FFmpegPath:      "missing-ffmpeg",
-		PactlPath:       "missing-pactl",
-		EnsurePulseSink: true,
-	})
-	found := false
-	for _, check := range checks {
-		if check.Name == "pactl" {
-			found = true
-			if !check.Required {
-				t.Fatal("pactl should be required when creating an external sink")
-			}
-		}
+	handle, err := newPlatform().Prepare(cfg)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
 	}
-	if !found {
-		t.Fatal("doctor did not include pactl")
+	defer handle.Shutdown()
+	for _, dir := range []string{cfg.Profile, cfg.DownloadsDir, cfg.UploadsDir} {
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			t.Fatalf("data directory %q was not created", dir)
+		}
 	}
 }

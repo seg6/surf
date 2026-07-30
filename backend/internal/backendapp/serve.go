@@ -19,7 +19,6 @@ import (
 	"surf-backend/internal/clientupdate"
 	"surf-backend/internal/config"
 	"surf-backend/internal/contentblocker"
-	"surf-backend/internal/ffmpegbin"
 	"surf-backend/internal/httpd"
 	"surf-backend/internal/runenv"
 	"surf-backend/internal/ws"
@@ -44,7 +43,7 @@ func Serve() error {
 		return fmt.Errorf("auth: %w", err)
 	}
 	hub := ws.NewHub()
-	b, err := browser.New(cfg, hub, rt.Handle())
+	b, err := browser.New(cfg, hub)
 	if err != nil {
 		return err
 	}
@@ -96,10 +95,7 @@ func Serve() error {
 }
 
 func EnsureRuntime(cfg *config.Config) error {
-	if err := ensureBrowser(cfg); err != nil {
-		return err
-	}
-	return ensureFFmpeg(cfg)
+	return ensureBrowser(cfg)
 }
 
 func ensureBrowser(cfg *config.Config) error {
@@ -132,20 +128,5 @@ func ensureBrowser(cfg *config.Config) error {
 		cfg.ContentBlockerPath = path
 		log.Printf("runtime: content blocker ready at %s", path)
 	}
-	return nil
-}
-
-func ensureFFmpeg(cfg *config.Config) error {
-	if cfg.FFmpegPath != "" {
-		log.Printf("runtime: using FFMPEG=%s", cfg.FFmpegPath)
-		return nil
-	}
-	log.Printf("runtime: ensuring FFmpeg %s", ffmpegbin.Version)
-	path, err := ffmpegbin.Ensure(cfg.SurfHome)
-	if err != nil {
-		return err
-	}
-	cfg.FFmpegPath = path
-	log.Printf("runtime: using managed FFmpeg %s", path)
 	return nil
 }

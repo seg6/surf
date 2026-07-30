@@ -4,7 +4,6 @@ package config
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -38,58 +37,30 @@ var Caps = []string{
 }
 
 type Config struct {
-	SurfHome          string
-	BindAddr          string
-	Port              int
-	ChromePath        string
-	StartURL          string
-	Profile           string
-	ViewW             int
-	ViewH             int
-	SourceJPEGQuality int // internal CDP-to-FFmpeg JPEG quality
-	SurfPassword      string
-	AuthDays          int
-	DownloadsDir      string
-	UploadsDir        string
+	SurfHome     string
+	BindAddr     string
+	Port         int
+	ChromePath   string
+	StartURL     string
+	Profile      string
+	ViewW        int
+	ViewH        int
+	SurfPassword string
+	AuthDays     int
+	DownloadsDir string
+	UploadsDir   string
 
-	PulseServer        string
-	PulseSink          string
-	AudioSource        string
-	FFmpegPath         string
-	PulseaudioPath     string
-	PactlPath          string
-	ManagePulse        bool
-	EnsurePulseSink    bool
 	ChromeNoSandbox    bool
 	ChromeGPU          bool
 	ContentBlocker     bool
 	ContentBlockerPath string
 	AdaptiveVideo      bool
-	ChildEnv           []string
 
 	// H.264 lane. The encoder only runs while a native video-mode client
 	// is subscribed.
 	StreamFPS      int    // STREAM_FPS
-	StreamScale    string // STREAM_SCALE, "960x720" to shrink; empty = VWxVH
-	StreamEncoder  string // STREAM_ENCODER
+	StreamScale    string // STREAM_SCALE, optional maximum; empty = client size
 	StreamBitrateK int    // STREAM_BITRATE
-	StreamMaxrateK int    // STREAM_MAXRATE
-	StreamBufsizeK int    // STREAM_BUFSIZE
-}
-
-// RefreshChildEnv rebuilds the environment ffmpeg (and, on Linux, Chromium)
-// children get. Chromium itself runs headless — no display server, so no
-// DISPLAY/Wayland/toolkit-backend forcing is needed here anymore, only
-// whatever PulseAudio connection info the audio lane depends on.
-func (c *Config) RefreshChildEnv() {
-	var env []string
-	if c.PulseServer != "" {
-		env = append(env, "PULSE_SERVER="+c.PulseServer)
-	}
-	if c.PulseSink != "" {
-		env = append(env, "PULSE_SINK="+c.PulseSink)
-	}
-	c.ChildEnv = env
 }
 
 func envInt(key string, def int) int {
@@ -131,12 +102,6 @@ func surfHome() string {
 	return ".surf"
 }
 
-var pulseServerAvailable = func(pactlPath string) bool {
-	cmd := exec.Command(pactlPath, "info")
-	cmd.Env = os.Environ()
-	return cmd.Run() == nil
-}
-
 func Load() (*Config, error) {
 	return load(true)
 }
@@ -149,53 +114,29 @@ func load(requireAuth bool) (*Config, error) {
 	home := surfHome()
 	viewW := envInt("VW", 768)
 	viewH := envInt("VH", 934)
-	pulseSink := envStr("PULSE_SINK", "surf_output")
-	pactlPath := envStr("PACTL", "pactl")
-	managePulseDefault := true
-	if os.Getenv("PULSE_SERVER") != "" || (os.Getenv("SURF_MANAGE_PULSE") == "" && pulseServerAvailable(pactlPath)) {
-		managePulseDefault = false
-	}
-	managePulse := envBool("SURF_MANAGE_PULSE", managePulseDefault)
-	pulseServerDefault := ""
-	if managePulse {
-		pulseServerDefault = "unix:/tmp/pulse/native"
-	}
 	cfg := &Config{
-		SurfHome:          home,
-		BindAddr:          envStr("BIND_ADDR", "0.0.0.0"),
-		Port:              envInt("PORT", 18080),
-		ChromePath:        os.Getenv("CHROME"),
-		StartURL:          envStr("START_URL", "https://www.google.com"),
-		Profile:           envStr("PROFILE", filepath.Join(home, "profile")),
-		ViewW:             viewW,
-		ViewH:             viewH,
-		SourceJPEGQuality: envInt("SOURCE_JPEG_QUALITY", 100),
-		SurfPassword:      os.Getenv("SURF_PASSWORD"),
-		AuthDays:          envInt("AUTH_DAYS", 180),
-		DownloadsDir:      envStr("DOWNLOADS", filepath.Join(home, "downloads")),
-		UploadsDir:        envStr("UPLOADS", filepath.Join(home, "uploads")),
-		PulseServer:       envStr("PULSE_SERVER", pulseServerDefault),
-		PulseSink:         pulseSink,
-		AudioSource:       envStr("AUDIO_SOURCE", pulseSink+".monitor"),
-		FFmpegPath:        os.Getenv("FFMPEG"),
-		PulseaudioPath:    envStr("PULSEAUDIO", "pulseaudio"),
-		PactlPath:         pactlPath,
-		ManagePulse:       managePulse,
-		EnsurePulseSink:   envBool("SURF_ENSURE_PULSE_SINK", !managePulse),
-		ChromeNoSandbox:   envBool("CHROME_NO_SANDBOX", os.Geteuid() == 0),
-		ChromeGPU:         envBool("SURF_CHROME_GPU", true),
-		ContentBlocker:    envBool("SURF_CONTENT_BLOCKER", true),
-		AdaptiveVideo:     envBool("SURF_ADAPTIVE_VIDEO", false),
-		StreamFPS:         envInt("STREAM_FPS", 30),
-		StreamScale:       envStr("STREAM_SCALE", "1024x1024"),
-		StreamEncoder:     envStr("STREAM_ENCODER", "libx264"),
-		StreamBitrateK:    envInt("STREAM_BITRATE", 6000),
-		StreamMaxrateK:    envInt("STREAM_MAXRATE", 8000),
-		StreamBufsizeK:    envInt("STREAM_BUFSIZE", 1800),
+		SurfHome:        home,
+		BindAddr:        envStr("BIND_ADDR", "0.0.0.0"),
+		Port:            envInt("PORT", 18080),
+		ChromePath:      os.Getenv("CHROME"),
+		StartURL:        envStr("START_URL", "https://www.google.com"),
+		Profile:         envStr("PROFILE", filepath.Join(home, "profile")),
+		ViewW:           viewW,
+		ViewH:           viewH,
+		SurfPassword:    os.Getenv("SURF_PASSWORD"),
+		AuthDays:        envInt("AUTH_DAYS", 180),
+		DownloadsDir:    envStr("DOWNLOADS", filepath.Join(home, "downloads")),
+		UploadsDir:      envStr("UPLOADS", filepath.Join(home, "uploads")),
+		ChromeNoSandbox: envBool("CHROME_NO_SANDBOX", os.Geteuid() == 0),
+		ChromeGPU:       envBool("SURF_CHROME_GPU", true),
+		ContentBlocker:  envBool("SURF_CONTENT_BLOCKER", true),
+		AdaptiveVideo:   envBool("SURF_ADAPTIVE_VIDEO", false),
+		StreamFPS:       envInt("STREAM_FPS", 30),
+		StreamScale:     envStr("STREAM_SCALE", ""),
+		StreamBitrateK:  envInt("STREAM_BITRATE", 6000),
 	}
 	if requireAuth && cfg.SurfPassword == "" {
 		return nil, fmt.Errorf("SURF_PASSWORD is required")
 	}
-	cfg.RefreshChildEnv()
 	return cfg, nil
 }

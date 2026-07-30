@@ -1842,8 +1842,8 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
 - (void)watchdogTick:(NSTimer *)timer {
     CFTimeInterval presentedAt = self.streamView.lastPresentationAt;
     double age = presentedAt > 0.0 ? CACurrentMediaTime() - presentedAt : 0.0;
-    // CDP screencasting is intentionally silent on static pages. Decoder
-    // errors request an IDR directly; elapsed wall time is not a fault signal.
+    // Decoder errors request an IDR directly; elapsed wall time alone is not
+    // a fault signal because capture can be quiet on static pages.
     // Keep a recent low-RTT sample for the performance overlay.
     if (self.session.state == RBSessionStateOpen) {
         NSDictionary *probe = [self.clockSync probeIfIdle];

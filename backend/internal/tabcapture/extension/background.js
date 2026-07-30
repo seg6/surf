@@ -1,3 +1,4 @@
+// Service worker entry point for Surf's tab media bridge.
 const OFFSCREEN_PATH = "offscreen.html";
 
 async function ensureOffscreenDocument() {
@@ -12,7 +13,7 @@ async function ensureOffscreenDocument() {
   await chrome.offscreen.createDocument({
     url: OFFSCREEN_PATH,
     reasons: ["USER_MEDIA"],
-    justification: "Stream the active tab audio to the Surf client",
+    justification: "Stream the active tab to the Surf client",
   });
 }
 

@@ -11,8 +11,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       fonts-liberation \
       fonts-noto-color-emoji \
       fonts-noto-core \
-      pulseaudio \
-      pulseaudio-utils \
     && rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \

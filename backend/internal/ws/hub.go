@@ -1,5 +1,5 @@
 // Package ws owns client-facing WebSocket connection lifecycle and media
-// scheduling. JPEG capture frames never cross this boundary.
+// scheduling. Raw capture frames never cross this boundary.
 package ws
 
 import (

@@ -1,9 +1,6 @@
 package cdp
 
-import (
-	"encoding/base64"
-	"encoding/json"
-)
+import "encoding/json"
 
 type NavigationEntry struct {
 	ID int `json:"id"`
@@ -55,19 +52,6 @@ func (c *Client) EvaluateBool(sessionID, expression string) (bool, error) {
 		"expression": expression, "returnByValue": true,
 	}, &p)
 	return p.Result.Value, err
-}
-
-func (c *Client) CaptureJPEG(sessionID string, quality int) ([]byte, error) {
-	var p struct {
-		Data string `json:"data"`
-	}
-	if err := c.CallInto(sessionID, "Page.captureScreenshot", map[string]any{
-		"format": "jpeg", "quality": quality,
-		"fromSurface": true, "captureBeyondViewport": false, "optimizeForSpeed": true,
-	}, &p); err != nil {
-		return nil, err
-	}
-	return base64.StdEncoding.DecodeString(p.Data)
 }
 
 func (c *Client) NavigationHistory(sessionID string) (NavigationHistory, error) {

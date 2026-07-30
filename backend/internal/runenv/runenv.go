@@ -12,10 +12,6 @@ type Runtime struct {
 	handle Handle
 }
 
-// Handle exposes the one remaining host-specific facility: system-audio
-// capture. Chromium launch and the H.264 path are platform-independent.
-func (r *Runtime) Handle() Handle { return r.handle }
-
 // Shutdown tears down whatever the platform's Prepare started.
 func (r *Runtime) Shutdown() {
 	if r.handle != nil {
@@ -23,8 +19,7 @@ func (r *Runtime) Shutdown() {
 	}
 }
 
-// Start prepares optional platform fallback services and process-lifetime
-// safeguards. Chromium tab capture itself is initialized above this layer.
+// Start prepares host runtime state and process-lifetime safeguards.
 func Start(cfg *config.Config) (*Runtime, error) {
 	handle, err := newPlatform().Prepare(cfg)
 	if err != nil {

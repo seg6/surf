@@ -97,7 +97,7 @@ func (b *Controller) refreshFavicon(t *Tab) {
 		// Do not query the active renderer merely to discover a custom icon.
 		// Keep renderer-side feature work out of the capture-critical path.
 		// The conventional origin favicon is sufficient and can be fetched
-		// outside Chromium without disturbing screencast cadence.
+		// outside Chromium without disturbing capture cadence.
 		href := origin + "/favicon.ico"
 		ic := fetchIcon(href)
 		if ic == nil {

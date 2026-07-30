@@ -380,8 +380,8 @@ func (b *Controller) switchActive(id int) {
 	if old != nil && old != next {
 		b.stopCast(old)
 	}
-	// Confirm activation before starting the new session's screencast;
-	// fire-and-forget can briefly deliver the previous tab's surface.
+	// Confirm activation before switching capture; fire-and-forget can briefly
+	// deliver the previous tab's surface.
 	started := time.Now()
 	if _, err := b.cdp.Call("", "Target.activateTarget", map[string]any{"targetId": next.TargetID}); err != nil {
 		log.Printf("tab %d activation failed after %s: %v", id, time.Since(started).Round(time.Millisecond), err)
@@ -391,8 +391,8 @@ func (b *Controller) switchActive(id int) {
 	if !b.isActiveGeneration(id, generation) {
 		return
 	}
-	if b.tabAudio != nil {
-		b.tabAudio.SwitchActive()
+	if b.tabCapture != nil {
+		b.tabCapture.SwitchActive()
 	}
 	b.applyView(next)
 	if !b.isActiveGeneration(id, generation) {
@@ -402,7 +402,7 @@ func (b *Controller) switchActive(id int) {
 	b.pushNavState()
 	b.broadcastTabs()
 	// Capture is deliberately last so tab activation and viewport state are
-	// settled before the new screencast generation starts producing frames.
+	// settled before the new tab stream starts producing frames.
 	b.ensureCast(next)
 }
 
@@ -432,16 +432,20 @@ func (b *Controller) applyView(t *Tab) {
 	if w > h {
 		orientation, angle = "landscapePrimary", 90
 	}
-	// Surf always runs headless-new. Browser.setContentsSize targets a
-	// platform window and Chrome rejects it in this mode (notably after an
-	// orientation change). Device metrics are the sole viewport authority;
-	// screencast startup is queued after this command on the same CDP writer.
+	// tabCapture reads Chromium's compositor surface, so its real headless
+	// window must follow the client too; otherwise Chromium scales a stale
+	// surface into the requested encoder dimensions and text becomes soft.
+	b.resizeTabCaptureSurface(t.TargetID, pixelW, pixelH)
 	b.setTouchMode(s)
-	_ = b.cdp.Dispatch(s, "Emulation.setDeviceMetricsOverride", map[string]any{
+	metrics := map[string]any{
 		"width": w, "height": h, "deviceScaleFactor": z, "mobile": mobile,
 		"screenWidth": pixelW, "screenHeight": pixelH,
 		"screenOrientation": map[string]any{
 			"type": orientation, "angle": angle,
 		},
-	})
+	}
+	// Capture startup must not race an old orientation. tabCapture reads the
+	// compositor directly and can otherwise begin with width/height transposed
+	// until the next resize.
+	_, _ = b.cdp.Call(s, "Emulation.setDeviceMetricsOverride", metrics)
 }

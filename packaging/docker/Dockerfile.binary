@@ -3,12 +3,9 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
       chromium \
-      ffmpeg \
       fonts-liberation \
       fonts-noto-color-emoji \
       fonts-noto-core \
-      pulseaudio \
-      pulseaudio-utils \
     && rm -rf /var/lib/apt/lists/*
 
 COPY surf /usr/local/bin/surf
@@ -20,7 +17,6 @@ ENV SURF_HOME=/data/surf \
     DOWNLOADS=/data/downloads \
     UPLOADS=/data/uploads \
     CHROME=/usr/bin/chromium \
-    FFMPEG=/usr/bin/ffmpeg \
     PORT=8080
 
 VOLUME ["/data/surf", "/data/profile", "/data/downloads", "/data/uploads"]
