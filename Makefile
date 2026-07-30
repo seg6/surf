@@ -22,10 +22,10 @@ test:
 surf-binary:
 	if [ -n "$(CLIENT_DEB)" ]; then \
 		test -f "$(CLIENT_DEB)"; \
-		cp "$(CLIENT_DEB)" backend/internal/clientupdate/bundle/client.deb; \
+		cp "$(CLIENT_DEB)" backend/internal/web/client/client.deb; \
 	fi
 	if [ "$(SURF_GOOS)" = "windows" ]; then \
-		cd backend/cmd/surf-desktop && go run github.com/tc-hib/go-winres@v0.3.1 simply \
+		cd backend/cmd/surf && go run github.com/tc-hib/go-winres@v0.3.1 simply \
 			--arch "$(SURF_GOARCH)" --out rsrc --manifest gui --icon surf-icon.png \
 			--product-version "$(VERSION).0" --file-version "$(VERSION).0" \
 			--file-description "Surf remote browser backend" --product-name Surf \
@@ -34,7 +34,7 @@ surf-binary:
 	cd backend && CGO_ENABLED=1 GOOS=$(SURF_GOOS) GOARCH=$(SURF_GOARCH) go build -trimpath \
 		$(if $(CLIENT_DEB),-tags=client_bundle) \
 		-ldflags="-s -w $(if $(filter windows,$(SURF_GOOS)),-H=windowsgui) -X surf-backend/internal/config.AppVersion=$(VERSION) -X surf-backend/internal/config.NativeVersion=$(PROTOCOL_VERSION)" \
-		-o "$(SURF_EXE)" ./cmd/surf-desktop
+		-o "$(SURF_EXE)" ./cmd/surf
 
 surf-dist: surf-binary
 	rm -rf "dist/$(SURF_DIST)" "dist/Surf.app"
@@ -44,8 +44,8 @@ surf-dist: surf-binary
 		mkdir -p "dist/Surf.app/Contents/Resources"; \
 		rm -rf "dist/Surf.iconset"; mkdir -p "dist/Surf.iconset"; \
 		for size in 16 32 128 256 512; do \
-			sips -z $$size $$size backend/cmd/surf-desktop/surf-icon.png --out "dist/Surf.iconset/icon_$${size}x$${size}.png" >/dev/null; \
-			double=$$((size * 2)); sips -z $$double $$double backend/cmd/surf-desktop/surf-icon.png --out "dist/Surf.iconset/icon_$${size}x$${size}@2x.png" >/dev/null; \
+			sips -z $$size $$size backend/cmd/surf/surf-icon.png --out "dist/Surf.iconset/icon_$${size}x$${size}.png" >/dev/null; \
+			double=$$((size * 2)); sips -z $$double $$double backend/cmd/surf/surf-icon.png --out "dist/Surf.iconset/icon_$${size}x$${size}@2x.png" >/dev/null; \
 		done; \
 		iconutil -c icns "dist/Surf.iconset" -o "dist/Surf.app/Contents/Resources/Surf.icns"; \
 		rm -rf "dist/Surf.iconset"; \
@@ -74,7 +74,7 @@ surf-dist: surf-binary
 				mkdir -p dist/Surf.AppDir/usr/bin; \
 				cp backend/surf dist/Surf.AppDir/usr/bin/surf; \
 				cp packaging/desktop/surf.desktop dist/Surf.AppDir/surf.desktop; \
-				cp backend/cmd/surf-desktop/surf-icon.png dist/Surf.AppDir/surf.png; \
+				cp backend/cmd/surf/surf-icon.png dist/Surf.AppDir/surf.png; \
 				ln -s usr/bin/surf dist/Surf.AppDir/AppRun; \
 				ARCH=x86_64 "$$APPIMAGETOOL" --appimage-extract-and-run dist/Surf.AppDir "dist/surf-$(VERSION)-linux-amd64.AppImage"; \
 			fi; \

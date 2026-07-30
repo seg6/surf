@@ -64,10 +64,3 @@ func (c *Client) NavigateToHistoryEntry(sessionID string, id int) error {
 	_, err := c.Call(sessionID, "Page.navigateToHistoryEntry", map[string]any{"entryId": id})
 	return err
 }
-
-func (c *Client) SetDeviceMetrics(sessionID string, width, height int, deviceScaleFactor float64) error {
-	_, err := c.Call(sessionID, "Emulation.setDeviceMetricsOverride", map[string]any{
-		"width": width, "height": height, "deviceScaleFactor": deviceScaleFactor, "mobile": false,
-	})
-	return err
-}

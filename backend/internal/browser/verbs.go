@@ -19,7 +19,7 @@ import (
 
 	"surf-backend/internal/cdp"
 	"surf-backend/internal/protocol"
-	"surf-backend/internal/ws"
+	"surf-backend/internal/transport"
 )
 
 const (
@@ -258,7 +258,7 @@ const hitExpr = `(function(x,y){
 })(%d,%d)`
 
 // handleHit answers a long-press hit-test: what's under the finger?
-func (b *Controller) handleHit(c *ws.ClientTransport, session string, x, y float64) {
+func (b *Controller) handleHit(c *transport.Client, session string, x, y float64) {
 	res, err := b.cdp.Call(session, "Runtime.evaluate", map[string]any{
 		"expression": fmt.Sprintf(hitExpr, int(x), int(y)), "returnByValue": true,
 	})
@@ -356,7 +356,7 @@ const readerExpr = `(function(){
   return JSON.stringify({title:document.title||'', html:root.innerHTML.slice(0,600000)});
 })()`
 
-func (b *Controller) handleReader(c *ws.ClientTransport, t *Tab, session string) {
+func (b *Controller) handleReader(c *transport.Client, t *Tab, session string) {
 	b.mu.Lock()
 	u := t.URL
 	b.mu.Unlock()
@@ -388,7 +388,7 @@ func (b *Controller) handleReader(c *ws.ClientTransport, t *Tab, session string)
 
 // ---- data clearing (M3.4) ------------------------------------------------
 
-func (b *Controller) handleClear(c *ws.ClientTransport, session, what string) {
+func (b *Controller) handleClear(c *transport.Client, session, what string) {
 	switch what {
 	case "history":
 		b.store.ClearHistory()

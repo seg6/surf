@@ -64,7 +64,7 @@ func (b *Controller) handleMediaStats(stats *protocol.MediaStatsCommand) {
 		b.adaptiveUnhealthy++
 		// One report can straddle the transition from a static page into
 		// motion. Require a second consecutive bad window before restarting
-		// the encoder and capture source at a lower profile.
+		// the WebCodecs encoder at a lower profile.
 		if b.adaptiveUnhealthy >= 2 && next < len(adaptiveProfiles)-1 {
 			next++
 			b.adaptiveUnhealthy = 0
@@ -90,7 +90,4 @@ func (b *Controller) handleMediaStats(stats *protocol.MediaStatsCommand) {
 	maxW, maxH := adaptiveScale(profile, viewW, viewH)
 	log.Printf("video: adaptive profile %s max=%dx%d", profile.name, maxW, maxH)
 	b.video.SetScaleLimit(maxW, maxH)
-	if tab := b.active(); tab != nil {
-		b.ensureCast(tab)
-	}
 }

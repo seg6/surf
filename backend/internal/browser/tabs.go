@@ -370,16 +370,12 @@ func (b *Controller) switchActive(id int) {
 		b.mu.Unlock()
 		return
 	}
-	old := b.tabs[b.activeID]
 	b.activeID = id
 	b.activeGen++
 	generation := b.activeGen
 	url := next.URL
 	b.mu.Unlock()
 
-	if old != nil && old != next {
-		b.stopCast(old)
-	}
 	// Confirm activation before switching capture; fire-and-forget can briefly
 	// deliver the previous tab's surface.
 	started := time.Now()
@@ -391,8 +387,8 @@ func (b *Controller) switchActive(id int) {
 	if !b.isActiveGeneration(id, generation) {
 		return
 	}
-	if b.tabCapture != nil {
-		b.tabCapture.SwitchActive()
+	if b.capture != nil {
+		b.capture.SwitchActive()
 	}
 	b.applyView(next)
 	if !b.isActiveGeneration(id, generation) {
@@ -401,9 +397,6 @@ func (b *Controller) switchActive(id int) {
 	b.hub.BroadcastJSON(b.urlMessage(url))
 	b.pushNavState()
 	b.broadcastTabs()
-	// Capture is deliberately last so tab activation and viewport state are
-	// settled before the new tab stream starts producing frames.
-	b.ensureCast(next)
 }
 
 func (b *Controller) isActiveGeneration(id int, generation uint64) bool {
@@ -435,7 +428,7 @@ func (b *Controller) applyView(t *Tab) {
 	// tabCapture reads Chromium's compositor surface, so its real headless
 	// window must follow the client too; otherwise Chromium scales a stale
 	// surface into the requested encoder dimensions and text becomes soft.
-	b.resizeTabCaptureSurface(t.TargetID, pixelW, pixelH)
+	b.resizeCaptureSurface(t.TargetID, pixelW, pixelH)
 	b.setTouchMode(s)
 	metrics := map[string]any{
 		"width": w, "height": h, "deviceScaleFactor": z, "mobile": mobile,

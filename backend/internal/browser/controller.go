@@ -1,6 +1,6 @@
 // Package browser implements Surf's Controller: ordered client commands and
-// browser state. stream.VideoPipeline, ws.ClientTransport,
-// and audio.AudioPipeline own their latency-sensitive domains independently.
+// browser state. media pipelines and client transports own their
+// latency-sensitive domains independently.
 //
 // Locking rule: b.mu guards all tab/view state and is NEVER held across a
 // cdp.Call — copy what you need under the lock, then talk to Chromium.
@@ -15,14 +15,12 @@ import (
 	"sync"
 	"time"
 
-	"surf-backend/internal/audio"
 	"surf-backend/internal/cdp"
 	"surf-backend/internal/config"
-	"surf-backend/internal/proc"
+	"surf-backend/internal/media"
+	"surf-backend/internal/process"
 	"surf-backend/internal/protocol"
-	"surf-backend/internal/stream"
-	"surf-backend/internal/tabcapture"
-	"surf-backend/internal/ws"
+	"surf-backend/internal/transport"
 )
 
 type Tab struct {
@@ -43,9 +41,8 @@ type Tab struct {
 type Controller struct {
 	cfg      *config.Config
 	cdp      *cdp.Client
-	source   FrameSource
 	cmd      *os.Process
-	hub      *ws.Hub
+	hub      *transport.Hub
 	commands chan controllerCommand
 	events   chan cdp.Event
 
@@ -67,12 +64,12 @@ type Controller struct {
 	dlMu    sync.Mutex
 	dlNames map[string]string // download guid -> final filename
 
-	video      *stream.VideoPipeline
-	audio      *audio.AudioPipeline
-	tabCapture *tabcapture.Source
-	mediaMu    sync.Mutex // guards client media subscriptions below
-	videoSubs  map[*ws.ClientTransport]*stream.Sub
-	audioSubs  map[*ws.ClientTransport]*audio.Sub
+	video     *media.VideoPipeline
+	audio     *media.AudioPipeline
+	capture   *media.Capture
+	mediaMu   sync.Mutex // guards client media subscriptions below
+	videoSubs map[*transport.Client]*media.VideoSubscription
+	audioSubs map[*transport.Client]*media.AudioSubscription
 
 	startedAt          time.Time
 	adaptiveProfile    int
@@ -99,19 +96,16 @@ type Controller struct {
 	lastRenderInputAt  time.Time
 	interactionID      uint64
 	sourceSeq          uint32
-	sourceLatN         int
-	sourceLatSumMS     float64
-	sourceLatMaxMS     float64
+	auLatN             int
+	auLatSumMS         float64
+	auLatMaxMS         float64
 	motionActive       bool
-	motionLastSourceAt time.Time
+	motionLastAUAt     time.Time
 	motionStallLogged  bool
 	motionStalls       uint64
 	motionGapN         int
 	motionGapSumMS     float64
 	motionGapMaxMS     float64
-	encodeLatN         int
-	encodeLatSumMS     float64
-	encodeLatMaxMS     float64
 
 	// verbMu guards the small M2 state: pending JS dialogs and the pending
 	// file-chooser interception (one at a time is plenty for one user).
@@ -123,27 +117,27 @@ type Controller struct {
 }
 
 type controllerCommand struct {
-	client     *ws.ClientTransport
+	client     *transport.Client
 	command    protocol.Command
 	receivedNS uint64
 }
 
-func New(cfg *config.Config, hub *ws.Hub) (*Controller, error) {
-	tabCapture, err := tabcapture.New(cfg.SurfHome)
+func New(cfg *config.Config, hub *transport.Hub) (*Controller, error) {
+	capture, err := media.NewCapture(cfg.SurfHome)
 	if err != nil {
 		return nil, fmt.Errorf("initialize tab capture: %w", err)
 	}
-	audioCfg := audio.Config{Capture: tabCapture.Open}
-	videoCfg := streamConfig(cfg)
+	audioCfg := media.AudioConfig{Capture: capture.OpenAudio}
+	videoCfg := videoPipelineConfig(cfg)
 	var b *Controller
 	videoCfg.Start = func(width, height, fps, bitrateK int) error {
-		return tabCapture.StartVideo(tabcapture.VideoConfig{
-			Codec: tabCaptureCodec(width, height, fps),
+		return capture.StartVideo(media.EncoderConfig{
+			Codec: encoderCodec(width, height, fps),
 			Width: width, Height: height, FPS: fps, BitrateK: bitrateK,
-		}, b.onTabCaptureFrame)
+		}, b.onVideoFrame)
 	}
-	videoCfg.Stop = tabCapture.StopVideo
-	videoCfg.Keyframe = tabCapture.RequestVideoKeyframe
+	videoCfg.Stop = capture.StopVideo
+	videoCfg.Keyframe = capture.RequestVideoKeyframe
 	b = &Controller{
 		cfg: cfg, hub: hub,
 		tabs:           map[int]*Tab{},
@@ -157,11 +151,11 @@ func New(cfg *config.Config, hub *ws.Hub) (*Controller, error) {
 		dlNames:        map[string]string{},
 		dialogSessions: map[string]bool{},
 		dlLastPush:     map[string]time.Time{},
-		video:          stream.New(videoCfg),
-		audio:          audio.New(audioCfg),
-		tabCapture:     tabCapture,
-		videoSubs:      map[*ws.ClientTransport]*stream.Sub{},
-		audioSubs:      map[*ws.ClientTransport]*audio.Sub{},
+		video:          media.NewVideoPipeline(videoCfg),
+		audio:          media.NewAudioPipeline(audioCfg),
+		capture:        capture,
+		videoSubs:      map[*transport.Client]*media.VideoSubscription{},
+		audioSubs:      map[*transport.Client]*media.AudioSubscription{},
 		perfCounts:     map[string]int{},
 		commands:       make(chan controllerCommand, 256),
 		events:         make(chan cdp.Event, 512),
@@ -199,8 +193,8 @@ func (b *Controller) Start() error {
 		extensionPaths = append(extensionPaths, b.cfg.ContentBlockerPath)
 	}
 	var extraArgs []string
-	if b.tabCapture != nil {
-		extensionPaths = append(extensionPaths, b.tabCapture.ExtensionPath())
+	if b.capture != nil {
+		extensionPaths = append(extensionPaths, b.capture.ExtensionPath())
 		// Required by CDP's Extensions domain, used to invoke the capture
 		// extension action as the active tab's user gesture.
 		extraArgs = append(extraArgs, "--enable-unsafe-extension-debugging")
@@ -220,8 +214,8 @@ func (b *Controller) Start() error {
 	}
 	b.cdp = client
 	b.cmd = cmd
-	if b.tabCapture != nil {
-		if err := b.tabCapture.Attach(client); err != nil {
+	if b.capture != nil {
+		if err := b.capture.Attach(client); err != nil {
 			return err
 		}
 	}
@@ -233,7 +227,6 @@ func (b *Controller) Start() error {
 			b.userAgent = NormalizeHeadlessUserAgent(version.UserAgent)
 		}
 	}
-	b.source = &tabCaptureSource{}
 	client.OnEvent(func(event cdp.Event) { b.events <- event })
 	// Full Chrome restores its previous pages and also creates the explicit
 	// about:blank launch target. Remove only those redundant startup blanks
@@ -293,23 +286,20 @@ func (b *Controller) newTargetParams(rawURL string) map[string]any {
 }
 
 func (b *Controller) Shutdown() {
-	if b.source != nil {
-		b.source.Close()
-	}
 	if b.video != nil {
 		b.video.Shutdown()
 	}
 	if b.audio != nil {
 		b.audio.Shutdown()
 	}
-	if b.tabCapture != nil {
-		_ = b.tabCapture.Close()
+	if b.capture != nil {
+		_ = b.capture.Close()
 	}
 	if b.cdp != nil {
 		b.cdp.Close()
 	}
 	if b.cmd != nil {
-		proc.Kill(b.cmd.Pid)
+		process.Kill(b.cmd.Pid)
 	}
 }
 
@@ -354,7 +344,7 @@ func (b *Controller) Stats() map[string]any {
 	}
 	stats := map[string]any{
 		"clients": b.hub.ClientCount(), "tabs": tabs, "activeURL": activeURL,
-		"view": fmt.Sprintf("%dx%d", vw, vh), "casting": b.source != nil && b.source.Casting(),
+		"view": fmt.Sprintf("%dx%d", vw, vh), "casting": b.video.Running(),
 		"videoSubs": vsubs, "audioSubs": asubs,
 		"inputCounts": counts, "inputWindowSec": windowSec,
 		"videoLatencyMeanMs": latMeanMS, "videoLatencyMaxMs": latMaxMS, "videoLatencyN": latN,

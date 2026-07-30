@@ -12,7 +12,7 @@ import (
 
 	"surf-backend/internal/protocol"
 	"surf-backend/internal/telemetry"
-	"surf-backend/internal/ws"
+	"surf-backend/internal/transport"
 )
 
 var schemeRe = regexp.MustCompile(`(?i)^[a-z][a-z0-9+.-]*:`)
@@ -59,9 +59,9 @@ const editableExpr = `(function(){
   return {on:true, kind:kind, rect:[r.left/w, r.top/h, r.width/w, r.height/h]};
 })()`
 
-// ClientConnected implements ws.Handler: greet, sync state, and automatically
+// ClientConnected implements transport.Handler: greet, sync state, and automatically
 // subscribe the client to the only visual lane (H.264).
-func (b *Controller) ClientConnected(c *ws.ClientTransport) {
+func (b *Controller) ClientConnected(c *transport.Client) {
 	b.mu.Lock()
 	w, h := b.viewW, b.viewH
 	b.mu.Unlock()
@@ -87,10 +87,10 @@ func (b *Controller) ClientConnected(c *ws.ClientTransport) {
 	}
 }
 
-// HandleMessage implements ws.Handler. It runs on the client's read goroutine,
+// HandleMessage implements transport.Handler. It runs on the client's read goroutine,
 // and only enqueues immutable typed commands. The controller goroutine is the
 // sole ordered executor (press before release, key order, tab commands).
-func (b *Controller) HandleMessage(c *ws.ClientTransport, command protocol.Command) {
+func (b *Controller) HandleMessage(c *transport.Client, command protocol.Command) {
 	select {
 	case b.commands <- controllerCommand{client: c, command: command, receivedNS: telemetry.MonoNS()}:
 	case <-c.Closed():
@@ -99,7 +99,7 @@ func (b *Controller) HandleMessage(c *ws.ClientTransport, command protocol.Comma
 	}
 }
 
-func (b *Controller) handleCommand(c *ws.ClientTransport, command protocol.Command, receivedNS uint64) {
+func (b *Controller) handleCommand(c *transport.Client, command protocol.Command, receivedNS uint64) {
 	kind := command.Kind()
 	telemetry.Emit("client_command", "input", "controller", map[string]any{"type": kind})
 	iid, _ := command.Causal()
@@ -142,9 +142,20 @@ func (b *Controller) handleCommand(c *ws.ClientTransport, command protocol.Comma
 	}
 	switch kind {
 	case "video-retry":
-		b.stopVideo(c)
-		b.video.ResetCrashBudget()
-		b.subscribeVideo(c)
+		b.mediaMu.Lock()
+		_, subscribed := b.videoSubs[c]
+		b.mediaMu.Unlock()
+		if subscribed {
+			cfg := b.video.Config()
+			c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "starting", FPS: cfg.FPS, Generation: b.video.Generation(), Profile: b.profileName()})
+			b.video.Restart()
+		} else {
+			// A failed first-AU wait removes this client's subscription while
+			// the five-second idle timer is still running. Stop that stale
+			// generation before subscribing again.
+			b.video.Restart()
+			b.subscribeVideo(c)
+		}
 		return
 	case "reqkeyframe":
 		// Client lost decode sync (VT session error / bad SPS-PPS) and wants an
@@ -303,7 +314,7 @@ func (b *Controller) handleMobileLayout(on bool) {
 	}
 }
 
-func (b *Controller) controlPageMedia(c *ws.ClientTransport, session, command string, value float64) {
+func (b *Controller) controlPageMedia(c *transport.Client, session, command string, value float64) {
 	action := `var media=document.querySelectorAll('video,audio');
 var shouldPause=Array.prototype.some.call(media,function(m){return !m.paused;});
 Array.prototype.forEach.call(media,function(m){
@@ -338,7 +349,7 @@ const mediaStateExpr = `(function(){
   };
 })()`
 
-func (b *Controller) queryPageMedia(c *ws.ClientTransport, session string) {
+func (b *Controller) queryPageMedia(c *transport.Client, session string) {
 	if c == nil || !b.isActiveSession(session) {
 		return
 	}
@@ -373,12 +384,12 @@ func (b *Controller) noteMotionPhase(phase string) {
 	switch phase {
 	case "begin":
 		b.motionActive = true
-		b.motionLastSourceAt = time.Time{}
+		b.motionLastAUAt = time.Time{}
 		b.motionStallLogged = false
 	case "move":
 		if !b.motionActive {
 			b.motionActive = true
-			b.motionLastSourceAt = time.Time{}
+			b.motionLastAUAt = time.Time{}
 			b.motionStallLogged = false
 		}
 	case "end":
@@ -404,10 +415,10 @@ func (b *Controller) checkMotionStall(now time.Time) {
 		b.perfMu.Unlock()
 		return
 	}
-	since := b.motionLastSourceAt
+	since := b.motionLastAUAt
 	age := now.Sub(since)
 	// A scroll can begin on a non-scrollable page or against its boundary.
-	// Until Chromium emits one changed frame there is no active source
+	// Until Chromium emits one encoded frame there is no active video
 	// cadence to stall; input-to-first-frame is measured separately.
 	if since.IsZero() || age < 75*time.Millisecond {
 		b.perfMu.Unlock()
@@ -417,10 +428,10 @@ func (b *Controller) checkMotionStall(now time.Time) {
 	b.motionStalls++
 	stalls := b.motionStalls
 	b.perfMu.Unlock()
-	telemetry.Emit("motion_source_stall", "capture", "cdp", map[string]any{
+	telemetry.Emit("motion_au_stall", "capture", "webcodecs", map[string]any{
 		"age_ms": float64(age.Microseconds()) / 1000.0,
 	})
-	log.Printf("capture: no source frame for %.1fms during scroll motion (stalls=%d)",
+	log.Printf("capture: no encoded AU for %.1fms during scroll motion (stalls=%d)",
 		float64(age.Microseconds())/1000.0, stalls)
 }
 
@@ -439,15 +450,13 @@ func (b *Controller) noteClientMessage(t string) {
 	counts := b.perfCounts
 	latN, latSumMS, latMaxMS := b.perfLatN, b.perfLatSumMS, b.perfLatMaxMS
 	aLatN, aLatSumMS, aLatMaxMS := b.perfALatN, b.perfALatSumMS, b.perfALatMaxMS
-	sourceN, sourceSumMS, sourceMaxMS := b.sourceLatN, b.sourceLatSumMS, b.sourceLatMaxMS
+	auN, auSumMS, auMaxMS := b.auLatN, b.auLatSumMS, b.auLatMaxMS
 	motionN, motionSumMS, motionMaxMS := b.motionGapN, b.motionGapSumMS, b.motionGapMaxMS
-	encodeN, encodeSumMS, encodeMaxMS := b.encodeLatN, b.encodeLatSumMS, b.encodeLatMaxMS
 	b.perfCounts = map[string]int{}
 	b.perfLatN, b.perfLatSumMS, b.perfLatMaxMS = 0, 0, 0
 	b.perfALatN, b.perfALatSumMS, b.perfALatMaxMS = 0, 0, 0
-	b.sourceLatN, b.sourceLatSumMS, b.sourceLatMaxMS = 0, 0, 0
+	b.auLatN, b.auLatSumMS, b.auLatMaxMS = 0, 0, 0
 	b.motionGapN, b.motionGapSumMS, b.motionGapMaxMS = 0, 0, 0
-	b.encodeLatN, b.encodeLatSumMS, b.encodeLatMaxMS = 0, 0, 0
 	b.perfSince = now
 	b.perfMu.Unlock()
 
@@ -459,19 +468,15 @@ func (b *Controller) noteClientMessage(t string) {
 	if aLatN > 0 {
 		aLatMeanMS = aLatSumMS / float64(aLatN)
 	}
-	sourceMeanMS := 0.0
-	if sourceN > 0 {
-		sourceMeanMS = sourceSumMS / float64(sourceN)
-	}
-	encodeMeanMS := 0.0
-	if encodeN > 0 {
-		encodeMeanMS = encodeSumMS / float64(encodeN)
+	auMeanMS := 0.0
+	if auN > 0 {
+		auMeanMS = auSumMS / float64(auN)
 	}
 	motionMeanMS := 0.0
 	if motionN > 0 {
 		motionMeanMS = motionSumMS / float64(motionN)
 	}
-	log.Printf("perf input %.1fs: click=%.1f/s scroll=%.1f/s key=%.1f/s nav=%d size=%d lp=%d other=%d | input->source mean=%.1fms max=%.1fms n=%d | motion source gap mean=%.1fms max=%.1fms n=%d | source->encode mean=%.1fms max=%.1fms n=%d | video queue mean=%.1fms max=%.1fms n=%d | audio lat mean=%.1fms max=%.1fms n=%d",
+	log.Printf("perf input %.1fs: click=%.1f/s scroll=%.1f/s key=%.1f/s nav=%d size=%d lp=%d other=%d | input->AU mean=%.1fms max=%.1fms n=%d | motion AU gap mean=%.1fms max=%.1fms n=%d | video queue mean=%.1fms max=%.1fms n=%d | audio lat mean=%.1fms max=%.1fms n=%d",
 		dt,
 		float64(counts["click"])/dt,
 		float64(counts["scroll"])/dt,
@@ -479,25 +484,10 @@ func (b *Controller) noteClientMessage(t string) {
 		counts["nav"], counts["size"],
 		counts["lpdown"]+counts["lpmove"]+counts["lpup"],
 		otherInputCount(counts),
-		sourceMeanMS, sourceMaxMS, sourceN,
+		auMeanMS, auMaxMS, auN,
 		motionMeanMS, motionMaxMS, motionN,
-		encodeMeanMS, encodeMaxMS, encodeN,
 		latMeanMS, latMaxMS, latN,
 		aLatMeanMS, aLatMaxMS, aLatN)
-}
-
-func (b *Controller) noteEncodeLatency(sourceNS, encodeNS uint64) {
-	if sourceNS == 0 || encodeNS < sourceNS {
-		return
-	}
-	ms := float64(encodeNS-sourceNS) / 1e6
-	b.perfMu.Lock()
-	b.encodeLatN++
-	b.encodeLatSumMS += ms
-	if ms > b.encodeLatMaxMS {
-		b.encodeLatMaxMS = ms
-	}
-	b.perfMu.Unlock()
 }
 
 func (b *Controller) noteRenderInput() {
@@ -506,27 +496,27 @@ func (b *Controller) noteRenderInput() {
 	b.perfMu.Unlock()
 }
 
-func (b *Controller) noteSourceFrame() {
+func (b *Controller) noteEncodedAU() {
 	now := time.Now()
 	b.perfMu.Lock()
 	if b.motionActive {
-		if !b.motionLastSourceAt.IsZero() {
-			gapMS := float64(now.Sub(b.motionLastSourceAt).Microseconds()) / 1000.0
+		if !b.motionLastAUAt.IsZero() {
+			gapMS := float64(now.Sub(b.motionLastAUAt).Microseconds()) / 1000.0
 			b.motionGapN++
 			b.motionGapSumMS += gapMS
 			if gapMS > b.motionGapMaxMS {
 				b.motionGapMaxMS = gapMS
 			}
 		}
-		b.motionLastSourceAt = now
+		b.motionLastAUAt = now
 		b.motionStallLogged = false
 	}
 	if !b.lastRenderInputAt.IsZero() {
 		ms := float64(now.Sub(b.lastRenderInputAt).Microseconds()) / 1000.0
-		b.sourceLatN++
-		b.sourceLatSumMS += ms
-		if ms > b.sourceLatMaxMS {
-			b.sourceLatMaxMS = ms
+		b.auLatN++
+		b.auLatSumMS += ms
+		if ms > b.auLatMaxMS {
+			b.auLatMaxMS = ms
 		}
 		b.lastRenderInputAt = time.Time{}
 	}
@@ -608,13 +598,11 @@ func (b *Controller) handleSize(m *protocol.SizeCommand) {
 	if t == nil {
 		return
 	}
-	b.stopCast(t)
 	b.applyView(t)
 	profile := adaptiveProfiles[b.profileIndex()]
 	maxW, maxH := adaptiveScale(profile, w, h)
 	b.video.SetScaleLimit(maxW, maxH)
 	b.video.SetSize(w, h)
-	b.ensureCast(t)
 }
 
 func (b *Controller) handleTab(m *protocol.TabCommand) {
@@ -684,7 +672,7 @@ func (b *Controller) setTouchMode(session string) {
 
 // checkEditable tells the tapping client whether focus landed in a text field
 // (so it can raise the iOS keyboard). Waits 180ms for focus to settle.
-func (b *Controller) checkEditable(c *ws.ClientTransport, session string) {
+func (b *Controller) checkEditable(c *transport.Client, session string) {
 	time.AfterFunc(180*time.Millisecond, func() {
 		if !b.isActiveSession(session) {
 			return

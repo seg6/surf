@@ -32,7 +32,7 @@ func TestMotionStallAccounting(t *testing.T) {
 	controller := &Controller{}
 	controller.noteMotionPhase("begin")
 	controller.perfMu.Lock()
-	controller.motionLastSourceAt = time.Now().Add(-100 * time.Millisecond)
+	controller.motionLastAUAt = time.Now().Add(-100 * time.Millisecond)
 	controller.perfMu.Unlock()
 	controller.checkMotionStall(time.Now())
 	controller.perfMu.Lock()

@@ -16,9 +16,9 @@ import (
 	"time"
 
 	"surf-backend/internal/cdp"
-	"surf-backend/internal/httpd"
 	"surf-backend/internal/protocol"
-	"surf-backend/internal/ws"
+	"surf-backend/internal/transport"
+	"surf-backend/internal/web"
 )
 
 // ---- per-tab setup ----------------------------------------------------
@@ -248,7 +248,7 @@ func (b *Controller) downloadList() []protocol.DownloadItem {
 // ---- HTTP routes ---------------------------------------------------------
 
 // RegisterRoutes adds feature routes (all behind the auth cookie).
-func (b *Controller) RegisterRoutes(srv *httpd.Server) {
+func (b *Controller) RegisterRoutes(srv *web.Server) {
 	srv.Gated("/tabicon/", func(w http.ResponseWriter, r *http.Request) {
 		id, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/tabicon/"))
 		b.mu.Lock()
@@ -280,7 +280,7 @@ func (b *Controller) RegisterRoutes(srv *httpd.Server) {
 // ---- feature messages ------------------------------------------------------
 
 // handleFeatureMessage handles message types beyond the M1 set.
-func (b *Controller) handleFeatureMessage(c *ws.ClientTransport, t *Tab, session string, command protocol.Command) {
+func (b *Controller) handleFeatureMessage(c *transport.Client, t *Tab, session string, command protocol.Command) {
 	switch command.Kind() {
 	case "zoom":
 		b.handleZoom(t, session, command.(*protocol.ZoomCommand))
@@ -395,7 +395,7 @@ func (b *Controller) handleZoom(t *Tab, session string, m *protocol.ZoomCommand)
 // finishLongpress runs after the long-press mouse-up. Plain press (sel=true):
 // double-click-select the word underneath. After a drag: whatever the drag
 // selected. Either way, ship the selection to the client for native copy.
-func (b *Controller) finishLongpress(c *ws.ClientTransport, t *Tab, session string, x, y float64, selectWord bool) {
+func (b *Controller) finishLongpress(c *transport.Client, t *Tab, session string, x, y float64, selectWord bool) {
 	if selectWord {
 		b.mouse(session, "mousePressed", x, y, 2)
 		b.mouse(session, "mouseReleased", x, y, 2)
@@ -411,7 +411,7 @@ func (b *Controller) finishLongpress(c *ws.ClientTransport, t *Tab, session stri
 	c.SendJSON(protocol.TextEvent{Type: "copytext", Text: text})
 }
 
-func (b *Controller) handleFind(c *ws.ClientTransport, t *Tab, session string, m *protocol.FindCommand) {
+func (b *Controller) handleFind(c *transport.Client, t *Tab, session string, m *protocol.FindCommand) {
 	if strings.TrimSpace(m.Q) == "" {
 		return
 	}

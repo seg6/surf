@@ -5,15 +5,15 @@ import (
 	"time"
 
 	"surf-backend/internal/config"
+	"surf-backend/internal/media"
 	"surf-backend/internal/protocol"
-	"surf-backend/internal/stream"
 )
 
 func TestAdaptiveProfileHysteresis(t *testing.T) {
 	cfg := &config.Config{AdaptiveVideo: true}
 	b := &Controller{
 		cfg: cfg,
-		video: stream.New(stream.Config{
+		video: media.NewVideoPipeline(media.VideoPipelineConfig{
 			W: 768, H: 934, CaptureW: 768, CaptureH: 934, FPS: 30,
 		}),
 		tabs: map[int]*Tab{},
@@ -43,7 +43,7 @@ func TestAdaptiveIgnoresStaticPageCadence(t *testing.T) {
 	cfg := &config.Config{AdaptiveVideo: true}
 	b := &Controller{
 		cfg: cfg,
-		video: stream.New(stream.Config{
+		video: media.NewVideoPipeline(media.VideoPipelineConfig{
 			W: 768, H: 934, CaptureW: 768, CaptureH: 934, FPS: 30,
 		}),
 		tabs: map[int]*Tab{},

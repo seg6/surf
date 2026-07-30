@@ -21,7 +21,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"surf-backend/internal/proc"
+	"surf-backend/internal/process"
 )
 
 type Event struct {
@@ -136,7 +136,7 @@ func (cfg LaunchConfig) Args() []string {
 // Launch starts headless Chromium (see Args) and returns a connected browser
 // client.
 func Launch(cfg LaunchConfig) (*Client, *os.Process, error) {
-	started, err := proc.Start(cfg.ChromePath, cfg.Args(), proc.Options{
+	started, err := process.Start(cfg.ChromePath, cfg.Args(), process.Options{
 		Env:    append(os.Environ(), cfg.Env...),
 		Stderr: true,
 	})
@@ -160,12 +160,12 @@ func Launch(cfg LaunchConfig) (*Client, *os.Process, error) {
 
 	url, err := waitForURL(wsURL, cfg.Profile)
 	if err != nil {
-		proc.Kill(started.Process.Pid)
+		process.Kill(started.Process.Pid)
 		return nil, nil, err
 	}
 	c, err := Dial(url)
 	if err != nil {
-		proc.Kill(started.Process.Pid)
+		process.Kill(started.Process.Pid)
 		return nil, nil, err
 	}
 	return c, started.Process, nil

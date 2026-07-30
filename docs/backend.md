@@ -116,10 +116,22 @@ override.
 Backend ownership is split by latency domain. `Controller` consumes concrete
 typed commands and owns tab/input state. The extension bridge owns capture and
 encoding. `VideoPipeline` tracks encoder generations and fans complete access
-units out to clients. `ClientTransport` independently schedules ordered
+units out to clients. The WebSocket transport independently schedules ordered
 control, drop-oldest audio, and a four-AU GOP-aware video queue;
 `AudioPipeline` owns bounded audio fan-out. Video overflow requests an
 immediate cooldown-protected IDR instead of accumulating delay.
+
+The Go module mirrors those boundaries:
+
+- `cmd/surf` is the unified CLI and desktop entrypoint.
+- `internal/app` is the composition root and process lifecycle.
+- `internal/browser` owns tabs, input, navigation, and browser features.
+- `internal/media` owns Chromium tab capture, WebCodecs video, and audio/video fan-out.
+- `internal/transport` owns each client WebSocket and its lane queues.
+- `internal/web` owns login, native configuration, health, and feature routes.
+- `internal/chromium`, `internal/cdp`, `internal/platform`, and `internal/process`
+  isolate browser provisioning and host-specific mechanics.
+- `internal/protocol` is the typed client wire contract.
 
 Protocol `20260729-4` uses a 96-byte extensible binary header carrying AU and
 source sequences, coded size, interaction ID, backend timing stamps, encoder
