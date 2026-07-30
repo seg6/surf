@@ -129,8 +129,9 @@ The Go module mirrors those boundaries:
 - `internal/media` owns Chromium tab capture, WebCodecs video, and audio/video fan-out.
 - `internal/transport` owns each client WebSocket and its lane queues.
 - `internal/web` owns login, native configuration, health, and feature routes.
-- `internal/chromium`, `internal/cdp`, `internal/platform`, and `internal/process`
-  isolate browser provisioning and host-specific mechanics.
+- `internal/chromium` owns browser provisioning and profile preparation;
+  `internal/cdp` owns the browser connection; `internal/process` contains the
+  small Unix/Windows process-lifetime differences.
 - `internal/protocol` is the typed client wire contract.
 
 Protocol `20260729-4` uses a 96-byte extensible binary header carrying AU and

@@ -10,13 +10,52 @@
 package process
 
 import (
+	"log"
 	"os"
 	"os/exec"
 	"strconv"
 	"syscall"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 const createNoWindow = 0x08000000
+
+// ProtectChildren assigns Surf to a kill-on-close Job Object. Chromium's
+// helpers inherit the job, so Windows also cleans the process tree when Surf
+// itself is force-killed and cannot execute normal shutdown.
+func ProtectChildren() func() {
+	job, err := windows.CreateJobObject(nil, nil)
+	if err != nil {
+		log.Printf("runtime: CreateJobObject failed, no kill-on-crash safety net: %v", err)
+		return func() {}
+	}
+	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{
+		BasicLimitInformation: windows.JOBOBJECT_BASIC_LIMIT_INFORMATION{
+			LimitFlags: windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+		},
+	}
+	if _, err := windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation,
+		uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info))); err != nil {
+		log.Printf("runtime: SetInformationJobObject failed, no kill-on-crash safety net: %v", err)
+		_ = windows.CloseHandle(job)
+		return func() {}
+	}
+	self, err := windows.GetCurrentProcess()
+	if err != nil {
+		log.Printf("runtime: GetCurrentProcess failed, no kill-on-crash safety net: %v", err)
+		_ = windows.CloseHandle(job)
+		return func() {}
+	}
+	if err := windows.AssignProcessToJobObject(job, self); err != nil {
+		log.Printf("runtime: AssignProcessToJobObject failed, no kill-on-crash safety net: %v", err)
+		_ = windows.CloseHandle(job)
+		return func() {}
+	}
+	log.Printf("runtime: chromium will be killed automatically if Surf exits unexpectedly")
+	return func() { _ = windows.CloseHandle(job) }
+}
 
 func hiddenCommand(path string, args ...string) *exec.Cmd {
 	cmd := exec.Command(path, args...)

@@ -18,7 +18,7 @@ import (
 	"surf-backend/internal/chromium"
 	"surf-backend/internal/config"
 	"surf-backend/internal/contentblocker"
-	"surf-backend/internal/platform"
+	"surf-backend/internal/process"
 	"surf-backend/internal/transport"
 	"surf-backend/internal/web"
 )
@@ -32,11 +32,8 @@ func Serve() error {
 		return err
 	}
 
-	rt, err := platform.Start(cfg)
-	if err != nil {
-		return err
-	}
-	defer rt.Shutdown()
+	releaseChildren := process.ProtectChildren()
+	defer releaseChildren()
 	a, err := auth.New(cfg.Profile, cfg.SurfPassword, cfg.AuthDays)
 	if err != nil {
 		return fmt.Errorf("auth: %w", err)
@@ -88,6 +85,17 @@ func Serve() error {
 
 // Prepare resolves the browser and optional managed extensions.
 func Prepare(cfg *config.Config) error {
+	for _, dir := range []string{cfg.SurfHome, cfg.DownloadsDir, cfg.UploadsDir} {
+		if dir == "" {
+			continue
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create runtime directory %s: %w", dir, err)
+		}
+	}
+	if err := chromium.PrepareProfile(cfg.Profile); err != nil {
+		return err
+	}
 	if cfg.ChromePath != "" {
 		log.Printf("runtime: using CHROME=%s", cfg.ChromePath)
 	} else {

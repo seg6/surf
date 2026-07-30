@@ -29,7 +29,6 @@ import (
 	"fyne.io/systray"
 	"surf-backend/internal/app"
 	"surf-backend/internal/config"
-	"surf-backend/internal/platform"
 	"surf-backend/internal/updater"
 )
 
@@ -185,20 +184,11 @@ func doctor() error {
 	if err := app.Prepare(cfg); err != nil {
 		return err
 	}
-	failed := false
-	for _, check := range platform.Doctor(cfg) {
-		if check.OK {
-			log.Printf("doctor: ok %s=%s", check.Name, check.Path)
-		} else if check.Required {
-			failed = true
-			log.Printf("doctor: missing %s=%s: %v", check.Name, check.Path, check.Err)
-		} else {
-			log.Printf("doctor: optional missing %s=%s: %v", check.Name, check.Path, check.Err)
-		}
-	}
-	if failed {
+	if _, err := exec.LookPath(cfg.ChromePath); err != nil {
+		log.Printf("doctor: missing chromium=%s: %v", cfg.ChromePath, err)
 		return fmt.Errorf("doctor failed")
 	}
+	log.Printf("doctor: ok chromium=%s", cfg.ChromePath)
 	return nil
 }
 

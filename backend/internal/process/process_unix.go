@@ -1,4 +1,4 @@
-//go:build linux
+//go:build !windows
 
 package process
 
@@ -7,6 +7,10 @@ import (
 	"os/exec"
 	"syscall"
 )
+
+// ProtectChildren is unnecessary on Unix: Start creates a dedicated process
+// group and explicit shutdown kills that whole group.
+func ProtectChildren() func() { return func() {} }
 
 func command(path string, args ...string) *exec.Cmd {
 	cmd := exec.Command(path, args...)

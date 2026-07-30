@@ -1,6 +1,6 @@
 // Package process provides OS-specific process launch/kill helpers so the rest
-// of the backend doesn't need per-OS branches: Setpgid + process-group kill
-// on Linux, kill-the-whole-tree via taskkill on Windows.
+// of the backend doesn't need per-OS branches: process-group teardown on Unix,
+// and hidden process-tree teardown on Windows.
 package process
 
 import (
