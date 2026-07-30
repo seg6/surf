@@ -47,6 +47,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.ChromeNoSandbox {
 		t.Fatal("ChromeNoSandbox=true")
 	}
+	if cfg.StreamBitrateK != 12000 {
+		t.Fatalf("StreamBitrateK=%d, want 12000", cfg.StreamBitrateK)
+	}
 }
 
 func TestLoadRequiresSurfPassword(t *testing.T) {

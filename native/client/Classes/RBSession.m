@@ -196,6 +196,11 @@ static NSString *RBURLEscape(NSString *s) {
 }
 
 - (void)updateViewportWidth:(NSInteger)width height:(NSInteger)height force:(BOOL)force {
+    // The native stream view is laid out to even dimensions, but normalize
+    // here too so reconnects and any future callers can never request a
+    // 4:2:0-incompatible odd viewport and trigger a quality-losing rescale.
+    width &= ~1;
+    height &= ~1;
     if (width <= 0 || height <= 0) return;
     if (!force && self.viewWidth == width && self.viewHeight == height) return;
     self.viewWidth = width;

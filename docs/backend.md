@@ -199,7 +199,7 @@ Common overrides:
 - `STREAM_SCALE`: maximum coded width and height, preserving aspect ratio;
   unset by default so the encoded frame exactly follows the client viewport.
   Set `768x1024` to cap encoder and decoder work on an original iPad.
-- `STREAM_BITRATE`: target H.264 bitrate in kbit/s; defaults to `6000`.
+- `STREAM_BITRATE`: target H.264 bitrate in kbit/s; defaults to `12000`.
 - `SURF_ADVERTISE=0`: disable LAN discovery advertisement.
 - `SURF_UPDATE_MANIFEST`: override the GitHub update manifest URL for release
   testing.

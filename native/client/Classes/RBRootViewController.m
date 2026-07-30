@@ -35,6 +35,15 @@ static const CGFloat kRBTopBarHeight = 44.0;
 static const CGFloat kRBTabStripHeight = 29.0;
 static const CGFloat kRBFindBarHeight = 38.0;
 
+// H.264 4:2:0 requires even coded dimensions. Keep the visible stream surface
+// even as well so Chromium, VideoEncoder, and OpenGL all operate at the same
+// pixel size instead of scaling an odd viewport down and back up.
+static CGFloat RBEvenExtent(CGFloat value) {
+    NSInteger whole = (NSInteger)floor(value);
+    if (whole < 2) return 2.0;
+    return (CGFloat)(whole & ~1);
+}
+
 @interface RBRootViewController () <UITextFieldDelegate, RBSessionDelegate, RBChromeBarDelegate,
                                     RBOmniboxDelegate, RBTabStripDelegate, RBSuggestPanelDelegate,
                                     RBFindBarDelegate, RBSettingsDelegate, RBMediaPipelineDelegate, RBStreamViewDelegate,
@@ -296,11 +305,14 @@ static const CGFloat kRBFindBarHeight = 38.0;
         self.findBar.frame = CGRectZero;
     }
 
-    CGFloat streamH = MAX(1.0, h - contentTop);
-    self.streamView.bounds = CGRectMake(0.0, 0.0, w, streamH);
-    self.streamView.center = CGPointMake(w / 2.0, contentTop + streamH / 2.0);
-    self.startPageView.frame = CGRectMake(0.0, contentTop, w, streamH);
-    self.browserStateView.frame = CGRectMake(0.0, contentTop, w, streamH);
+    CGFloat streamW = RBEvenExtent(w);
+    CGFloat streamH = RBEvenExtent(h - contentTop);
+    CGFloat streamX = floor((w - streamW) / 2.0);
+    self.streamView.bounds = CGRectMake(0.0, 0.0, streamW, streamH);
+    self.streamView.center = CGPointMake(streamX + streamW / 2.0,
+                                         contentTop + streamH / 2.0);
+    self.startPageView.frame = CGRectMake(streamX, contentTop, streamW, streamH);
+    self.browserStateView.frame = CGRectMake(streamX, contentTop, streamW, streamH);
 
     CGRect omniboxFrame = [self.chromeBar convertRect:self.chromeBar.omnibox.frame toView:self.view];
     self.suggestPanel.frame = CGRectMake(omniboxFrame.origin.x, kRBTopBarHeight - 4.0,

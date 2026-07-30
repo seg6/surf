@@ -130,7 +130,7 @@ func load(requireAuth bool) (*Config, error) {
 		ContentBlocker:  envBool("SURF_CONTENT_BLOCKER", true),
 		AdaptiveVideo:   envBool("SURF_ADAPTIVE_VIDEO", false),
 		StreamScale:     envStr("STREAM_SCALE", ""),
-		StreamBitrateK:  envInt("STREAM_BITRATE", 6000),
+		StreamBitrateK:  envInt("STREAM_BITRATE", 12000),
 	}
 	if requireAuth && cfg.SurfPassword == "" {
 		return nil, fmt.Errorf("SURF_PASSWORD is required")
