@@ -62,13 +62,17 @@ func (s *Capture) StartVideo(config EncoderConfig, handler func(VideoFrame)) err
 	}
 	s.mu.Unlock()
 
-	s.sendVideoConfig()
 	if reacquire {
 		if err := s.stopCaptureForReconfigure(); err != nil {
 			s.StopVideo()
 			return err
 		}
 	}
+	// Configure only after the old track is fully detached. Configuring first
+	// made the offscreen worker start WebCodecs on a track that the following
+	// restart immediately stopped, producing one guaranteed failed generation
+	// on every rotation/fullscreen transition.
+	s.sendVideoConfig()
 	if !mediaActive || reacquire {
 		if _, err := s.triggerActive(true); err != nil {
 			s.StopVideo()

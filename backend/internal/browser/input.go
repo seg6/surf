@@ -17,6 +17,8 @@ import (
 
 var schemeRe = regexp.MustCompile(`(?i)^[a-z][a-z0-9+.-]*:`)
 
+const viewportResizeSettle = 120 * time.Millisecond
+
 // NormalizeNavURL turns address-bar input into a URL: scheme kept as-is,
 // bare hosts get https://, everything else becomes a search.
 func NormalizeNavURL(input string) string {
@@ -81,8 +83,10 @@ func (b *Controller) ClientConnected(c *transport.Client) {
 	if t := b.active(); t != nil {
 		b.mu.Lock()
 		u := t.URL
+		fullscreen := t.Fullscreen
 		b.mu.Unlock()
 		c.SendJSON(b.urlMessage(u))
+		c.SendJSON(protocol.BoolEvent{Type: "fullscreen", On: fullscreen})
 		b.pushNavState()
 	}
 }
@@ -126,6 +130,8 @@ func (b *Controller) handleCommand(c *transport.Client, command protocol.Command
 			b.handleAudio(c, m.On)
 		} else if kind == "mobile" {
 			b.handleMobileLayout(m.On)
+		} else if kind == "fullscreen" {
+			b.setPageFullscreen(m.On)
 		}
 		return
 	case *protocol.DialogReplyCommand:
@@ -585,7 +591,7 @@ func (b *Controller) noteAudioLatency(d time.Duration) {
 
 func otherInputCount(counts map[string]int) int {
 	known := map[string]bool{
-		"click": true, "scroll": true, "key": true, "nav": true, "size": true,
+		"click": true, "scroll": true, "key": true, "nav": true, "size": true, "fullscreen": true,
 		"lpdown": true, "lpmove": true, "lpup": true,
 	}
 	n := 0
@@ -598,15 +604,8 @@ func otherInputCount(counts map[string]int) int {
 }
 
 func (b *Controller) handleSize(m *protocol.SizeCommand) {
-	clampDim := func(v, def int) int {
-		if v == 0 {
-			return def
-		}
-		return min(1600, max(320, v))
-	}
 	b.mu.Lock()
-	w := clampDim(m.W, b.viewW)
-	h := clampDim(m.H, b.viewH)
+	w, h := normalizeViewportSize(m.W, m.H, b.viewW, b.viewH)
 	// Chromium's H.264 WebCodecs implementation rejects odd dimensions.
 	// Normalize the viewport itself so the page, compositor surface, raw
 	// tab frame, encoder, and wire header all describe the same pixels.
@@ -621,15 +620,61 @@ func (b *Controller) handleSize(m *protocol.SizeCommand) {
 	if !changed {
 		return
 	}
-	t := b.active()
-	if t == nil {
+	b.scheduleViewportApply()
+}
+
+func normalizeViewportSize(width, height, defaultWidth, defaultHeight int) (int, int) {
+	clampDim := func(value, fallback int) int {
+		if value == 0 {
+			value = fallback
+		}
+		// 64 is the encoder's actual lower bound. A 320-point minimum broke
+		// real phone landscape surfaces such as 480x232 by inventing pixels
+		// that do not exist in the native stream view.
+		return min(1600, max(64, value)) &^ 1
+	}
+	return clampDim(width, defaultWidth), clampDim(height, defaultHeight)
+}
+
+// scheduleViewportApply coalesces the transient layouts emitted while native
+// chrome rotates or enters fullscreen. Chromium's compositor and tabCapture
+// are reconfigured only for the final dimensions, so the authenticated socket
+// and its media subscription stay alive through the transition.
+func (b *Controller) scheduleViewportApply() {
+	b.resizeMu.Lock()
+	if b.resizeClosed {
+		b.resizeMu.Unlock()
 		return
 	}
-	b.applyView(t)
-	profile := adaptiveProfiles[b.profileIndex()]
+	b.resizeGen++
+	generation := b.resizeGen
+	if b.resizeTimer != nil {
+		b.resizeTimer.Stop()
+	}
+	b.resizeTimer = time.AfterFunc(viewportResizeSettle, func() {
+		b.applySettledViewport(generation)
+	})
+	b.resizeMu.Unlock()
+}
+
+func (b *Controller) applySettledViewport(generation uint64) {
+	b.resizeMu.Lock()
+	if b.resizeClosed || generation != b.resizeGen {
+		b.resizeMu.Unlock()
+		return
+	}
+	b.resizeTimer = nil
+	b.resizeMu.Unlock()
+
+	b.mu.Lock()
+	w, h := b.viewW, b.viewH
+	profile := adaptiveProfiles[b.adaptiveProfile]
+	b.mu.Unlock()
+	if tab := b.active(); tab != nil {
+		b.applyView(tab)
+	}
 	maxW, maxH := adaptiveScale(profile, w, h)
-	b.video.SetScaleLimit(maxW, maxH)
-	b.video.SetSize(w, h)
+	b.video.SetViewport(w, h, maxW, maxH)
 }
 
 func (b *Controller) handleTab(m *protocol.TabCommand) {

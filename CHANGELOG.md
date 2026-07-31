@@ -38,6 +38,11 @@ This file records the user-visible changes in every Surf release.
 - Made native-size browser text and page edges substantially sharper with
   constant-quality H.264 at QP 12, retaining a 24 Mbps VBR compatibility
   fallback without changing the low-latency 30 FPS delivery path.
+- Made rotation and fullscreen viewport changes settle atomically, preserving
+  exact small-phone landscape dimensions while keeping the control connection
+  and media subscription alive through a single tab-capture reconfiguration.
+- Synchronized the remote page Fullscreen API with Surf's native fullscreen
+  chrome in both directions, including embedded players such as YouTube.
 
 ## 0.9.0 - 2026-07-31
 

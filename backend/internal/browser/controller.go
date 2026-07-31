@@ -33,9 +33,10 @@ type Tab struct {
 	loading           bool
 	awaitingPageFrame bool
 
-	Zoom     float64 // page zoom, 1..3; applied via device metrics
-	IconKey  string  // favicon cache key (origin), "" when unknown
-	Security string  // last Security.securityStateChanged state, "" unknown
+	Zoom       float64 // page zoom, 1..3; applied via device metrics
+	IconKey    string  // favicon cache key (origin), "" when unknown
+	Security   string  // last Security.securityStateChanged state, "" unknown
+	Fullscreen bool    // page Fullscreen API state
 }
 
 type Controller struct {
@@ -46,16 +47,20 @@ type Controller struct {
 	commands chan controllerCommand
 	events   chan cdp.Event
 
-	mu        sync.Mutex
-	tabs      map[int]*Tab
-	byTarget  map[string]*Tab
-	bySession map[string]*Tab
-	seq       int
-	activeID  int
-	activeGen uint64
-	viewW     int
-	viewH     int
-	mobile    bool
+	mu           sync.Mutex
+	tabs         map[int]*Tab
+	byTarget     map[string]*Tab
+	bySession    map[string]*Tab
+	seq          int
+	activeID     int
+	activeGen    uint64
+	viewW        int
+	viewH        int
+	mobile       bool
+	resizeMu     sync.Mutex
+	resizeTimer  *time.Timer
+	resizeGen    uint64
+	resizeClosed bool
 
 	store        *Store
 	icons        map[string]*favicon // origin -> icon, guarded by b.mu
@@ -313,6 +318,14 @@ func (b *Controller) newTargetParams(rawURL string) map[string]any {
 
 func (b *Controller) Shutdown() {
 	b.shutdown.Do(func() {
+		b.resizeMu.Lock()
+		b.resizeClosed = true
+		b.resizeGen++
+		if b.resizeTimer != nil {
+			b.resizeTimer.Stop()
+			b.resizeTimer = nil
+		}
+		b.resizeMu.Unlock()
 		// Close the source first: encoder/audio startup may be waiting for an
 		// extension response while holding its pipeline lock. Closing capture
 		// wakes those waits so shutdown cannot inherit their 12-second timeout.
@@ -492,5 +505,7 @@ func (b *Controller) onEvent(ev cdp.Event) {
 		b.onFileChooserOpened(ev)
 	case "Security.securityStateChanged":
 		b.onSecurityStateChanged(ev)
+	case "Runtime.bindingCalled":
+		b.onFullscreenBinding(ev)
 	}
 }

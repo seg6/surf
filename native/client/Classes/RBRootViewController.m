@@ -127,6 +127,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
 // Page state
 @property(nonatomic, assign) BOOL loading;
 @property(nonatomic, assign) BOOL fullscreen;
+@property(nonatomic, assign) BOOL viewportTransitioning;
 @property(nonatomic, assign) BOOL findVisible;
 @property(nonatomic, assign) BOOL debugVisible;
 @property(nonatomic, strong) NSArray *lastTabs;
@@ -369,8 +370,8 @@ static CGFloat RBEvenExtent(CGFloat value) {
     self.findBar.hidden = self.fullscreen || !self.findVisible;
     self.suggestPanel.hidden = self.fullscreen;
     self.restoreButton.hidden = !self.fullscreen;
-    self.fullscreenBackButton.hidden = !self.fullscreen;
-    self.fullscreenForwardButton.hidden = !self.fullscreen;
+    self.fullscreenBackButton.hidden = YES;
+    self.fullscreenForwardButton.hidden = YES;
     self.fullscreenBackButton.enabled = self.canGoBack;
     self.fullscreenForwardButton.enabled = self.canGoForward;
 
@@ -434,16 +435,51 @@ static CGFloat RBEvenExtent(CGFloat value) {
 
 - (void)willAnimateRotationToInterfaceOrientation:(UIInterfaceOrientation)toInterfaceOrientation duration:(NSTimeInterval)duration {
     [super willAnimateRotationToInterfaceOrientation:toInterfaceOrientation duration:duration];
+    self.viewportTransitioning = YES;
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(sendCurrentViewportSize) object:nil];
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(sendCurrentViewportSizeForcedAfterTransition) object:nil];
     [self.view setNeedsLayout];
 }
 
-- (void)scheduleViewportUpdate {
+- (void)didRotateFromInterfaceOrientation:(UIInterfaceOrientation)fromInterfaceOrientation {
+    [super didRotateFromInterfaceOrientation:fromInterfaceOrientation];
+    [self finishViewportTransition];
+}
+
+- (void)viewWillTransitionToSize:(CGSize)size
+       withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
+    [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
+    self.viewportTransitioning = YES;
     [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(sendCurrentViewportSize) object:nil];
-    [self performSelector:@selector(sendCurrentViewportSize) withObject:nil afterDelay:0.08];
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(sendCurrentViewportSizeForcedAfterTransition) object:nil];
+    __weak RBRootViewController *weakSelf = self;
+    [coordinator animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext> context) {
+        [weakSelf finishViewportTransition];
+    }];
+}
+
+- (void)finishViewportTransition {
+    self.viewportTransitioning = NO;
+    [self.view setNeedsLayout];
+    [self.view layoutIfNeeded];
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(sendCurrentViewportSize) object:nil];
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(sendCurrentViewportSizeForcedAfterTransition) object:nil];
+    [self performSelector:@selector(sendCurrentViewportSizeForcedAfterTransition)
+               withObject:nil afterDelay:0.10];
+}
+
+- (void)scheduleViewportUpdate {
+    if (self.viewportTransitioning) return;
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(sendCurrentViewportSize) object:nil];
+    [self performSelector:@selector(sendCurrentViewportSize) withObject:nil afterDelay:0.10];
 }
 
 - (void)sendCurrentViewportSize {
     [self sendCurrentViewportSizeForced:NO];
+}
+
+- (void)sendCurrentViewportSizeForcedAfterTransition {
+    [self sendCurrentViewportSizeForced:YES];
 }
 
 - (void)sendCurrentViewportSizeForced:(BOOL)force {
@@ -952,6 +988,8 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
         }
     } else if ([t isEqualToString:@"video-config"]) {
         [self handleVideoConfig:message];
+    } else if ([t isEqualToString:@"fullscreen"]) {
+        [self setFullscreen:[[message objectForKey:@"on"] boolValue] notifyPage:NO];
     } else if ([t isEqualToString:@"audio-config"]) {
         if ([[message objectForKey:@"ok"] boolValue]) {
             [self.mediaPipeline configureAudioSampleRate:[[message objectForKey:@"rate"] intValue]
@@ -1536,8 +1574,24 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
 }
 
 - (void)toggleFullscreen {
-    self.fullscreen = !self.fullscreen;
+    [self setFullscreen:!self.fullscreen notifyPage:YES];
+}
+
+- (void)setFullscreen:(BOOL)fullscreen notifyPage:(BOOL)notifyPage {
+    if (self.fullscreen == fullscreen) {
+        if (notifyPage)
+            [self.session sendMessage:@{@"t": @"fullscreen", @"on": [NSNumber numberWithBool:fullscreen]}];
+        return;
+    }
+    self.viewportTransitioning = YES;
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(sendCurrentViewportSize) object:nil];
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(sendCurrentViewportSizeForcedAfterTransition) object:nil];
+    self.fullscreen = fullscreen;
     [self.view setNeedsLayout];
+    [self.view layoutIfNeeded];
+    [self finishViewportTransition];
+    if (notifyPage)
+        [self.session sendMessage:@{@"t": @"fullscreen", @"on": [NSNumber numberWithBool:fullscreen]}];
 }
 
 - (void)fullscreenBackTapped:(id)sender {

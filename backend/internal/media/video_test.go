@@ -147,6 +147,28 @@ func TestResizeRestartsAtClientDerivedSize(t *testing.T) {
 	}
 }
 
+func TestViewportAndScaleChangeUseOneEncoderGeneration(t *testing.T) {
+	var starts [][2]int
+	stops := 0
+	s := NewVideoPipeline(VideoPipelineConfig{
+		W: 768, H: 950, CaptureW: 768, CaptureH: 950,
+		Start: func(width, height, bitrateK int) error {
+			starts = append(starts, [2]int{width, height})
+			return nil
+		},
+		Stop: func() { stops++ },
+	})
+	defer s.Shutdown()
+	s.Subscribe()
+	s.SetViewport(1024, 694, 896, 607)
+	if len(starts) != 2 || starts[1] != [2]int{896, 606} {
+		t.Fatalf("starts=%v", starts)
+	}
+	if stops != 1 {
+		t.Fatalf("stops=%d, want one viewport restart", stops)
+	}
+}
+
 func TestResizeStartFailureKeepsSubscriberForAutomaticRetry(t *testing.T) {
 	var starts atomic.Int64
 	s := NewVideoPipeline(VideoPipelineConfig{

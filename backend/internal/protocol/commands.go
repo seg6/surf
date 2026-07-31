@@ -142,7 +142,7 @@ func DecodeCommand(data []byte) (Command, error) {
 		} else {
 			dst = &URLCommand{}
 		}
-	case "audio", "mobile":
+	case "audio", "mobile", "fullscreen":
 		dst = &ToggleCommand{}
 	case "click", "lpdown", "lpmove", "hit":
 		dst = &PointCommand{}

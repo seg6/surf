@@ -79,6 +79,20 @@ func TestIsActiveSession(t *testing.T) {
 	}
 }
 
+func TestNormalizeViewportPreservesPhoneLandscape(t *testing.T) {
+	w, h := normalizeViewportSize(480, 232, 768, 950)
+	if w != 480 || h != 232 {
+		t.Fatalf("phone landscape normalized to %dx%d, want 480x232", w, h)
+	}
+}
+
+func TestNormalizeViewportUsesEvenEncoderBounds(t *testing.T) {
+	w, h := normalizeViewportSize(31, 2001, 768, 950)
+	if w != 64 || h != 1600 {
+		t.Fatalf("normalized bounds = %dx%d, want 64x1600", w, h)
+	}
+}
+
 func TestPageOrigin(t *testing.T) {
 	cases := map[string]string{
 		"https://example.com/path":      "https://example.com",

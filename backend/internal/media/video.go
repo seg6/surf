@@ -272,6 +272,35 @@ func (s *VideoPipeline) SetSize(width, height int) {
 	s.resetSubsForGenLocked()
 }
 
+// SetViewport changes the capture dimensions and adaptive scale as one
+// encoder generation. Calling SetScaleLimit and SetSize separately can tear
+// down WebCodecs twice for a single rotation when both values change.
+func (s *VideoPipeline) SetViewport(width, height, maxWidth, maxHeight int) {
+	if width < 64 || height < 64 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	codedW, codedH := VideoPipelineConfig{
+		ScaleMaxW: maxWidth,
+		ScaleMaxH: maxHeight,
+	}.codedSize(width, height)
+	if width == s.cfg.CaptureW && height == s.cfg.CaptureH &&
+		maxWidth == s.cfg.ScaleMaxW && maxHeight == s.cfg.ScaleMaxH &&
+		codedW == s.cfg.W && codedH == s.cfg.H {
+		return
+	}
+	s.cfg.CaptureW, s.cfg.CaptureH = width, height
+	s.cfg.ScaleMaxW, s.cfg.ScaleMaxH = maxWidth, maxHeight
+	s.cfg.W, s.cfg.H = codedW, codedH
+	if s.running {
+		log.Printf("stream: settling tab encoder capture=%dx%d coded=%dx%d", width, height, codedW, codedH)
+		s.stopLocked()
+		s.startLocked()
+	}
+	s.resetSubsForGenLocked()
+}
+
 func (s *VideoPipeline) SetScaleLimit(maxWidth, maxHeight int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

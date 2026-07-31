@@ -474,6 +474,10 @@ func (b *Controller) switchActive(id int) {
 		return
 	}
 	b.hub.BroadcastJSON(b.urlMessage(url))
+	b.mu.Lock()
+	fullscreen := next.Fullscreen
+	b.mu.Unlock()
+	b.hub.BroadcastJSON(protocol.BoolEvent{Type: "fullscreen", On: fullscreen})
 	b.pushNavState()
 	b.broadcastTabs()
 }

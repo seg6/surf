@@ -30,6 +30,7 @@ func (b *Controller) setupFeatures(t *Tab) {
 	b.mu.Unlock()
 	b.setupFileChooser(s) // upload interception (M2.2)
 	b.setupSecurity(s)    // TLS state events (M2.5)
+	b.setupPageFullscreen(s)
 }
 
 // onURLChanged fires on every main-frame URL change and records history.
