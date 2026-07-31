@@ -40,6 +40,28 @@ func pairDevice(t *testing.T, manager *Manager) (*rsa.PrivateKey, Device) {
 	return key, manager.ListDevices()[0]
 }
 
+func TestInvalidDeviceRegistryIsPreservedAndStartsRevoked(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, "devices.json")
+	if err := os.WriteFile(path, []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := New(home, strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manager.DeviceCount() != 0 {
+		t.Fatalf("device count=%d", manager.DeviceCount())
+	}
+	backups, err := filepath.Glob(path + ".invalid-*")
+	if err != nil || len(backups) != 1 {
+		t.Fatalf("registry backups=%v err=%v", backups, err)
+	}
+	if data, err := os.ReadFile(backups[0]); err != nil || string(data) != "{broken" {
+		t.Fatalf("backup=%q err=%v", data, err)
+	}
+}
+
 func TestPairingRequiresServerInvitationAndClientConfirmation(t *testing.T) {
 	manager, err := New(t.TempDir(), "server")
 	if err != nil {

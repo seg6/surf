@@ -99,6 +99,25 @@ manual install, run `uicache` and respring if the icon does not appear.
 On older systems, use `su mobile -c uicache`; running it as `root` may fail to
 open SpringBoard's cache.
 
+## The desktop opens but the backend does not start
+
+Check **Settings > Logs** before removing state. Surf retries transient daemon
+failures with bounded backoff and records the actual startup error in
+`$SURF_HOME/desktop.log`.
+
+A force-closed tray should not leave a daemon, Chromium tree, listener, or
+backend lock behind. Empty `.lock` files are normal and do not hold a lock by
+themselves. Dead runtime descriptors and malformed replaceable state are backed
+up and repaired automatically. Repeated Chromium startup failures preserve the
+old profile under `SURF_HOME` and retry with clean browser state while retaining
+the server identity and pairings.
+
+Do not delete all of `SURF_HOME` as a first repair step: that also destroys the
+pinned server identity and forces every client to pair again. If the log reports
+an invalid TLS identity, preserve the directory and repair or deliberately
+replace only `identity/`; clients will correctly reject a replacement identity
+until explicitly forgotten and paired again.
+
 ## Collect logs
 
 Desktop logs are available from the Surf tray Settings page. The native client

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"surf-backend/internal/auth"
 	"surf-backend/internal/browser"
@@ -63,8 +64,21 @@ func Serve() error {
 	hub.SetHandler(b)
 	defer b.Shutdown()
 	if err := b.Start(); err != nil {
+		recoverProfile, recoveryErr := noteBrowserStartupFailure(cfg.SurfHome, cfg.Profile, time.Now())
+		if recoveryErr != nil {
+			log.Printf("browser recovery state: %v", recoveryErr)
+		}
+		if recoverProfile {
+			backup, backupErr := chromium.QuarantineProfile(cfg.Profile)
+			if backupErr != nil {
+				return fmt.Errorf("browser startup failed: %w; profile recovery failed: %v", err, backupErr)
+			}
+			log.Printf("browser startup failed twice; profile preserved at %s", backup)
+			return fmt.Errorf("browser startup failed: %w; profile was preserved and reset for retry", err)
+		}
 		return err
 	}
+	clearBrowserStartupFailures(cfg.SurfHome)
 	srv := web.New(cfg, a, ident, hub)
 	srv.SetHealthCheck(b.Health)
 	srv.SetStats(b.Stats)

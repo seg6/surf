@@ -54,7 +54,11 @@ func ProtectChildren() func() {
 		return func() {}
 	}
 	log.Printf("runtime: chromium will be killed automatically if Surf exits unexpectedly")
-	return func() { _ = windows.CloseHandle(job) }
+	// Do not close job explicitly: this process is itself a member, so
+	// JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE would terminate Surf before Serve can
+	// report an error or finish graceful shutdown. The OS closes the handle
+	// when the daemon process exits, which is exactly the lifetime we need.
+	return func() {}
 }
 
 func hiddenCommand(path string, args ...string) *exec.Cmd {
@@ -98,6 +102,8 @@ func Start(path string, args []string, opts Options) (*Started, error) {
 			return nil, err
 		}
 		started.Stdout = r
+	} else if opts.StdoutWriter != nil {
+		cmd.Stdout = opts.StdoutWriter
 	}
 	if opts.Stderr {
 		r, err := cmd.StderrPipe()
@@ -105,6 +111,8 @@ func Start(path string, args []string, opts Options) (*Started, error) {
 			return nil, err
 		}
 		started.Stderr = r
+	} else if opts.StderrWriter != nil {
+		cmd.Stderr = opts.StderrWriter
 	}
 	if err := cmd.Start(); err != nil {
 		return nil, err

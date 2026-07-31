@@ -29,9 +29,11 @@ import (
 
 	"fyne.io/systray"
 	"surf-backend/internal/app"
+	"surf-backend/internal/atomicfile"
 	"surf-backend/internal/config"
 	"surf-backend/internal/control"
 	"surf-backend/internal/process"
+	"surf-backend/internal/statefile"
 	"surf-backend/internal/updater"
 	"surf-backend/internal/web"
 )
@@ -57,13 +59,15 @@ type desktopApp struct {
 	manageURL     string
 	manageHTTP    *http.Server
 
-	cmd  *exec.Cmd
-	done chan struct{}
+	cmd         *process.Started
+	done        chan struct{}
+	parentGuard io.WriteCloser
 
 	closing        bool
 	restartTimer   *time.Timer
 	restartAttempt int
 	killProcess    func(int)
+	matchesProcess func(int, string) bool
 
 	statusItem *systray.MenuItem
 	updateItem *systray.MenuItem
@@ -210,7 +214,7 @@ func newDesktopApp() (*desktopApp, error) {
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return nil, err
 	}
-	cfg, err := loadDesktopConfig(home)
+	cfg, recoveredConfig, err := loadDesktopConfigRecovering(home)
 	if err != nil {
 		return nil, err
 	}
@@ -242,13 +246,17 @@ func newDesktopApp() (*desktopApp, error) {
 		home: home, manageChild: true,
 		baseURL:    "https://127.0.0.1:" + strconv.Itoa(cfg.Port),
 		serverName: cfg.ServerName, publicAddress: cfg.PublicAddress,
-		logPath: logPath, logFile: logFile, killProcess: process.Kill,
+		logPath: logPath, logFile: logFile,
+		killProcess: process.Kill, matchesProcess: process.MatchesExecutable,
 	}
 	if err := app.startManagementServer(); err != nil {
 		_ = logFile.Close()
 		return nil, err
 	}
 	fmt.Fprintln(logFile, "surf: management UI", app.manageURL)
+	if recoveredConfig != "" {
+		fmt.Fprintln(logFile, "surf: recovered invalid desktop settings; backup:", recoveredConfig)
+	}
 	return app, nil
 }
 
@@ -317,7 +325,12 @@ func (a *desktopApp) takeControlOfExistingBackend() error {
 		return nil
 	}
 	if err != nil {
-		return err
+		backup, backupErr := statefile.Quarantine(control.Path(a.home), "invalid")
+		if backupErr != nil {
+			return fmt.Errorf("discard invalid daemon descriptor: %w (original error: %v)", backupErr, err)
+		}
+		a.logf("surf: ignored invalid daemon descriptor; backup: %s (%v)\n", backup, err)
+		return nil
 	}
 	client, err := a.backendHTTPClient(time.Second)
 	if err != nil {
@@ -326,6 +339,20 @@ func (a *desktopApp) takeControlOfExistingBackend() error {
 	probeURL := "https://127.0.0.1" + web.APIRoot + "/admin/devices"
 	response, err := client.Get(probeURL)
 	if err != nil {
+		if !process.Running(descriptor.PID) {
+			a.logf("surf: removed stale daemon descriptor for exited pid=%d\n", descriptor.PID)
+			return control.RemoveOwned(a.home, descriptor.AdminToken)
+		}
+		self, selfErr := os.Executable()
+		if selfErr == nil && a.matchesProcess != nil && a.matchesProcess(descriptor.PID, self) {
+			a.logf("surf: taking control from unresponsive backend pid=%d after executable verification (%v)\n", descriptor.PID, err)
+			kill := a.killProcess
+			if kill == nil {
+				kill = process.Kill
+			}
+			kill(descriptor.PID)
+			return control.RemoveOwned(a.home, descriptor.AdminToken)
+		}
 		return fmt.Errorf("verify existing daemon pid=%d: %w", descriptor.PID, err)
 	}
 	_, _ = io.Copy(io.Discard, response.Body)
@@ -372,33 +399,39 @@ func (a *desktopApp) startBackend() error {
 		a.mu.Unlock()
 		return err
 	}
-	cmd := exec.Command(self, "daemon")
-	cmd.Env = append(filteredEnv(os.Environ(), "SURF_HOME", "SURF_SERVER_NAME", "SURF_PUBLIC_ADDRESS", "BIND_ADDR", "PORT"),
+	env := append(filteredEnv(os.Environ(), "SURF_HOME", "SURF_SERVER_NAME", "SURF_PUBLIC_ADDRESS", "BIND_ADDR", "PORT", "SURF_PARENT_GUARD"),
 		"SURF_HOME="+a.home,
 		"SURF_SERVER_NAME="+serverName,
 		"SURF_PUBLIC_ADDRESS="+publicAddress,
 		"BIND_ADDR=0.0.0.0",
 		"PORT="+strings.TrimPrefix(baseURL, "https://127.0.0.1:"),
+		"SURF_PARENT_GUARD=1",
 	)
-	cmd.Stdout, cmd.Stderr = a.logFile, a.logFile
 	done := make(chan struct{})
-	if err := cmd.Start(); err != nil {
+	cmd, err := process.Start(self, []string{"daemon"}, process.Options{
+		Env: env, Stdin: true, StdoutWriter: a.logFile, StderrWriter: a.logFile,
+	})
+	if err != nil {
 		a.mu.Unlock()
 		a.setStatus("Surf failed to start")
 		a.scheduleBackendRestart()
 		return err
 	}
-	a.cmd, a.done = cmd, done
+	a.cmd, a.done, a.parentGuard = cmd, done, cmd.Stdin
 	a.mu.Unlock()
 	a.logf("surf: backend started pid=%d\n", cmd.Process.Pid)
 	a.setStatus("Surf is starting…")
 	go func() {
-		err := cmd.Wait()
+		err := <-cmd.Done
 		a.mu.Lock()
 		unexpected := a.cmd == cmd && !a.closing
 		if a.cmd == cmd {
 			a.cmd = nil
 			a.done = nil
+			if a.parentGuard != nil {
+				_ = a.parentGuard.Close()
+				a.parentGuard = nil
+			}
 		}
 		a.mu.Unlock()
 		close(done)
@@ -420,10 +453,11 @@ func (a *desktopApp) stopBackend() {
 	a.mu.Lock()
 	a.cancelBackendRestartLocked()
 	a.restartAttempt = 0
-	cmd, done := a.cmd, a.done
+	cmd, done, parentGuard := a.cmd, a.done, a.parentGuard
 	if cmd != nil {
 		a.cmd = nil
 		a.done = nil
+		a.parentGuard = nil
 	}
 	a.mu.Unlock()
 	if cmd == nil || cmd.Process == nil {
@@ -437,6 +471,9 @@ func (a *desktopApp) stopBackend() {
 	case <-time.After(3 * time.Second):
 		_ = cmd.Process.Kill()
 		<-done
+	}
+	if parentGuard != nil {
+		_ = parentGuard.Close()
 	}
 }
 
@@ -1083,6 +1120,19 @@ func loadDesktopConfig(home string) (desktopConfig, error) {
 	return cfg, nil
 }
 
+func loadDesktopConfigRecovering(home string) (desktopConfig, string, error) {
+	cfg, err := loadDesktopConfig(home)
+	if err == nil {
+		return cfg, "", nil
+	}
+	path := filepath.Join(home, "desktop.json")
+	backup, backupErr := statefile.Quarantine(path, "invalid")
+	if backupErr != nil {
+		return desktopConfig{}, "", fmt.Errorf("recover desktop config: %w (original error: %v)", backupErr, err)
+	}
+	return desktopConfig{}, backup, nil
+}
+
 func saveDesktopConfig(home string, cfg desktopConfig) error {
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -1094,14 +1144,7 @@ func saveDesktopConfig(home string, cfg desktopConfig) error {
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
-	// Windows does not let Rename replace an existing file. The config is
-	// deliberately tiny, so remove the old copy before installing the complete
-	// temporary file on every platform.
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		_ = os.Remove(tmp)
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := atomicfile.Replace(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}

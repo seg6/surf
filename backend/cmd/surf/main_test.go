@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -45,6 +46,115 @@ func TestDesktopConfigRoundTrip(t *testing.T) {
 	got, err = loadDesktopConfig(home)
 	if err != nil || got != want {
 		t.Fatalf("replacement config=%+v err=%v", got, err)
+	}
+}
+
+func TestInvalidDesktopConfigIsPreservedAndReset(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, "desktop.json")
+	if err := os.WriteFile(path, []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, backup, err := loadDesktopConfigRecovering(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg != (desktopConfig{}) {
+		t.Fatalf("recovered config=%+v", cfg)
+	}
+	if backup == "" {
+		t.Fatal("invalid settings were not preserved")
+	}
+	if data, err := os.ReadFile(backup); err != nil || string(data) != "{broken" {
+		t.Fatalf("backup=%q err=%v", data, err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("invalid settings remain: %v", err)
+	}
+}
+
+func TestDesktopParentGuardExitsOnEOF(t *testing.T) {
+	t.Setenv("SURF_PARENT_GUARD", "1")
+	reader, writer := io.Pipe()
+	exited := make(chan int, 1)
+	watchDesktopParent(reader, func(code int) { exited <- code })
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case code := <-exited:
+		if code != 0 {
+			t.Fatalf("exit code=%d", code)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("daemon did not react to desktop parent EOF")
+	}
+}
+
+func TestInvalidDaemonDescriptorIsPreservedAndIgnored(t *testing.T) {
+	home := t.TempDir()
+	path := control.Path(home)
+	if err := os.WriteFile(path, []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	killed := false
+	app := &desktopApp{
+		home: home, killProcess: func(int) { killed = true },
+		matchesProcess: func(int, string) bool { return false },
+	}
+	if err := app.takeControlOfExistingBackend(); err != nil {
+		t.Fatal(err)
+	}
+	if killed {
+		t.Fatal("invalid descriptor authorized a process kill")
+	}
+	backups, err := filepath.Glob(path + ".invalid-*")
+	if err != nil || len(backups) != 1 {
+		t.Fatalf("descriptor backups=%v err=%v", backups, err)
+	}
+}
+
+func TestDesktopTakesControlOfUnresponsiveVerifiedDaemon(t *testing.T) {
+	home := t.TempDir()
+	server, descriptor := testDaemonDescriptor(t, home, func(w http.ResponseWriter, _ *http.Request, _ string) {
+		w.WriteHeader(http.StatusOK)
+	})
+	server.Close()
+	killedPID := 0
+	app := &desktopApp{
+		home:        home,
+		killProcess: func(pid int) { killedPID = pid },
+		matchesProcess: func(pid int, executable string) bool {
+			return pid == descriptor.PID && executable != ""
+		},
+	}
+	if err := app.takeControlOfExistingBackend(); err != nil {
+		t.Fatal(err)
+	}
+	if killedPID != descriptor.PID {
+		t.Fatalf("killed pid=%d, want %d", killedPID, descriptor.PID)
+	}
+	if _, err := control.Load(home); !errors.Is(err, control.ErrNotRunning) {
+		t.Fatalf("daemon descriptor remains after takeover: %v", err)
+	}
+}
+
+func TestDesktopRemovesDescriptorForExitedDaemon(t *testing.T) {
+	home := t.TempDir()
+	server, descriptor := testDaemonDescriptor(t, home, func(w http.ResponseWriter, _ *http.Request, _ string) {
+		w.WriteHeader(http.StatusOK)
+	})
+	server.Close()
+	descriptor.PID = 1<<30 - 1
+	if err := control.Write(home, descriptor); err != nil {
+		t.Fatal(err)
+	}
+	app := &desktopApp{home: home, killProcess: func(int) { t.Fatal("stale PID was killed") }}
+	if err := app.takeControlOfExistingBackend(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.Load(home); !errors.Is(err, control.ErrNotRunning) {
+		t.Fatalf("stale descriptor remains: %v", err)
 	}
 }
 

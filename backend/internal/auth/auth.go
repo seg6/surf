@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math/big"
 	"net"
 	"net/http"
@@ -26,6 +27,7 @@ import (
 	"unicode"
 
 	"surf-backend/internal/atomicfile"
+	"surf-backend/internal/statefile"
 )
 
 const (
@@ -601,7 +603,8 @@ func (m *Manager) pruneLocked(now time.Time) {
 }
 
 func (m *Manager) loadDevices() error {
-	data, err := os.ReadFile(filepath.Join(m.home, "devices.json"))
+	path := filepath.Join(m.home, "devices.json")
+	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -610,7 +613,12 @@ func (m *Manager) loadDevices() error {
 	}
 	var registry registryFile
 	if err := json.Unmarshal(data, &registry); err != nil {
-		return fmt.Errorf("parse devices: %w", err)
+		backup, backupErr := statefile.Quarantine(path, "invalid")
+		if backupErr != nil {
+			return fmt.Errorf("parse devices: %w (quarantine failed: %v)", err, backupErr)
+		}
+		log.Printf("auth: ignored invalid device registry; backup: %s (%v)", backup, err)
+		return nil
 	}
 	for _, device := range registry.Devices {
 		if device != nil && device.ID != "" {

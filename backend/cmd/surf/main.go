@@ -4,6 +4,8 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"os"
 
 	"surf-backend/internal/app"
@@ -38,6 +40,7 @@ func main() {
 		if len(args) != 1 {
 			err = fmt.Errorf("usage: surf daemon")
 		} else {
+			watchDesktopParent(os.Stdin, os.Exit)
 			err = app.Serve()
 		}
 	case "status":
@@ -78,9 +81,23 @@ func main() {
 		err = fmt.Errorf("unknown command %q", args[0])
 	}
 	if err != nil {
+		if args[0] == "daemon" {
+			log.Printf("surf daemon: %v", err)
+		}
 		fmt.Fprintln(os.Stderr, "surf:", err)
 		os.Exit(1)
 	}
+}
+
+func watchDesktopParent(parent io.Reader, exit func(int)) {
+	if os.Getenv("SURF_PARENT_GUARD") != "1" {
+		return
+	}
+	go func() {
+		_, _ = io.Copy(io.Discard, parent)
+		log.Printf("surf daemon: desktop parent exited")
+		exit(0)
+	}()
 }
 
 func applyHomeFlag(args []string) ([]string, error) {

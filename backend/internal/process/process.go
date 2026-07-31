@@ -18,6 +18,11 @@ type Options struct {
 	Stdin  bool
 	Stdout bool
 	Stderr bool
+	// StdoutWriter and StderrWriter attach existing destinations instead of
+	// requesting pipes. They are useful for supervised children whose output
+	// should be appended directly to the parent's log.
+	StdoutWriter io.Writer
+	StderrWriter io.Writer
 }
 
 // Started is a launched child process plus whichever pipes Options asked

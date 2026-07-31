@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -45,5 +46,31 @@ func TestLoadOrCreatePersistsIdentity(t *testing.T) {
 	}
 	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
 		t.Fatalf("private key mode = %o", info.Mode().Perm())
+	}
+}
+
+func TestLoadOrCreateNeverSilentlyReplacesInvalidIdentity(t *testing.T) {
+	home := t.TempDir()
+	identity, err := LoadOrCreate(home, "Test Surf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(home, "identity", keyFile)
+	if err := os.WriteFile(keyPath, []byte("invalid key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadOrCreate(home, "Test Surf"); err == nil {
+		t.Fatal("invalid pinned identity was silently replaced")
+	}
+	certificate, err := os.ReadFile(filepath.Join(home, "identity", certFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(certificate), "BEGIN CERTIFICATE") || identity.Fingerprint == "" {
+		t.Fatal("original certificate was not preserved")
+	}
+	key, err := os.ReadFile(keyPath)
+	if err != nil || string(key) != "invalid key" {
+		t.Fatalf("invalid key changed: %q err=%v", key, err)
 	}
 }

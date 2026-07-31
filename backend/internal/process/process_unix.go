@@ -52,6 +52,8 @@ func Start(path string, args []string, opts Options) (*Started, error) {
 			return nil, err
 		}
 		started.Stdout = r
+	} else if opts.StdoutWriter != nil {
+		cmd.Stdout = opts.StdoutWriter
 	}
 	if opts.Stderr {
 		r, err := cmd.StderrPipe()
@@ -59,6 +61,8 @@ func Start(path string, args []string, opts Options) (*Started, error) {
 			return nil, err
 		}
 		started.Stderr = r
+	} else if opts.StderrWriter != nil {
+		cmd.Stderr = opts.StderrWriter
 	}
 	if err := cmd.Start(); err != nil {
 		return nil, err

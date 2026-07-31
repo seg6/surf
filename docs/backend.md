@@ -104,9 +104,24 @@ $SURF_HOME/daemon.json
 commands use it to find and authenticate the daemon's loopback TLS control
 listener; they never start a second browser or create a server identity.
 
+Desktop Surf owns its managed daemon through a private parent pipe. Normal
+Quit performs a graceful shutdown; if the tray is force-closed, the pipe closes
+and the daemon exits with its Chromium process tree. `desktop.lock` and
+`server.lock` are kernel-owned locks: their empty files may remain on disk, but
+the locks themselves are released when their owner exits.
+
 The browser profile, downloads, uploads, managed browser, updates, and desktop
 configuration also live below `SURF_HOME`. Back up the entire directory if you
 want to preserve the server identity and existing pairings.
+
+Replaceable state recovers conservatively. Invalid desktop settings, device
+registries, and runtime descriptors are moved beside the original with an
+`.invalid-<timestamp>` suffix. After two browser startup failures within ten
+minutes, Surf preserves the Chromium profile as
+`profile.startup-failed-<timestamp>`, restores Surf bookmarks and history into
+a clean profile, and retries. This recovery never replaces the pinned
+`identity/server.crt` or `identity/server.key`; an invalid server identity stays
+failed closed and requires an explicit owner decision.
 
 ## Versioned API
 

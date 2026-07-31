@@ -2,6 +2,21 @@
 
 This file records the user-visible changes in every Surf release.
 
+## 0.10.2 - 2026-08-01
+
+- Prevented a force-closed desktop tray from leaving its managed daemon,
+  Chromium tree, listener, or backend lock behind.
+- Made desktop startup remove dead runtime descriptors and safely take control
+  of an unresponsive process only after verifying the Surf executable.
+- Added targeted recovery for malformed desktop settings and device registries,
+  preserving invalid files for diagnosis instead of requiring all Surf state to
+  be deleted.
+- Added bounded Chromium-profile recovery after repeated startup failures. Surf
+  preserves the failed profile plus its TLS identity, pairing state, bookmarks,
+  and history before retrying with clean browser state.
+- Fixed Windows daemon shutdown so startup errors reach the supervisor and
+  `desktop.log` with their real nonzero exit status.
+
 ## 0.10.1 - 2026-07-31
 
 - Made the Windows tray authenticate and take ownership of an existing Surf
