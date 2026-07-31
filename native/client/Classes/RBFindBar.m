@@ -60,12 +60,22 @@
     CGFloat w = self.bounds.size.width;
     CGFloat h = self.bounds.size.height;
     CGFloat y = floorf((h - 28.0) / 2.0);
-    self.field.frame = CGRectMake(8.0, y, MIN(320.0, w * 0.42), 28.0);
+    BOOL compact = w < 520.0;
+    CGFloat buttonW = compact ? 36.0 : 40.0;
+    CGFloat doneW = compact ? 52.0 : 56.0;
+    CGFloat margin = compact ? 6.0 : 8.0;
+    CGFloat doneX = w - doneW - margin;
+    CGFloat fieldW = compact
+        ? MAX(80.0, doneX - margin - buttonW * 2.0 - 6.0 - margin)
+        : MIN(320.0, w * 0.42);
+    self.field.frame = CGRectMake(margin, y, fieldW, 28.0);
     CGFloat x = CGRectGetMaxX(self.field.frame) + 4.0;
-    self.prevButton.frame = CGRectMake(x, 0.0, 40.0, h);
-    self.nextButton.frame = CGRectMake(x + 40.0, 0.0, 40.0, h);
-    self.stateLabel.frame = CGRectMake(x + 88.0, 0.0, 120.0, h);
-    self.doneButton.frame = CGRectMake(w - 64.0, 0.0, 56.0, h);
+    self.prevButton.frame = CGRectMake(x, 0.0, buttonW, h);
+    self.nextButton.frame = CGRectMake(x + buttonW, 0.0, buttonW, h);
+    CGFloat stateX = x + buttonW * 2.0 + 8.0;
+    self.stateLabel.hidden = compact;
+    self.stateLabel.frame = CGRectMake(stateX, 0.0, MAX(0.0, doneX - stateX - 6.0), h);
+    self.doneButton.frame = CGRectMake(doneX, 0.0, doneW, h);
 }
 
 - (void)focusField {

@@ -91,7 +91,7 @@ func (cfg LaunchConfig) Args() []string {
 		"--disable-popup-blocking", "--no-first-run", "--no-default-browser-check",
 		"--disable-session-crashed-bubble", "--hide-crash-restore-bubble", "--noerrdialogs",
 		"--hide-scrollbars",
-		"--disable-background-networking", "--disable-sync",
+		"--disable-sync",
 		// The anti-throttling set puppeteer always passed: without these,
 		// Chromium can treat itself as backgrounded/occluded and throttle or
 		// stop producing compositor frames. Headless removes most of the
@@ -102,7 +102,7 @@ func (cfg LaunchConfig) Args() []string {
 		"--disable-renderer-backgrounding",
 		"--disable-hang-monitor",
 		"--disable-ipc-flooding-protection",
-		"--disable-breakpad", "--disable-component-update",
+		"--disable-breakpad",
 		"--disable-default-apps", "--disable-prompt-on-repost",
 		"--allow-pre-commit-input", "--force-color-profile=srgb",
 		"--metrics-recording-only", "--password-store=basic", "--use-mock-keychain",

@@ -1,262 +1,163 @@
 # Surf
 
-Surf is a native iOS 6 client for a remote Chromium backend. It makes modern
-websites usable on legacy jailbroken iOS devices without relying on the
-obsolete system WebKit.
+Surf brings the modern web to legacy iPhones, iPod touches, and iPads.
 
-The native app provides the touch-first browser UI, input handling, H.264 video
-decoding, audio playback, tabs, downloads, uploads, and device integration. The
-backend, `surf serve`, runs managed Chrome headlessly, captures compositor
-frames through Chromium's tab-capture API, and streams H.264 to the device
-over WebSocket.
+The iOS app is a native, touch-first remote browser. A computer running Surf
+hosts Chromium, renders the page, and streams video and audio to the device;
+the client sends navigation, keyboard, and touch input back. Modern TLS,
+JavaScript, media, and optional Widevine support therefore come from the host
+browser instead of the device's obsolete WebKit.
 
-The result is closer to a purpose-built remote browser than a remote desktop:
-Chromium does the web compatibility work, while the iOS app keeps the device
-experience native.
+Surf is built around the device rather than a generic remote-desktop surface:
+it has native tabs, an omnibox, bookmarks, history, downloads, uploads, sharing,
+fullscreen media, and phone- and tablet-specific layouts inspired by classic
+Safari.
 
-The iOS client includes a native New Tab page, persistent tab strip and
-omnibox, searchable Bookmarks/History/Downloads Library, page media controls,
-server and browsing settings, explicit connection/video/page-error recovery,
-and an optional live performance overlay. Web content remains Chromium-rendered;
-browser chrome and browser-owned state stay native and responsive.
+## Project status
 
-## Status
+Surf is experimental. The primary tested client is an original iPad mini on
+iOS 6.1.3. The release package is built for many more devices, but those
+model/OS combinations should be considered build-supported until they have
+been tested on hardware.
 
-Surf is a hobby project for jailbroken legacy iOS devices. It is usable, but
-still experimental.
+## Compatibility
 
-See [CHANGELOG.md](CHANGELOG.md) for the history of each release.
+One universal, rootful `iphoneos-arm` package contains both client
+architectures and declares the iPhone/iPod and iPad device families:
 
-The main test target is the original iPad mini on iOS 6.1.3. Other iOS 6 iPads,
-iPhones, and iPods may work, but layout and performance are less tested.
+| Client slice | Minimum OS | Hardware |
+| --- | --- | --- |
+| `armv7` | iOS 6.0 | 32-bit iPhone, iPod touch, and iPad models |
+| `arm64` | iOS 7.0 | 64-bit A7 and newer devices through the iOS 14 generation |
 
-The video/browsing backend supports Linux x86-64 and ARM64, Windows x86-64, and macOS
-Intel/Apple Silicon. It prefers an installed Chrome or Chromium and otherwise
-installs a verified ungoogled-chromium release into `SURF_HOME`. Release
-packages need no separate media runtime. Audio and video capture use
-Chromium's tab capture API on Linux, Windows, and macOS. See `docs/backend.md`
-for details.
+The current compatibility target ends at iOS/iPadOS 14.8.1 and requires a
+rootful jailbreak. A compatible jailbreak may not exist for every model and OS
+combination in that range. iOS 15+, rootless packages, armv6 devices, iOS 5,
+and the original iPad are not currently supported.
 
-## AI Disclosure
+For the best experience, use an A5 device or newer; A7 and newer devices are
+preferred. The 256 MB iPhone 3GS and iPod touch 4 are package-compatible but
+experimental.
 
-Surf is explicitly an AI-assisted project.
+<details>
+<summary>Device and OS details</summary>
 
-I am generally not an "AI codebase" person. Surf happened while I was on
-vacation, with an old iPad mini in front of me and not enough personal time to
-build the whole thing by hand. I used AI heavily to accelerate implementation,
-iteration, and debugging. The direction, testing, device bring-up, deployment
-decisions, and release judgment were human-directed.
+### 32-bit devices
 
-That is disclosed here on purpose. If you are reading, modifying, packaging, or
-deploying Surf, treat it like any other experimental systems project: review the
-code, test your setup, and assume there are rough edges.
+| Models | Surf-compatible OS range | Status |
+| --- | --- | --- |
+| iPhone 3GS | 6.0–6.1.6 | Experimental |
+| iPhone 4 | 6.0–7.1.2 | Legacy candidate |
+| iPhone 4s | 6.0–9.3.6 | Legacy candidate |
+| iPhone 5 | 6.0–10.3.4 | Good candidate |
+| iPhone 5c | 7.0–10.3.3 | Good candidate |
+| iPod touch 4 | 6.0–6.1.6 | Experimental |
+| iPod touch 5 | 6.0–9.3.5 | Legacy candidate |
+| iPad 2 and iPad 3 | 6.0–9.3.5; 9.3.6 on cellular models | Legacy candidates |
+| iPad 4 | 6.0–10.3.3; 10.3.4 on cellular models | Good candidate |
+| iPad mini 1 | 6.0–9.3.5; 9.3.6 on cellular models | Verified on iOS 6.1.3 |
 
-## Requirements
+### 64-bit devices
 
-- A jailbroken iOS device.
-- iOS 6 is the primary target.
-- Filza, iFile, OpenSSH, or another way to install `.deb` packages.
-- A Linux, Windows, or macOS computer for `surf`.
-- macOS 12 Monterey or newer when using macOS.
-- Enough disk space for Chromium and Surf's media runtime.
-- A low-latency network between the device and backend. LAN is best.
+| Models | Surf-compatible OS range |
+| --- | --- |
+| iPhone 5s | 7.0–12.5.7 |
+| iPhone 6 and 6 Plus | 8.0–12.5.7 |
+| iPad Air 1 and iPad mini 2 | 7.0–12.5.7 |
+| iPad mini 3 | 8.0–12.5.7 |
+| iPod touch 6 | 8.4–12.5.7 |
+| iPhone 6s through iPhone 12, including SE 1 and SE 2 | Device launch OS–14.8.1 |
+| iPad Air 2–4, iPad mini 4–5, and iPad 5–8 | Device launch OS–14.8.1 |
+| iPad Pro models released through 2020 | Device launch OS–14.8.1 |
+| iPod touch 7 | 12.3–14.8.1 |
 
-You do not need to build the native app yourself if a `.deb` is available in
-GitHub Releases for your device.
+</details>
 
-## Install The Native App
+The backend runs on:
 
-Download the latest Surf package from GitHub Releases. The filename looks like:
+- Windows x86-64
+- macOS 12+ on Intel or Apple Silicon
+- Linux x86-64 or ARM64
 
-```text
-space.seg6.surf_<version>-1_iphoneos-arm.deb
+## Quick start
+
+### 1. Start Surf on the computer
+
+Download the package for your computer and the universal iOS `.deb` from the
+[latest release](https://github.com/seg6/surf/releases/latest).
+
+The desktop build provides a Settings window for the password, port, detected
+LAN address, logs, and updates. For a terminal or server installation:
+
+```sh
+SURF_PASSWORD='choose-a-strong-password' ./surf serve
 ```
 
-Install it with Filza or iFile, or install over SSH:
+Surf listens on port `18080` by default. Windows archives contain `surf.exe`.
+
+### 2. Install the iOS client
+
+Install `space.seg6.surf_<version>_iphoneos-arm.deb` with Filza or iFile, or
+copy it over SSH:
 
 ```sh
 scp space.seg6.surf_*.deb root@DEVICE_IP:/tmp/surf.deb
 ssh root@DEVICE_IP 'dpkg -i /tmp/surf.deb && uicache || true'
 ```
 
-Replace `DEVICE_IP` with the IP address of your iOS device. If the icon does
-not appear after installation, run `uicache` again or respring.
+Respring or run `uicache` again if the icon does not appear.
 
-## Start The Backend
+### 3. Connect
 
-Download the matching Surf package from GitHub Releases:
-
-- Windows: run the per-user installer, or extract the portable ZIP.
-- macOS: open the DMG and copy `Surf.app`.
-- Linux desktop: run the AppImage; servers can use the tarball.
-
-The macOS app is not notarized. If macOS refuses to open it after you copy it
-to Applications, clear the downloaded quarantine metadata and open it again:
-
-```sh
-xattr -cr /Applications/Surf.app
-open /Applications/Surf.app
-```
-
-The tray/menu-bar menu opens Settings, restarts the backend, or quits Surf.
-The Settings window shows the
-detected LAN address and stream status, lets you change the password and port,
-keeps logs behind a collapsed disclosure, and installs updates published on
-GitHub Releases. The password is saved under
-`SURF_HOME` so the iPad does not need to be reconfigured on every launch.
-If Chrome or Chromium is not installed, first launch downloads the latest
-verified ungoogled-chromium build maintained by its official GitHub
-organization. Surf keeps this private browser current without touching a
-personal browser profile.
-
-On first run Surf asks whether it should start when you sign in. The choice can
-be changed later in Settings. Launching Surf again while it is already running
-opens the existing Settings page instead of starting a second backend.
-
-The desktop app is not signed with a trusted publisher certificate or
-notarized, so Windows or macOS may display a security warning. For a server or
-terminal-only launch, use the same archive:
-
-```sh
-tar xf surf-*-linux-*.tar.gz
-cd surf-*-linux-*
-./surf doctor
-SURF_PASSWORD='change-me' ./surf serve
-```
-
-Windows archives contain `surf.exe`. macOS archives are published separately
-for Intel and Apple Silicon.
-
-Terminal installations can update in place with:
-
-```sh
-./surf update
-```
-
-Release builds also contain the matching iOS package. If an older native app
-connects with an incompatible protocol, Surf offers the matching update in the
-app instead of failing with an unexplained authorization error. The first
-update from a build older than 0.6.0 must still be installed manually once.
-
-Use a strong password before exposing Surf beyond local testing.
-
-To build from source instead:
-
-```sh
-make surf-binary
-SURF_PASSWORD='change-me' ./backend/surf serve
-```
-
-Build the native desktop package on the matching operating system with:
-
-```sh
-make surf-dist
-```
-
-By default, `surf serve`:
-
-- Listens on port `18080`.
-- Advertises the backend on the local network for Surf discovery.
-- Reads required `SURF_PASSWORD` from the environment.
-- Prefers system Chrome/Chromium and manages ungoogled-chromium as a fallback.
-- Runs Chrome with `--headless=new` and captures the active tab through the
-  built-in extension.
-
-To run the binary directly:
-
-```sh
-make surf-binary
-SURF_PASSWORD='change-me' ./backend/surf serve
-```
-
-## Connect From Surf
-
-Open Surf on the iOS device.
-
-The easiest path is local discovery:
-
-1. Open Settings in Surf.
-2. Tap `Find Local Surf`.
-3. Select the discovered backend.
-4. Enter the password from `SURF_PASSWORD`.
-5. Tap `Connect`.
-
-If discovery does not find the backend, enter the URL manually:
-
-```text
-http://YOUR_COMPUTER_IP:18080
-```
-
-Example:
+Open **More > Surf Settings** in the client, tap **Find Local Surf**, select the
+backend, enter its password, and connect. If discovery is unavailable, enter
+the computer's LAN address manually:
 
 ```text
 http://192.168.1.50:18080
 ```
 
-Use the LAN IP address of the computer running `surf serve`, not the IP
-address of the iOS device.
+Use the computer's address, not the address of the iOS device. If the backend
+is unreachable, allow inbound TCP port `18080` through the host firewall.
 
-## Firewall Notes
+## Browser and DRM support
 
-If Surf can see the backend but cannot connect, the computer firewall is often
-blocking inbound TCP port `18080`.
+Surf prefers a compatible installed Edge or Chromium and otherwise manages a
+verified ungoogled-chromium build in its private data directory. Video and
+audio come from Chromium's tab-capture APIs; no FFmpeg, PulseAudio, virtual
+audio device, or desktop capture is required.
 
-For Linux systems using `ufw`:
+Surf does not distribute Widevine. If the selected host browser supplies a
+working Widevine CDM, protected sites can use it, subject to that site's
+license and output-protection rules.
+
+## Build from source
+
+Build the backend and the current host's desktop package:
 
 ```sh
-sudo ufw allow from 192.168.0.0/16 to any port 18080 proto tcp
+make surf-binary
+make surf-dist
 ```
 
-If you use another firewall, allow inbound TCP port `18080`.
+Building the universal iOS package uses a reproducible Linux/WSL2/Docker
+environment. See [Native Build](docs/native-build.md) for the SDK and packaging
+steps.
 
-## What Surf Is
+## Documentation
 
-- A native client for legacy jailbroken iOS devices.
-- A single cross-platform `surf` executable with tray and server modes.
-- A touch-first remote browser, not a generic remote desktop.
-- Intended for LAN use, with VPS deployment possible if latency is acceptable.
+- [Backend configuration and deployment](docs/backend.md)
+- [Native client build](docs/native-build.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Changelog](CHANGELOG.md)
 
-## What Surf Is Not
+## AI disclosure
 
-- It is not a standalone WebKit replacement.
-- It is not a browser that works without a backend.
-- It is not an App Store app.
-- It is not trying to make iOS 6 Safari compatible with the modern web.
-
-## FAQ
-
-### Does Surf require a computer or server?
-
-Yes. Chromium runs on the backend. The iOS app is the native client for that
-backend.
-
-### Can the backend run on a VPS?
-
-Yes. LAN usually feels better, but a VPS works if latency is reasonable. Use
-HTTPS and a strong password for any internet-facing deployment.
-
-### Why not build a normal browser for iOS 6?
-
-Third-party browsers on iOS 6 are still tied to the system WebKit. That engine
-is missing too much modern TLS, JavaScript, and CSS support for today's web.
-Running Chromium elsewhere avoids that limitation.
-
-### Does it work on iPhone or iPod touch?
-
-The primary target is iPad-sized iOS 6 hardware. Smaller devices may work, but
-they are less tested.
-
-### Do I need the iOS 6 SDK?
-
-Only if you want to build the native app yourself. Most users should install the
-prebuilt `.deb` from Releases.
-
-## More Docs
-
-- `docs/backend.md`: backend configuration and deployment notes.
-- `docs/native-build.md`: building the iOS `.deb`.
-- `docs/troubleshooting.md`: common connection and install issues.
+Surf is an AI-assisted project. Its direction, device testing, deployment
+decisions, and release judgment are human-directed. Treat it like any other
+experimental systems project: review the code, test your setup, and do not
+expose it to the internet with a weak password.
 
 ## License
 
-MIT
+[MIT](LICENSE)

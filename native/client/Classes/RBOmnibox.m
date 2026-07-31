@@ -18,14 +18,17 @@
 
 @implementation RBOmnibox
 
+@synthesize showsBookmarkButton = _showsBookmarkButton;
+
 - (id)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
+        self.showsBookmarkButton = NO;
         self.backgroundColor = [UIColor clearColor];
 
         self.fieldBackground = [[UIView alloc] initWithFrame:CGRectZero];
         self.fieldBackground.backgroundColor = [UIColor whiteColor];
-        self.fieldBackground.layer.cornerRadius = 5.0;
+        self.fieldBackground.layer.cornerRadius = 6.0;
         self.fieldBackground.layer.borderWidth = 1.0;
         self.fieldBackground.layer.borderColor = [[UIColor colorWithRed:0.42 green:0.45 blue:0.50 alpha:1.0] CGColor];
         self.fieldBackground.layer.masksToBounds = YES;
@@ -86,14 +89,15 @@
     // the field's left/right insets below already assume the space is free
     // (10pt/4pt vs. a full button-width inset), so leaving these visible
     // just overlaps the typed text and the native clear-button ("x").
-    self.starButton.hidden = editing;
+    self.starButton.hidden = editing || !self.showsBookmarkButton;
     self.reloadButton.hidden = editing;
     self.starButton.frame = CGRectMake(0.0, 0.0, side, h);
     self.reloadButton.frame = CGRectMake(w - side, 0.0, side, h);
     BOOL showLock = self.lockVisible && !editing;
     self.lockLabel.hidden = !showLock;
-    self.lockLabel.frame = CGRectMake(side - 4.0, 0.0, 16.0, h);
-    CGFloat left = editing ? 10.0 : (side + (showLock ? 14.0 : 0.0));
+    self.lockLabel.frame = CGRectMake(self.showsBookmarkButton ? side - 4.0 : 4.0, 0.0, 16.0, h);
+    CGFloat left = editing ? 10.0 : (self.showsBookmarkButton ? side : 10.0);
+    if (showLock) left += self.showsBookmarkButton ? 14.0 : 16.0;
     CGFloat right = editing ? 4.0 : side;
     self.field.frame = CGRectMake(left, 0.0, MAX(40.0, w - left - right), h);
     [CATransaction begin];
@@ -101,6 +105,12 @@
     self.progressLayer.bounds = CGRectMake(0.0, 0.0, self.progressVisible ? self.progressLayer.bounds.size.width : 0.0, h);
     self.progressLayer.position = CGPointMake(0.0, 0.0);
     [CATransaction commit];
+}
+
+- (void)setShowsBookmarkButton:(BOOL)showsBookmarkButton {
+    if (_showsBookmarkButton == showsBookmarkButton) return;
+    _showsBookmarkButton = showsBookmarkButton;
+    [self setNeedsLayout];
 }
 
 - (void)styleStar:(BOOL)starred {

@@ -16,6 +16,8 @@ import (
 
 func systemCandidates() []candidate {
 	return []candidate{
+		{path: "microsoft-edge-stable", label: "system Microsoft Edge"},
+		{path: "/opt/microsoft/msedge/msedge", label: "system Microsoft Edge"},
 		{path: "google-chrome-stable", label: "system Google Chrome Stable", branded: true},
 		{path: "/opt/google/chrome/chrome", label: "system Google Chrome Stable", branded: true},
 		{path: "chromium", label: "system Chromium"},

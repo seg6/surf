@@ -16,7 +16,10 @@ typedef enum {
     RBIconChevronUp,
     RBIconChevronDown,
     RBIconBook, // library (history/bookmarks/downloads)
-    RBIconMore  // page actions
+    RBIconMore, // Surf-specific actions
+    RBIconShare,
+    RBIconTabs,
+    RBIconSearch
 } RBIcon;
 
 // Gradient bar with a 1px dark bottom hairline; the iOS 6 toolbar look.
@@ -26,6 +29,7 @@ typedef enum {
 
 @interface RBTheme : NSObject
 + (UIImage *)icon:(RBIcon)icon size:(CGFloat)size color:(UIColor *)color;
++ (BOOL)usesClassicAppearance;
 // Etched toolbar button: icon with a subtle bottom highlight, dims when pressed.
 + (UIButton *)barButtonWithIcon:(RBIcon)icon target:(id)target action:(SEL)action;
 + (UIColor *)barTopColor;

@@ -4,33 +4,53 @@
 @interface RBChromeBar ()
 @property(nonatomic, strong) UIButton *backButton;
 @property(nonatomic, strong) UIButton *fwdButton;
-@property(nonatomic, strong) UIButton *settingsButton;
-@property(nonatomic, strong, readwrite) UIButton *actionButton;
+@property(nonatomic, strong, readwrite) UIButton *moreButton;
+@property(nonatomic, strong, readwrite) UIButton *shareButton;
 @property(nonatomic, strong, readwrite) UIButton *libraryButton;
 @property(nonatomic, strong, readwrite) RBOmnibox *omnibox;
+@property(nonatomic, strong) UILabel *titleLabel;
 @end
 
 @implementation RBChromeBar
 
-@synthesize actionButton = _actionButton;
+@synthesize moreButton = _moreButton;
+@synthesize shareButton = _shareButton;
 @synthesize libraryButton = _libraryButton;
 @synthesize omnibox = _omnibox;
+@synthesize phoneLayout = _phoneLayout;
+@synthesize pageTitle = _pageTitle;
 
 - (id)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
         self.backButton = [RBTheme barButtonWithIcon:RBIconBack target:self action:@selector(backTapped:)];
         self.fwdButton = [RBTheme barButtonWithIcon:RBIconForward target:self action:@selector(fwdTapped:)];
-        self.actionButton = [RBTheme barButtonWithIcon:RBIconMore target:self action:@selector(actionsTapped:)];
+        self.shareButton = [RBTheme barButtonWithIcon:RBIconShare target:self action:@selector(shareTapped:)];
         self.libraryButton = [RBTheme barButtonWithIcon:RBIconBook target:self action:@selector(libraryTapped:)];
-        self.settingsButton = [RBTheme barButtonWithIcon:RBIconGear target:self action:@selector(settingsTapped:)];
+        self.moreButton = [RBTheme barButtonWithIcon:RBIconMore target:self action:@selector(moreTapped:)];
         self.backButton.enabled = NO;
         self.fwdButton.enabled = NO;
+        self.backButton.accessibilityLabel = @"Back";
+        self.fwdButton.accessibilityLabel = @"Forward";
+        self.shareButton.accessibilityLabel = @"Share";
+        self.libraryButton.accessibilityLabel = @"Bookmarks";
+        self.moreButton.accessibilityLabel = @"More";
         [self addSubview:self.backButton];
         [self addSubview:self.fwdButton];
-        [self addSubview:self.actionButton];
+        [self addSubview:self.shareButton];
         [self addSubview:self.libraryButton];
-        [self addSubview:self.settingsButton];
+        [self addSubview:self.moreButton];
+
+        self.titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+        self.titleLabel.backgroundColor = [UIColor clearColor];
+        self.titleLabel.textAlignment = NSTextAlignmentCenter;
+        self.titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+        self.titleLabel.font = [RBTheme fontOfSize:14.0 bold:YES];
+        self.titleLabel.textColor = [RBTheme primaryTextColor];
+        self.titleLabel.shadowColor = [RBTheme usesClassicAppearance]
+            ? [UIColor colorWithWhite:1.0 alpha:0.72] : nil;
+        self.titleLabel.shadowOffset = CGSizeMake(0.0, 1.0);
+        [self addSubview:self.titleLabel];
 
         self.omnibox = [[RBOmnibox alloc] initWithFrame:CGRectZero];
         [self addSubview:self.omnibox];
@@ -38,27 +58,51 @@
     return self;
 }
 
+- (void)setPhoneLayout:(BOOL)phoneLayout {
+    if (_phoneLayout == phoneLayout) return;
+    _phoneLayout = phoneLayout;
+    self.backButton.hidden = phoneLayout;
+    self.fwdButton.hidden = phoneLayout;
+    self.shareButton.hidden = phoneLayout;
+    self.libraryButton.hidden = phoneLayout;
+    self.moreButton.hidden = phoneLayout;
+    // Library already has a first-class toolbar button on iPad. Keeping a
+    // second bookmark control inside the field makes the unified omnibox look
+    // off-centre and steals space from security and address text.
+    self.omnibox.showsBookmarkButton = NO;
+    [self setNeedsLayout];
+}
+
+- (void)setPageTitle:(NSString *)pageTitle {
+    if (_pageTitle == pageTitle || [_pageTitle isEqualToString:pageTitle]) return;
+    _pageTitle = [pageTitle copy];
+    self.titleLabel.text = [_pageTitle length] ? _pageTitle : @"Surf";
+}
+
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGFloat w = self.bounds.size.width;
     CGFloat h = self.bounds.size.height;
+    if (self.phoneLayout) {
+        self.titleLabel.hidden = YES;
+        self.titleLabel.frame = CGRectZero;
+        CGFloat fieldH = 32.0;
+        CGFloat y = floorf((h - fieldH) / 2.0);
+        self.omnibox.frame = CGRectMake(8.0, y, MAX(80.0, w - 16.0), fieldH);
+        return;
+    }
+
+    self.titleLabel.hidden = YES;
     CGFloat buttonW = 40.0;
-    CGFloat fieldH = 28.0;
-    // floorf, not plain division: this device is non-retina (1x scale), so a
-    // fractional origin (e.g. 56-tall bar, 31-tall field -> y=12.5) renders on
-    // a blurry half-pixel boundary. The omnibox and everything inside it then
-    // visibly fails to line up with the other bar buttons, which sit on whole
-    // pixels (y=0..h).
+    CGFloat fieldH = 32.0;
     CGFloat y = floorf((h - fieldH) / 2.0);
-
-    self.backButton.frame = CGRectMake(4.0, 0.0, buttonW, h);
-    self.fwdButton.frame = CGRectMake(4.0 + buttonW, 0.0, buttonW, h);
-    self.settingsButton.frame = CGRectMake(w - buttonW - 4.0, 0.0, buttonW, h);
-    self.libraryButton.frame = CGRectMake(w - buttonW * 2.0 - 4.0, 0.0, buttonW, h);
-    self.actionButton.frame = CGRectMake(w - buttonW * 3.0 - 4.0, 0.0, buttonW, h);
-
-    CGFloat left = 4.0 + buttonW * 2.0 + 6.0;
-    CGFloat right = w - buttonW * 3.0 - 10.0;
+    self.backButton.frame = CGRectMake(2.0, 0.0, buttonW, h);
+    self.fwdButton.frame = CGRectMake(2.0 + buttonW, 0.0, buttonW, h);
+    self.moreButton.frame = CGRectMake(w - buttonW - 2.0, 0.0, buttonW, h);
+    self.libraryButton.frame = CGRectMake(w - buttonW * 2.0 - 2.0, 0.0, buttonW, h);
+    self.shareButton.frame = CGRectMake(w - buttonW * 3.0 - 2.0, 0.0, buttonW, h);
+    CGFloat left = 2.0 + buttonW * 2.0 + 6.0;
+    CGFloat right = CGRectGetMinX(self.shareButton.frame) - 6.0;
     self.omnibox.frame = CGRectMake(left, y, MAX(120.0, right - left), fieldH);
 }
 
@@ -69,8 +113,8 @@
 
 - (void)backTapped:(id)sender { [self.delegate chromeBack:self]; }
 - (void)fwdTapped:(id)sender { [self.delegate chromeForward:self]; }
-- (void)actionsTapped:(id)sender { [self.delegate chrome:self actionsFromButton:self.actionButton]; }
+- (void)shareTapped:(id)sender { [self.delegate chrome:self shareFromButton:self.shareButton]; }
 - (void)libraryTapped:(id)sender { [self.delegate chrome:self libraryFromButton:self.libraryButton]; }
-- (void)settingsTapped:(id)sender { [self.delegate chromeSettings:self]; }
+- (void)moreTapped:(id)sender { [self.delegate chrome:self moreFromButton:self.moreButton]; }
 
 @end

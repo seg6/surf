@@ -9,13 +9,27 @@
   <key>CFBundleExecutable</key>
   <string>Surf</string>
   <key>CFBundleIconFile</key>
-  <string>icon-72.png</string>
+  <string>icon-57.png</string>
   <key>CFBundleIconFiles</key>
   <array>
+    <string>icon-57.png</string>
+    <string>icon-57@2x.png</string>
     <string>icon-72.png</string>
     <string>icon-72@2x.png</string>
   </array>
   <key>CFBundleIcons</key>
+  <dict>
+    <key>CFBundlePrimaryIcon</key>
+    <dict>
+      <key>CFBundleIconFiles</key>
+      <array>
+        <string>icon-57</string>
+      </array>
+      <key>UIPrerenderedIcon</key>
+      <true/>
+    </dict>
+  </dict>
+  <key>CFBundleIcons~ipad</key>
   <dict>
     <key>CFBundlePrimaryIcon</key>
     <dict>
@@ -43,10 +57,6 @@
   <array>
     <string>iPhoneOS</string>
   </array>
-  <key>UIRequiredDeviceCapabilities</key>
-  <array>
-    <string>armv7</string>
-  </array>
   <key>CFBundleURLTypes</key>
   <array>
     <dict>
@@ -66,6 +76,7 @@
   <string>6.0</string>
   <key>UIDeviceFamily</key>
   <array>
+    <integer>1</integer>
     <integer>2</integer>
   </array>
   <key>UIStatusBarHidden</key>

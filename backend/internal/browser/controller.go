@@ -82,6 +82,11 @@ type Controller struct {
 	// this is the ordinary browser binary; normalize that single token while
 	// preserving the real platform and version.
 	userAgent string
+	// widevineState is probed through EME on the first trustworthy page,
+	// making the diagnostic independent of host OS and browser brand.
+	widevineState   string
+	widevineDetail  string
+	widevineProbing bool
 
 	perfMu             sync.Mutex
 	perfSince          time.Time
@@ -169,6 +174,7 @@ func New(cfg *config.Config, hub *transport.Hub) (*Controller, error) {
 		commands:       make(chan controllerCommand, 256),
 		events:         make(chan cdp.Event, 512),
 		startedAt:      time.Now(),
+		widevineState:  "unknown",
 	}
 	go b.runController()
 	return b, nil
@@ -340,6 +346,7 @@ func (b *Controller) Stats() map[string]any {
 		activeURL = t.URL
 	}
 	vw, vh := b.viewW, b.viewH
+	widevine, widevineDetail := b.widevineState, b.widevineDetail
 	b.mu.Unlock()
 	b.mediaMu.Lock()
 	vsubs, asubs := len(b.videoSubs), len(b.audioSubs)
@@ -369,6 +376,7 @@ func (b *Controller) Stats() map[string]any {
 	stats := map[string]any{
 		"clients": b.hub.ClientCount(), "tabs": tabs, "activeURL": activeURL,
 		"view": fmt.Sprintf("%dx%d", vw, vh), "casting": b.video.Running(),
+		"widevine": widevine, "widevineDetail": widevineDetail,
 		"videoSubs": vsubs, "audioSubs": asubs,
 		"inputCounts": counts, "inputWindowSec": windowSec,
 		"videoLatencyMeanMs": latMeanMS, "videoLatencyMaxMs": latMaxMS, "videoLatencyN": latN,
@@ -467,6 +475,7 @@ func (b *Controller) onEvent(ev cdp.Event) {
 			t.loading = false
 			b.mu.Unlock()
 		}
+		go b.probeWidevine(ev.SessionID)
 	case "Controller.downloadWillBegin":
 		b.onDownloadBegin(ev)
 	case "Controller.downloadProgress":

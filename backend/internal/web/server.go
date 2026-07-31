@@ -35,7 +35,7 @@ func New(cfg *config.Config, a *auth.Auth, hub *transport.Hub) *Server {
 	}
 	if client := embeddedClientPackage(); client != nil {
 		s.setClientPackage(client)
-		log.Printf("updates: embedded iPad client %s protocol %s (%d bytes)",
+		log.Printf("updates: embedded iOS client %s protocol %s (%d bytes)",
 			client.Version, client.Protocol, len(client.Data))
 	}
 	return s

@@ -29,7 +29,7 @@ jobs:
       - name: Build native build environment
         run: docker build -t surf-buildenv native/buildenv
 
-      - name: Build native package
+      - name: Build and verify native package
         run: make native-package
 
       - uses: actions/upload-artifact@v4

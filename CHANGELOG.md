@@ -2,6 +2,44 @@
 
 This file records the user-visible changes in every Surf release.
 
+## 0.9.0 - 2026-07-31
+
+- Rebuilt native browser chrome around classic Safari's device-specific
+  structure: phones now use a unified omnibox, six-button bottom toolbar, and
+  swipeable Pages controller with readable page titles, while iPads keep a top
+  toolbar and compact persistent tabs with close, new-tab, and overflow
+  controls.
+- Replaced the generic browser action menu with native Share and More activity
+  surfaces, moved Settings to **Surf Settings** under More, and made the
+  Bookmarks/History/Downloads Library full-screen on phones and an anchored
+  popover on iPads.
+- Added on-demand decoded-frame tab previews with a bounded 12-entry LRU cache,
+  favicon/title placeholders, and memory-warning cleanup, without adding a
+  backend or wire-protocol dependency.
+- Made fullscreen expose translucent Back, Forward, and Exit controls while
+  preserving one settled viewport update across fullscreen and rotation.
+- Matched chrome appearance to the installed OS with procedural iOS 6
+  gradients, shadows, and icons and a flatter iOS 7–14 palette.
+- Made the rootful native package universal: armv7 remains compatible with iOS
+  6, while arm64 supports 64-bit devices from iOS 7 through iOS 14.
+- Enabled iPhone and iPod touch installation, with compact toolbar/find
+  layouts, phone-safe menus and pickers, adaptive modals, and legacy phone
+  icons and launch images.
+- Added release and pull-request checks for both Mach-O slices, their minimum
+  iOS versions, package identity, device families, resources, and privileged
+  updater permissions.
+- Preserved host-browser Widevine/CDM loading on every backend platform, added
+  compatible Microsoft Edge discovery, and exposed an actual EME capability
+  result in authenticated runtime statistics.
+- Kept desktop User-Agent Client Hints coherent with Surf's normalized browser
+  identity so sign-in and anti-bot checks do not see an Edge/Windows user agent
+  paired with empty browser and platform metadata.
+- Hardened the native CoreVideo/OpenGL presentation path against the recurring
+  `presentRenderbuffer:` crash in the iOS 6 PowerVR driver.
+- Kept video subscriptions alive across rotation and fullscreen viewport
+  changes, automatically retrying Chromium's transient encoder reconfigure
+  failures and configuring each recovered generation before its first frame.
+
 ## 0.8.4 - 2026-07-30
 
 - Restored Chromium tab audio on Linux while keeping captured tabs inaudible on

@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"surf-backend/internal/cdp"
+	"surf-backend/internal/process"
 )
 
 func TestNewExtractsLoopbackOnlyExtension(t *testing.T) {
@@ -86,6 +89,36 @@ func TestNewEnablesLoopbackVideoBridge(t *testing.T) {
 	}
 	if !strings.Contains(string(config), `/video/`) {
 		t.Fatalf("video bridge is not enabled: %s", config)
+	}
+}
+
+func TestBrowserTabCaptureIntegration(t *testing.T) {
+	path := os.Getenv("SURF_TEST_BROWSER")
+	if path == "" {
+		t.Skip("set SURF_TEST_BROWSER to run the browser integration test")
+	}
+	source, err := NewCapture(t.TempDir())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer source.Close()
+	client, browserProcess, err := cdp.Launch(cdp.LaunchConfig{
+		ChromePath: path,
+		Profile:    t.TempDir(),
+		W:          800, H: 600,
+		ExtensionPaths: []string{source.ExtensionPath()},
+		ExtraArgs:      []string{"--enable-unsafe-extension-debugging"},
+	})
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	defer process.Kill(browserProcess.Pid)
+	defer client.Close()
+	if err := source.Attach(client); err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	if err := source.Start(); err != nil {
+		t.Fatalf("start: %v", err)
 	}
 }
 

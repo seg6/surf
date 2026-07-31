@@ -31,7 +31,34 @@ func TestMobileUserAgentOverrideIsCoherent(t *testing.T) {
 	}
 
 	desktopParams := userAgentOverrideParams(desktop, false)
-	if desktopParams["userAgent"] != desktop || desktopParams["userAgentMetadata"] != nil {
+	desktopMetadata, _ := desktopParams["userAgentMetadata"].(map[string]any)
+	if desktopParams["userAgent"] != desktop ||
+		desktopMetadata["platform"] != "Linux" ||
+		desktopMetadata["architecture"] != "x86" ||
+		desktopMetadata["bitness"] != "64" ||
+		desktopMetadata["mobile"] != false {
 		t.Fatalf("desktop override = %#v", desktopParams)
+	}
+}
+
+func TestEdgeUserAgentOverridePreservesClientHints(t *testing.T) {
+	const edge = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.4078.105"
+	params := userAgentOverrideParams(edge, false)
+	metadata, _ := params["userAgentMetadata"].(map[string]any)
+	if metadata["platform"] != "Windows" ||
+		metadata["platformVersion"] != "10.0.0" ||
+		metadata["fullVersion"] != "150.0.4078.105" {
+		t.Fatalf("Edge metadata = %#v", metadata)
+	}
+	brands, _ := metadata["brands"].([]any)
+	foundEdge := false
+	for _, item := range brands {
+		brand, _ := item.(map[string]any)
+		if brand["brand"] == "Microsoft Edge" && brand["version"] == "150" {
+			foundEdge = true
+		}
+	}
+	if !foundEdge {
+		t.Fatalf("Edge brand missing from %#v", brands)
 	}
 }

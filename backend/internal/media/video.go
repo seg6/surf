@@ -10,9 +10,11 @@ import (
 )
 
 const (
-	subQueueCap      = 4
-	videoIdleDelay   = 5 * time.Second
-	keyframeCooldown = 2 * time.Second
+	subQueueCap        = 4
+	videoIdleDelay     = 5 * time.Second
+	videoStartRetryMin = 150 * time.Millisecond
+	videoStartRetryMax = time.Second
+	keyframeCooldown   = 2 * time.Second
 )
 
 type VideoPipelineConfig struct {
@@ -66,6 +68,8 @@ type VideoPipeline struct {
 	gen             int
 	seq             uint32
 	stopTimer       *time.Timer
+	startRetryTimer *time.Timer
+	startFailures   int
 	lastKeyframeReq time.Time
 
 	accessUnits atomic.Uint64
@@ -161,15 +165,18 @@ func (sub *VideoSubscription) Close() {
 		close(sub.C)
 	}
 	sub.mu.Unlock()
-	if len(s.subs) == 0 && s.running {
-		s.stopTimer = time.AfterFunc(videoIdleDelay, func() {
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			if len(s.subs) == 0 && s.running {
-				log.Printf("stream: idle, stopping tab encoder")
-				s.stopLocked()
-			}
-		})
+	if len(s.subs) == 0 {
+		s.cancelStartRetryLocked()
+		if s.running {
+			s.stopTimer = time.AfterFunc(videoIdleDelay, func() {
+				s.mu.Lock()
+				defer s.mu.Unlock()
+				if len(s.subs) == 0 && s.running {
+					log.Printf("stream: idle, stopping tab encoder")
+					s.stopLocked()
+				}
+			})
+		}
 	}
 }
 
@@ -313,19 +320,24 @@ func (s *VideoPipeline) startLocked() {
 		s.failAllLocked()
 		return
 	}
+	s.cancelStartRetryLocked()
 	s.gen++
 	gen := s.gen
 	s.running = true
 	if err := s.cfg.Start(s.cfg.W, s.cfg.H, s.cfg.BitrateK); err != nil {
 		s.running = false
-		log.Printf("stream: tab encoder start failed: %v", err)
-		s.failAllLocked()
+		s.startFailures++
+		log.Printf("stream: tab encoder start failed (attempt %d): %v", s.startFailures, err)
+		s.scheduleStartRetryLocked()
 		return
 	}
+	s.startFailures = 0
 	log.Printf("stream: tab encoder started generation=%d %dx%d paced-30fps", gen, s.cfg.W, s.cfg.H)
 }
 
 func (s *VideoPipeline) stopLocked() {
+	s.cancelStartRetryLocked()
+	s.startFailures = 0
 	if !s.running {
 		return
 	}
@@ -336,6 +348,44 @@ func (s *VideoPipeline) stopLocked() {
 	}
 }
 
+func (s *VideoPipeline) cancelStartRetryLocked() {
+	if s.startRetryTimer != nil {
+		s.startRetryTimer.Stop()
+		s.startRetryTimer = nil
+	}
+}
+
+func (s *VideoPipeline) scheduleStartRetryLocked() {
+	if s.startRetryTimer != nil || len(s.subs) == 0 {
+		return
+	}
+	delay := videoStartRetryMin
+	for attempt := 1; attempt < s.startFailures && delay < videoStartRetryMax; attempt++ {
+		delay *= 2
+	}
+	if delay > videoStartRetryMax {
+		delay = videoStartRetryMax
+	}
+	var timer *time.Timer
+	timer = time.AfterFunc(delay, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.startRetryTimer != timer {
+			return
+		}
+		s.startRetryTimer = nil
+		if len(s.subs) == 0 || s.running {
+			return
+		}
+		log.Printf("stream: retrying tab encoder after %s", delay)
+		s.startLocked()
+		// Every attempt advances the encoder generation. Keep subscribers
+		// attached, drain stale AUs, and require the successful attempt's IDR.
+		s.resetSubsForGenLocked()
+	})
+	s.startRetryTimer = timer
+}
+
 func (s *VideoPipeline) resetSubsForGenLocked() {
 	for sub := range s.subs {
 		sub.resetForGen(s.gen)
@@ -343,6 +393,7 @@ func (s *VideoPipeline) resetSubsForGenLocked() {
 }
 
 func (s *VideoPipeline) failAllLocked() {
+	s.cancelStartRetryLocked()
 	for sub := range s.subs {
 		delete(s.subs, sub)
 		sub.mu.Lock()

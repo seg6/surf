@@ -52,12 +52,40 @@
 
 @implementation RBTheme
 
-+ (UIColor *)barTopColor { return [UIColor colorWithRed:0.91 green:0.93 blue:0.96 alpha:1.0]; }
-+ (UIColor *)barBottomColor { return [UIColor colorWithRed:0.82 green:0.85 blue:0.89 alpha:1.0]; }
-+ (UIColor *)barLineColor { return [UIColor colorWithRed:0.54 green:0.58 blue:0.64 alpha:1.0]; }
-+ (UIColor *)stripTopColor { return [UIColor colorWithRed:0.47 green:0.52 blue:0.60 alpha:1.0]; }
-+ (UIColor *)stripBottomColor { return [UIColor colorWithRed:0.35 green:0.40 blue:0.48 alpha:1.0]; }
-+ (UIColor *)iconColor { return [UIColor colorWithRed:0.20 green:0.24 blue:0.30 alpha:1.0]; }
++ (BOOL)usesClassicAppearance {
+    return [[[UIDevice currentDevice] systemVersion] floatValue] < 7.0;
+}
+
++ (UIColor *)barTopColor {
+    return [self usesClassicAppearance]
+        ? [UIColor colorWithRed:0.91 green:0.93 blue:0.96 alpha:1.0]
+        : [UIColor colorWithWhite:0.97 alpha:0.98];
+}
++ (UIColor *)barBottomColor {
+    return [self usesClassicAppearance]
+        ? [UIColor colorWithRed:0.82 green:0.85 blue:0.89 alpha:1.0]
+        : [UIColor colorWithWhite:0.97 alpha:0.98];
+}
++ (UIColor *)barLineColor {
+    return [self usesClassicAppearance]
+        ? [UIColor colorWithRed:0.54 green:0.58 blue:0.64 alpha:1.0]
+        : [UIColor colorWithWhite:0.78 alpha:1.0];
+}
++ (UIColor *)stripTopColor {
+    return [self usesClassicAppearance]
+        ? [UIColor colorWithRed:0.47 green:0.52 blue:0.60 alpha:1.0]
+        : [UIColor colorWithWhite:0.91 alpha:1.0];
+}
++ (UIColor *)stripBottomColor {
+    return [self usesClassicAppearance]
+        ? [UIColor colorWithRed:0.35 green:0.40 blue:0.48 alpha:1.0]
+        : [UIColor colorWithWhite:0.91 alpha:1.0];
+}
++ (UIColor *)iconColor {
+    return [self usesClassicAppearance]
+        ? [UIColor colorWithRed:0.20 green:0.24 blue:0.30 alpha:1.0]
+        : [self accentColor];
+}
 + (UIColor *)progressFillColor { return [[self accentColor] colorWithAlphaComponent:0.30]; }
 + (UIColor *)pageBackgroundColor { return [UIColor colorWithRed:0.95 green:0.96 blue:0.97 alpha:1.0]; }
 + (UIColor *)primaryTextColor { return [UIColor colorWithRed:0.12 green:0.14 blue:0.17 alpha:1.0]; }
@@ -77,6 +105,12 @@
     [button setImage:normal forState:UIControlStateNormal];
     [button setImage:pressed forState:UIControlStateHighlighted];
     [button setImage:disabled forState:UIControlStateDisabled];
+    if ([self usesClassicAppearance]) {
+        button.imageView.layer.shadowColor = [[UIColor whiteColor] CGColor];
+        button.imageView.layer.shadowOpacity = 0.7;
+        button.imageView.layer.shadowRadius = 0.0;
+        button.imageView.layer.shadowOffset = CGSizeMake(0.0, 1.0);
+    }
     [button addTarget:target action:action forControlEvents:UIControlEventTouchUpInside];
     return button;
 }
@@ -255,6 +289,40 @@
                 CGFloat x = mid + i * s * 0.23;
                 CGContextFillEllipseInRect(ctx, CGRectMake(x - r, mid - r, r * 2.0, r * 2.0));
             }
+            break;
+        }
+        case RBIconShare: {
+            CGFloat boxTop = s * 0.43;
+            CGContextMoveToPoint(ctx, pad, boxTop);
+            CGContextAddLineToPoint(ctx, pad, s - pad);
+            CGContextAddLineToPoint(ctx, s - pad, s - pad);
+            CGContextAddLineToPoint(ctx, s - pad, boxTop);
+            CGContextStrokePath(ctx);
+            CGContextMoveToPoint(ctx, mid, s * 0.62);
+            CGContextAddLineToPoint(ctx, mid, pad * 0.55);
+            CGContextMoveToPoint(ctx, mid, pad * 0.55);
+            CGContextAddLineToPoint(ctx, mid - s * 0.19, s * 0.28);
+            CGContextMoveToPoint(ctx, mid, pad * 0.55);
+            CGContextAddLineToPoint(ctx, mid + s * 0.19, s * 0.28);
+            CGContextStrokePath(ctx);
+            break;
+        }
+        case RBIconTabs: {
+            CGFloat offset = s * 0.16;
+            CGFloat box = s - pad * 2.0 - offset;
+            CGContextSetLineWidth(ctx, MAX(1.5, lw * 0.75));
+            CGContextStrokeRect(ctx, CGRectMake(pad + offset, pad, box, box));
+            CGContextStrokeRect(ctx, CGRectMake(pad, pad + offset, box, box));
+            break;
+        }
+        case RBIconSearch: {
+            CGFloat r = s * 0.25;
+            CGPoint c = CGPointMake(s * 0.43, s * 0.42);
+            CGContextAddEllipseInRect(ctx, CGRectMake(c.x - r, c.y - r, r * 2.0, r * 2.0));
+            CGContextStrokePath(ctx);
+            CGContextMoveToPoint(ctx, c.x + r * 0.72, c.y + r * 0.72);
+            CGContextAddLineToPoint(ctx, s - pad, s - pad);
+            CGContextStrokePath(ctx);
             break;
         }
         case RBIconShrink: {

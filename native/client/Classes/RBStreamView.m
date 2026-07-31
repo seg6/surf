@@ -3,8 +3,12 @@
 #import "RBProtocol.h"
 
 #import <QuartzCore/QuartzCore.h>
+
+#include <math.h>
 #import <OpenGLES/ES2/gl.h>
 #import <OpenGLES/ES2/glext.h>
+
+#include <stdlib.h>
 
 enum { kRBMotionRateSamples = 31 };
 
@@ -195,18 +199,91 @@ static GLuint RBCompileShader(GLenum type, const char *source) {
     self.pendingMetadata = metadata;
 }
 
+static unsigned char RBClampByte(int value) {
+    return (unsigned char)(value < 0 ? 0 : (value > 255 ? 255 : value));
+}
+
+- (UIImage *)snapshotImageWithMaximumSize:(CGSize)maximumSize {
+    if (!_currentBuffer || maximumSize.width < 1.0 || maximumSize.height < 1.0 ||
+        CVPixelBufferGetPlaneCount(_currentBuffer) < 2) return nil;
+    CVPixelBufferRetain(_currentBuffer);
+    CVPixelBufferRef buffer = _currentBuffer;
+    if (CVPixelBufferLockBaseAddress(buffer, 0) != kCVReturnSuccess) {
+        CVPixelBufferRelease(buffer);
+        return nil;
+    }
+    size_t sourceW = CVPixelBufferGetWidthOfPlane(buffer, 0);
+    size_t sourceH = CVPixelBufferGetHeightOfPlane(buffer, 0);
+    double scale = MIN(1.0, MIN(maximumSize.width / MAX(1.0, (double)sourceW),
+                                maximumSize.height / MAX(1.0, (double)sourceH)));
+    size_t outputW = MAX(1, (size_t)floor(sourceW * scale));
+    size_t outputH = MAX(1, (size_t)floor(sourceH * scale));
+    size_t outputStride = outputW * 4;
+    unsigned char *pixels = (unsigned char *)calloc(outputH, outputStride);
+    unsigned char *yPlane = (unsigned char *)CVPixelBufferGetBaseAddressOfPlane(buffer, 0);
+    unsigned char *uvPlane = (unsigned char *)CVPixelBufferGetBaseAddressOfPlane(buffer, 1);
+    size_t yStride = CVPixelBufferGetBytesPerRowOfPlane(buffer, 0);
+    size_t uvStride = CVPixelBufferGetBytesPerRowOfPlane(buffer, 1);
+    if (!pixels || !yPlane || !uvPlane) {
+        free(pixels);
+        CVPixelBufferUnlockBaseAddress(buffer, 0);
+        CVPixelBufferRelease(buffer);
+        return nil;
+    }
+    {
+        for (size_t y = 0; y < outputH; y++) {
+            size_t sourceY = MIN(sourceH - 1, y * sourceH / outputH);
+            unsigned char *output = pixels + y * outputStride;
+            unsigned char *sourceLuma = yPlane + sourceY * yStride;
+            unsigned char *sourceChroma = uvPlane + (sourceY / 2) * uvStride;
+            for (size_t x = 0; x < outputW; x++) {
+                size_t sourceX = MIN(sourceW - 1, x * sourceW / outputW);
+                int c = MAX(0, (int)sourceLuma[sourceX] - 16);
+                size_t uvX = (sourceX / 2) * 2;
+                int d = (int)sourceChroma[uvX] - 128;
+                int e = (int)sourceChroma[uvX + 1] - 128;
+                output[x * 4] = RBClampByte((298 * c + 409 * e + 128) >> 8);
+                output[x * 4 + 1] = RBClampByte((298 * c - 100 * d - 208 * e + 128) >> 8);
+                output[x * 4 + 2] = RBClampByte((298 * c + 516 * d + 128) >> 8);
+                output[x * 4 + 3] = 255;
+            }
+        }
+    }
+    CVPixelBufferUnlockBaseAddress(buffer, 0);
+    CVPixelBufferRelease(buffer);
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    CGContextRef context = CGBitmapContextCreate(pixels, outputW, outputH, 8, outputStride,
+                                                  colorSpace,
+                                                  kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGColorSpaceRelease(colorSpace);
+    if (!context) {
+        free(pixels);
+        return nil;
+    }
+    CGImageRef cgImage = CGBitmapContextCreateImage(context);
+    UIImage *image = cgImage ? [UIImage imageWithCGImage:cgImage] : nil;
+    if (cgImage) CGImageRelease(cgImage);
+    CGContextRelease(context);
+    free(pixels);
+    return image;
+}
+
 - (BOOL)drawPixelBuffer:(CVPixelBufferRef)pixelBuffer {
-    if (!pixelBuffer || !_textureCache || CVPixelBufferGetPlaneCount(pixelBuffer) < 2) return NO;
-    [EAGLContext setCurrentContext:self.glContext];
+    if (!pixelBuffer || !_textureCache || !self.window ||
+        [UIApplication sharedApplication].applicationState != UIApplicationStateActive ||
+        CVPixelBufferGetPlaneCount(pixelBuffer) < 2) return NO;
+    if (![EAGLContext setCurrentContext:self.glContext]) return NO;
     CVOpenGLESTextureRef yTexture = NULL;
     CVOpenGLESTextureRef uvTexture = NULL;
     size_t width = CVPixelBufferGetWidthOfPlane(pixelBuffer, 0);
     size_t height = CVPixelBufferGetHeightOfPlane(pixelBuffer, 0);
+    size_t chromaWidth = CVPixelBufferGetWidthOfPlane(pixelBuffer, 1);
+    size_t chromaHeight = CVPixelBufferGetHeightOfPlane(pixelBuffer, 1);
     CVReturn yStatus = CVOpenGLESTextureCacheCreateTextureFromImage(kCFAllocatorDefault, _textureCache,
         pixelBuffer, NULL, GL_TEXTURE_2D, GL_LUMINANCE, (GLsizei)width, (GLsizei)height,
         GL_LUMINANCE, GL_UNSIGNED_BYTE, 0, &yTexture);
     CVReturn uvStatus = CVOpenGLESTextureCacheCreateTextureFromImage(kCFAllocatorDefault, _textureCache,
-        pixelBuffer, NULL, GL_TEXTURE_2D, GL_LUMINANCE_ALPHA, (GLsizei)(width / 2), (GLsizei)(height / 2),
+        pixelBuffer, NULL, GL_TEXTURE_2D, GL_LUMINANCE_ALPHA, (GLsizei)chromaWidth, (GLsizei)chromaHeight,
         GL_LUMINANCE_ALPHA, GL_UNSIGNED_BYTE, 1, &uvTexture);
     if (yStatus != kCVReturnSuccess || uvStatus != kCVReturnSuccess) {
         if (yTexture) CFRelease(yTexture);
@@ -214,6 +291,11 @@ static GLuint RBCompileShader(GLenum type, const char *source) {
         return NO;
     }
     glBindFramebuffer(GL_FRAMEBUFFER, _framebuffer);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        CFRelease(yTexture);
+        CFRelease(uvTexture);
+        return NO;
+    }
     glViewport(0, 0, (GLsizei)(self.bounds.size.width * self.contentScaleFactor),
                (GLsizei)(self.bounds.size.height * self.contentScaleFactor));
     glClearColor(0, 0, 0, 1);
@@ -244,7 +326,17 @@ static GLuint RBCompileShader(GLenum type, const char *source) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glUniform1i(glGetUniformLocation(_program, "chroma"), 1);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    // iOS 6's SGX543 driver can return from present while it still consumes
+    // CoreVideo-backed textures. Releasing and flushing that cache immediately
+    // afterward then produces a recurring crash in presentRenderbuffer. Finish
+    // the draw and unbind both planes before presentation so their lifetime is
+    // unambiguous even on the legacy driver.
+    glFinish();
     GLenum drawError = glGetError();
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, 0);
     glBindRenderbuffer(GL_RENDERBUFFER, _renderbuffer);
     BOOL presented = drawError == GL_NO_ERROR &&
         [self.glContext presentRenderbuffer:GL_RENDERBUFFER];

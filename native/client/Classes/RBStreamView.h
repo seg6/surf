@@ -19,6 +19,9 @@
 @property(nonatomic, readonly) unsigned int lastPresentedSourceSequence;
 
 - (void)displayVideoPixelBuffer:(CVPixelBufferRef)pixelBuffer metadata:(RBFrameMetadata *)metadata;
+// Converts the retained current NV12 frame into a small CPU-side image. This
+// is intentionally on-demand for the classic phone Pages switcher.
+- (UIImage *)snapshotImageWithMaximumSize:(CGSize)maximumSize;
 - (void)beginMotionWindow;
 - (void)continueMotionWindow;
 - (void)endMotionWindow;

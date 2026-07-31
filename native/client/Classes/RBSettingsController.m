@@ -39,7 +39,7 @@ static const NSInteger kClearDataAlertTag = 1002;
     if (self) {
         self.initialURL = serverURL;
         self.initialPassword = password;
-        self.title = @"Settings";
+        self.title = @"Surf Settings";
         self.editingServerRow = -1;
     }
     return self;

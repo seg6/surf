@@ -10,6 +10,7 @@ typedef enum {
 @interface RBLibraryController () <UISearchBarDelegate, UIAlertViewDelegate>
 @property(nonatomic, strong) UISegmentedControl *segments;
 @property(nonatomic, strong) UISearchBar *searchBar;
+@property(nonatomic, strong) UIView *libraryHeader;
 // history
 @property(nonatomic, strong) NSMutableArray *history; // {url,title,ts}
 @property(nonatomic, assign) NSInteger historyTotal;
@@ -50,7 +51,6 @@ typedef enum {
     self.segments.segmentedControlStyle = UISegmentedControlStyleBar;
     self.segments.selectedSegmentIndex = RBLibraryTabBookmarks;
     [self.segments addTarget:self action:@selector(segmentChanged:) forControlEvents:UIControlEventValueChanged];
-    self.navigationItem.titleView = self.segments;
     self.navigationItem.rightBarButtonItem =
         [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
                                                       target:self action:@selector(doneTapped:)];
@@ -59,7 +59,12 @@ typedef enum {
     self.searchBar = [[UISearchBar alloc] initWithFrame:CGRectMake(0.0, 0.0, self.view.bounds.size.width, 44.0)];
     self.searchBar.delegate = self;
     self.searchBar.placeholder = @"Search bookmarks";
-    self.tableView.tableHeaderView = self.searchBar;
+    self.libraryHeader = [[UIView alloc] initWithFrame:CGRectMake(0.0, 0.0,
+                                                                  self.view.bounds.size.width, 78.0)];
+    self.libraryHeader.backgroundColor = [RBTheme pageBackgroundColor];
+    [self.libraryHeader addSubview:self.segments];
+    [self.libraryHeader addSubview:self.searchBar];
+    self.tableView.tableHeaderView = self.libraryHeader;
     self.tableView.rowHeight = 54.0;
 
     self.emptyLabel = [[UILabel alloc] initWithFrame:self.tableView.bounds];
@@ -70,14 +75,25 @@ typedef enum {
     self.emptyLabel.font = [RBTheme fontOfSize:15.0 bold:NO];
 }
 
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    CGFloat width = self.tableView.bounds.size.width;
+    self.libraryHeader.frame = CGRectMake(0.0, 0.0, width, 78.0);
+    self.segments.frame = CGRectMake(6.0, 5.0, MAX(1.0, width - 12.0), 29.0);
+    self.searchBar.frame = CGRectMake(0.0, 34.0, width, 44.0);
+}
+
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
     if (!self.bookmarksLoaded && self.onNeedsData) self.onNeedsData(@"bookmarks");
 }
 
 - (void)doneTapped:(id)sender {
-    if (self.onDismiss) self.onDismiss();
-    [self.presentingViewController dismissViewControllerAnimated:YES completion:nil];
+    if (self.onDismiss) {
+        self.onDismiss();
+    } else {
+        [self.presentingViewController dismissViewControllerAnimated:YES completion:nil];
+    }
 }
 
 - (void)refreshLeftButton {
@@ -99,7 +115,7 @@ typedef enum {
     self.query = @"";
     static NSString *const placeholders[] = {@"Search bookmarks", @"Search history", @"Search downloads"};
     self.searchBar.placeholder = placeholders[[self tab]];
-    self.tableView.tableHeaderView = self.searchBar;
+    self.tableView.tableHeaderView = self.libraryHeader;
     if ([self tab] == RBLibraryTabBookmarks && !self.bookmarksLoaded && self.onNeedsData) self.onNeedsData(@"bookmarks");
     if ([self tab] == RBLibraryTabHistory && ![self.history count]) [self requestHistoryFrom:0];
     if ([self tab] == RBLibraryTabDownloads && !self.downloadsLoaded && self.onNeedsData) self.onNeedsData(@"downloads");
@@ -225,7 +241,7 @@ typedef enum {
     if ([self tab] == RBLibraryTabHistory && [self historyHasMore]) n++;
     if (n == 0) {
         static NSString *const emptyText[] = {
-            @"No bookmarks yet\nTap the star in the address bar to add one.",
+            @"No bookmarks yet\nUse Share to add the current page.",
             @"No browsing history",
             @"No downloads"
         };

@@ -72,11 +72,48 @@ func TestTabEncoderFeedsFanout(t *testing.T) {
 	}
 }
 
-func TestSubscribeFailsImmediatelyWhenEncoderCannotStart(t *testing.T) {
+func TestSubscribeRetriesTransientEncoderStartFailure(t *testing.T) {
+	var starts atomic.Int64
 	s := NewVideoPipeline(VideoPipelineConfig{
 		W: 64, H: 64,
-		Start: func(int, int, int) error { return errors.New("unavailable") },
+		Start: func(int, int, int) error {
+			if starts.Add(1) == 1 {
+				return errors.New("reconfigure still draining")
+			}
+			return nil
+		},
 	})
+	defer s.Shutdown()
+	sub := s.Subscribe()
+	select {
+	case _, ok := <-sub.C:
+		if !ok {
+			t.Fatal("transient start failure closed the subscription")
+		}
+	default:
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for !s.Running() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !s.Running() || starts.Load() != 2 {
+		t.Fatalf("running=%t starts=%d, want automatic second attempt", s.Running(), starts.Load())
+	}
+	if !s.Push([]byte{1}, true, 64, 64, 1, 0, FrameMetadata{}) {
+		t.Fatal("IDR was rejected after automatic recovery")
+	}
+	select {
+	case au, ok := <-sub.C:
+		if !ok || !au.IDR {
+			t.Fatalf("recovery AU = %+v, open=%t", au, ok)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("subscriber did not receive recovery IDR")
+	}
+}
+
+func TestSubscribeFailsImmediatelyWithoutEncoder(t *testing.T) {
+	s := NewVideoPipeline(VideoPipelineConfig{W: 64, H: 64})
 	sub := s.Subscribe()
 	select {
 	case _, ok := <-sub.C:
@@ -84,7 +121,7 @@ func TestSubscribeFailsImmediatelyWhenEncoderCannotStart(t *testing.T) {
 			t.Fatal("expected closed channel")
 		}
 	default:
-		t.Fatal("expected subscription to close immediately")
+		t.Fatal("expected unavailable encoder to close subscription immediately")
 	}
 }
 
@@ -107,6 +144,53 @@ func TestResizeRestartsAtClientDerivedSize(t *testing.T) {
 	}
 	if stops != 1 {
 		t.Fatalf("stops=%d, want 1 before shutdown", stops)
+	}
+}
+
+func TestResizeStartFailureKeepsSubscriberForAutomaticRetry(t *testing.T) {
+	var starts atomic.Int64
+	s := NewVideoPipeline(VideoPipelineConfig{
+		W: 768, H: 950,
+		Start: func(width, height, bitrateK int) error {
+			if starts.Add(1) == 2 {
+				return errors.New("old capture is still stopping")
+			}
+			return nil
+		},
+		Stop: func() {},
+	})
+	defer s.Shutdown()
+	sub := s.Subscribe()
+	if !s.Push([]byte{1}, true, 768, 950, 1, 0, FrameMetadata{}) {
+		t.Fatal("initial IDR was rejected")
+	}
+	<-sub.C
+
+	s.SetSize(1024, 694)
+	select {
+	case _, ok := <-sub.C:
+		if !ok {
+			t.Fatal("resize start failure closed the subscription")
+		}
+	default:
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for !s.Running() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !s.Running() || starts.Load() != 3 {
+		t.Fatalf("running=%t starts=%d, want resize plus automatic retry", s.Running(), starts.Load())
+	}
+	if !s.Push([]byte{2}, true, 1024, 694, 2, 0, FrameMetadata{}) {
+		t.Fatal("resized IDR was rejected")
+	}
+	select {
+	case au, ok := <-sub.C:
+		if !ok || au.W != 1024 || au.H != 694 || !au.IDR {
+			t.Fatalf("resized recovery AU = %+v, open=%t", au, ok)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("subscriber did not receive resized recovery IDR")
 	}
 }
 

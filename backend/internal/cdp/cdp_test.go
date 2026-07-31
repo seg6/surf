@@ -31,6 +31,10 @@ func TestLaunchArgsSandboxDefault(t *testing.T) {
 	if hasArg(args, "--disable-smooth-scrolling") {
 		t.Fatalf("obsolete scroll override present: %v", args)
 	}
+	if hasArg(args, "--disable-component-update") ||
+		hasArg(args, "--disable-background-networking") {
+		t.Fatalf("browser CDMs and components must remain available: %v", args)
+	}
 	if !hasArg(args, "--user-data-dir=/tmp/profile") || !hasArg(args, "--window-size=1024,768") {
 		t.Fatalf("missing profile/window args: %v", args)
 	}

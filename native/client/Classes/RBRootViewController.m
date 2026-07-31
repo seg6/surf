@@ -1,4 +1,5 @@
 #import "RBRootViewController.h"
+#import "RBActionActivity.h"
 #import "RBChromeBar.h"
 #import "RBBrowserStateView.h"
 #import "RBConfig.h"
@@ -16,6 +17,8 @@
 #import "RBInteractionTracker.h"
 #import "RBOmnibox.h"
 #import "RBProtocol.h"
+#import "RBPageSwitcherController.h"
+#import "RBPhoneToolbar.h"
 #import "RBSession.h"
 #import "RBSettingsController.h"
 #import "RBStreamView.h"
@@ -35,6 +38,10 @@ static const CGFloat kRBTopBarHeight = 44.0;
 static const CGFloat kRBTabStripHeight = 29.0;
 static const CGFloat kRBFindBarHeight = 38.0;
 
+static BOOL RBIsPad(void) {
+    return UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad;
+}
+
 // H.264 4:2:0 requires even coded dimensions. Keep the visible stream surface
 // even as well so Chromium, VideoEncoder, and OpenGL all operate at the same
 // pixel size instead of scaling an odd viewport down and back up.
@@ -45,6 +52,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
 }
 
 @interface RBRootViewController () <UITextFieldDelegate, RBSessionDelegate, RBChromeBarDelegate,
+                                    RBPhoneToolbarDelegate, RBPageSwitcherDelegate,
                                     RBOmniboxDelegate, RBTabStripDelegate, RBSuggestPanelDelegate,
                                     RBFindBarDelegate, RBSettingsDelegate, RBMediaPipelineDelegate, RBStreamViewDelegate,
                                     RBNewTabViewDelegate, RBBrowserStateViewDelegate,
@@ -59,10 +67,13 @@ static CGFloat RBEvenExtent(CGFloat value) {
 @property(nonatomic, strong) RBNewTabView *startPageView;
 @property(nonatomic, strong) RBBrowserStateView *browserStateView;
 @property(nonatomic, strong) RBChromeBar *chromeBar;
+@property(nonatomic, strong) RBPhoneToolbar *phoneToolbar;
 @property(nonatomic, strong) RBTabStrip *tabStrip;
 @property(nonatomic, strong) RBFindBar *findBar;
 @property(nonatomic, strong) RBSuggestPanel *suggestPanel;
 @property(nonatomic, strong) UIButton *restoreButton;
+@property(nonatomic, strong) UIButton *fullscreenBackButton;
+@property(nonatomic, strong) UIButton *fullscreenForwardButton;
 @property(nonatomic, strong) UILabel *toastLabel;
 @property(nonatomic, strong) UILabel *connectionPill;
 @property(nonatomic, strong) RBDiagnosticsOverlay *diagnosticsOverlay;
@@ -70,7 +81,11 @@ static CGFloat RBEvenExtent(CGFloat value) {
 // Controllers
 @property(nonatomic, strong) RBSession *session;
 @property(nonatomic, strong) RBSettingsController *settingsController;
+@property(nonatomic, strong) RBPageSwitcherController *pageSwitcherController;
 @property(nonatomic, strong) UIPopoverController *popover;
+@property(nonatomic, strong) UIViewController *compactPopoverController;
+@property(nonatomic, strong) UIViewController *activityController;
+@property(nonatomic, copy) NSString *pendingActivityAction;
 @property(nonatomic, strong) UIDocumentInteractionController *docController;
 @property(nonatomic, strong) RBMediaController *pageMediaController;
 // Connect flow
@@ -96,10 +111,14 @@ static CGFloat RBEvenExtent(CGFloat value) {
 @property(nonatomic, assign) BOOL findVisible;
 @property(nonatomic, assign) BOOL debugVisible;
 @property(nonatomic, strong) NSArray *lastTabs;
+@property(nonatomic, strong) NSMutableDictionary *tabThumbnails;
+@property(nonatomic, strong) NSMutableArray *thumbnailLRU;
 @property(nonatomic, strong) NSArray *bookmarks;
 @property(nonatomic, copy) NSString *currentURL;
 @property(nonatomic, copy) NSString *currentSecurity;
 @property(nonatomic, assign) BOOL currentStarred;
+@property(nonatomic, assign) BOOL canGoBack;
+@property(nonatomic, assign) BOOL canGoForward;
 @property(nonatomic, assign) BOOL awaitingPageFrame;
 @property(nonatomic, assign) unsigned int awaitedSourceSequence;
 // Copy menu
@@ -131,6 +150,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
 // Uploads (M2.2)
 @property(nonatomic, assign) BOOL chooserPending;
 @property(nonatomic, strong) UIPopoverController *uploadPopover;
+@property(nonatomic, strong) UIImagePickerController *uploadPicker;
 // Link context menu (M2.4)
 @property(nonatomic, strong) NSDictionary *lastLinkInfo;
 @property(nonatomic, strong) UIActionSheet *linkSheet;
@@ -145,6 +165,10 @@ static CGFloat RBEvenExtent(CGFloat value) {
 @property(nonatomic, assign) int edgeSwipe;
 @property(nonatomic, assign) CGPoint edgeStart;
 @property(nonatomic, assign) BOOL scrollGestureActive;
+- (NSNumber *)activeTabKey;
+- (void)cacheThumbnailForTabKey:(NSNumber *)tabKey;
+- (void)presentLibraryFromButton:(UIButton *)button;
+- (void)presentPageSwitcher;
 @end
 
 @implementation RBRootViewController
@@ -196,11 +220,21 @@ static CGFloat RBEvenExtent(CGFloat value) {
     self.chromeBar = [[RBChromeBar alloc] initWithFrame:CGRectZero];
     self.chromeBar.delegate = self;
     self.chromeBar.omnibox.delegate = self;
+    self.chromeBar.phoneLayout = !RBIsPad();
     [self.view addSubview:self.chromeBar];
+
+    self.phoneToolbar = [[RBPhoneToolbar alloc] initWithFrame:CGRectZero];
+    self.phoneToolbar.delegate = self;
+    self.phoneToolbar.hidden = RBIsPad();
+    [self.view addSubview:self.phoneToolbar];
 
     self.tabStrip = [[RBTabStrip alloc] initWithFrame:CGRectZero];
     self.tabStrip.delegate = self;
+    self.tabStrip.hidden = !RBIsPad();
     [self.view addSubview:self.tabStrip];
+
+    self.tabThumbnails = [NSMutableDictionary dictionary];
+    self.thumbnailLRU = [NSMutableArray array];
 
     self.findBar = [[RBFindBar alloc] initWithFrame:CGRectZero];
     self.findBar.delegate = self;
@@ -218,7 +252,30 @@ static CGFloat RBEvenExtent(CGFloat value) {
                         forState:UIControlStateNormal];
     [self.restoreButton addTarget:self action:@selector(toggleFullscreen) forControlEvents:UIControlEventTouchUpInside];
     self.restoreButton.hidden = YES;
+    self.restoreButton.accessibilityLabel = @"Exit Fullscreen";
     [self.view addSubview:self.restoreButton];
+
+    self.fullscreenBackButton = [UIButton buttonWithType:UIButtonTypeCustom];
+    self.fullscreenBackButton.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.42];
+    self.fullscreenBackButton.layer.cornerRadius = 8.0;
+    [self.fullscreenBackButton setImage:[RBTheme icon:RBIconBack size:20.0 color:[UIColor colorWithWhite:1.0 alpha:0.9]]
+                                 forState:UIControlStateNormal];
+    [self.fullscreenBackButton addTarget:self action:@selector(fullscreenBackTapped:)
+                        forControlEvents:UIControlEventTouchUpInside];
+    self.fullscreenBackButton.accessibilityLabel = @"Back";
+    self.fullscreenBackButton.hidden = YES;
+    [self.view addSubview:self.fullscreenBackButton];
+
+    self.fullscreenForwardButton = [UIButton buttonWithType:UIButtonTypeCustom];
+    self.fullscreenForwardButton.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.42];
+    self.fullscreenForwardButton.layer.cornerRadius = 8.0;
+    [self.fullscreenForwardButton setImage:[RBTheme icon:RBIconForward size:20.0 color:[UIColor colorWithWhite:1.0 alpha:0.9]]
+                                    forState:UIControlStateNormal];
+    [self.fullscreenForwardButton addTarget:self action:@selector(fullscreenForwardTapped:)
+                           forControlEvents:UIControlEventTouchUpInside];
+    self.fullscreenForwardButton.accessibilityLabel = @"Forward";
+    self.fullscreenForwardButton.hidden = YES;
+    [self.view addSubview:self.fullscreenForwardButton];
 
     self.hiddenInput = [[UITextField alloc] initWithFrame:CGRectMake(-100.0, -100.0, 20.0, 20.0)];
     self.hiddenInput.delegate = self;
@@ -275,6 +332,9 @@ static CGFloat RBEvenExtent(CGFloat value) {
     [super didReceiveMemoryWarning];
     self.hadMemoryWarning = YES;
     [self.tabStrip purgeIconCache];
+    [self.tabThumbnails removeAllObjects];
+    [self.thumbnailLRU removeAllObjects];
+    [self.pageSwitcherController updateTabs:self.lastTabs thumbnails:@{}];
 }
 
 // ------------------------------------------------------------------- layout
@@ -283,30 +343,49 @@ static CGFloat RBEvenExtent(CGFloat value) {
     [super viewDidLayoutSubviews];
     CGFloat w = self.view.bounds.size.width;
     CGFloat h = self.view.bounds.size.height;
+    BOOL pad = RBIsPad();
+    CGFloat topBarHeight = kRBTopBarHeight;
+    CGFloat bottomBarHeight = pad ? 0.0 : 44.0;
 
+    self.chromeBar.phoneLayout = !pad;
     self.chromeBar.hidden = self.fullscreen;
-    self.tabStrip.hidden = self.fullscreen;
+    self.phoneToolbar.hidden = self.fullscreen || pad;
+    self.tabStrip.hidden = self.fullscreen || !pad;
     self.findBar.hidden = self.fullscreen || !self.findVisible;
     self.suggestPanel.hidden = self.fullscreen;
     self.restoreButton.hidden = !self.fullscreen;
+    self.fullscreenBackButton.hidden = !self.fullscreen;
+    self.fullscreenForwardButton.hidden = !self.fullscreen;
+    self.fullscreenBackButton.enabled = self.canGoBack;
+    self.fullscreenForwardButton.enabled = self.canGoForward;
 
     CGFloat contentTop = 0.0;
+    CGFloat contentBottom = h;
     if (!self.fullscreen) {
-        self.chromeBar.frame = CGRectMake(0.0, 0.0, w, kRBTopBarHeight);
-        self.tabStrip.frame = CGRectMake(0.0, kRBTopBarHeight, w, kRBTabStripHeight);
-        contentTop = kRBTopBarHeight + kRBTabStripHeight;
+        self.chromeBar.frame = CGRectMake(0.0, 0.0, w, topBarHeight);
+        if (pad) {
+            self.tabStrip.frame = CGRectMake(0.0, topBarHeight, w, kRBTabStripHeight);
+            self.phoneToolbar.frame = CGRectZero;
+            contentTop = topBarHeight + kRBTabStripHeight;
+        } else {
+            self.tabStrip.frame = CGRectZero;
+            self.phoneToolbar.frame = CGRectMake(0.0, h - bottomBarHeight, w, bottomBarHeight);
+            contentTop = topBarHeight;
+            contentBottom = h - bottomBarHeight;
+        }
         if (self.findVisible) {
             self.findBar.frame = CGRectMake(0.0, contentTop, w, kRBFindBarHeight);
             contentTop += kRBFindBarHeight;
         }
     } else {
         self.chromeBar.frame = CGRectZero;
+        self.phoneToolbar.frame = CGRectZero;
         self.tabStrip.frame = CGRectZero;
         self.findBar.frame = CGRectZero;
     }
 
     CGFloat streamW = RBEvenExtent(w);
-    CGFloat streamH = RBEvenExtent(h - contentTop);
+    CGFloat streamH = RBEvenExtent(MAX(2.0, contentBottom - contentTop));
     CGFloat streamX = floor((w - streamW) / 2.0);
     self.streamView.bounds = CGRectMake(0.0, 0.0, streamW, streamH);
     self.streamView.center = CGPointMake(streamX + streamW / 2.0,
@@ -315,12 +394,18 @@ static CGFloat RBEvenExtent(CGFloat value) {
     self.browserStateView.frame = CGRectMake(streamX, contentTop, streamW, streamH);
 
     CGRect omniboxFrame = [self.chromeBar convertRect:self.chromeBar.omnibox.frame toView:self.view];
-    self.suggestPanel.frame = CGRectMake(omniboxFrame.origin.x, kRBTopBarHeight - 4.0,
-                                         omniboxFrame.size.width, [self.suggestPanel desiredHeight]);
+    CGFloat suggestTop = MAX(0.0, topBarHeight - 4.0);
+    CGFloat suggestH = MIN([self.suggestPanel desiredHeight],
+                           MAX(0.0, contentBottom - suggestTop));
+    self.suggestPanel.frame = CGRectMake(omniboxFrame.origin.x, suggestTop,
+                                         omniboxFrame.size.width, suggestH);
 
     self.restoreButton.frame = CGRectMake(w - 54.0, h - 54.0, 44.0, 44.0);
-    self.toastLabel.frame = CGRectMake((w - 320.0) / 2.0, contentTop + 14.0, 320.0, 28.0);
-    self.connectionPill.frame = CGRectMake(10.0, h - 34.0, 150.0, 22.0);
+    self.fullscreenBackButton.frame = CGRectMake(10.0, h - 54.0, 44.0, 44.0);
+    self.fullscreenForwardButton.frame = CGRectMake(62.0, h - 54.0, 44.0, 44.0);
+    CGFloat toastW = MIN(320.0, MAX(120.0, w - 20.0));
+    self.toastLabel.frame = CGRectMake(floorf((w - toastW) / 2.0), contentTop + 14.0, toastW, 28.0);
+    self.connectionPill.frame = CGRectMake(10.0, contentBottom - 34.0, 150.0, 22.0);
     CGFloat diagnosticsW = MIN(520.0, w - 20.0);
     CGFloat diagnosticsH = MIN(270.0, streamH - 20.0);
     self.diagnosticsOverlay.frame = CGRectMake(10.0, contentTop + 10.0,
@@ -380,6 +465,13 @@ static CGFloat RBEvenExtent(CGFloat value) {
 }
 
 - (void)presentSettingsAllowingCancel:(BOOL)allowsCancel message:(NSString *)message {
+    if (self.settingsController && !self.presentedViewController &&
+        (![self.settingsController isViewLoaded] || !self.settingsController.view.window)) {
+        // A presentation attempted during an iOS 6 dismissal transition can
+        // be ignored by UIKit. Do not let that stale controller make every
+        // later Settings tap look like a no-op.
+        self.settingsController = nil;
+    }
     if (self.settingsController) {
         if (message) [self.settingsController setStatusText:message isError:YES];
         return;
@@ -394,7 +486,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
     settings.diagnosticsVisible = self.debugVisible;
     self.settingsController = settings;
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:settings];
-    nav.modalPresentationStyle = UIModalPresentationFormSheet;
+    nav.modalPresentationStyle = RBIsPad() ? UIModalPresentationFormSheet : UIModalPresentationFullScreen;
     [self presentViewController:nav animated:YES completion:nil];
     if (message) [settings setStatusText:message isError:YES];
 }
@@ -418,7 +510,8 @@ static CGFloat RBEvenExtent(CGFloat value) {
 - (void)settingsWantsMediaControls:(RBSettingsController *)settings {
     self.settingsController = nil;
     [self dismissViewControllerAnimated:YES completion:^{
-        [self presentMediaControlsFromButton:self.chromeBar.actionButton];
+        UIButton *anchor = RBIsPad() ? self.chromeBar.moreButton : self.phoneToolbar.moreButton;
+        [self presentMediaControlsFromButton:anchor];
     }];
 }
 
@@ -677,8 +770,12 @@ static CGFloat RBEvenExtent(CGFloat value) {
         [self.chromeBar.omnibox setSecurityState:self.currentSecurity];
         [self hideErrorCard];
     } else if ([t isEqualToString:@"histstate"]) {
-        [self.chromeBar setCanGoBack:[[message objectForKey:@"back"] boolValue]
-                             forward:[[message objectForKey:@"fwd"] boolValue]];
+        self.canGoBack = [[message objectForKey:@"back"] boolValue];
+        self.canGoForward = [[message objectForKey:@"fwd"] boolValue];
+        [self.chromeBar setCanGoBack:self.canGoBack forward:self.canGoForward];
+        [self.phoneToolbar setCanGoBack:self.canGoBack forward:self.canGoForward];
+        self.fullscreenBackButton.enabled = self.canGoBack;
+        self.fullscreenForwardButton.enabled = self.canGoForward;
     } else if ([t isEqualToString:@"loading"]) {
         self.loading = [[message objectForKey:@"on"] boolValue];
         [self.chromeBar.omnibox setLoading:self.loading];
@@ -715,8 +812,45 @@ static CGFloat RBEvenExtent(CGFloat value) {
         [self.libraryController setDownloads:[message objectForKey:@"items"]];
     } else if ([t isEqualToString:@"tabs"]) {
         id tabs = [message objectForKey:@"tabs"];
-        self.lastTabs = [tabs isKindOfClass:[NSArray class]] ? tabs : nil;
+        NSArray *nextTabs = [tabs isKindOfClass:[NSArray class]] ? tabs : nil;
+        NSNumber *oldActiveKey = [self activeTabKey];
+        NSNumber *nextActiveKey = nil;
+        for (NSDictionary *tab in nextTabs) {
+            if ([[tab objectForKey:@"active"] boolValue]) {
+                nextActiveKey = [tab objectForKey:@"id"];
+                break;
+            }
+        }
+        if (!RBIsPad() && oldActiveKey && nextActiveKey && ![oldActiveKey isEqual:nextActiveKey]) {
+            [self cacheThumbnailForTabKey:oldActiveKey];
+        }
+        self.lastTabs = nextTabs;
         [self.tabStrip setTabs:self.lastTabs baseURL:self.session.baseURL];
+        [self.phoneToolbar setTabCount:[self.lastTabs count]];
+        NSMutableSet *liveTabIDs = [NSMutableSet set];
+        NSString *activeTitle = nil;
+        for (NSDictionary *tab in self.lastTabs) {
+            NSNumber *tabID = [tab objectForKey:@"id"];
+            if (tabID) [liveTabIDs addObject:tabID];
+            if ([[tab objectForKey:@"active"] boolValue]) {
+                activeTitle = [tab objectForKey:@"title"];
+                NSString *activeURL = [tab objectForKey:@"url"];
+                if ([activeURL hasPrefix:@"about:blank#surf-new"] ||
+                    [activeTitle hasPrefix:@"about:blank#surf-new"]) {
+                    activeTitle = @"New Page";
+                } else if (![activeTitle length]) {
+                    activeTitle = activeURL;
+                }
+            }
+        }
+        self.chromeBar.pageTitle = activeTitle;
+        for (NSNumber *tabID in [self.tabThumbnails allKeys]) {
+            if (![liveTabIDs containsObject:tabID]) {
+                [self.tabThumbnails removeObjectForKey:tabID];
+                [self.thumbnailLRU removeObject:tabID];
+            }
+        }
+        [self.pageSwitcherController updateTabs:self.lastTabs thumbnails:self.tabThumbnails];
     } else if ([t isEqualToString:@"hist"]) {
         self.bookmarks = [[message objectForKey:@"bookmarks"] isKindOfClass:[NSArray class]]
             ? [message objectForKey:@"bookmarks"] : @[];
@@ -928,7 +1062,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
         return;
     }
     if (longPress.state == UIGestureRecognizerStateChanged) {
-        if (fabsf(p.x - self.longPressStart.x) > 8.0 || fabsf(p.y - self.longPressStart.y) > 8.0) self.longPressMoved = YES;
+        if (fabs(p.x - self.longPressStart.x) > 8.0 || fabs(p.y - self.longPressStart.y) > 8.0) self.longPressMoved = YES;
         if (self.longPressMoved) [self.session sendMessage:@{@"t": @"lpmove", @"x": [NSNumber numberWithFloat:f.x], @"y": [NSNumber numberWithFloat:f.y]}];
         return;
     }
@@ -983,37 +1117,156 @@ static CGFloat RBEvenExtent(CGFloat value) {
 - (void)chromeBack:(RBChromeBar *)bar { [self.session sendMessage:@{@"t": @"back"}]; }
 - (void)chromeForward:(RBChromeBar *)bar { [self.session sendMessage:@{@"t": @"fwd"}]; }
 
-// Page actions (more button): everything scoped to the current page.
-- (void)chrome:(RBChromeBar *)bar actionsFromButton:(UIButton *)button {
-    NSArray *pageItems = @[
-        [RBListItem itemWithTitle:@"Media Controls" subtitle:@"playback and volume on this page" payload:@"media"],
-        [RBListItem itemWithTitle:@"Reader" subtitle:@"read this page natively" payload:@"reader"],
-        [RBListItem itemWithTitle:@"Find on Page" subtitle:nil payload:@"find"],
-        [RBListItem itemWithTitle:@"Page Information" subtitle:nil payload:@"pageinfo"],
-        [RBListItem itemWithTitle:@"Paste to Page" subtitle:nil payload:@"paste"],
-        [RBListItem itemWithTitle:@"Fullscreen" subtitle:nil payload:@"fullscreen"],
-    ];
-    NSArray *shareItems = @[
-        [RBListItem itemWithTitle:(self.currentStarred ? @"Remove Bookmark" : @"Add Bookmark")
-                         subtitle:nil payload:@"bookmark"],
-        [RBListItem itemWithTitle:@"Copy Page URL" subtitle:nil payload:@"copyurl"],
-        [RBListItem itemWithTitle:@"Mail Link" subtitle:nil payload:@"maillink"],
-    ];
-    RBListPopover *list = [[RBListPopover alloc] initWithSections:@[
-        @{@"title": @"PAGE", @"items": pageItems},
-        @{@"title": @"SHARE", @"items": shareItems}
-    ]];
+- (void)chrome:(RBChromeBar *)bar shareFromButton:(UIButton *)button {
+    [self presentShareFromButton:button];
+}
+
+- (void)chrome:(RBChromeBar *)bar moreFromButton:(UIButton *)button {
+    [self presentMoreFromButton:button];
+}
+
+- (void)phoneToolbarBack:(RBPhoneToolbar *)toolbar {
+    [self.session sendMessage:@{@"t": @"back"}];
+}
+
+- (void)phoneToolbarForward:(RBPhoneToolbar *)toolbar {
+    [self.session sendMessage:@{@"t": @"fwd"}];
+}
+
+- (void)phoneToolbar:(RBPhoneToolbar *)toolbar shareFromButton:(UIButton *)button {
+    [self presentShareFromButton:button];
+}
+
+- (void)phoneToolbar:(RBPhoneToolbar *)toolbar libraryFromButton:(UIButton *)button {
+    [self presentLibraryFromButton:button];
+}
+
+- (void)phoneToolbar:(RBPhoneToolbar *)toolbar pagesFromButton:(UIButton *)button {
+    [self presentPageSwitcher];
+}
+
+- (void)phoneToolbar:(RBPhoneToolbar *)toolbar moreFromButton:(UIButton *)button {
+    [self presentMoreFromButton:button];
+}
+
+- (RBActionActivity *)activityForAction:(NSString *)action title:(NSString *)title icon:(RBIcon)icon {
     __weak RBRootViewController *weakSelf = self;
-    list.onSelect = ^(RBListItem *item) {
-        [weakSelf dismissPopover];
-        [weakSelf handlePageAction:item.payload];
-    };
-    [self presentListPopover:list fromButton:button];
+    return [[RBActionActivity alloc]
+            initWithType:[@"space.seg6.surf." stringByAppendingString:action]
+                   title:title
+                   image:[RBTheme icon:icon size:48.0 color:[UIColor blackColor]]
+                 handler:^{
+        weakSelf.pendingActivityAction = action;
+        RBLog(@"activity selected %@", action);
+    }];
+}
+
+- (void)activityControllerDidFinish {
+    NSString *action = self.pendingActivityAction;
+    self.pendingActivityAction = nil;
+    self.activityController = nil;
+    if ([action length]) {
+        [self performSelector:@selector(performActivityActionWhenReady:)
+                   withObject:action afterDelay:0.05];
+    }
+}
+
+- (void)performActivityActionWhenReady:(NSString *)action {
+    if (self.presentedViewController) {
+        [self performSelector:@selector(performActivityActionWhenReady:)
+                   withObject:action afterDelay:0.10];
+        return;
+    }
+    // UIActivityViewController's iOS 6 completion handler can run after the
+    // presented-controller link clears but before the dismissal animation is
+    // fully settled. Give that legacy transition one final beat before trying
+    // to present Media Controls or Surf Settings.
+    [self performSelector:@selector(handlePageAction:) withObject:action afterDelay:0.35];
+}
+
+- (void)presentActivityController:(UIActivityViewController *)controller fromButton:(UIButton *)button {
+    [self dismissPopover];
+    self.pendingActivityAction = nil;
+    self.activityController = controller;
+    __weak RBRootViewController *weakSelf = self;
+    if ([controller respondsToSelector:@selector(setCompletionWithItemsHandler:)]) {
+        controller.completionWithItemsHandler = ^(NSString *activityType, BOOL completed,
+                                                   NSArray *returnedItems, NSError *activityError) {
+            [weakSelf activityControllerDidFinish];
+        };
+    } else {
+        controller.completionHandler = ^(NSString *activityType, BOOL completed) {
+            [weakSelf activityControllerDidFinish];
+        };
+    }
+    if (RBIsPad()) {
+        if ([controller respondsToSelector:@selector(popoverPresentationController)]) {
+            UIPopoverPresentationController *presentation = controller.popoverPresentationController;
+            presentation.sourceView = button;
+            presentation.sourceRect = button.bounds;
+            [self presentViewController:controller animated:YES completion:nil];
+        } else {
+            UIPopoverController *popover = [[UIPopoverController alloc] initWithContentViewController:controller];
+            popover.delegate = self;
+            self.popover = popover;
+            CGRect anchor = [button convertRect:button.bounds toView:self.view];
+            [popover presentPopoverFromRect:anchor inView:self.view
+                   permittedArrowDirections:UIPopoverArrowDirectionAny animated:YES];
+        }
+    } else {
+        [self presentViewController:controller animated:YES completion:nil];
+    }
+}
+
+- (void)presentShareFromButton:(UIButton *)button {
+    NSString *urlText = self.currentURL ?: [self.chromeBar.omnibox currentText];
+    NSURL *url = [NSURL URLWithString:urlText ?: @""];
+    id shareItem = url ?: (urlText ?: @"");
+    NSString *pageTitle = self.chromeBar.pageTitle;
+    NSMutableArray *shareItems = [NSMutableArray array];
+    if ([pageTitle length]) [shareItems addObject:pageTitle];
+    [shareItems addObject:shareItem];
+    RBActionActivity *bookmark = [self activityForAction:@"bookmark"
+                                                   title:(self.currentStarred ? @"Remove Bookmark" : @"Add Bookmark")
+                                                    icon:(self.currentStarred ? RBIconStarFill : RBIconStar)];
+    UIActivityViewController *controller = [[UIActivityViewController alloc]
+                                             initWithActivityItems:shareItems
+                                             applicationActivities:@[bookmark]];
+    [self presentActivityController:controller fromButton:button];
+}
+
+- (void)presentMoreFromButton:(UIButton *)button {
+    NSArray *activities = @[
+        [self activityForAction:@"reader" title:@"Reader" icon:RBIconBook],
+        [self activityForAction:@"find" title:@"Find on Page" icon:RBIconSearch],
+        [self activityForAction:@"media" title:@"Media Controls" icon:RBIconMore],
+        [self activityForAction:@"paste" title:@"Paste to Page" icon:RBIconKeyboard],
+        [self activityForAction:@"fullscreen" title:(self.fullscreen ? @"Exit Fullscreen" : @"Fullscreen")
+                            icon:(self.fullscreen ? RBIconShrink : RBIconExpand)],
+        [self activityForAction:@"settings" title:@"Surf Settings" icon:RBIconGear],
+    ];
+    UIActivityViewController *controller = [[UIActivityViewController alloc]
+                                             initWithActivityItems:@[@{@"surf": @"actions"}]
+                                             applicationActivities:activities];
+    controller.excludedActivityTypes = @[UIActivityTypePostToFacebook, UIActivityTypePostToTwitter,
+                                          UIActivityTypePostToWeibo, UIActivityTypeMessage,
+                                          UIActivityTypeMail, UIActivityTypePrint,
+                                          UIActivityTypeCopyToPasteboard, UIActivityTypeAssignToContact,
+                                          UIActivityTypeSaveToCameraRoll];
+    [self presentActivityController:controller fromButton:button];
 }
 
 - (void)handlePageAction:(NSString *)action {
-    if ([action isEqualToString:@"media"]) {
-        [self presentMediaControlsFromButton:self.chromeBar.actionButton];
+    RBLog(@"activity executing %@", action ?: @"(nil)");
+    if ([action isEqualToString:@"forward"]) {
+        [self.session sendMessage:@{@"t": @"fwd"}];
+    } else if ([action isEqualToString:@"library"]) {
+        [self presentLibrary];
+    } else if ([action isEqualToString:@"settings"]) {
+        [self presentSettingsAllowingCancel:YES message:nil];
+    } else if ([action isEqualToString:@"media"]) {
+        UIButton *anchor = RBIsPad() ? self.chromeBar.moreButton : self.phoneToolbar.moreButton;
+        [self presentMediaControlsFromButton:anchor];
     } else if ([action isEqualToString:@"reader"]) {
         self.readerPending = YES;
         [self.session sendMessage:@{@"t": @"reader"}];
@@ -1023,16 +1276,6 @@ static CGFloat RBEvenExtent(CGFloat value) {
         [self.view setNeedsLayout];
         [self.view layoutIfNeeded];
         [self.findBar focusField];
-    } else if ([action isEqualToString:@"pageinfo"]) {
-        NSURL *url = [NSURL URLWithString:self.currentURL ?: @""];
-        NSString *host = [url host] ?: (self.currentURL ?: @"This page");
-        NSString *security = [self.currentSecurity isEqualToString:@"secure"]
-            ? @"The connection to this site is secure."
-            : ([self.currentSecurity isEqualToString:@"insecure"]
-               ? @"The connection to this site is not secure."
-               : @"Connection security information is unavailable.");
-        [[[UIAlertView alloc] initWithTitle:host message:security delegate:nil
-                          cancelButtonTitle:@"Done" otherButtonTitles:nil] show];
     } else if ([action isEqualToString:@"paste"]) {
         [self pasteToPage];
     } else if ([action isEqualToString:@"bookmark"]) {
@@ -1053,12 +1296,22 @@ static CGFloat RBEvenExtent(CGFloat value) {
     RBMediaController *controller = [[RBMediaController alloc] init];
     controller.delegate = self;
     self.pageMediaController = controller;
-    UIPopoverController *popover = [[UIPopoverController alloc] initWithContentViewController:controller];
-    popover.delegate = self;
-    self.popover = popover;
-    CGRect anchor = [button convertRect:button.bounds toView:self.view];
-    [popover presentPopoverFromRect:anchor inView:self.view
-           permittedArrowDirections:UIPopoverArrowDirectionUp animated:YES];
+    if (RBIsPad()) {
+        UIPopoverController *popover = [[UIPopoverController alloc] initWithContentViewController:controller];
+        popover.delegate = self;
+        self.popover = popover;
+        CGRect anchor = [button convertRect:button.bounds toView:self.view];
+        [popover presentPopoverFromRect:anchor inView:self.view
+               permittedArrowDirections:UIPopoverArrowDirectionUp animated:YES];
+    } else {
+        controller.navigationItem.rightBarButtonItem =
+            [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
+                                                          target:self action:@selector(compactPopoverDone:)];
+        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:controller];
+        nav.modalPresentationStyle = UIModalPresentationFullScreen;
+        self.compactPopoverController = nav;
+        [self presentViewController:nav animated:YES completion:nil];
+    }
     [self.session sendMessage:@{@"t": @"media-query"}];
 }
 
@@ -1080,7 +1333,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
 
 - (void)mailCurrentPage {
     if (![MFMailComposeViewController canSendMail]) {
-        [self showToast:@"Mail is not set up on this iPad"];
+        [self showToast:@"Mail is not set up on this device"];
         return;
     }
     MFMailComposeViewController *mail = [[MFMailComposeViewController alloc] init];
@@ -1106,14 +1359,10 @@ static CGFloat RBEvenExtent(CGFloat value) {
 
 // Library (book button): History | Bookmarks | Downloads in one surface.
 - (void)chrome:(RBChromeBar *)bar libraryFromButton:(UIButton *)button {
-    [self presentLibrary];
+    [self presentLibraryFromButton:button];
 }
 
 // Settings (gear): straight to settings — there is no menu.
-- (void)chromeSettings:(RBChromeBar *)bar {
-    [self presentSettingsAllowingCancel:YES message:nil];
-}
-
 - (void)pasteToPage {
     NSString *text = [UIPasteboard generalPasteboard].string;
     if (![text length]) {
@@ -1127,6 +1376,14 @@ static CGFloat RBEvenExtent(CGFloat value) {
 - (void)toggleFullscreen {
     self.fullscreen = !self.fullscreen;
     [self.view setNeedsLayout];
+}
+
+- (void)fullscreenBackTapped:(id)sender {
+    [self.session sendMessage:@{@"t": @"back"}];
+}
+
+- (void)fullscreenForwardTapped:(id)sender {
+    [self.session sendMessage:@{@"t": @"fwd"}];
 }
 
 // ---------------------------------------------------------------- omnibox
@@ -1248,6 +1505,74 @@ static CGFloat RBEvenExtent(CGFloat value) {
     [self.session sendMessage:@{@"t": @"tab", @"action": @"new"}];
 }
 
+// --------------------------------------------------------- phone pages
+
+- (NSNumber *)activeTabKey {
+    for (NSDictionary *tab in self.lastTabs) {
+        if ([[tab objectForKey:@"active"] boolValue]) return [tab objectForKey:@"id"];
+    }
+    return nil;
+}
+
+- (void)cacheThumbnailForTabKey:(NSNumber *)tabKey {
+    if (!tabKey) return;
+    UIImage *image = [self.streamView snapshotImageWithMaximumSize:CGSizeMake(280.0, 360.0)];
+    if (!image) return;
+    [self.tabThumbnails setObject:image forKey:tabKey];
+    [self.thumbnailLRU removeObject:tabKey];
+    [self.thumbnailLRU addObject:tabKey];
+    while ([self.thumbnailLRU count] > 12) {
+        NSNumber *oldest = [self.thumbnailLRU objectAtIndex:0];
+        [self.thumbnailLRU removeObjectAtIndex:0];
+        [self.tabThumbnails removeObjectForKey:oldest];
+    }
+}
+
+- (void)cacheActiveTabThumbnail {
+    [self cacheThumbnailForTabKey:[self activeTabKey]];
+}
+
+- (void)presentPageSwitcher {
+    if (RBIsPad() || self.pageSwitcherController) return;
+    [self.chromeBar.omnibox dismissKeyboard];
+    [self cacheActiveTabThumbnail];
+    RBPageSwitcherController *controller = [[RBPageSwitcherController alloc]
+                                             initWithTabs:self.lastTabs
+                                             thumbnails:self.tabThumbnails
+                                             baseURL:self.session.baseURL];
+    controller.delegate = self;
+    self.pageSwitcherController = controller;
+    [self presentViewController:controller animated:YES completion:nil];
+}
+
+- (void)dismissPageSwitcherSelectingTab:(NSInteger)tabID {
+    self.pageSwitcherController = nil;
+    [self dismissViewControllerAnimated:YES completion:^{
+        if (tabID != NSNotFound) {
+            [self.session sendMessage:@{@"t": @"tab", @"action": @"select",
+                                        @"id": [NSNumber numberWithInteger:tabID]}];
+        }
+    }];
+}
+
+- (void)pageSwitcher:(RBPageSwitcherController *)controller selectTab:(NSInteger)tabID {
+    [self dismissPageSwitcherSelectingTab:tabID];
+}
+
+- (void)pageSwitcher:(RBPageSwitcherController *)controller closeTab:(NSInteger)tabID {
+    NSNumber *tabKey = [NSNumber numberWithInteger:tabID];
+    [self.tabThumbnails removeObjectForKey:tabKey];
+    [self.thumbnailLRU removeObject:tabKey];
+    [self.session sendMessage:@{@"t": @"tab", @"action": @"close", @"id": tabKey}];
+}
+
+- (void)pageSwitcherNewTab:(RBPageSwitcherController *)controller {
+    self.pageSwitcherController = nil;
+    [self dismissViewControllerAnimated:YES completion:^{
+        [self.session sendMessage:@{@"t": @"tab", @"action": @"new"}];
+    }];
+}
+
 // --------------------------------------------------------------- find bar
 
 - (void)findBar:(RBFindBar *)bar search:(NSString *)query direction:(NSInteger)direction {
@@ -1263,25 +1588,46 @@ static CGFloat RBEvenExtent(CGFloat value) {
 
 - (void)presentListPopover:(RBListPopover *)list fromButton:(UIButton *)button {
     [self dismissPopover];
-    list.contentSizeForViewInPopover = [list preferredSize];
-    UIPopoverController *popover = [[UIPopoverController alloc] initWithContentViewController:list];
-    popover.delegate = self;
-    self.popover = popover;
-    CGRect anchor = [button convertRect:button.bounds toView:self.view];
-    [popover presentPopoverFromRect:anchor inView:self.view
-           permittedArrowDirections:UIPopoverArrowDirectionUp animated:YES];
+    if (RBIsPad()) {
+        list.contentSizeForViewInPopover = [list preferredSize];
+        UIPopoverController *popover = [[UIPopoverController alloc] initWithContentViewController:list];
+        popover.delegate = self;
+        self.popover = popover;
+        CGRect anchor = [button convertRect:button.bounds toView:self.view];
+        [popover presentPopoverFromRect:anchor inView:self.view
+               permittedArrowDirections:UIPopoverArrowDirectionUp animated:YES];
+    } else {
+        list.title = @"Actions";
+        list.navigationItem.rightBarButtonItem =
+            [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
+                                                          target:self action:@selector(compactPopoverDone:)];
+        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:list];
+        nav.modalPresentationStyle = UIModalPresentationFullScreen;
+        self.compactPopoverController = nav;
+        [self presentViewController:nav animated:YES completion:nil];
+    }
 }
 
 - (void)dismissPopover {
     if (self.popover.popoverVisible) [self.popover dismissPopoverAnimated:NO];
+    if (self.compactPopoverController) {
+        [self dismissViewControllerAnimated:NO completion:nil];
+    }
     self.popover = nil;
+    self.compactPopoverController = nil;
     self.pageMediaController = nil;
+}
+
+- (void)compactPopoverDone:(id)sender {
+    [self dismissPopover];
 }
 
 - (void)popoverControllerDidDismissPopover:(UIPopoverController *)popoverController {
     if (popoverController == self.popover) {
         self.popover = nil;
         self.pageMediaController = nil;
+        self.libraryController = nil;
+        self.activityController = nil;
     }
     if (popoverController == self.uploadPopover) {
         // Swiped away without picking: cancel the pending server chooser.
@@ -1296,6 +1642,22 @@ static CGFloat RBEvenExtent(CGFloat value) {
 // ---------------------------------------------------------------- library
 
 - (void)presentLibrary {
+    UIButton *button = RBIsPad() ? self.chromeBar.libraryButton : self.phoneToolbar.libraryButton;
+    [self presentLibraryFromButton:button];
+}
+
+- (void)dismissLibraryAnimated:(BOOL)animated {
+    if (self.popover.popoverVisible) {
+        [self.popover dismissPopoverAnimated:animated];
+        self.popover = nil;
+    } else if (self.libraryController) {
+        [self dismissViewControllerAnimated:animated completion:nil];
+    }
+    self.libraryController = nil;
+}
+
+- (void)presentLibraryFromButton:(UIButton *)button {
+    [self dismissPopover];
     RBLibraryController *library = [[RBLibraryController alloc] init];
     __weak RBRootViewController *weakSelf = self;
     library.onRequestHistoryPage = ^(NSString *query, NSInteger offset) {
@@ -1320,12 +1682,11 @@ static CGFloat RBEvenExtent(CGFloat value) {
         [weakSelf.session sendMessage:@{@"t": @"dldel", @"name": name ?: @""}];
     };
     library.onPick = ^(NSString *url) {
-        [weakSelf dismissViewControllerAnimated:YES completion:nil];
-        weakSelf.libraryController = nil;
+        [weakSelf dismissLibraryAnimated:YES];
         [weakSelf.session sendMessage:@{@"t": @"nav", @"url": url}];
     };
     library.onDismiss = ^{
-        weakSelf.libraryController = nil;
+        [weakSelf dismissLibraryAnimated:YES];
     };
     library.onNeedsData = ^(NSString *kind) {
         if ([kind isEqualToString:@"bookmarks"]) [weakSelf.session sendMessage:@{@"t": @"hist"}];
@@ -1333,8 +1694,24 @@ static CGFloat RBEvenExtent(CGFloat value) {
     };
     self.libraryController = library;
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:library];
-    nav.modalPresentationStyle = UIModalPresentationFormSheet;
-    [self presentViewController:nav animated:YES completion:nil];
+    if (RBIsPad()) {
+        CGSize librarySize = CGSizeMake(420.0, 520.0);
+        library.contentSizeForViewInPopover = librarySize;
+        nav.contentSizeForViewInPopover = librarySize;
+        UIPopoverController *popover = [[UIPopoverController alloc] initWithContentViewController:nav];
+        // iOS 6 does not reliably forward a navigation controller's preferred
+        // size into an already-created popover. Set the owning controller too,
+        // otherwise UIKit falls back to an almost full-screen table height.
+        popover.popoverContentSize = librarySize;
+        popover.delegate = self;
+        self.popover = popover;
+        CGRect anchor = [button convertRect:button.bounds toView:self.view];
+        [popover presentPopoverFromRect:anchor inView:self.view
+               permittedArrowDirections:UIPopoverArrowDirectionUp animated:YES];
+    } else {
+        nav.modalPresentationStyle = UIModalPresentationFullScreen;
+        [self presentViewController:nav animated:YES completion:nil];
+    }
     // Prefetch the other two tabs so switching is instant.
     [self.session sendMessage:@{@"t": @"hist"}];
     [self.session sendMessage:@{@"t": @"downloads"}];
@@ -1588,19 +1965,26 @@ static CGFloat RBEvenExtent(CGFloat value) {
     UIImagePickerController *picker = [[UIImagePickerController alloc] init];
     picker.sourceType = UIImagePickerControllerSourceTypePhotoLibrary;
     picker.delegate = self;
-    // iPad rule: the photo library picker must live in a popover.
-    UIPopoverController *popover = [[UIPopoverController alloc] initWithContentViewController:picker];
-    popover.delegate = self;
-    self.uploadPopover = popover;
-    CGRect anchor = [self.chromeBar.actionButton convertRect:self.chromeBar.actionButton.bounds toView:self.view];
-    [popover presentPopoverFromRect:anchor inView:self.view
-           permittedArrowDirections:UIPopoverArrowDirectionUp animated:YES];
+    if (RBIsPad()) {
+        // iPad rule: the photo library picker must live in a popover.
+        UIPopoverController *popover = [[UIPopoverController alloc] initWithContentViewController:picker];
+        popover.delegate = self;
+        self.uploadPopover = popover;
+        CGRect anchor = [self.chromeBar.moreButton convertRect:self.chromeBar.moreButton.bounds toView:self.view];
+        [popover presentPopoverFromRect:anchor inView:self.view
+               permittedArrowDirections:UIPopoverArrowDirectionUp animated:YES];
+    } else {
+        self.uploadPicker = picker;
+        [self presentViewController:picker animated:YES completion:nil];
+    }
     [self showToast:@"Pick a photo to upload"];
 }
 
 - (void)dismissUploadPopover {
     if (self.uploadPopover.popoverVisible) [self.uploadPopover dismissPopoverAnimated:YES];
+    if (self.uploadPicker) [self dismissViewControllerAnimated:YES completion:nil];
     self.uploadPopover = nil;
+    self.uploadPicker = nil;
 }
 
 - (void)imagePickerController:(UIImagePickerController *)picker
@@ -1690,8 +2074,12 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
     [actions addObject:@"cancel"];
     self.linkSheetActions = actions;
     self.linkSheet = sheet;
-    CGRect r = CGRectMake(self.longPressStart.x - 2.0, self.longPressStart.y - 2.0, 4.0, 4.0);
-    [sheet showFromRect:r inView:self.streamView animated:YES];
+    if (RBIsPad()) {
+        CGRect r = CGRectMake(self.longPressStart.x - 2.0, self.longPressStart.y - 2.0, 4.0, 4.0);
+        [sheet showFromRect:r inView:self.streamView animated:YES];
+    } else {
+        [sheet showInView:self.view];
+    }
 }
 
 - (void)actionSheet:(UIActionSheet *)actionSheet clickedButtonAtIndex:(NSInteger)buttonIndex {

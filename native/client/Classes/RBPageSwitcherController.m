@@ -1,0 +1,353 @@
+#import "RBPageSwitcherController.h"
+
+#import "RBTheme.h"
+
+#import <QuartzCore/QuartzCore.h>
+
+@interface RBPageCard : UIView
+@property(nonatomic, assign) NSInteger tabID;
+@property(nonatomic, strong) UILabel *pageTitleLabel;
+@property(nonatomic, strong) UIImageView *previewView;
+@property(nonatomic, strong) UILabel *placeholderLabel;
+@property(nonatomic, strong) UIImageView *faviconView;
+@property(nonatomic, strong) UIButton *closeButton;
+@property(nonatomic, strong) UIView *closeDot;
+@property(nonatomic, copy) NSString *iconPath;
+@end
+
+@implementation RBPageCard
+@end
+
+@interface RBPageSwitcherController () <UIGestureRecognizerDelegate>
+@property(nonatomic, strong) NSArray *tabs;
+@property(nonatomic, strong) NSDictionary *thumbnails;
+@property(nonatomic, strong) RBGradientBar *titleBar;
+@property(nonatomic, strong) UILabel *titleLabel;
+@property(nonatomic, strong) UIScrollView *scrollView;
+@property(nonatomic, strong) UIPageControl *pageControl;
+@property(nonatomic, strong) RBGradientBar *bottomBar;
+@property(nonatomic, strong) UIButton *addPageButton;
+@property(nonatomic, strong) UIButton *doneButton;
+@property(nonatomic, strong) NSMutableArray *cards;
+@property(nonatomic, strong) NSURL *baseURL;
+@property(nonatomic, strong) NSMutableDictionary *iconCache;
+@property(nonatomic, strong) NSMutableSet *iconFetches;
+@property(nonatomic, assign) NSInteger selectedIndex;
+@property(nonatomic, assign) CGFloat lastLayoutWidth;
+@end
+
+@implementation RBPageSwitcherController
+
+- (id)initWithTabs:(NSArray *)tabs thumbnails:(NSDictionary *)thumbnails baseURL:(NSURL *)baseURL {
+    self = [super initWithNibName:nil bundle:nil];
+    if (self) {
+        self.tabs = tabs ?: @[];
+        self.thumbnails = thumbnails ?: @{};
+        self.baseURL = baseURL;
+        self.iconCache = [NSMutableDictionary dictionary];
+        self.iconFetches = [NSMutableSet set];
+        self.selectedIndex = [self activeIndexInTabs:self.tabs];
+        self.modalTransitionStyle = UIModalTransitionStyleFlipHorizontal;
+        self.modalPresentationStyle = UIModalPresentationFullScreen;
+    }
+    return self;
+}
+
+- (NSInteger)activeIndexInTabs:(NSArray *)tabs {
+    for (NSUInteger i = 0; i < [tabs count]; i++) {
+        NSDictionary *tab = [tabs objectAtIndex:i];
+        if ([[tab objectForKey:@"active"] boolValue]) return (NSInteger)i;
+    }
+    return [tabs count] ? 0 : NSNotFound;
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.view.backgroundColor = [RBTheme stripBottomColor];
+
+    self.titleBar = [[RBGradientBar alloc] initWithFrame:CGRectZero];
+    [self.view addSubview:self.titleBar];
+    self.titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    self.titleLabel.backgroundColor = [UIColor clearColor];
+    self.titleLabel.text = @"Pages";
+    self.titleLabel.textAlignment = NSTextAlignmentCenter;
+    self.titleLabel.font = [RBTheme fontOfSize:18.0 bold:YES];
+    self.titleLabel.textColor = [RBTheme primaryTextColor];
+    [self.titleBar addSubview:self.titleLabel];
+
+    self.scrollView = [[UIScrollView alloc] initWithFrame:CGRectZero];
+    self.scrollView.backgroundColor = [UIColor clearColor];
+    self.scrollView.pagingEnabled = YES;
+    self.scrollView.showsHorizontalScrollIndicator = NO;
+    self.scrollView.delegate = self;
+    [self.view addSubview:self.scrollView];
+
+    self.pageControl = [[UIPageControl alloc] initWithFrame:CGRectZero];
+    self.pageControl.userInteractionEnabled = NO;
+    [self.view addSubview:self.pageControl];
+
+    self.bottomBar = [[RBGradientBar alloc] initWithFrame:CGRectZero];
+    [self.view addSubview:self.bottomBar];
+    self.addPageButton = [UIButton buttonWithType:UIButtonTypeCustom];
+    [self.addPageButton setTitle:@"New Page" forState:UIControlStateNormal];
+    [self.addPageButton setTitleColor:[RBTheme iconColor] forState:UIControlStateNormal];
+    self.addPageButton.titleLabel.font = [RBTheme fontOfSize:15.0 bold:YES];
+    self.addPageButton.accessibilityLabel = @"New Page";
+    [self.addPageButton addTarget:self action:@selector(newTapped:) forControlEvents:UIControlEventTouchUpInside];
+    [self.bottomBar addSubview:self.addPageButton];
+    self.doneButton = [UIButton buttonWithType:UIButtonTypeCustom];
+    [self.doneButton setTitle:@"Done" forState:UIControlStateNormal];
+    [self.doneButton setTitleColor:[RBTheme iconColor] forState:UIControlStateNormal];
+    self.doneButton.titleLabel.font = [RBTheme fontOfSize:15.0 bold:YES];
+    self.doneButton.accessibilityLabel = @"Done";
+    [self.doneButton addTarget:self action:@selector(doneTapped:) forControlEvents:UIControlEventTouchUpInside];
+    [self.bottomBar addSubview:self.doneButton];
+
+    self.cards = [NSMutableArray array];
+    [self rebuildCards];
+}
+
+- (void)updateTabs:(NSArray *)tabs thumbnails:(NSDictionary *)thumbnails {
+    NSInteger selectedID = [self selectedTabID];
+    self.tabs = tabs ?: @[];
+    self.thumbnails = thumbnails ?: @{};
+    self.selectedIndex = [self indexOfTabID:selectedID];
+    if (self.selectedIndex == NSNotFound) self.selectedIndex = [self activeIndexInTabs:self.tabs];
+    if ([self isViewLoaded]) {
+        [self rebuildCards];
+        [self.view setNeedsLayout];
+    }
+}
+
+- (void)didReceiveMemoryWarning {
+    [super didReceiveMemoryWarning];
+    self.thumbnails = @{};
+    [self.iconCache removeAllObjects];
+    if ([self isViewLoaded]) {
+        [self rebuildCards];
+        [self.view setNeedsLayout];
+    }
+}
+
+- (NSInteger)indexOfTabID:(NSInteger)tabID {
+    for (NSUInteger i = 0; i < [self.tabs count]; i++) {
+        if ([[[self.tabs objectAtIndex:i] objectForKey:@"id"] integerValue] == tabID) return (NSInteger)i;
+    }
+    return NSNotFound;
+}
+
+- (NSInteger)selectedTabID {
+    if (self.selectedIndex == NSNotFound || self.selectedIndex < 0 ||
+        self.selectedIndex >= (NSInteger)[self.tabs count]) return NSNotFound;
+    return [[[self.tabs objectAtIndex:(NSUInteger)self.selectedIndex] objectForKey:@"id"] integerValue];
+}
+
+- (NSString *)titleForTab:(NSDictionary *)tab {
+    NSString *url = [tab objectForKey:@"url"];
+    if ([url hasPrefix:@"about:blank#surf-new"]) return @"New Page";
+    NSString *title = [tab objectForKey:@"title"];
+    if (![title length]) title = url;
+    if ([title hasPrefix:@"about:blank#surf-new"]) title = @"New Page";
+    return [title length] ? title : @"Untitled";
+}
+
+- (void)rebuildCards {
+    for (UIView *card in self.cards) [card removeFromSuperview];
+    [self.cards removeAllObjects];
+    for (NSDictionary *tab in self.tabs) {
+        NSInteger tabID = [[tab objectForKey:@"id"] integerValue];
+        RBPageCard *card = [[RBPageCard alloc] initWithFrame:CGRectZero];
+        card.tabID = tabID;
+        card.backgroundColor = [UIColor clearColor];
+        card.layer.cornerRadius = 7.0;
+        card.layer.borderWidth = 0.0;
+        card.layer.masksToBounds = YES;
+
+        UILabel *title = [[UILabel alloc] initWithFrame:CGRectZero];
+        title.backgroundColor = [UIColor colorWithWhite:0.90 alpha:1.0];
+        title.text = [self titleForTab:tab];
+        title.textAlignment = NSTextAlignmentCenter;
+        title.lineBreakMode = NSLineBreakByTruncatingTail;
+        title.font = [RBTheme fontOfSize:13.0 bold:YES];
+        title.textColor = [RBTheme primaryTextColor];
+        [card addSubview:title];
+        card.pageTitleLabel = title;
+
+        UIImageView *preview = [[UIImageView alloc] initWithFrame:CGRectZero];
+        preview.backgroundColor = [RBTheme pageBackgroundColor];
+        preview.contentMode = UIViewContentModeScaleAspectFill;
+        preview.clipsToBounds = YES;
+        preview.image = [self.thumbnails objectForKey:[NSNumber numberWithInteger:tabID]];
+        [card addSubview:preview];
+        card.previewView = preview;
+
+        if (!preview.image) {
+            NSString *iconPath = [tab objectForKey:@"icon"];
+            card.iconPath = [iconPath isKindOfClass:[NSString class]] ? iconPath : nil;
+            UIImageView *favicon = [[UIImageView alloc] initWithFrame:CGRectZero];
+            favicon.backgroundColor = [UIColor clearColor];
+            favicon.contentMode = UIViewContentModeScaleAspectFit;
+            favicon.image = [self.iconCache objectForKey:card.iconPath];
+            if (!favicon.image) {
+                favicon.image = [RBTheme icon:RBIconTabs size:42.0
+                                         color:[[RBTheme secondaryTextColor] colorWithAlphaComponent:0.34]];
+                [self fetchIcon:card.iconPath];
+            }
+            [card addSubview:favicon];
+            card.faviconView = favicon;
+
+            UILabel *placeholder = [[UILabel alloc] initWithFrame:CGRectZero];
+            placeholder.backgroundColor = [UIColor clearColor];
+            placeholder.text = [self titleForTab:tab];
+            placeholder.textAlignment = NSTextAlignmentCenter;
+            placeholder.numberOfLines = 3;
+            placeholder.font = [RBTheme fontOfSize:16.0 bold:YES];
+            placeholder.textColor = [RBTheme secondaryTextColor];
+            [card addSubview:placeholder];
+            card.placeholderLabel = placeholder;
+        }
+
+        UIButton *close = [UIButton buttonWithType:UIButtonTypeCustom];
+        close.tag = tabID;
+        close.backgroundColor = [UIColor clearColor];
+        close.accessibilityLabel = @"Close Page";
+        [close addTarget:self action:@selector(closeTapped:) forControlEvents:UIControlEventTouchUpInside];
+        UIView *closeDot = [[UIView alloc] initWithFrame:CGRectZero];
+        closeDot.backgroundColor = [UIColor colorWithRed:0.86 green:0.20 blue:0.18 alpha:1.0];
+        closeDot.layer.borderWidth = 0.5;
+        closeDot.layer.borderColor = [[UIColor colorWithRed:0.58 green:0.08 blue:0.07 alpha:1.0] CGColor];
+        closeDot.layer.cornerRadius = 8.0;
+        closeDot.userInteractionEnabled = NO;
+        [close addSubview:closeDot];
+        [card addSubview:close];
+        card.closeButton = close;
+        card.closeDot = closeDot;
+
+        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(cardTapped:)];
+        tap.delegate = self;
+        [card addGestureRecognizer:tap];
+        [self.scrollView addSubview:card];
+        [self.cards addObject:card];
+    }
+    self.pageControl.numberOfPages = [self.tabs count];
+    self.pageControl.currentPage = self.selectedIndex == NSNotFound ? 0 : self.selectedIndex;
+}
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    CGFloat w = self.view.bounds.size.width;
+    CGFloat h = self.view.bounds.size.height;
+    CGFloat titleH = 44.0;
+    CGFloat bottomH = 44.0;
+    CGFloat dotsH = 25.0;
+    self.titleBar.frame = CGRectMake(0.0, 0.0, w, titleH);
+    self.titleLabel.frame = self.titleBar.bounds;
+    self.bottomBar.frame = CGRectMake(0.0, h - bottomH, w, bottomH);
+    self.addPageButton.frame = CGRectMake(0.0, 0.0, w / 2.0, bottomH);
+    self.doneButton.frame = CGRectMake(w / 2.0, 0.0, w / 2.0, bottomH);
+    self.pageControl.frame = CGRectMake(0.0, h - bottomH - dotsH, w, dotsH);
+    self.scrollView.frame = CGRectMake(0.0, titleH, w, MAX(1.0, h - titleH - bottomH - dotsH));
+
+    CGFloat cardW = MIN(320.0, MAX(220.0, w - 42.0));
+    CGFloat cardH = MAX(160.0, self.scrollView.bounds.size.height - 24.0);
+    for (NSUInteger i = 0; i < [self.cards count]; i++) {
+        RBPageCard *card = [self.cards objectAtIndex:i];
+        card.frame = CGRectMake(w * i + floorf((w - cardW) / 2.0), 10.0, cardW, cardH);
+        UILabel *title = card.pageTitleLabel;
+        UIImageView *preview = card.previewView;
+        UILabel *placeholder = card.placeholderLabel;
+        title.frame = CGRectMake(0.0, 0.0, cardW, 28.0);
+        preview.frame = CGRectMake(0.0, 28.0, cardW, cardH - 28.0);
+        if (placeholder) {
+            CGFloat centerY = CGRectGetMidY(preview.frame);
+            card.faviconView.frame = CGRectMake(floorf((cardW - 48.0) / 2.0), centerY - 62.0, 48.0, 48.0);
+            placeholder.frame = CGRectMake(24.0, centerY - 4.0, cardW - 48.0, 78.0);
+        }
+        card.closeButton.frame = CGRectMake(0.0, 0.0, 32.0, 28.0);
+        card.closeDot.frame = CGRectMake(8.0, 6.0, 16.0, 16.0);
+    }
+    self.scrollView.contentSize = CGSizeMake(w * [self.tabs count], self.scrollView.bounds.size.height);
+    if (self.selectedIndex != NSNotFound && [self.tabs count]) {
+        self.scrollView.contentOffset = CGPointMake(w * self.selectedIndex, 0.0);
+    }
+    self.lastLayoutWidth = w;
+}
+
+- (void)fetchIcon:(NSString *)iconPath {
+    if (![iconPath length] || !self.baseURL || [self.iconFetches containsObject:iconPath]) return;
+    NSURL *url = [NSURL URLWithString:iconPath relativeToURL:self.baseURL];
+    if (!url) return;
+    [self.iconFetches addObject:iconPath];
+    NSURLRequest *request = [NSURLRequest requestWithURL:url
+                                            cachePolicy:NSURLRequestReturnCacheDataElseLoad
+                                        timeoutInterval:15.0];
+    __weak RBPageSwitcherController *weakSelf = self;
+    [NSURLConnection sendAsynchronousRequest:request queue:[NSOperationQueue mainQueue]
+                           completionHandler:^(NSURLResponse *response, NSData *data, NSError *error) {
+        RBPageSwitcherController *strongSelf = weakSelf;
+        [strongSelf.iconFetches removeObject:iconPath];
+        if (!strongSelf || error || ![data length]) return;
+        UIImage *image = [UIImage imageWithData:data];
+        if (!image) return;
+        [strongSelf.iconCache setObject:image forKey:iconPath];
+        for (RBPageCard *card in strongSelf.cards) {
+            if ([card.iconPath isEqualToString:iconPath]) card.faviconView.image = image;
+        }
+    }];
+}
+
+- (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView {
+    CGFloat w = MAX(1.0, scrollView.bounds.size.width);
+    NSInteger page = (NSInteger)floor((scrollView.contentOffset.x + w / 2.0) / w);
+    self.selectedIndex = MIN(MAX(0, page), MAX(0, (NSInteger)[self.tabs count] - 1));
+    self.pageControl.currentPage = self.selectedIndex;
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldReceiveTouch:(UITouch *)touch {
+    UIView *view = touch.view;
+    while (view && view != gestureRecognizer.view) {
+        if ([view isKindOfClass:[UIButton class]]) return NO;
+        view = view.superview;
+    }
+    return YES;
+}
+
+- (void)cardTapped:(UITapGestureRecognizer *)tap {
+    if (tap.state != UIGestureRecognizerStateEnded) return;
+    NSInteger index = [self indexOfTabID:[(RBPageCard *)tap.view tabID]];
+    if (index != NSNotFound) self.selectedIndex = index;
+    [self chooseSelectedTab];
+}
+
+- (void)closeTapped:(UIButton *)sender {
+    NSInteger tabID = sender.tag;
+    NSInteger oldIndex = [self indexOfTabID:tabID];
+    if (oldIndex == NSNotFound) return;
+    NSMutableArray *remaining = [self.tabs mutableCopy];
+    [remaining removeObjectAtIndex:(NSUInteger)oldIndex];
+    self.tabs = remaining;
+    self.selectedIndex = MIN(oldIndex, (NSInteger)[self.tabs count] - 1);
+    if (![self.tabs count]) self.selectedIndex = NSNotFound;
+    [self.delegate pageSwitcher:self closeTab:tabID];
+    [self rebuildCards];
+    [self.view setNeedsLayout];
+}
+
+- (void)newTapped:(id)sender {
+    [self.delegate pageSwitcherNewTab:self];
+}
+
+- (void)doneTapped:(id)sender {
+    if (![self.tabs count]) {
+        [self.delegate pageSwitcherNewTab:self];
+        return;
+    }
+    [self chooseSelectedTab];
+}
+
+- (void)chooseSelectedTab {
+    NSInteger tabID = [self selectedTabID];
+    if (tabID != NSNotFound) [self.delegate pageSwitcher:self selectTab:tabID];
+}
+
+@end

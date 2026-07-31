@@ -115,12 +115,14 @@ func encoderCodec(width, height int) string {
 // pumpVideo gates on encoder health, then relays AUs until the sub dies or
 // the client disconnects or explicitly retries.
 func (b *Controller) pumpVideo(c *transport.Client, sub *media.VideoSubscription) {
+	var generation uint32
 	select {
 	case au, ok := <-sub.C:
 		if !ok {
 			b.videoFailed(c)
 			return
 		}
+		generation = au.Generation
 		c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "ready", W: au.W, H: au.H, Generation: au.Generation, Profile: b.profileName()})
 		b.deliverAU(c, sub, au)
 	case <-time.After(firstAUWait):
@@ -130,6 +132,13 @@ func (b *Controller) pumpVideo(c *transport.Client, sub *media.VideoSubscription
 	}
 
 	for au := range sub.C {
+		if au.Generation != generation {
+			generation = au.Generation
+			// A viewport/fullscreen change restarts WebCodecs without
+			// replacing the subscription. Reconfigure VideoToolbox before the
+			// new generation's first IDR, exactly like initial subscription.
+			c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "ready", W: au.W, H: au.H, Generation: au.Generation, Profile: b.profileName()})
+		}
 		b.deliverAU(c, sub, au)
 	}
 	// Channel closed: encoder gave up (or we unsubscribed).

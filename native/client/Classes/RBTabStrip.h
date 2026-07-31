@@ -8,13 +8,10 @@
 - (void)tabStripNewTab:(RBTabStrip *)strip;
 @end
 
-// Safari-style tab bar: one cell per remote tab (favicon, title, close),
-// plus a [+] button pinned at the right.
-@interface RBTabStrip : UIView
+// Classic iPad Safari tab row. Tabs fill the available width; excess tabs
+// move into a >> overflow menu and the active tab is always kept visible.
+@interface RBTabStrip : UIView <UIActionSheetDelegate>
 @property(nonatomic, assign) id<RBTabStripDelegate> delegate;
-
-// tabs: array of {id, title, url, active, icon?} from the server broadcast.
-// baseURL resolves relative favicon paths like /tabicon/3?v=abc.
 - (void)setTabs:(NSArray *)tabs baseURL:(NSURL *)baseURL;
-- (void)purgeIconCache;
+- (void)purgeIconCache; // compatibility no-op; thumbnails/favicons are absent
 @end

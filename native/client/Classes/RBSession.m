@@ -155,7 +155,7 @@ static NSString *RBURLEscape(NSString *s);
     if ([compatibility isEqualToString:@"client-update-required"]) {
         NSDictionary *update = [json objectForKey:@"clientUpdate"];
         if ([update isKindOfClass:[NSDictionary class]]) self.requiredClientUpdate = update;
-        if (error) *error = @"This iPad needs a Surf update";
+        if (error) *error = @"This device needs a Surf update";
         return NO;
     }
     if ([compatibility isEqualToString:@"server-update-required"]) {

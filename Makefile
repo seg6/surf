@@ -99,4 +99,5 @@ native-sdk:
 	native/buildenv/fetch-sdk.sh
 
 native-package: native-sdk
-	docker run --rm --network host -v "$(CURDIR):/src" surf-buildenv make -C /src/native/client clean package DEBUG=0
+	docker run --rm --network host -v "$(CURDIR):/src" surf-buildenv bash -c \
+		'make -C /src/native/client clean package DEBUG=0 && bash /src/native/client/verify-package.sh'

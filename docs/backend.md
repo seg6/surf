@@ -3,7 +3,12 @@
 The backend is started with `surf serve`. It runs managed Chrome in
 `--headless=new`, captures and encodes the active tab through Chromium's
 tab-capture and WebCodecs APIs, and streams video, audio, and control messages
-to the native client.
+to the universal native iPhone, iPod touch, and iPad client.
+
+The same backend and wire protocol serve armv7/iOS 6 and arm64/iOS 7–14
+clients. Backend host architecture does not select the client architecture:
+each release embeds one rootful `iphoneos-arm` package containing both slices.
+Viewport and orientation continue to come from the connected client.
 
 ## Desktop app
 
@@ -23,9 +28,9 @@ checked against its declared size and SHA-256 before replacement. A previous
 executable is retained as `surf.previous`.
 
 Desktop packages are built natively for Linux x86-64 and ARM64, Windows x86-64, macOS
-Intel, and macOS Apple Silicon. Surf prefers a compatible system Chrome, then
-system Chromium, and otherwise downloads a verified ungoogled-chromium release
-into `SURF_HOME`.
+Intel, and macOS Apple Silicon. Surf prefers a compatible system Edge or
+Chromium and otherwise downloads a verified ungoogled-chromium release into
+`SURF_HOME`.
 
 macOS packages require macOS 12 Monterey or newer.
 
@@ -45,6 +50,10 @@ tab suppresses its local playback, so audio is heard by the Surf client without
 also playing on the host. Surf converts it to signed 16-bit, 16 kHz mono PCM
 inside Chromium and carries it over a random, loopback-only WebSocket. No
 virtual audio cable or external media process is required.
+
+Surf does not bundle a DRM module. Browser background networking and component
+updates remain available so any Widevine CDM supplied by the selected browser
+can register and update on its supported host platforms.
 
 ## Quick Start
 
@@ -95,9 +104,11 @@ SURF_PASSWORD='change-me' ./backend/surf serve
 ## Runtime Behavior
 
 Surf uses `CHROME` when explicitly set; that browser must permit unpacked
-extensions. Otherwise Surf prefers an extension-capable installed Chromium and
-then its managed ungoogled-chromium runtime because media capture uses the
-built-in extension. Managed releases are downloaded from the official
+extensions. Otherwise Surf prefers an extension-capable installed Edge or
+Chromium and then its managed ungoogled-chromium runtime because media capture
+uses the built-in extension. Current Google Chrome branded builds are not
+selected automatically because Chrome 137+ ignores the unpacked-extension
+launch flag Surf's capture bridge requires. Managed releases are downloaded from the official
 ungoogled-chromium GitHub organization, checked against GitHub's declared size
 and SHA-256 digest, installed atomically, and checked daily. One previous
 version is retained for rollback. Chrome for Testing is not used.
@@ -118,6 +129,24 @@ and require `video-retry`.
 There is no desktop capture, headful, headless-shell, or screenshot-polling
 mode. `CHROME=/path/to/browser` remains an explicit development/recovery
 override.
+
+### Widevine and protected media
+
+Widevine belongs to the host browser, not the legacy iOS client. Surf neither
+copies a CDM from another installation nor includes Google's proprietary module
+in a release. The launch configuration deliberately leaves component/CDM
+registration and update traffic enabled on every operating system.
+
+After the first HTTPS or localhost page loads, Surf calls
+`navigator.requestMediaKeySystemAccess("com.widevine.alpha", ...)`. Authenticated
+`/health?stats=1` output exposes the result as `widevine: "unknown"`,
+`"available"`, or `"unavailable"` plus `widevineDetail`. This is a capability
+result from the running browser, not a platform or executable-name guess.
+
+The managed ungoogled-chromium runtime normally has no Widevine CDM. Set
+`CHROME` to a compatible browser that already provides it when DRM is required.
+Even when EME reports Widevine available, the content provider can enforce
+license, HDCP, quality, and capture restrictions; Surf cannot bypass them.
 
 Backend ownership is split by latency domain. `Controller` consumes concrete
 typed commands and owns tab/input state. The extension bridge owns capture and
@@ -224,9 +253,10 @@ it behind HTTPS and use a strong password.
 
 Official GitHub Releases are Surf's update source of truth. SHA-256 protects
 against damaged or mismatched downloads; it is not a separate publisher
-signature. Release builds embed the native package built from the same commit.
-An authenticated native client with an older protocol can download that package
-from `/updates/v1/client`; media WebSockets are never used for update payloads.
+signature. Every Linux, Windows, and macOS release build embeds the same
+universal rootful native package built from the same commit. An authenticated
+native client with an older protocol can download that package from
+`/updates/v1/client`; media WebSockets are never used for update payloads.
 
 Video output is fixed at 30 FPS. Surf asks tabCapture for up to 60 source
 frames per second, retains only the newest source image, and samples it on the

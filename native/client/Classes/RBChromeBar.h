@@ -8,21 +8,22 @@
 @protocol RBChromeBarDelegate <NSObject>
 - (void)chromeBack:(RBChromeBar *)bar;
 - (void)chromeForward:(RBChromeBar *)bar;
-// Page actions (more icon): Reader, Find, Paste, sharing, Fullscreen.
-- (void)chrome:(RBChromeBar *)bar actionsFromButton:(UIButton *)button;
-// Library (book icon): History | Bookmarks | Downloads.
+- (void)chrome:(RBChromeBar *)bar shareFromButton:(UIButton *)button;
+- (void)chrome:(RBChromeBar *)bar moreFromButton:(UIButton *)button;
 - (void)chrome:(RBChromeBar *)bar libraryFromButton:(UIButton *)button;
-// Settings (gear icon): opens settings directly — there is no menu.
-- (void)chromeSettings:(RBChromeBar *)bar;
 @end
 
-// The Safari-style top bar: back/forward, unified omnibox, then page actions,
-// library, and settings.
+// Device-specific Safari top chrome. Phones show the unified omnibox while
+// iPads show navigation and browser controls around it. Phone page titles live
+// in Pages, where they remain readable without crowding the address field.
 @interface RBChromeBar : RBGradientBar
 @property(nonatomic, assign) id<RBChromeBarDelegate> delegate;
 @property(nonatomic, readonly) RBOmnibox *omnibox;
-@property(nonatomic, readonly) UIButton *actionButton;
+@property(nonatomic, readonly) UIButton *moreButton;
+@property(nonatomic, readonly) UIButton *shareButton;
 @property(nonatomic, readonly) UIButton *libraryButton;
+@property(nonatomic, assign, getter=isPhoneLayout) BOOL phoneLayout;
+@property(nonatomic, copy) NSString *pageTitle;
 
 - (void)setCanGoBack:(BOOL)back forward:(BOOL)forward;
 @end
