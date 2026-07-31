@@ -7,35 +7,58 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: write
 
 jobs:
   native:
-    name: Native package
+    name: Reuse native package
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Verify generated native metadata
+      - name: Download matching native CI artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
         run: |
-          VERSION="$(tr -d '[:space:]' < VERSION)" \
-          PROTOCOL_VERSION="$(tr -d '[:space:]' < PROTOCOL_VERSION)" \
-            native/client/render-versioned-files.sh
-          git diff --exit-code -- native/client/control native/client/Resources/Info.plist
+          set -euo pipefail
+          deadline=$((SECONDS + 900))
+          while (( SECONDS < deadline )); do
+            run_json="$(gh run list \
+              --workflow native.yml \
+              --commit "$GITHUB_SHA" \
+              --event push \
+              --limit 1 \
+              --json databaseId,status,conclusion,url)"
+            run_id="$(jq -r '.[0].databaseId // empty' <<< "$run_json")"
+            status="$(jq -r '.[0].status // empty' <<< "$run_json")"
+            conclusion="$(jq -r '.[0].conclusion // empty' <<< "$run_json")"
+            run_url="$(jq -r '.[0].url // empty' <<< "$run_json")"
 
-      - name: Download native SDK
-        run: make native-sdk
+            if [ -z "$run_id" ]; then
+              echo "Waiting for native CI on $GITHUB_SHA..."
+            elif [ "$status" != "completed" ]; then
+              echo "Waiting for native CI run $run_id ($status)..."
+            elif [ "$conclusion" = "success" ]; then
+              echo "Reusing native package from $run_url"
+              gh run download "$run_id" --name surf-native-deb --dir dist/native
+              test -n "$(find dist/native -name '*.deb' -type f -print -quit)"
+              break
+            else
+              echo "Native CI failed with conclusion '$conclusion': $run_url" >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          test -n "$(find dist/native -name '*.deb' -type f -print -quit 2>/dev/null)" || {
+            echo "Timed out waiting for successful native CI on $GITHUB_SHA" >&2
+            exit 1
+          }
 
-      - name: Build native build environment
-        run: docker build -t surf-buildenv native/buildenv
-
-      - name: Build and verify native package
-        run: make native-package
-
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: surf-native-deb
-          path: native/client/packages/*.deb
+          path: dist/native/*.deb
           if-no-files-found: error
 
   packages:
@@ -62,7 +85,7 @@ jobs:
             goos: darwin
             goarch: arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Free Intel macOS package space
         if: matrix.goos == 'darwin' && matrix.goarch == 'amd64'
@@ -72,12 +95,12 @@ jobs:
           sudo rm -rf /usr/local/share/dotnet
           rm -rf "$HOME/Library/Android" "$HOME/.gradle" "$HOME/.nuget"
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: surf-native-deb
           path: dist/native
@@ -118,11 +141,12 @@ jobs:
               test -n "$(find dist -name '*.dmg' -type f -print -quit)"
               codesign --verify --deep --strict dist/Surf.app
               test "$(otool -l dist/Surf.app/Contents/MacOS/surf |
-                awk '$1 == "minos" { print $2; exit }')" = "12.0"
+                awk '!found && $1 == "minos" { minos = $2; found = 1 }
+                     END { if (found) print minos }')" = "12.0"
               ;;
           esac
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: surf-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
@@ -138,7 +162,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [native, packages]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Release metadata
         id: meta
@@ -163,7 +187,7 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "protocol_version=${protocol_version}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
@@ -175,7 +199,7 @@ jobs:
             native/client/render-versioned-files.sh
           git diff --exit-code -- native/client/control native/client/Resources/Info.plist
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: surf-*
           path: dist/packages
@@ -203,7 +227,7 @@ jobs:
           test -s release-notes.md
           printf '\nNative iOS and unified Linux, Windows, and macOS packages are attached. Launch `surf` for the desktop app or run `surf daemon` under a service manager for a headless backend.\n' >> release-notes.md
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
           target_commitish: ${{ github.sha }}

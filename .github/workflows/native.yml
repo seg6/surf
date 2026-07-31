@@ -9,14 +9,9 @@ on:
       - "VERSION"
       - "native/**"
   push:
+    # Release tags reuse this exact-commit artifact instead of rebuilding it.
     branches:
       - main
-    paths:
-      - ".github/workflows/native.yml"
-      - "Makefile"
-      - "PROTOCOL_VERSION"
-      - "VERSION"
-      - "native/**"
   workflow_dispatch:
 
 permissions:
@@ -27,7 +22,7 @@ jobs:
     name: Universal package
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Verify generated native metadata
         run: |
@@ -45,7 +40,7 @@ jobs:
       - name: Build and verify native package
         run: make native-package
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: surf-native-deb
           path: native/client/packages/*.deb
