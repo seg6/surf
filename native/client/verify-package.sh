@@ -53,9 +53,12 @@ minimum_version() {
       in_version_command = 1
       next
     }
-    in_version_command && ($1 == "version" || $1 == "minos") {
-      print $2
-      exit
+    !found && in_version_command && ($1 == "version" || $1 == "minos") {
+      version = $2
+      found = 1
+    }
+    END {
+      if (found) print version
     }
   '
 }
@@ -102,8 +105,10 @@ if [ "$phone_family_count" != 1 ] || [ "$tablet_family_count" != 1 ]; then
   echo "UIDeviceFamily must contain phone/iPod (1) and iPad (2) exactly once" >&2
   exit 1
 fi
-if sed -n '/<key>UIRequiredDeviceCapabilities<\/key>/,/<\/array>/p' "$plist_xml" |
-    grep -q '<string>armv7</string>'; then
+required_capabilities="$(
+  sed -n '/<key>UIRequiredDeviceCapabilities<\/key>/,/<\/array>/p' "$plist_xml"
+)"
+if grep -q '<string>armv7</string>' <<< "$required_capabilities"; then
   echo "Info.plist still excludes arm64-only devices" >&2
   exit 1
 fi
@@ -121,9 +126,12 @@ done
 
 updater_mode="$(
   dpkg-deb -c "$package" |
-    awk '$NF == "usr/libexec/surf-update-v2" || $NF == "./usr/libexec/surf-update-v2" {
-      print $1
-      exit
+    awk '!found && ($NF == "usr/libexec/surf-update-v2" || $NF == "./usr/libexec/surf-update-v2") {
+      mode = $1
+      found = 1
+    }
+    END {
+      if (found) print mode
     }'
 )"
 case "$updater_mode" in
