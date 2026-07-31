@@ -18,7 +18,10 @@ Safari.
 Surf is experimental. The primary tested client is an original iPad mini on
 iOS 6.1.3. The release package is built for many more devices, but those
 model/OS combinations should be considered build-supported until they have
-been tested on hardware.
+been tested on hardware. Current iPad-mini acceptance covers pairing, saved
+servers, touch and keyboard input, video and audio, rotation, and synchronized
+page/native fullscreen; the phone layout is also exercised there through a
+disposable compatibility-mode package.
 
 ## Compatibility
 
@@ -106,10 +109,13 @@ copy it over SSH:
 
 ```sh
 scp space.seg6.surf_*.deb root@DEVICE_IP:/tmp/surf.deb
-ssh root@DEVICE_IP 'dpkg -i /tmp/surf.deb && uicache || true'
+ssh root@DEVICE_IP 'dpkg -i /tmp/surf.deb'
+ssh root@DEVICE_IP 'su mobile -c uicache || uicache || true'
 ```
 
-Respring or run `uicache` again if the icon does not appear.
+On older jailbreaks, running `uicache` as `root` can report an incorrect-user
+error. Run it as `mobile` as shown above, then respring if the icon still does
+not appear.
 
 ### 3. Pair and connect
 
@@ -139,12 +145,23 @@ Surf port, not Caddy, Cloudflare, a public certificate, or a certificate
 installed on the iOS device. Set `SURF_PUBLIC_ADDRESS=host:port` when a
 headless VPS should include its public endpoint in pairing codes.
 
+After pairing, every saved server is identified by its exact certificate pin
+and a per-server device key in the iOS Keychain. See the concise
+[security model](docs/security.md) for the pairing, MITM, revocation, and
+update-package trust boundaries.
+
 ## Browser and DRM support
 
 Surf prefers a compatible installed Edge or Chromium and otherwise manages a
 verified ungoogled-chromium build in its private data directory. Video and
 audio come from Chromium's tab-capture APIs; no FFmpeg, PulseAudio, virtual
 audio device, or desktop capture is required.
+
+The stream follows the exact even-sized surface left by native chrome; it is
+not selected from a fixed phone/iPad resolution list. Rotation and Surf
+fullscreen settle into one capture reconfiguration. A page entering or
+leaving the Fullscreen API, including YouTube's player, keeps native fullscreen
+synchronized without reconnecting the browser session.
 
 Surf does not distribute Widevine. If the selected host browser supplies a
 working Widevine CDM, protected sites can use it, subject to that site's
@@ -167,6 +184,7 @@ steps.
 
 - [Backend configuration and deployment](docs/backend.md)
 - [Native client build](docs/native-build.md)
+- [Security model](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Changelog](CHANGELOG.md)
 

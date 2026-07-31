@@ -58,12 +58,25 @@ Manual pairing also uses the six-word identity comparison.
 
 - Open **More > Surf Settings > Performance Overlay** for decoder, latency,
   network, and audio health.
-- Use **Retry Video** after a transient encoder failure.
+- Rotation and fullscreen reconfiguration should recover automatically. Use
+  **Retry Video** only if that recovery ultimately reports video unavailable.
 - Check the desktop logs for Chromium capture or WebCodecs errors.
 - Make sure the client and backend have the same Surf/protocol release.
 
 Surf's active-tab capture handles audio and video directly. Installing FFmpeg,
 PulseAudio, or a virtual audio device will not help this path.
+
+## Rotation or fullscreen has the wrong size
+
+Surf fullscreen and the remote page Fullscreen API are synchronized. A page
+player such as YouTube can enter native fullscreen, and the native Exit control
+leaves both states; Back and Forward are intentionally hidden in fullscreen.
+
+After rotation or a fullscreen change, the backend log should report the exact
+even-sized client surface and one settled tab-encoder resize. Intermediate
+orientation sizes are coalesced and must not close the WebSocket or require
+**Retry Video**. If the client reconnects, confirm the client and backend use
+the same protocol build, then collect both logs around the transition.
 
 ## Widevine or streaming-site sign-in
 
@@ -83,6 +96,8 @@ docker run --rm -v "$PWD:/src" surf-buildenv \
 The package must contain armv7 and arm64 slices, declare device families 1 and
 2, and retain the privileged updater's root ownership/setuid mode. After a
 manual install, run `uicache` and respring if the icon does not appear.
+On older systems, use `su mobile -c uicache`; running it as `root` may fail to
+open SpringBoard's cache.
 
 ## Collect logs
 

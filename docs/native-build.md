@@ -87,6 +87,9 @@ for a rootful jailbreak package containing both slices. It is not a rootless
 same package installs on iPhone/iPod and iPad. Classic phone launch images opt
 into native 3.5-, 4-, 4.7-, and 5.5-inch viewports; the client sends the
 resulting live viewport and every rotation to the backend.
+There is no per-model resolution table in the client or backend: device bounds,
+chrome, orientation, and fullscreen determine the live even-sized surface.
+Named sizes in tests are regression examples only.
 
 The runtime layout is selected with `UI_USER_INTERFACE_IDIOM()`. Phone builds
 use a bottom toolbar and a full-screen Pages controller; tablet builds use a
@@ -135,13 +138,21 @@ docker run --rm -v "$PWD:/src" surf-buildenv bash -c \
 For device acceptance, verify both idioms rather than resizing one layout:
 
 - On iPad, test the top toolbar, persistent tabs and overflow, anchored Share,
-  Bookmarks, and More popovers, rotation, fullscreen, video, audio, and input.
+  Bookmarks, and More popovers, rotation, Surf fullscreen, page-requested
+  fullscreen, video, audio, and input. Fullscreen should expose only Exit.
 - On an iPhone/iPod or phone-only compatibility package, test the six-button
   bottom toolbar, Pages previews and cache behavior, full-screen Library and
   activities, portrait/landscape transitions, and Surf Settings discovery.
 - Watch the native diagnostics/log during every chrome transition. The
   reported viewport must equal the remaining even-sized stream surface, and
-  rotation/fullscreen changes must recover automatically without Retry Video.
+  rotation/fullscreen changes must produce one settled encoder generation,
+  retain the WebSocket, and recover automatically without Retry Video.
+- Exercise rapid portrait/landscape changes as well as entering and leaving a
+  player such as YouTube. Returning from page fullscreen must restore the
+  device-specific chrome at the correct viewport without black borders.
+- Cover representative compact phone/iPod, modern phone, iPad, and iPad Pro
+  surfaces. Every requested even size must remain exact rather than being
+  coerced to the dimensions of another device family.
 
 To build the unified release binary with a matching client package embedded:
 

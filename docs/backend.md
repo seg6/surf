@@ -7,7 +7,7 @@ the equivalent foreground process for a service manager.
 
 ## Start and pair
 
-Desktop users open **Paired Devices** and choose **Pair new client**.
+Desktop users open **Paired Devices** and choose **Pair device**.
 Headless users start one persistent daemon and connect to it from another
 terminal:
 
@@ -46,6 +46,8 @@ Surf creates a persistent RSA-2048/SHA-256 certificate on first launch and
 serves TLS 1.2+ directly. Clients pin the SHA-256 leaf fingerprint, so a public
 CA, domain, reverse proxy, and installed iOS certificate are not required.
 TLS resumption is disabled; every new transport presents the pinned identity.
+The full trust model and first-pairing MITM boundary are documented in
+[Security](security.md).
 
 For a VPS, expose the configured Surf TCP port and tell pairing codes which
 reachable address to use:
@@ -147,6 +149,15 @@ uses its verified managed Chromium build. Active-tab `tabCapture` supplies both
 video and audio; no FFmpeg, PulseAudio, desktop capture, or virtual audio device
 is required.
 
+The native client reports the exact even-sized stream surface left by its
+current chrome; the backend does not choose from hard-coded device profiles.
+The 64-1600 dimension bounds are resource guards and cover the supported
+iOS 6-14 catalog, whose largest logical screen dimension is 1366 points.
+Rapid intermediate sizes are coalesced before Chromium and WebCodecs are
+reconfigured, so rotation, Surf fullscreen, and page Fullscreen API transitions
+retain the authenticated socket and media subscription. Page fullscreen state
+is synchronized to native fullscreen in both directions.
+
 Surf does not distribute Widevine. A working CDM supplied by the selected host
 browser may be used, subject to each service's DRM and output-protection rules.
 
@@ -155,3 +166,5 @@ browser may be used, subject to each service's DRM and output-protection rules.
 Desktop releases use the signed release manifest and SHA-256-verified assets.
 The native `.deb` update travels over its already authenticated, pinned Surf
 connection and is verified again before the privileged installer applies it.
+See [Security](security.md#updates) for what that protects and which host trust
+boundary remains.

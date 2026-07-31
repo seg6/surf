@@ -18,3 +18,6 @@ terminates TLS itself; there is no password or required reverse proxy.
 Basic health is `https://HOST:18080/api/v1/health`. Clients authenticate with
 paired device keys before configuration, media, files, or diagnostics are
 available.
+
+For the pairing and host-compromise trust boundaries, see
+[`docs/security.md`](../../docs/security.md).

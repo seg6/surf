@@ -6,6 +6,10 @@ server name/public address/port, creates single-use pairing codes and QR
 invitations, shows the active verification phrase, lists paired devices, and
 revokes devices immediately.
 
+The six-word phrase shown for manual pairing is the active-MITM check, not an
+extra password. QR pairing carries the expected identity out of band and does
+not require the comparison.
+
 The backend listener itself is pinned TLS. The local Settings page proxies only
 loopback admin operations through the daemon's permission-restricted per-run
 control descriptor, so device management is neither exposed nor authorized on

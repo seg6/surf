@@ -42,7 +42,8 @@ This file records the user-visible changes in every Surf release.
   exact small-phone landscape dimensions while keeping the control connection
   and media subscription alive through a single tab-capture reconfiguration.
 - Synchronized the remote page Fullscreen API with Surf's native fullscreen
-  chrome in both directions, including embedded players such as YouTube.
+  chrome in both directions, including embedded players such as YouTube, and
+  reduced fullscreen controls to a single unobtrusive Exit button.
 
 ## 0.9.0 - 2026-07-31
 
