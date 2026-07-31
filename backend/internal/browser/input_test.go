@@ -79,17 +79,27 @@ func TestIsActiveSession(t *testing.T) {
 	}
 }
 
-func TestNormalizeViewportPreservesPhoneLandscape(t *testing.T) {
-	w, h := normalizeViewportSize(480, 232, 768, 950)
-	if w != 480 || h != 232 {
-		t.Fatalf("phone landscape normalized to %dx%d, want 480x232", w, h)
+func TestNormalizeViewportPreservesClientDerivedSurfaces(t *testing.T) {
+	// These are representative live stream surfaces, not profiles used by
+	// production code. They cover compact phones/iPods, modern phones, iPads,
+	// iPad Pro, both orientations, and an arbitrary non-device-specific size.
+	surfaces := [][2]int{
+		{320, 392}, {480, 232}, {320, 480}, {374, 578}, {414, 648}, {428, 838},
+		{768, 950}, {1024, 694}, {834, 1120}, {1366, 950}, {1024, 1292},
+		{1200, 700},
+	}
+	for _, surface := range surfaces {
+		w, h := normalizeViewportSize(surface[0], surface[1], 768, 950)
+		if w != surface[0] || h != surface[1] {
+			t.Errorf("surface %dx%d normalized to %dx%d", surface[0], surface[1], w, h)
+		}
 	}
 }
 
 func TestNormalizeViewportUsesEvenEncoderBounds(t *testing.T) {
 	w, h := normalizeViewportSize(31, 2001, 768, 950)
-	if w != 64 || h != 1600 {
-		t.Fatalf("normalized bounds = %dx%d, want 64x1600", w, h)
+	if w != minViewportDimension || h != maxViewportDimension {
+		t.Fatalf("normalized bounds = %dx%d, want %dx%d", w, h, minViewportDimension, maxViewportDimension)
 	}
 }
 

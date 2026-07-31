@@ -17,7 +17,11 @@ import (
 
 var schemeRe = regexp.MustCompile(`(?i)^[a-z][a-z0-9+.-]*:`)
 
-const viewportResizeSettle = 120 * time.Millisecond
+const (
+	viewportResizeSettle = 120 * time.Millisecond
+	minViewportDimension = 64
+	maxViewportDimension = 1600
+)
 
 // NormalizeNavURL turns address-bar input into a URL: scheme kept as-is,
 // bare hosts get https://, everything else becomes a search.
@@ -628,10 +632,11 @@ func normalizeViewportSize(width, height, defaultWidth, defaultHeight int) (int,
 		if value == 0 {
 			value = fallback
 		}
-		// 64 is the encoder's actual lower bound. A 320-point minimum broke
-		// real phone landscape surfaces such as 480x232 by inventing pixels
-		// that do not exist in the native stream view.
-		return min(1600, max(64, value)) &^ 1
+		// These are encoder/resource safety bounds, not device profiles. Keep
+		// every client-derived size inside them exactly (modulo H.264's even
+		// dimensions); a 320-point minimum once broke real phone landscape
+		// surfaces by inventing pixels that were not in the native stream view.
+		return min(maxViewportDimension, max(minViewportDimension, value)) &^ 1
 	}
 	return clampDim(width, defaultWidth), clampDim(height, defaultHeight)
 }
