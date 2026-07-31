@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -44,6 +45,43 @@ func TestDesktopConfigRoundTrip(t *testing.T) {
 	got, err = loadDesktopConfig(home)
 	if err != nil || got != want {
 		t.Fatalf("replacement config=%+v err=%v", got, err)
+	}
+}
+
+func TestBackendRestartDelayUsesBoundedBackoff(t *testing.T) {
+	tests := []struct {
+		attempt int
+		want    time.Duration
+	}{
+		{-1, time.Second},
+		{0, time.Second},
+		{1, 2 * time.Second},
+		{2, 5 * time.Second},
+		{3, 10 * time.Second},
+		{4, 30 * time.Second},
+		{20, 30 * time.Second},
+	}
+	for _, test := range tests {
+		if got := backendRestartDelay(test.attempt); got != test.want {
+			t.Errorf("attempt %d delay=%s, want %s", test.attempt, got, test.want)
+		}
+	}
+}
+
+func TestHealthyExternalDaemonCancelsPendingRestart(t *testing.T) {
+	app := &desktopApp{restartAttempt: 3}
+	app.scheduleBackendRestart()
+	app.mu.Lock()
+	if app.restartTimer == nil {
+		app.mu.Unlock()
+		t.Fatal("restart was not scheduled")
+	}
+	app.mu.Unlock()
+	app.backendHealthy()
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	if app.restartTimer != nil || app.restartAttempt != 0 {
+		t.Fatalf("healthy daemon left timer=%v attempt=%d", app.restartTimer != nil, app.restartAttempt)
 	}
 }
 
@@ -238,7 +276,13 @@ func TestLocalAdminDiscoversDaemonWithoutCreatingIdentity(t *testing.T) {
 
 func TestLocalAdminRejectsChangedDaemonIdentity(t *testing.T) {
 	home := t.TempDir()
-	server, descriptor := testDaemonDescriptor(t, home, func(w http.ResponseWriter, _ *http.Request, _ string) {
+	server, descriptor := testDaemonDescriptor(t, home, func(w http.ResponseWriter, request *http.Request, token string) {
+		if request.URL.Path != "/api/v1/admin/devices" {
+			t.Errorf("takeover probe path=%q", request.URL.Path)
+		}
+		if request.Header.Get(control.AdminHeader) != token {
+			t.Errorf("takeover admin token=%q", request.Header.Get(control.AdminHeader))
+		}
 		w.WriteHeader(http.StatusOK)
 	})
 	defer server.Close()
@@ -278,6 +322,52 @@ func TestDesktopTransportUsesRuntimeControlEndpointAndToken(t *testing.T) {
 	response.Body.Close()
 	if response.StatusCode != http.StatusNoContent {
 		t.Fatalf("status=%d", response.StatusCode)
+	}
+}
+
+func TestDesktopTakesControlOfAuthenticatedExistingDaemon(t *testing.T) {
+	home := t.TempDir()
+	server, descriptor := testDaemonDescriptor(t, home, func(w http.ResponseWriter, _ *http.Request, _ string) {
+		w.WriteHeader(http.StatusOK)
+	})
+	defer server.Close()
+	killedPID := 0
+	app := &desktopApp{
+		home: home,
+		killProcess: func(pid int) {
+			killedPID = pid
+			server.CloseClientConnections()
+			server.Close()
+		},
+	}
+	if err := app.takeControlOfExistingBackend(); err != nil {
+		t.Fatal(err)
+	}
+	if killedPID != descriptor.PID {
+		t.Fatalf("killed pid=%d, want %d", killedPID, descriptor.PID)
+	}
+	if _, err := control.Load(home); !errors.Is(err, control.ErrNotRunning) {
+		t.Fatalf("daemon descriptor remains after takeover: %v", err)
+	}
+}
+
+func TestDesktopDoesNotKillUnverifiedDaemon(t *testing.T) {
+	home := t.TempDir()
+	server, descriptor := testDaemonDescriptor(t, home, func(w http.ResponseWriter, _ *http.Request, _ string) {
+		w.WriteHeader(http.StatusOK)
+	})
+	defer server.Close()
+	descriptor.ServerID = strings.Repeat("0", 64)
+	if err := control.Write(home, descriptor); err != nil {
+		t.Fatal(err)
+	}
+	killed := false
+	app := &desktopApp{home: home, killProcess: func(int) { killed = true }}
+	if err := app.takeControlOfExistingBackend(); err == nil {
+		t.Fatal("takeover accepted a changed daemon identity")
+	}
+	if killed {
+		t.Fatal("takeover killed an unverified process")
 	}
 }
 

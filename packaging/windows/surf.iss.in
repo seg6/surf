@@ -30,7 +30,8 @@ Name: "{group}\Uninstall Surf"; Filename: "{uninstallexe}"
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "Surf"; Flags: uninsdeletevalue dontcreatekey
 
 [Run]
+Filename: "{cmd}"; Parameters: "/C taskkill /IM surf.exe /T /F >NUL 2>&1"; Flags: runhidden waituntilterminated; StatusMsg: "Stopping existing Surf processes..."
 Filename: "{app}\surf.exe"; Description: "Launch Surf"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-Filename: "{cmd}"; Parameters: "/C taskkill /IM surf.exe /F"; Flags: runhidden; RunOnceId: "StopSurf"
+Filename: "{cmd}"; Parameters: "/C taskkill /IM surf.exe /T /F"; Flags: runhidden; RunOnceId: "StopSurf"

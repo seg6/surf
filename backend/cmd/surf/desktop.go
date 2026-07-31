@@ -31,6 +31,7 @@ import (
 	"surf-backend/internal/app"
 	"surf-backend/internal/config"
 	"surf-backend/internal/control"
+	"surf-backend/internal/process"
 	"surf-backend/internal/updater"
 	"surf-backend/internal/web"
 )
@@ -58,6 +59,11 @@ type desktopApp struct {
 
 	cmd  *exec.Cmd
 	done chan struct{}
+
+	closing        bool
+	restartTimer   *time.Timer
+	restartAttempt int
+	killProcess    func(int)
 
 	statusItem *systray.MenuItem
 	updateItem *systray.MenuItem
@@ -236,7 +242,7 @@ func newDesktopApp() (*desktopApp, error) {
 		home: home, manageChild: true,
 		baseURL:    "https://127.0.0.1:" + strconv.Itoa(cfg.Port),
 		serverName: cfg.ServerName, publicAddress: cfg.PublicAddress,
-		logPath: logPath, logFile: logFile,
+		logPath: logPath, logFile: logFile, killProcess: process.Kill,
 	}
 	if err := app.startManagementServer(); err != nil {
 		_ = logFile.Close()
@@ -259,7 +265,14 @@ func (a *desktopApp) onReady() {
 	systray.AddSeparator()
 	quit := systray.AddMenuItem("Quit Surf", "Stop the backend and quit")
 
-	go a.startBackend()
+	go func() {
+		if err := a.takeControlOfExistingBackend(); err != nil {
+			a.logf("surf: take control: %v\n", err)
+		}
+		if err := a.startBackend(); err != nil {
+			a.logf("surf: start backend: %v\n", err)
+		}
+	}()
 	go a.monitorHealth()
 	if cfg, err := loadDesktopConfig(a.home); err == nil && !cfg.StartupChoiceMade {
 		go a.openManagement("")
@@ -285,6 +298,10 @@ func menuLoop(item *systray.MenuItem, action func()) {
 }
 
 func (a *desktopApp) onExit() {
+	a.mu.Lock()
+	a.closing = true
+	a.cancelBackendRestartLocked()
+	a.mu.Unlock()
 	a.stopBackend()
 	if a.manageHTTP != nil {
 		_ = a.manageHTTP.Close()
@@ -294,12 +311,55 @@ func (a *desktopApp) onExit() {
 	}
 }
 
+func (a *desktopApp) takeControlOfExistingBackend() error {
+	descriptor, err := control.Load(a.home)
+	if errors.Is(err, control.ErrNotRunning) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	client, err := a.backendHTTPClient(time.Second)
+	if err != nil {
+		return err
+	}
+	probeURL := "https://127.0.0.1" + web.APIRoot + "/admin/devices"
+	response, err := client.Get(probeURL)
+	if err != nil {
+		return fmt.Errorf("verify existing daemon pid=%d: %w", descriptor.PID, err)
+	}
+	_, _ = io.Copy(io.Discard, response.Body)
+	_ = response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("verify existing daemon pid=%d: status %d", descriptor.PID, response.StatusCode)
+	}
+
+	a.logf("surf: taking control from existing backend pid=%d\n", descriptor.PID)
+	kill := a.killProcess
+	if kill == nil {
+		kill = process.Kill
+	}
+	kill(descriptor.PID)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		request, requestErr := client.Get(probeURL)
+		if requestErr != nil {
+			return control.RemoveOwned(a.home, descriptor.AdminToken)
+		}
+		_, _ = io.Copy(io.Discard, request.Body)
+		_ = request.Body.Close()
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("existing backend pid=%d did not stop", descriptor.PID)
+}
+
 func (a *desktopApp) startBackend() error {
 	a.mu.Lock()
-	if a.cmd != nil {
+	if a.closing || a.cmd != nil {
 		a.mu.Unlock()
 		return nil
 	}
+	a.cancelBackendRestartLocked()
 	baseURL, serverName, publicAddress := a.baseURL, a.serverName, a.publicAddress
 	port, _ := strconv.Atoi(strings.TrimPrefix(baseURL, "https://127.0.0.1:"))
 	if publicAddress == "" {
@@ -325,30 +385,46 @@ func (a *desktopApp) startBackend() error {
 	if err := cmd.Start(); err != nil {
 		a.mu.Unlock()
 		a.setStatus("Surf failed to start")
+		a.scheduleBackendRestart()
 		return err
 	}
 	a.cmd, a.done = cmd, done
 	a.mu.Unlock()
+	a.logf("surf: backend started pid=%d\n", cmd.Process.Pid)
 	a.setStatus("Surf is starting…")
 	go func() {
 		err := cmd.Wait()
 		a.mu.Lock()
+		unexpected := a.cmd == cmd && !a.closing
 		if a.cmd == cmd {
 			a.cmd = nil
 			a.done = nil
 		}
 		a.mu.Unlock()
-		if err != nil {
-			fmt.Fprintln(a.logFile, "surf: backend exited:", err)
-		}
 		close(done)
+		if !unexpected {
+			return
+		}
+		if err != nil {
+			a.logf("surf: backend pid=%d exited: %v\n", cmd.Process.Pid, err)
+		} else {
+			a.logf("surf: backend pid=%d exited unexpectedly\n", cmd.Process.Pid)
+		}
+		a.setStatus("Surf is restarting…")
+		a.scheduleBackendRestart()
 	}()
 	return nil
 }
 
 func (a *desktopApp) stopBackend() {
 	a.mu.Lock()
+	a.cancelBackendRestartLocked()
+	a.restartAttempt = 0
 	cmd, done := a.cmd, a.done
+	if cmd != nil {
+		a.cmd = nil
+		a.done = nil
+	}
 	a.mu.Unlock()
 	if cmd == nil || cmd.Process == nil {
 		return
@@ -361,6 +437,74 @@ func (a *desktopApp) stopBackend() {
 	case <-time.After(3 * time.Second):
 		_ = cmd.Process.Kill()
 		<-done
+	}
+}
+
+func backendRestartDelay(attempt int) time.Duration {
+	delays := [...]time.Duration{
+		time.Second,
+		2 * time.Second,
+		5 * time.Second,
+		10 * time.Second,
+		30 * time.Second,
+	}
+	if attempt < 0 {
+		attempt = 0
+	}
+	if attempt >= len(delays) {
+		attempt = len(delays) - 1
+	}
+	return delays[attempt]
+}
+
+func (a *desktopApp) cancelBackendRestartLocked() {
+	if a.restartTimer != nil {
+		a.restartTimer.Stop()
+		a.restartTimer = nil
+	}
+}
+
+func (a *desktopApp) scheduleBackendRestart() {
+	a.mu.Lock()
+	if a.closing || a.cmd != nil || a.restartTimer != nil {
+		a.mu.Unlock()
+		return
+	}
+	delay := backendRestartDelay(a.restartAttempt)
+	if a.restartAttempt < 4 {
+		a.restartAttempt++
+	}
+	var timer *time.Timer
+	timer = time.AfterFunc(delay, func() {
+		a.mu.Lock()
+		if a.closing || a.restartTimer != timer {
+			a.mu.Unlock()
+			return
+		}
+		a.restartTimer = nil
+		a.mu.Unlock()
+		a.setStatus("Surf is restarting…")
+		if err := a.startBackend(); err != nil {
+			a.logf("surf: restart backend: %v\n", err)
+		}
+	})
+	a.restartTimer = timer
+	a.mu.Unlock()
+	a.logf("surf: retrying backend in %s\n", delay)
+}
+
+func (a *desktopApp) backendHealthy() {
+	a.mu.Lock()
+	a.restartAttempt = 0
+	if a.cmd == nil {
+		a.cancelBackendRestartLocked()
+	}
+	a.mu.Unlock()
+}
+
+func (a *desktopApp) logf(format string, args ...any) {
+	if a.logFile != nil {
+		_, _ = fmt.Fprintf(a.logFile, format, args...)
 	}
 }
 
@@ -382,6 +526,7 @@ func (a *desktopApp) monitorHealth() {
 			response.Body.Close()
 		}
 		if err == nil && response.StatusCode >= 200 && response.StatusCode < 300 {
+			a.backendHealthy()
 			a.setStatus("Surf is running")
 		} else {
 			a.mu.Lock()
@@ -390,7 +535,8 @@ func (a *desktopApp) monitorHealth() {
 			if owned {
 				a.setStatus("Surf is starting…")
 			} else {
-				a.setStatus("Surf is stopped")
+				a.setStatus("Surf is restarting…")
+				a.scheduleBackendRestart()
 			}
 		}
 		<-ticker.C

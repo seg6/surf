@@ -2,6 +2,15 @@
 
 This file records the user-visible changes in every Surf release.
 
+## 0.10.1 - 2026-07-31
+
+- Made the Windows tray authenticate and take ownership of an existing Surf
+  daemon during startup and upgrades, without killing unverified processes.
+- Added automatic daemon recovery with bounded backoff and child lifecycle
+  logging, so a transient browser or port collision cannot leave Surf stopped.
+- Made the Windows installer stop existing Surf process trees before launching
+  the newly installed version.
+
 ## 0.10.0 - 2026-07-31
 
 - Replaced shared passwords and plaintext transport with Surf's built-in TLS
