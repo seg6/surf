@@ -151,6 +151,15 @@ steps.
 - [Troubleshooting](docs/troubleshooting.md)
 - [Changelog](CHANGELOG.md)
 
+## Support Surf
+
+If Surf has made an old device useful again and you'd like to buy me a coffee,
+you can do that on Ko-fi.
+
+<a href="https://ko-fi.com/seg6_">
+  <img src="https://storage.ko-fi.com/cdn/kofi5.png?v=3" alt="Buy me a coffee on Ko-fi" height="36">
+</a>
+
 ## AI disclosure
 
 Surf is an AI-assisted project. Its direction, device testing, deployment
