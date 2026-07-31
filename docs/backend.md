@@ -1,278 +1,157 @@
 # Backend
 
-The backend is started with `surf serve`. It runs managed Chrome in
-`--headless=new`, captures and encodes the active tab through Chromium's
-tab-capture and WebCodecs APIs, and streams video, audio, and control messages
-to the universal native iPhone, iPod touch, and iPad client.
+Surf runs Chromium on a Windows, macOS, or Linux host and exposes one encrypted
+remote-browser port. The desktop build supervises the backend and provides
+local Settings, pairing, device revocation, logs, and updates. `surf daemon` is
+the equivalent foreground process for a service manager.
 
-The same backend and wire protocol serve armv7/iOS 6 and arm64/iOS 7–14
-clients. Backend host architecture does not select the client architecture:
-each release embeds one rootful `iphoneos-arm` package containing both slices.
-Viewport and orientation continue to come from the connected client.
+## Start and pair
 
-## Desktop app
-
-The recommended local-computer package is Surf. It is a single
-executable containing a tray/menu-bar supervisor and an isolated backend child
-mode. It generates and persists a strong password and reports health. Its
-loopback-only Settings window shows the detected LAN address and stream state, provides editable
-password and port settings, and exposes collapsed local logs. The tray menu
-opens Settings, restarts the backend, and quits Surf. The backend
-remains a separate process, so the same server implementation is used by both
-desktop and headless deployments.
-
-Settings checks GitHub Releases for a newer official build and can install it
-in place. Headless installations provide the same operation as `surf update`.
-The release manifest is fetched over HTTPS and every downloaded archive is
-checked against its declared size and SHA-256 before replacement. A previous
-executable is retained as `surf.previous`.
-
-Desktop packages are built natively for Linux x86-64 and ARM64, Windows x86-64, macOS
-Intel, and macOS Apple Silicon. Surf prefers a compatible system Edge or
-Chromium and otherwise downloads a verified ungoogled-chromium release into
-`SURF_HOME`.
-
-macOS packages require macOS 12 Monterey or newer.
-
-The desktop app accepts `SURF_HOME` and `SURF_PASSWORD` overrides. Its
-generated configuration is stored at
-`SURF_HOME/desktop.json`, and combined supervisor/backend output is written to
-`SURF_HOME/desktop.log`.
-
-The `serve` mode described below is intended for services, VPSes, and machines
-without a desktop session.
-
-## Dependencies
-
-Surf resolves Chromium automatically. Audio uses a built-in Manifest V3
-extension and Chromium's tab capture API on every supported host. Capturing a
-tab suppresses its local playback, so audio is heard by the Surf client without
-also playing on the host. Surf converts it to signed 16-bit, 16 kHz mono PCM
-inside Chromium and carries it over a random, loopback-only WebSocket. No
-virtual audio cable or external media process is required.
-
-Surf does not bundle a DRM module. Browser background networking and component
-updates remain available so any Widevine CDM supplied by the selected browser
-can register and update on its supported host platforms.
-
-## Quick Start
-
-Download the `surf` archive matching Linux x86-64 or ARM64, Windows x86-64, macOS
-Intel, or macOS Apple Silicon from GitHub Releases. For Linux:
+Desktop users open **Paired Devices** and choose **Pair new client**.
+Headless users start one persistent daemon and connect to it from another
+terminal:
 
 ```sh
-tar xf surf-*-linux-*.tar.gz
-cd surf-*-linux-*
-./surf doctor
-SURF_PASSWORD='change-me' ./surf serve
+./surf daemon
+./surf status
+./surf pair
 ```
 
-Use a strong password before exposing Surf beyond local testing. Press `Ctrl-C`
-to stop the foreground backend.
+Pairing is closed by default. The desktop button or `surf pair` creates one
+single-use invitation with a six-digit manual code and a QR code. The QR is
+self-contained: it carries the reachable address, expected server identity,
+and a random 128-bit one-time token. A manual client enters the address and
+six-digit code separately.
 
-The default LAN URL is:
+The invitation has no timer; it remains open until used, cancelled, the daemon
+restarts, or five incorrect manual codes close it. Only one matching client key
+can consume it. QR pairing already pins the identity carried by the code.
+Manual pairing compares a six-word value independently derived from the TLS
+certificate and client key; the six-digit code authorizes the request but does
+not by itself authenticate a self-signed endpoint against an active relay.
 
-```text
-http://YOUR_COMPUTER_IP:18080
-```
-
-## Build From Source
-
-From the repo root:
+Manage paired clients without restarting the browser:
 
 ```sh
-make surf-binary
-SURF_PASSWORD='change-me' ./backend/surf serve
+./surf devices list
+./surf devices revoke DEVICE_ID
 ```
 
-Press `Ctrl-C` to stop the foreground backend.
+Revocation closes that device's active WebSockets immediately and invalidates
+its sessions, challenges, and tickets.
 
-## Useful Commands
+## Direct TLS
+
+Surf creates a persistent RSA-2048/SHA-256 certificate on first launch and
+serves TLS 1.2+ directly. Clients pin the SHA-256 leaf fingerprint, so a public
+CA, domain, reverse proxy, and installed iOS certificate are not required.
+TLS resumption is disabled; every new transport presents the pinned identity.
+
+For a VPS, expose the configured Surf TCP port and tell pairing codes which
+reachable address to use:
 
 ```sh
-make surf-binary         # build backend/surf
-make surf-dist           # build the current host package
+SURF_PUBLIC_ADDRESS=surf.example.net:18080 ./surf daemon
 ```
 
-Run the binary directly:
-
-```sh
-make surf-binary
-SURF_PASSWORD='change-me' ./backend/surf serve
-```
-
-## Runtime Behavior
-
-Surf uses `CHROME` when explicitly set; that browser must permit unpacked
-extensions. Otherwise Surf prefers an extension-capable installed Edge or
-Chromium and then its managed ungoogled-chromium runtime because media capture
-uses the built-in extension. Current Google Chrome branded builds are not
-selected automatically because Chrome 137+ ignores the unpacked-extension
-launch flag Surf's capture bridge requires. Managed releases are downloaded from the official
-ungoogled-chromium GitHub organization, checked against GitHub's declared size
-and SHA-256 digest, installed atomically, and checked daily. One previous
-version is retained for rollback. Chrome for Testing is not used.
-
-The selected browser always runs with `--headless=new`. Surf's built-in
-Manifest V3 extension captures the active tab. An offscreen document feeds raw
-video frames to Chromium's H.264 WebCodecs encoder and sends complete Annex-B
-access units over a random, loopback-only WebSocket. It samples tabCapture at
-up to 60 Hz into a one-frame latest-only handoff, then emits H.264 on a stable
-30 Hz clock. Short compositor scheduling gaps repeat the most recent image
-instead of becoming transport and presentation gaps; repeats are marked
-internally and never counted as fresh interaction responses. The same
-document converts captured audio to 16-bit, 16 kHz mono PCM. Annex-B H.264 is
-the sole client-facing visual format. Clients subscribe automatically after
-connecting; encoder failures are reported as explicit `video-config` states
-and require `video-retry`.
-
-There is no desktop capture, headful, headless-shell, or screenshot-polling
-mode. `CHROME=/path/to/browser` remains an explicit development/recovery
-override.
-
-### Widevine and protected media
-
-Widevine belongs to the host browser, not the legacy iOS client. Surf neither
-copies a CDM from another installation nor includes Google's proprietary module
-in a release. The launch configuration deliberately leaves component/CDM
-registration and update traffic enabled on every operating system.
-
-After the first HTTPS or localhost page loads, Surf calls
-`navigator.requestMediaKeySystemAccess("com.widevine.alpha", ...)`. Authenticated
-`/health?stats=1` output exposes the result as `widevine: "unknown"`,
-`"available"`, or `"unavailable"` plus `widevineDetail`. This is a capability
-result from the running browser, not a platform or executable-name guess.
-
-The managed ungoogled-chromium runtime normally has no Widevine CDM. Set
-`CHROME` to a compatible browser that already provides it when DRM is required.
-Even when EME reports Widevine available, the content provider can enforce
-license, HDCP, quality, and capture restrictions; Surf cannot bypass them.
-
-Backend ownership is split by latency domain. `Controller` consumes concrete
-typed commands and owns tab/input state. The extension bridge owns capture and
-encoding. `VideoPipeline` tracks encoder generations and fans complete access
-units out to clients. The WebSocket transport independently schedules ordered
-control, drop-oldest audio, and a four-AU GOP-aware video queue;
-`AudioPipeline` owns bounded audio fan-out. Video overflow requests an
-immediate cooldown-protected IDR instead of accumulating delay.
-
-The Go module mirrors those boundaries:
-
-- `cmd/surf` is the unified CLI and desktop entrypoint.
-- `internal/app` is the composition root and process lifecycle.
-- `internal/browser` owns tabs, input, navigation, and browser features.
-- `internal/media` owns Chromium tab capture, WebCodecs video, and audio/video fan-out.
-- `internal/transport` owns each client WebSocket and its lane queues.
-- `internal/web` owns login, native configuration, health, and feature routes.
-- `internal/chromium` owns browser provisioning and profile preparation;
-  `internal/cdp` owns the browser connection; `internal/process` contains the
-  small Unix/Windows process-lifetime differences.
-- `internal/protocol` is the typed client wire contract.
-
-Protocol `20260729-4` uses a 96-byte extensible binary header carrying AU and
-source sequences, coded size, interaction ID, backend timing stamps, encoder
-generation, CDP scroll metadata, and the active adaptive profile. The
-socket-write timestamp is stamped by the WebSocket writer immediately before
-the write. Input receive and CDP-dispatch timestamps make the input-to-source
-part of the path distinguishable from capture, encode, transport, decode, and
-display.
-
-Control messages are decoded into concrete command types. In addition to
-ordered navigation and input, pan gestures use ordered `scroll` begin/move/end
-commands carrying precise pixel deltas at UIKit's gesture callback cadence,
-followed by a short inertial tail after release. Chromium applies every delta
-to the page while the video pipeline independently selects the latest frame at
-its configured rate; the client never shifts stale video locally. The protocol also exposes stateful page-media
-controls (`media-query`, playback, mute, and volume) and a client-selected
-mobile browsing mode. Mobile mode applies a coherent Android Chrome user
-agent, client hints, touch viewport behavior, and reloads the active page so
-both server-rendered and responsive sites can select their mobile UI. A user-created tab stays on
-`about:blank#surf-new` until the native New Tab page chooses a destination;
-the backend never inserts a delayed homepage navigation.
-
-The client reports decode and presentation health every five seconds. Surf
-keeps the client-requested coded size fixed by default, avoiding visible
-resolution changes and encoder restarts. Experimental adaptive profiles can be
-enabled explicitly; they require 30 healthy seconds before stepping back up.
-
-On every platform, Surf invokes its built-in extension for Chromium's active
-tab when the client subscribes. An offscreen extension document owns the media
-stream and an AudioWorklet converts it to signed 16-bit, 16 kHz mono PCM before
-it enters the bounded audio fan-out. Switching tabs moves the capture to the
-newly active tab; stopping the client subscription releases the tab capture.
-Chromium remains muted for its entire process lifetime, including while no
-client is connected. This uses Chromium's own cross-platform audio-output
-mute and does not require a host audio service or virtual audio device.
-
-Data is stored under `~/.surf/` by default:
-
-- `~/.surf/profile`: Chromium profile.
-- `~/.surf/downloads`: browser downloads.
-- `~/.surf/uploads`: temporary upload files.
-- `~/.surf/runtime/ublock-origin-lite`: Surf's verified, managed content
-  blocker. It is loaded into the browser profile automatically.
-- `~/.surf/runtime/tab-capture-extension`: Surf's generated Chromium media bridge.
+This does not provide NAT traversal. LAN firewalls and VPS security groups must
+allow the selected port. Protect `SURF_HOME`: copying it copies the server
+identity and paired-device registry.
 
 ## Configuration
 
-Common overrides:
+Surf reads configuration from environment variables:
 
-- `SURF_PASSWORD`: required login password.
-- `PORT`: listen port; defaults to `18080`.
-- `BIND_ADDR`: listen address; defaults to `0.0.0.0`.
-- `SURF_HOME`: data root; defaults to `~/.surf`.
-- `CHROME`: explicit extension-capable browser override. Setting this disables
-  managed browser selection.
-- `SURF_BROWSER_DOWNLOAD=0`: prohibit downloading managed ungoogled-chromium.
-- `SURF_CONTENT_BLOCKER=0`: disable the managed uBlock Origin Lite extension.
-  It is enabled by default. The built-in tab-capture extension remains enabled.
-- `SURF_CONTENT_BLOCKER_DOWNLOAD=0`: prohibit downloading a missing pinned
-  uBlock Origin Lite release.
-- `SURF_CHROME_GPU=0`: disable Chrome GPU acceleration. GPU acceleration is
-  enabled by default; Chrome may still select a software renderer when the
-  host has no usable graphics device.
-- `SURF_ADAPTIVE_VIDEO=1`: opt in to automatic coded-size
-  reduction when two consecutive motion windows miss their performance
-  targets. Disabled by default to keep quality and resolution stable.
-- `STREAM_SCALE`: maximum coded width and height, preserving aspect ratio;
-  unset by default so the encoded frame exactly follows the client viewport.
-  Set `768x1024` to cap encoder and decoder work on an original iPad.
-- `STREAM_BITRATE`: target H.264 bitrate in kbit/s; defaults to `12000`.
-- `SURF_ADVERTISE=0`: disable LAN discovery advertisement.
-- `SURF_UPDATE_MANIFEST`: override the GitHub update manifest URL for release
-  testing.
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SURF_HOME` | `~/.surf` | Identity, devices, browser profile, downloads, logs |
+| `SURF_SERVER_NAME` | `Surf` | Friendly name shown while pairing and in Bonjour |
+| `SURF_PUBLIC_ADDRESS` | empty | Reachable host/IP and optional port for pairing QR codes |
+| `BIND_ADDR` | `0.0.0.0` | Listener address |
+| `PORT` | `18080` | TLS/API port |
+| `CHROME` | auto | Chromium or Edge executable |
+| `PROFILE` | `$SURF_HOME/profile` | Chromium profile |
+| `START_URL` | Google | Initial page |
+| `DOWNLOADS` | `$SURF_HOME/downloads` | Browser downloads |
+| `UPLOADS` | `$SURF_HOME/uploads` | Temporary client uploads |
+| `VW`, `VH` | `768`, `934` | Initial viewport before the client reports its exact size |
+| `STREAM_BITRATE` | `24000` | H.264 fallback target in kbit/s |
+| `STREAM_QUANTIZER` | `12` | H.264 constant-quality QP (0–51; lower is sharper) |
+| `STREAM_SCALE` | empty | Optional maximum stream size |
+| `SURF_CHROME_GPU` | `1` | Enable Chromium GPU support |
+| `SURF_CONTENT_BLOCKER` | `1` | Manage uBlock Origin Lite |
+| `SURF_ADAPTIVE_VIDEO` | `0` | Experimental adaptive stream profile |
+| `CHROME_NO_SANDBOX` | automatic for root | Disable Chromium sandbox where required |
 
-If you run the backend as root on a VPS, Chromium usually requires
-`CHROME_NO_SANDBOX=1`. Surf enables this by default for root, but running as a
-normal user is preferred.
+There is no password variable and no plaintext mode.
 
-## Security
+## Persistent files
 
-Do not expose a weak-password backend to the public internet. For VPS usage, put
-it behind HTTPS and use a strong password.
+The security-sensitive files are permission-restricted and replaced
+atomically:
 
-Official GitHub Releases are Surf's update source of truth. SHA-256 protects
-against damaged or mismatched downloads; it is not a separate publisher
-signature. Every Linux, Windows, and macOS release build embeds the same
-universal rootful native package built from the same commit. An authenticated
-native client with an older protocol can download that package from
-`/updates/v1/client`; media WebSockets are never used for update payloads.
-
-Video output is fixed at 30 FPS. Surf asks tabCapture for up to 60 source
-frames per second, retains only the newest source image, and samples it on the
-30 Hz encoder clock. Latest-only capture/presentation slots and bounded
-encode/GOP transport queues discard stale work instead of accumulating
-latency. Backend diagnostics report paced AU gaps separately from fresh-source
-gaps and duplicate AUs, so a stable output clock cannot hide a Chromium
-compositor stall.
-
-The defaults target the original iPad at its exact viewport and 12 Mbps:
-
-```sh
-SURF_PASSWORD='choose-a-password' ./surf serve
+```text
+$SURF_HOME/identity/server.crt
+$SURF_HOME/identity/server.key
+$SURF_HOME/identity/session.key
+$SURF_HOME/devices.json
+$SURF_HOME/daemon.json
 ```
 
-Triple-tap the video on the iPad to open the diagnostics overlay. During
-continuous motion, `AU RATE` should approach 30 and `VT CALLBACK` should
-remain below the 33.3 ms frame budget. Lower `STREAM_SCALE` only if decode
-time exceeds that budget.
+`daemon.json` is a permission-restricted, per-run control descriptor. CLI
+commands use it to find and authenticate the daemon's loopback TLS control
+listener; they never start a second browser or create a server identity.
+
+The browser profile, downloads, uploads, managed browser, updates, and desktop
+configuration also live below `SURF_HOME`. Back up the entire directory if you
+want to preserve the server identity and existing pairings.
+
+## Versioned API
+
+Surf 0.10 intentionally has no old-route aliases. Network interfaces live
+under one root:
+
+```text
+/api/v1/health
+/api/v1/server
+/api/v1/pairing/*
+/api/v1/auth/*
+/api/v1/config
+/api/v1/ws
+/api/v1/tab-icons/*
+/api/v1/uploads
+/api/v1/downloads/*
+/api/v1/updates/client
+/api/v1/admin/*
+```
+
+`/api/v1/admin/*` is loopback-only and requires the per-run control token.
+Other protected routes require a signed, short-lived device session;
+WebSockets use a fresh device-bound one-time ticket. The signed challenge is
+bound to API v1, the server ID, device ID, challenge ID, and nonce.
+
+The unauthenticated health endpoint is useful for basic reachability:
+
+```sh
+curl -k https://127.0.0.1:18080/api/v1/health
+```
+
+Detailed runtime statistics are available to the local desktop and paired
+clients. They include capture, video/audio subscribers, frame/drop counters,
+and Widevine capability state.
+
+## Browser and media
+
+Surf prefers a compatible installed Chromium or Microsoft Edge, otherwise it
+uses its verified managed Chromium build. Active-tab `tabCapture` supplies both
+video and audio; no FFmpeg, PulseAudio, desktop capture, or virtual audio device
+is required.
+
+Surf does not distribute Widevine. A working CDM supplied by the selected host
+browser may be used, subject to each service's DRM and output-protection rules.
+
+## Updates
+
+Desktop releases use the signed release manifest and SHA-256-verified assets.
+The native `.deb` update travels over its already authenticated, pinned Surf
+connection and is verified again before the privileged installer applies it.

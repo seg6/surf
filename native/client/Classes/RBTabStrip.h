@@ -12,6 +12,6 @@
 // move into a >> overflow menu and the active tab is always kept visible.
 @interface RBTabStrip : UIView <UIActionSheetDelegate>
 @property(nonatomic, assign) id<RBTabStripDelegate> delegate;
-- (void)setTabs:(NSArray *)tabs baseURL:(NSURL *)baseURL;
-- (void)purgeIconCache; // compatibility no-op; thumbnails/favicons are absent
+- (void)setTabs:(NSArray *)tabs baseURL:(NSURL *)baseURL fingerprint:(NSString *)fingerprint;
+- (void)purgeIconCache;
 @end

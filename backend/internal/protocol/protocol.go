@@ -120,5 +120,5 @@ type TabInfo struct {
 	Title  string `json:"title"`
 	URL    string `json:"url"`
 	Active bool   `json:"active"`
-	Icon   string `json:"icon,omitempty"` // /tabicon/<id>?v=<hash> when known
+	Icon   string `json:"icon,omitempty"` // /api/v1/tab-icons/<id>?v=<hash> when known
 }

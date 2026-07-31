@@ -2,7 +2,6 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -17,12 +16,12 @@ var NativeVersion = "dev"
 // AppVersion is injected from VERSION in release builds.
 var AppVersion = "dev"
 
-// Caps enumerates optional server capabilities for /native-config. The client
+// Caps enumerates optional server capabilities for /api/v1/config. The client
 // feature-gates on these instead of parsing version strings, so server and app
 // can ship independently once both understand a capability.
 var Caps = []string{
 	"dialog",      // JS dialog forwarding + dialogreply
-	"filechooser", // upload intercept + POST /upload
+	"filechooser", // upload intercept + POST /api/v1/uploads
 	"linkinfo",    // hit message -> linkinfo reply
 	"history2",    // paginated history query + histdel/clear
 	"reader",      // reader-mode extraction
@@ -37,18 +36,18 @@ var Caps = []string{
 }
 
 type Config struct {
-	SurfHome     string
-	BindAddr     string
-	Port         int
-	ChromePath   string
-	StartURL     string
-	Profile      string
-	ViewW        int
-	ViewH        int
-	SurfPassword string
-	AuthDays     int
-	DownloadsDir string
-	UploadsDir   string
+	SurfHome      string
+	BindAddr      string
+	Port          int
+	ChromePath    string
+	StartURL      string
+	Profile       string
+	ViewW         int
+	ViewH         int
+	ServerName    string
+	PublicAddress string
+	DownloadsDir  string
+	UploadsDir    string
 
 	ChromeNoSandbox    bool
 	ChromeGPU          bool
@@ -57,8 +56,9 @@ type Config struct {
 	AdaptiveVideo      bool
 
 	// H.264 lane. The encoder only runs while a native client is subscribed.
-	StreamScale    string // STREAM_SCALE, optional maximum; empty = client size
-	StreamBitrateK int    // STREAM_BITRATE
+	StreamScale     string // STREAM_SCALE, optional maximum; empty = client size
+	StreamBitrateK  int    // STREAM_BITRATE, fallback when constant-quality encoding is unavailable
+	StreamQuantizer int    // STREAM_QUANTIZER, H.264 QP 0..51; lower is sharper
 }
 
 func envInt(key string, def int) int {
@@ -101,14 +101,14 @@ func surfHome() string {
 }
 
 func Load() (*Config, error) {
-	return load(true)
+	return load()
 }
 
 func LoadForDoctor() (*Config, error) {
-	return load(false)
+	return load()
 }
 
-func load(requireAuth bool) (*Config, error) {
+func load() (*Config, error) {
 	home := surfHome()
 	viewW := envInt("VW", 768)
 	viewH := envInt("VH", 934)
@@ -121,8 +121,8 @@ func load(requireAuth bool) (*Config, error) {
 		Profile:         envStr("PROFILE", filepath.Join(home, "profile")),
 		ViewW:           viewW,
 		ViewH:           viewH,
-		SurfPassword:    os.Getenv("SURF_PASSWORD"),
-		AuthDays:        envInt("AUTH_DAYS", 180),
+		ServerName:      envStr("SURF_SERVER_NAME", "Surf"),
+		PublicAddress:   os.Getenv("SURF_PUBLIC_ADDRESS"),
 		DownloadsDir:    envStr("DOWNLOADS", filepath.Join(home, "downloads")),
 		UploadsDir:      envStr("UPLOADS", filepath.Join(home, "uploads")),
 		ChromeNoSandbox: envBool("CHROME_NO_SANDBOX", os.Geteuid() == 0),
@@ -130,10 +130,8 @@ func load(requireAuth bool) (*Config, error) {
 		ContentBlocker:  envBool("SURF_CONTENT_BLOCKER", true),
 		AdaptiveVideo:   envBool("SURF_ADAPTIVE_VIDEO", false),
 		StreamScale:     envStr("STREAM_SCALE", ""),
-		StreamBitrateK:  envInt("STREAM_BITRATE", 12000),
-	}
-	if requireAuth && cfg.SurfPassword == "" {
-		return nil, fmt.Errorf("SURF_PASSWORD is required")
+		StreamBitrateK:  envInt("STREAM_BITRATE", 24000),
+		StreamQuantizer: envInt("STREAM_QUANTIZER", 12),
 	}
 	return cfg, nil
 }

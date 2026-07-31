@@ -16,10 +16,11 @@ import (
 const videoHeaderBytes = 20
 
 type EncoderConfig struct {
-	Codec    string `json:"codec"`
-	Width    int    `json:"width"`
-	Height   int    `json:"height"`
-	BitrateK int    `json:"bitrateK"`
+	Codec     string `json:"codec"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	BitrateK  int    `json:"bitrateK"`
+	Quantizer int    `json:"quantizer"`
 }
 
 type VideoFrame struct {
@@ -170,7 +171,7 @@ func (s *Capture) sendVideoConfig() {
 	s.writeVideoText(conn, map[string]any{
 		"type": "configure", "codec": config.Codec,
 		"width": config.Width, "height": config.Height,
-		"bitrateK": config.BitrateK,
+		"bitrateK": config.BitrateK, "quantizer": config.Quantizer,
 	})
 }
 
@@ -274,6 +275,8 @@ func (s *Capture) handleVideoMessage(data []byte) {
 		VisibleHeight int     `json:"visibleHeight"`
 		Rotation      float64 `json:"rotation"`
 		Constraint    string  `json:"constraint"`
+		RateControl   string  `json:"rateControl"`
+		Quantizer     int     `json:"quantizer"`
 	}
 	if json.Unmarshal(data, &message) != nil {
 		return
@@ -290,9 +293,10 @@ func (s *Capture) handleVideoMessage(data []byte) {
 			default:
 			}
 		}
-		log.Printf("video: tabCapture source %dx%d@%.1ffps capability=%.1ffps",
+		log.Printf("video: tabCapture source %dx%d@%.1ffps capability=%.1ffps quality=%s qp=%d",
 			message.SourceWidth, message.SourceHeight,
-			message.SourceFPS, message.CapabilityFPS)
+			message.SourceFPS, message.CapabilityFPS,
+			message.RateControl, message.Quantizer)
 	case "video-error":
 		if message.Error == "" {
 			message.Error = "unknown tab capture error"

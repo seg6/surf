@@ -91,8 +91,11 @@ static void RBSignalHandler(int sig) {
     char buf[96];
     snprintf(buf, sizeof(buf), "fatal signal %d\n", sig);
     RBWriteCrashLine(buf);
+    // Do not raise the signal from inside its handler. On iOS 6 that can
+    // nominate an unrelated thread as the crash site and discard the useful
+    // faulting stack. Restoring the default action and returning retries the
+    // faulting instruction, producing an accurate device crash report.
     signal(sig, SIG_DFL);
-    raise(sig);
 }
 
 static void RBExceptionHandler(NSException *exception) {

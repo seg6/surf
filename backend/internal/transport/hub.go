@@ -114,8 +114,9 @@ type clockReply struct {
 }
 
 type Client struct {
-	hub  *Hub
-	conn *websocket.Conn
+	hub      *Hub
+	conn     *websocket.Conn
+	deviceID string
 
 	control chan outMsg
 	video   chan outMsg
@@ -134,6 +135,7 @@ func (c *Client) SendBinary(data []byte) error {
 
 func (c *Client) Closed() <-chan struct{} { return c.done }
 func (c *Client) Close()                  { _ = c.conn.Close() }
+func (c *Client) DeviceID() string        { return c.deviceID }
 
 // Serve upgrades the request and runs the read loop until disconnect.
 //
@@ -145,13 +147,19 @@ func (c *Client) Close()                  { _ = c.conn.Close() }
 // hand-rolled socket (native/client/Classes/RBSocket.m) is the one that
 // needed an explicit setsockopt.
 func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.ServeHTTPForDevice(w, r, "")
+}
+
+// ServeHTTPForDevice attaches the authenticated device identity to the live
+// transport so revocation can terminate it immediately.
+func (h *Hub) ServeHTTPForDevice(w http.ResponseWriter, r *http.Request, deviceID string) {
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
 	conn.SetReadLimit(readLimit)
 	c := &Client{
-		hub: h, conn: conn, done: make(chan struct{}),
+		hub: h, conn: conn, deviceID: deviceID, done: make(chan struct{}),
 		control: make(chan outMsg, 64),
 		video:   make(chan outMsg, 4),
 		audio:   make(chan outMsg, audioQueueCap),
@@ -197,6 +205,21 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = conn.Close()
 	if h.handler != nil {
 		h.handler.ClientDisconnected(c)
+	}
+}
+
+// CloseDevice terminates all active sockets authenticated as deviceID.
+func (h *Hub) CloseDevice(deviceID string) {
+	h.mu.Lock()
+	targets := make([]*Client, 0, 1)
+	for client := range h.clients {
+		if client.deviceID == deviceID {
+			targets = append(targets, client)
+		}
+	}
+	h.mu.Unlock()
+	for _, client := range targets {
+		client.Close()
 	}
 }
 

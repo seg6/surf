@@ -3,10 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
+	"crypto/sha256"
+	"crypto/tls"
 	_ "embed"
-	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,11 +30,14 @@ import (
 	"fyne.io/systray"
 	"surf-backend/internal/app"
 	"surf-backend/internal/config"
+	"surf-backend/internal/control"
 	"surf-backend/internal/updater"
+	"surf-backend/internal/web"
 )
 
 type desktopConfig struct {
-	Password          string `json:"password"`
+	ServerName        string `json:"serverName"`
+	PublicAddress     string `json:"publicAddress,omitempty"`
 	Port              int    `json:"port"`
 	StartAtLogin      bool   `json:"startAtLogin"`
 	StartupChoiceMade bool   `json:"startupChoiceMade"`
@@ -42,15 +46,15 @@ type desktopConfig struct {
 type desktopApp struct {
 	mu sync.Mutex
 
-	home        string
-	manageChild bool
-	baseURL     string
-	password    string
-	logPath     string
-	logFile     *os.File
-	manageURL   string
-	manageHTTP  *http.Server
-	authCookie  *http.Cookie
+	home          string
+	manageChild   bool
+	baseURL       string
+	serverName    string
+	publicAddress string
+	logPath       string
+	logFile       *os.File
+	manageURL     string
+	manageHTTP    *http.Server
 
 	cmd  *exec.Cmd
 	done chan struct{}
@@ -204,14 +208,18 @@ func newDesktopApp() (*desktopApp, error) {
 	if err != nil {
 		return nil, err
 	}
-	if envPassword := os.Getenv("SURF_PASSWORD"); envPassword != "" {
-		cfg.Password = envPassword
+	if envName := os.Getenv("SURF_SERVER_NAME"); envName != "" {
+		cfg.ServerName = envName
 	}
-	if cfg.Password == "" {
-		cfg.Password, err = randomPassword()
-		if err != nil {
-			return nil, err
+	if cfg.ServerName == "" {
+		hostname, _ := os.Hostname()
+		cfg.ServerName = "Surf"
+		if hostname != "" {
+			cfg.ServerName = "Surf on " + hostname
 		}
+	}
+	if envAddress := os.Getenv("SURF_PUBLIC_ADDRESS"); envAddress != "" {
+		cfg.PublicAddress = envAddress
 	}
 	if cfg.Port <= 0 || cfg.Port > 65535 {
 		cfg.Port = 18080
@@ -226,8 +234,9 @@ func newDesktopApp() (*desktopApp, error) {
 	}
 	app := &desktopApp{
 		home: home, manageChild: true,
-		baseURL:  "http://127.0.0.1:" + strconv.Itoa(cfg.Port),
-		password: cfg.Password, logPath: logPath, logFile: logFile,
+		baseURL:    "https://127.0.0.1:" + strconv.Itoa(cfg.Port),
+		serverName: cfg.ServerName, publicAddress: cfg.PublicAddress,
+		logPath: logPath, logFile: logFile,
 	}
 	if err := app.startManagementServer(); err != nil {
 		_ = logFile.Close()
@@ -291,18 +300,25 @@ func (a *desktopApp) startBackend() error {
 		a.mu.Unlock()
 		return nil
 	}
-	password, baseURL := a.password, a.baseURL
+	baseURL, serverName, publicAddress := a.baseURL, a.serverName, a.publicAddress
+	port, _ := strconv.Atoi(strings.TrimPrefix(baseURL, "https://127.0.0.1:"))
+	if publicAddress == "" {
+		if urls := localLANURLs(port); len(urls) != 0 {
+			publicAddress = urls[0]
+		}
+	}
 	self, err := os.Executable()
 	if err != nil {
 		a.mu.Unlock()
 		return err
 	}
-	cmd := exec.Command(self, "serve")
-	cmd.Env = append(filteredEnv(os.Environ(), "SURF_HOME", "SURF_PASSWORD", "BIND_ADDR", "PORT"),
+	cmd := exec.Command(self, "daemon")
+	cmd.Env = append(filteredEnv(os.Environ(), "SURF_HOME", "SURF_SERVER_NAME", "SURF_PUBLIC_ADDRESS", "BIND_ADDR", "PORT"),
 		"SURF_HOME="+a.home,
-		"SURF_PASSWORD="+password,
+		"SURF_SERVER_NAME="+serverName,
+		"SURF_PUBLIC_ADDRESS="+publicAddress,
 		"BIND_ADDR=0.0.0.0",
-		"PORT="+strings.TrimPrefix(baseURL, "http://127.0.0.1:"),
+		"PORT="+strings.TrimPrefix(baseURL, "https://127.0.0.1:"),
 	)
 	cmd.Stdout, cmd.Stderr = a.logFile, a.logFile
 	done := make(chan struct{})
@@ -349,14 +365,18 @@ func (a *desktopApp) stopBackend() {
 }
 
 func (a *desktopApp) monitorHealth() {
-	client := &http.Client{Timeout: time.Second}
+	client, err := a.backendHTTPClient(time.Second)
+	if err != nil {
+		fmt.Fprintln(a.logFile, "surf: TLS identity:", err)
+		return
+	}
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
 		a.mu.Lock()
 		baseURL := a.baseURL
 		a.mu.Unlock()
-		response, err := client.Get(baseURL + "/health")
+		response, err := client.Get(baseURL + web.APIRoot + "/health")
 		if err == nil {
 			io.Copy(io.Discard, response.Body)
 			response.Body.Close()
@@ -381,12 +401,6 @@ func (a *desktopApp) setStatus(status string) {
 	if a.statusItem != nil {
 		a.statusItem.SetTitle(status)
 	}
-}
-
-func (a *desktopApp) currentPassword() string {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.password
 }
 
 func filteredEnv(env []string, names ...string) []string {
@@ -459,17 +473,26 @@ func (a *desktopApp) managementHandler() http.Handler {
 			request.URL.Scheme = target.Scheme
 			request.URL.Host = target.Host
 			if request.URL.Path == "/api/status" {
-				request.URL.Path = "/health"
+				request.URL.Path = web.APIRoot + "/health"
 				request.URL.RawQuery = "stats=1"
+			} else if strings.HasPrefix(request.URL.Path, "/api/backend/") {
+				request.URL.Path = strings.TrimPrefix(request.URL.Path, "/api/backend")
 			}
 			request.Host = target.Host
 		},
-		Transport: &desktopTransport{app: a, base: http.DefaultTransport},
+		Transport: a.backendTransport(),
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 			http.Error(w, "Surf backend is not ready: "+err.Error(), http.StatusBadGateway)
 		},
 	}
 	mux.Handle("/api/status", proxy)
+	mux.Handle("/api/backend/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && !validDesktopMutation(r) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	}))
 	return localOnly(mux)
 }
 
@@ -564,7 +587,7 @@ func (a *desktopApp) managementUpdateApply(w http.ResponseWriter, r *http.Reques
 }
 
 func validDesktopMutation(r *http.Request) bool {
-	return r.Method == http.MethodPost && r.Header.Get("X-Surf-Desktop") == "1"
+	return (r.Method == http.MethodPost || r.Method == http.MethodDelete) && r.Header.Get("X-Surf-Desktop") == "1"
 }
 
 func (a *desktopApp) applyDesktopUpdate(release updater.Release) {
@@ -676,10 +699,10 @@ func (a *desktopApp) managementHome(w http.ResponseWriter, r *http.Request) {
 
 func (a *desktopApp) managementConfig(w http.ResponseWriter, _ *http.Request) {
 	a.mu.Lock()
-	password, baseURL := a.password, a.baseURL
+	baseURL, serverName, publicAddress := a.baseURL, a.serverName, a.publicAddress
 	running := a.cmd != nil
 	a.mu.Unlock()
-	port, _ := strconv.Atoi(strings.TrimPrefix(baseURL, "http://127.0.0.1:"))
+	port, _ := strconv.Atoi(strings.TrimPrefix(baseURL, "https://127.0.0.1:"))
 	lanURLs := localLANURLs(port)
 	lanURL := ""
 	if len(lanURLs) != 0 {
@@ -688,7 +711,7 @@ func (a *desktopApp) managementConfig(w http.ResponseWriter, _ *http.Request) {
 	cfg, _ := loadDesktopConfig(a.home)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"password": password, "baseURL": baseURL, "lanURL": lanURL, "lanURLs": lanURLs,
+		"serverName": serverName, "publicAddress": publicAddress, "baseURL": baseURL, "lanURL": lanURL, "lanURLs": lanURLs,
 		"port": port, "running": running, "startAtLogin": cfg.StartAtLogin,
 		"startupChoiceMade": cfg.StartupChoiceMade,
 	})
@@ -707,7 +730,7 @@ func localLANURLs(port int) []string {
 			continue
 		}
 		if ip4 := ip.To4(); ip4 != nil {
-			value := "http://" + net.JoinHostPort(ip4.String(), strconv.Itoa(port))
+			value := "https://" + net.JoinHostPort(ip4.String(), strconv.Itoa(port))
 			if preferred != nil && ip4.Equal(preferred) {
 				urls = append([]string{value}, urls...)
 			} else {
@@ -759,10 +782,11 @@ func (a *desktopApp) managementSettings(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "invalid settings", http.StatusBadRequest)
 		return
 	}
-	password := r.FormValue("password")
+	serverName := strings.TrimSpace(r.FormValue("serverName"))
+	publicAddress := strings.TrimSpace(r.FormValue("publicAddress"))
 	port, err := strconv.Atoi(r.FormValue("port"))
-	if len(password) < 8 {
-		http.Error(w, "Password must contain at least 8 characters.", http.StatusBadRequest)
+	if serverName == "" || len(serverName) > 80 {
+		http.Error(w, "Server name must contain 1 to 80 characters.", http.StatusBadRequest)
 		return
 	}
 	if err != nil || port < 1 || port > 65535 {
@@ -771,7 +795,8 @@ func (a *desktopApp) managementSettings(w http.ResponseWriter, r *http.Request) 
 	}
 	startAtLogin := r.FormValue("startAtLogin") == "on"
 	cfg := desktopConfig{
-		Password: password, Port: port, StartAtLogin: startAtLogin, StartupChoiceMade: true,
+		ServerName: serverName, PublicAddress: publicAddress, Port: port,
+		StartAtLogin: startAtLogin, StartupChoiceMade: true,
 	}
 	if a.manageChild {
 		if err := setStartAtLogin(startAtLogin); err != nil {
@@ -784,9 +809,9 @@ func (a *desktopApp) managementSettings(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	a.mu.Lock()
-	a.password = password
-	a.baseURL = "http://127.0.0.1:" + strconv.Itoa(port)
-	a.authCookie = nil
+	a.serverName = serverName
+	a.publicAddress = publicAddress
+	a.baseURL = "https://127.0.0.1:" + strconv.Itoa(port)
 	a.mu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
 	if !a.manageChild { // unit tests exercise settings without a child process
@@ -814,60 +839,76 @@ func (a *desktopApp) managementLogs(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write(data)
 }
 
-type desktopTransport struct {
-	app  *desktopApp
-	base http.RoundTripper
+func (a *desktopApp) backendTransport() http.RoundTripper {
+	a.mu.Lock()
+	home := a.home
+	a.mu.Unlock()
+	if home == "" {
+		return &errorTransport{err: fmt.Errorf("Surf home is not configured")}
+	}
+	return &daemonControlTransport{home: home}
 }
 
-func (t *desktopTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	cookie, err := t.app.backendAuthCookie()
-	if err != nil {
-		return nil, err
+func (a *desktopApp) backendHTTPClient(timeout time.Duration) (*http.Client, error) {
+	transport := a.backendTransport()
+	if failed, ok := transport.(*errorTransport); ok {
+		return nil, failed.err
 	}
+	return &http.Client{Timeout: timeout, Transport: transport}, nil
+}
+
+type errorTransport struct{ err error }
+
+func (t *errorTransport) RoundTrip(*http.Request) (*http.Response, error) { return nil, t.err }
+
+type daemonControlTransport struct {
+	home      string
+	mu        sync.Mutex
+	token     string
+	target    *url.URL
+	transport *http.Transport
+}
+
+func (t *daemonControlTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	descriptor, err := control.Load(t.home)
+	if err != nil {
+		return nil, fmt.Errorf("Surf daemon control: %w", err)
+	}
+	t.mu.Lock()
+	if t.transport == nil || t.token != descriptor.AdminToken {
+		target, err := url.Parse(descriptor.ControlURL)
+		if err != nil {
+			t.mu.Unlock()
+			return nil, err
+		}
+		want := descriptor.ServerID
+		transport := &http.Transport{TLSClientConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12, InsecureSkipVerify: true,
+			VerifyConnection: func(state tls.ConnectionState) error {
+				if len(state.PeerCertificates) == 0 {
+					return fmt.Errorf("backend presented no certificate")
+				}
+				sum := sha256.Sum256(state.PeerCertificates[0].Raw)
+				if got := hex.EncodeToString(sum[:]); got != want {
+					return fmt.Errorf("backend identity mismatch")
+				}
+				return nil
+			},
+		}}
+		if t.transport != nil {
+			t.transport.CloseIdleConnections()
+		}
+		t.token, t.target, t.transport = descriptor.AdminToken, target, transport
+	}
+	token, target, transport := t.token, t.target, t.transport
+	t.mu.Unlock()
+
 	clone := request.Clone(request.Context())
 	clone.Header = request.Header.Clone()
-	clone.AddCookie(cookie)
-	response, err := t.base.RoundTrip(clone)
-	if err == nil && response.StatusCode == http.StatusUnauthorized {
-		t.app.mu.Lock()
-		t.app.authCookie = nil
-		t.app.mu.Unlock()
-	}
-	return response, err
-}
-
-func (a *desktopApp) backendAuthCookie() (*http.Cookie, error) {
-	a.mu.Lock()
-	if a.authCookie != nil {
-		cookie := *a.authCookie
-		a.mu.Unlock()
-		return &cookie, nil
-	}
-	password, baseURL := a.password, a.baseURL
-	a.mu.Unlock()
-
-	form := url.Values{"password": {password}}
-	request, _ := http.NewRequest(http.MethodPost, baseURL+"/login", strings.NewReader(form.Encode()))
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	response, err := (&http.Client{Timeout: 3 * time.Second}).Do(request)
-	if err != nil {
-		return nil, err
-	}
-	_, _ = io.Copy(io.Discard, response.Body)
-	_ = response.Body.Close()
-	if response.StatusCode != http.StatusNoContent {
-		return nil, fmt.Errorf("backend login returned HTTP %d", response.StatusCode)
-	}
-	for _, cookie := range response.Cookies() {
-		if cookie.Name == "surf_auth" {
-			a.mu.Lock()
-			a.authCookie = cookie
-			a.mu.Unlock()
-			copy := *cookie
-			return &copy, nil
-		}
-	}
-	return nil, fmt.Errorf("backend login did not return an auth cookie")
+	clone.URL.Scheme, clone.URL.Host = target.Scheme, target.Host
+	clone.Host = target.Host
+	clone.Header.Set(control.AdminHeader, token)
+	return transport.RoundTrip(clone)
 }
 
 func surfHome() (string, error) {
@@ -919,14 +960,6 @@ func saveDesktopConfig(home string, cfg desktopConfig) error {
 		return err
 	}
 	return nil
-}
-
-func randomPassword() (string, error) {
-	raw := make([]byte, 18)
-	if _, err := rand.Read(raw); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
 func openExternal(target string) error {

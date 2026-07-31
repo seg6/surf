@@ -10,14 +10,13 @@ func clearConfigEnv(t *testing.T) {
 	for _, key := range []string{
 		"SURF_HOME", "BIND_ADDR", "PORT", "CHROME", "START_URL",
 		"PROFILE", "VW", "VH",
-		"AUTH_DAYS", "DOWNLOADS", "UPLOADS",
-		"CHROME_NO_SANDBOX", "SURF_CHROME_GPU", "SURF_PASSWORD",
+		"SURF_SERVER_NAME", "SURF_PUBLIC_ADDRESS", "DOWNLOADS", "UPLOADS",
+		"CHROME_NO_SANDBOX", "SURF_CHROME_GPU",
 		"SURF_ADAPTIVE_VIDEO",
-		"STREAM_SCALE", "STREAM_BITRATE",
+		"STREAM_SCALE", "STREAM_BITRATE", "STREAM_QUANTIZER",
 	} {
 		t.Setenv(key, "")
 	}
-	t.Setenv("SURF_PASSWORD", "test-password")
 }
 
 func loadConfig(t *testing.T) *Config {
@@ -47,23 +46,17 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.ChromeNoSandbox {
 		t.Fatal("ChromeNoSandbox=true")
 	}
-	if cfg.StreamBitrateK != 12000 {
-		t.Fatalf("StreamBitrateK=%d, want 12000", cfg.StreamBitrateK)
+	if cfg.StreamBitrateK != 24000 {
+		t.Fatalf("StreamBitrateK=%d, want 24000", cfg.StreamBitrateK)
+	}
+	if cfg.StreamQuantizer != 12 {
+		t.Fatalf("StreamQuantizer=%d, want 12", cfg.StreamQuantizer)
 	}
 }
 
-func TestLoadRequiresSurfPassword(t *testing.T) {
+func TestLoadDoesNotRequirePassword(t *testing.T) {
 	clearConfigEnv(t)
-	t.Setenv("SURF_PASSWORD", "")
-	if _, err := Load(); err == nil {
-		t.Fatal("Load succeeded without SURF_PASSWORD")
-	}
-}
-
-func TestLoadForDoctorDoesNotRequireSurfPassword(t *testing.T) {
-	clearConfigEnv(t)
-	t.Setenv("SURF_PASSWORD", "")
-	if _, err := LoadForDoctor(); err != nil {
+	if _, err := Load(); err != nil {
 		t.Fatal(err)
 	}
 }

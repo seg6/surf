@@ -1,9 +1,11 @@
 #import "RBSocket.h"
 #import "RBLog.h"
+#import "RBSecureHTTPClient.h"
 
 #import <CFNetwork/CFSocketStream.h>
 #import <CommonCrypto/CommonDigest.h>
 #import <QuartzCore/QuartzCore.h>
+#import <Security/SecureTransport.h>
 #import <arpa/inet.h>
 #import <errno.h>
 #import <fcntl.h>
@@ -64,23 +66,6 @@ static void RBSetSocketOptions(int fd) {
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &noDelay, sizeof(noDelay));
 }
 
-// RBTryEnableTCPNoDelay mirrors RBSetSocketOptions for the TLS/CFStream path,
-// which never hands us a raw fd directly — CFStreamCreatePairWithSocketToHost
-// owns socket creation internally. Best-effort/non-fatal: a NULL or
-// unexpectedly-sized property just means Nagle stays on for this connection,
-// which is a latency regression, not a correctness one.
-static void RBTryEnableTCPNoDelay(CFReadStreamRef readStream) {
-    CFDataRef handle = CFReadStreamCopyProperty(readStream, kCFStreamPropertySocketNativeHandle);
-    if (!handle) return;
-    if (CFDataGetLength(handle) == sizeof(CFSocketNativeHandle)) {
-        CFSocketNativeHandle fd;
-        CFDataGetBytes(handle, CFRangeMake(0, sizeof(fd)), (UInt8 *)&fd);
-        int noDelay = 1;
-        setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &noDelay, sizeof(noDelay));
-    }
-    CFRelease(handle); // CFReadStreamCopyProperty follows the Copy rule; ARC doesn't manage CF types
-}
-
 static BOOL RBConnectWithTimeout(int fd, const struct sockaddr *addr, socklen_t len) {
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags < 0) return connect(fd, addr, len) == 0;
@@ -137,29 +122,65 @@ static BOOL RBReadAll(int fd, void *buf, NSUInteger len) {
 @property(nonatomic, copy) NSString *path;
 @property(nonatomic, assign) NSInteger port;
 @property(nonatomic, assign) BOOL secure;
+@property(nonatomic, copy) NSString *expectedFingerprint;
 @property(nonatomic, assign) int fd;
 @property(nonatomic, assign) BOOL running;
 @property(nonatomic, assign) BOOL connectStarted;
 @property(nonatomic, assign) BOOL closeNotified;
-@property(nonatomic, strong) NSLock *readLock;
 @property(nonatomic, strong) NSLock *writeLock;
+@property(nonatomic, strong) NSLock *tlsLock;
 @property(nonatomic, strong) dispatch_queue_t writeQueue;
-@property(nonatomic, strong) NSInputStream *inputStream;
-@property(nonatomic, strong) NSOutputStream *outputStream;
+@property(nonatomic, assign) SSLContextRef tlsContext;
+@property(nonatomic, assign) BOOL closing;
+- (int)socketFileDescriptor;
 @end
+
+static OSStatus RBSocketTLSRead(SSLConnectionRef connection, void *data, size_t *dataLength) {
+    RBSocket *socket = (__bridge RBSocket *)connection;
+    int fd = [socket socketFileDescriptor];
+    size_t requested = *dataLength;
+    ssize_t count;
+    do { count = recv(fd, data, requested, 0); } while (count < 0 && errno == EINTR);
+    if (count > 0) {
+        *dataLength = (size_t)count;
+        return (size_t)count == requested ? noErr : errSSLWouldBlock;
+    }
+    *dataLength = 0;
+    if (count == 0) return errSSLClosedGraceful;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) return errSSLWouldBlock;
+    return errSecIO;
+}
+
+static OSStatus RBSocketTLSWrite(SSLConnectionRef connection, const void *data, size_t *dataLength) {
+    RBSocket *socket = (__bridge RBSocket *)connection;
+    int fd = [socket socketFileDescriptor];
+    size_t requested = *dataLength;
+    ssize_t count;
+    do { count = send(fd, data, requested, 0); } while (count < 0 && errno == EINTR);
+    if (count >= 0) {
+        *dataLength = (size_t)count;
+        return (size_t)count == requested ? noErr : errSSLWouldBlock;
+    }
+    *dataLength = 0;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) return errSSLWouldBlock;
+    return errSecIO;
+}
 
 @implementation RBSocket
 
-- (id)initWithHost:(NSString *)host port:(NSInteger)port path:(NSString *)path secure:(BOOL)secure {
+- (int)socketFileDescriptor { return self.fd; }
+
+- (id)initWithHost:(NSString *)host port:(NSInteger)port path:(NSString *)path secure:(BOOL)secure fingerprint:(NSString *)fingerprint {
     self = [super init];
     if (self) {
         self.host = host;
         self.port = port;
         self.path = path;
         self.secure = secure;
+        self.expectedFingerprint = [fingerprint lowercaseString];
         self.fd = -1;
-        self.readLock = [[NSLock alloc] init];
         self.writeLock = [[NSLock alloc] init];
+        self.tlsLock = [[NSLock alloc] init];
         self.writeQueue = dispatch_queue_create("surf.socket.write", DISPATCH_QUEUE_SERIAL);
     }
     return self;
@@ -191,30 +212,23 @@ static BOOL RBReadAll(int fd, void *buf, NSUInteger len) {
 }
 
 - (void)close {
-    self.running = NO;
+    @synchronized (self) {
+        if (self.closing) return;
+        self.closing = YES;
+        self.running = NO;
+    }
 
-    // CFNetwork on iOS 6 is not safe when one thread closes an NSInputStream
-    // while another is inside -read:maxLength:. Closing the output side first
-    // tears down the shared socket and wakes a blocked reader; readLock then
-    // guarantees the input object cannot be released underneath that reader.
-    [self.writeLock lock];
-    if (self.outputStream) {
-        [self.outputStream close];
-        self.outputStream = nil;
+    // Wake a blocked TLS operation before waiting for the context owner. Old
+    // Secure Transport releases are not safe when SSLRead and SSLWrite enter
+    // the same context concurrently, so both directions share tlsLock.
+    if (self.fd >= 0) shutdown(self.fd, SHUT_RDWR);
+    [self.tlsLock lock];
+    if (self.tlsContext) {
+        CFRelease(self.tlsContext);
+        self.tlsContext = NULL;
     }
-    if (self.fd >= 0) {
-        shutdown(self.fd, SHUT_RDWR);
-        close(self.fd);
-        self.fd = -1;
-    }
-    [self.writeLock unlock];
-
-    [self.readLock lock];
-    if (self.inputStream) {
-        [self.inputStream close];
-        self.inputStream = nil;
-    }
-    [self.readLock unlock];
+    if (self.fd >= 0) { close(self.fd); self.fd = -1; }
+    [self.tlsLock unlock];
 }
 
 - (BOOL)openAndHandshake:(NSString **)error {
@@ -228,7 +242,8 @@ static BOOL RBReadAll(int fd, void *buf, NSUInteger len) {
     for (NSUInteger i = 0; i < sizeof(randomKey); i++) randomKey[i] = (unsigned char)(arc4random() & 0xff);
     NSString *key = RBBase64Encode([NSData dataWithBytes:randomKey length:sizeof(randomKey)]);
     BOOL defaultPort = (!self.secure && self.port == 80) || (self.secure && self.port == 443);
-    NSString *hostHeader = defaultPort ? self.host : [NSString stringWithFormat:@"%@:%d", self.host, (int)self.port];
+    NSString *headerHost = [self.host rangeOfString:@":"].location == NSNotFound ? self.host : [NSString stringWithFormat:@"[%@]", self.host];
+    NSString *hostHeader = defaultPort ? headerHost : [NSString stringWithFormat:@"%@:%d", headerHost, (int)self.port];
     NSString *request = [NSString stringWithFormat:
         @"GET %@ HTTP/1.1\r\nHost: %@\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %@\r\nSec-WebSocket-Version: 13\r\n\r\n",
         self.path, hostHeader, key];
@@ -302,77 +317,98 @@ static BOOL RBReadAll(int fd, void *buf, NSUInteger len) {
         if (error) *error = @"tcp connect failed";
         return NO;
     }
-    self.fd = fd;
+    @synchronized (self) {
+        // close may run while DNS/connect is in flight. Never publish a new
+        // descriptor after the socket has already been cancelled.
+        if (!self.running) {
+            close(fd);
+            if (error) *error = @"socket closed";
+            return NO;
+        }
+        self.fd = fd;
+    }
     return YES;
 }
 
 - (BOOL)openTLS:(NSString **)error {
-    CFReadStreamRef readStream = NULL;
-    CFWriteStreamRef writeStream = NULL;
-    CFStreamCreatePairWithSocketToHost(kCFAllocatorDefault, (__bridge CFStringRef)self.host, (UInt32)self.port, &readStream, &writeStream);
-    if (!readStream || !writeStream) {
-        if (readStream) CFRelease(readStream);
-        if (writeStream) CFRelease(writeStream);
-        if (error) *error = @"tls stream create failed";
+    if (![self openTCP:error]) return NO;
+
+    // Secure Transport on iOS 6 cannot tolerate another thread releasing the
+    // context while SSLHandshake is using it. The same lock covers handshake,
+    // all later reads/writes, and final teardown.
+    [self.tlsLock lock];
+    if (!self.running) {
+        if (self.fd >= 0) { close(self.fd); self.fd = -1; }
+        [self.tlsLock unlock];
+        if (error) *error = @"socket closed";
+        return NO;
+    }
+    SSLContextRef context = SSLCreateContext(kCFAllocatorDefault, kSSLClientSide, kSSLStreamType);
+    if (!context) {
+        close(self.fd); self.fd = -1;
+        [self.tlsLock unlock];
+        if (error) *error = @"tls context create failed";
+        return NO;
+    }
+    self.tlsContext = context;
+    OSStatus ioStatus = SSLSetIOFuncs(context, RBSocketTLSRead, RBSocketTLSWrite);
+    OSStatus connectionStatus = SSLSetConnection(context, (__bridge SSLConnectionRef)self);
+    OSStatus peerStatus = SSLSetPeerDomainName(context, [self.host UTF8String], strlen([self.host UTF8String]));
+    OSStatus minStatus = SSLSetProtocolVersionMin(context, kTLSProtocol12);
+    OSStatus maxStatus = SSLSetProtocolVersionMax(context, kTLSProtocol12);
+    OSStatus authStatus = SSLSetSessionOption(context, kSSLSessionOptionBreakOnServerAuth, true);
+    if (ioStatus != noErr || connectionStatus != noErr || peerStatus != noErr ||
+        minStatus != noErr || maxStatus != noErr || authStatus != noErr) {
+        if (error) *error = @"TLS 1.2 configuration failed";
+        CFRelease(context); self.tlsContext = NULL;
+        close(self.fd); self.fd = -1;
+        [self.tlsLock unlock];
         return NO;
     }
 
-    NSDictionary *ssl = @{
-        (__bridge NSString *)kCFStreamSSLPeerName: self.host,
-        (__bridge NSString *)kCFStreamSSLValidatesCertificateChain: @YES
-    };
-    CFReadStreamSetProperty(readStream, kCFStreamPropertySSLSettings, (__bridge CFTypeRef)ssl);
-    CFWriteStreamSetProperty(writeStream, kCFStreamPropertySSLSettings, (__bridge CFTypeRef)ssl);
-    CFReadStreamSetProperty(readStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanTrue);
-    CFWriteStreamSetProperty(writeStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanTrue);
-
-    [self.readLock lock];
-    self.inputStream = (__bridge_transfer NSInputStream *)readStream;
-    [self.inputStream open];
-    [self.readLock unlock];
-    [self.writeLock lock];
-    self.outputStream = (__bridge_transfer NSOutputStream *)writeStream;
-    [self.outputStream open];
-    [self.writeLock unlock];
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:RBSocketTimeoutSeconds];
-    while (self.running && [[NSDate date] compare:deadline] == NSOrderedAscending) {
-        [self.readLock lock];
-        NSStreamStatus inStatus = self.inputStream ? [self.inputStream streamStatus] : NSStreamStatusClosed;
-        [self.readLock unlock];
-        [self.writeLock lock];
-        NSStreamStatus outStatus = self.outputStream ? [self.outputStream streamStatus] : NSStreamStatusClosed;
-        [self.writeLock unlock];
-        if (inStatus == NSStreamStatusError || outStatus == NSStreamStatusError) break;
-        if ((inStatus == NSStreamStatusOpen || inStatus == NSStreamStatusReading) &&
-            (outStatus == NSStreamStatusOpen || outStatus == NSStreamStatusWriting)) {
-            [self.readLock lock];
-            if (self.inputStream) RBTryEnableTCPNoDelay((__bridge CFReadStreamRef)self.inputStream);
-            [self.readLock unlock];
-            return YES;
+    BOOL checkedIdentity = NO;
+    for (;;) {
+        OSStatus status = SSLHandshake(context);
+        if (status == errSSLPeerAuthCompleted || status == noErr) {
+            SecTrustRef trust = NULL;
+            if (SSLCopyPeerTrust(context, &trust) == noErr && trust) {
+                NSString *fingerprint = [RBSecureHTTPClient fingerprintForTrust:trust];
+                CFRelease(trust);
+                checkedIdentity = [self.expectedFingerprint length] && [fingerprint isEqualToString:self.expectedFingerprint];
+            }
+            if (!checkedIdentity) {
+                if (error) *error = @"Server Identity Changed";
+                break;
+            }
+            if (status == noErr) {
+                [self.tlsLock unlock];
+                return YES;
+            }
+            continue;
         }
-        [NSThread sleepForTimeInterval:0.02];
+        if (status == errSSLWouldBlock) continue;
+        if (error) *error = [NSString stringWithFormat:@"TLS 1.2 handshake failed (%d)", (int)status];
+        break;
     }
-    if (error) *error = @"tls connect failed";
+    CFRelease(context); self.tlsContext = NULL;
+    close(self.fd); self.fd = -1;
+    [self.tlsLock unlock];
     return NO;
 }
 
 - (BOOL)readAll:(void *)buf length:(NSUInteger)len {
     if (!self.secure) return self.fd >= 0 && RBReadAll(self.fd, buf, len);
     unsigned char *p = (unsigned char *)buf;
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:RBSocketTimeoutSeconds];
     while (len > 0 && self.running) {
-        [self.readLock lock];
-        NSInteger n = self.inputStream ? [self.inputStream read:p maxLength:len] : -1;
-        [self.readLock unlock];
-        if (n < 0) return NO;
-        if (n == 0) {
-            if ([[NSDate date] compare:deadline] != NSOrderedAscending) return NO;
-            [NSThread sleepForTimeInterval:0.01];
-            continue;
-        }
-        p += n;
-        len -= (NSUInteger)n;
-        deadline = [NSDate dateWithTimeIntervalSinceNow:RBSocketTimeoutSeconds];
+        size_t count = 0;
+        [self.tlsLock lock];
+        SSLContextRef context = self.running ? self.tlsContext : NULL;
+        OSStatus status = context ? SSLRead(context, p, len, &count) : errSSLClosedAbort;
+        [self.tlsLock unlock];
+        p += count;
+        len -= count;
+        if (status == noErr || status == errSSLWouldBlock) continue;
+        return NO;
     }
     return len == 0;
 }
@@ -380,18 +416,16 @@ static BOOL RBReadAll(int fd, void *buf, NSUInteger len) {
 - (BOOL)writeAll:(const void *)buf length:(NSUInteger)len {
     if (!self.secure) return self.fd >= 0 && RBWriteAll(self.fd, buf, len);
     const unsigned char *p = (const unsigned char *)buf;
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:RBSocketTimeoutSeconds];
     while (len > 0 && self.running) {
-        NSInteger n = [self.outputStream write:p maxLength:len];
-        if (n < 0) return NO;
-        if (n == 0) {
-            if ([[NSDate date] compare:deadline] != NSOrderedAscending) return NO;
-            [NSThread sleepForTimeInterval:0.01];
-            continue;
-        }
-        p += n;
-        len -= (NSUInteger)n;
-        deadline = [NSDate dateWithTimeIntervalSinceNow:RBSocketTimeoutSeconds];
+        size_t count = 0;
+        [self.tlsLock lock];
+        SSLContextRef context = self.running ? self.tlsContext : NULL;
+        OSStatus status = context ? SSLWrite(context, p, len, &count) : errSSLClosedAbort;
+        [self.tlsLock unlock];
+        p += count;
+        len -= count;
+        if (status == noErr || status == errSSLWouldBlock) continue;
+        return NO;
     }
     return len == 0;
 }

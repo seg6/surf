@@ -10,6 +10,6 @@
 
 @interface RBClientUpdater : NSObject <NSURLConnectionDataDelegate>
 @property(nonatomic, weak) id<RBClientUpdaterDelegate> delegate;
-- (id)initWithBaseURL:(NSURL *)baseURL update:(NSDictionary *)update;
+- (id)initWithBaseURL:(NSURL *)baseURL fingerprint:(NSString *)fingerprint update:(NSDictionary *)update;
 - (void)start;
 @end

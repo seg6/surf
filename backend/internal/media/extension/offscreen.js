@@ -26,11 +26,6 @@ let videoPendingFrames = [];
 // absorbs that jitter without ever building a queue of old pictures.
 const captureFrameRate = 60;
 const outputFrameRate = 30;
-// A tab-capture track survives viewport and orientation changes. Give that
-// long-lived track room for later resizes; exact current dimensions are still
-// applied in startVideoEncoder, so this ceiling does not increase frame size.
-const maxCaptureDimension = 1024;
-
 function stopVideoEncoder() {
   videoGeneration++;
   if (videoReader) {
@@ -245,20 +240,37 @@ async function startVideoEncoder(track) {
     });
   }
   const settings = track.getSettings();
-  const config = {
+  const baseConfig = {
     codec: videoConfig.codec,
     width: videoConfig.width,
     height: videoConfig.height,
-    bitrate: videoConfig.bitrateK * 1000,
-    // Variable mode spends the same target bitrate where browser text and
-    // scrolling are complex instead of padding static frames.
-    bitrateMode: "variable",
+    framerate: outputFrameRate,
     latencyMode: "realtime",
     hardwareAcceleration: "no-preference",
     contentHint: "detail",
     avc: {format: "annexb"},
   };
-  const support = await VideoEncoder.isConfigSupported(config);
+  // Constant-quantizer AVC gives text, icons and fine page edges a fixed
+  // quality floor instead of allowing a bitrate controller to blur them.
+  // QP 12 is effectively transparent for browser chrome at native size while
+  // remaining practical on old Wi-Fi. Fall back to a deliberately generous
+  // VBR target on encoders that do not implement WebCodecs quantizer mode.
+  const requestedQuantizer = Number(videoConfig.quantizer);
+  const quantizer = Number.isInteger(requestedQuantizer) ?
+    Math.max(0, Math.min(51, requestedQuantizer)) : 12;
+  let rateControl = "quantizer";
+  let support = await VideoEncoder.isConfigSupported({
+    ...baseConfig,
+    bitrateMode: "quantizer",
+  });
+  if (!support.supported) {
+    rateControl = "variable";
+    support = await VideoEncoder.isConfigSupported({
+      ...baseConfig,
+      bitrate: videoConfig.bitrateK * 1000,
+      bitrateMode: "variable",
+    });
+  }
   if (!support.supported || generation !== videoGeneration) {
     throw new Error("requested H.264 encoder configuration is unsupported");
   }
@@ -310,6 +322,8 @@ async function startVideoEncoder(track) {
     sourceHeight: settings.height || 0,
     sourceFPS: settings.frameRate || 0,
     sourceCapabilityFPS: availableRate || 0,
+    rateControl,
+    quantizer: rateControl === "quantizer" ? quantizer : -1,
   });
 
   const readFrames = async () => {
@@ -393,7 +407,11 @@ async function startVideoEncoder(track) {
         fresh,
       });
       try {
-        encoder.encode(frame, {keyFrame});
+        const encodeOptions = {keyFrame};
+        if (rateControl === "quantizer") {
+          encodeOptions.avc = {quantizer};
+        }
+        encoder.encode(frame, encodeOptions);
       } catch (error) {
         videoPendingFrames.pop();
         frame.close();
@@ -428,14 +446,14 @@ async function startCapture(streamId) {
           chromeMediaSourceId: streamId,
         },
       },
-      // Leave enough room for either source orientation. The video track is
-      // constrained to the client-derived dimensions before encoding.
+      // Leave enough room for either source orientation at the exact current
+      // client size. A viewport change reacquires the track with a new limit.
       video: videoConfig ? {
         mandatory: {
           chromeMediaSource: "tab",
           chromeMediaSourceId: streamId,
-          maxWidth: maxCaptureDimension,
-          maxHeight: maxCaptureDimension,
+          maxWidth: Math.max(videoConfig.width, videoConfig.height),
+          maxHeight: Math.max(videoConfig.width, videoConfig.height),
           maxFrameRate: captureFrameRate,
         },
       } : false,

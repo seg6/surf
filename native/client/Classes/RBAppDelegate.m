@@ -1,4 +1,5 @@
 #import "RBAppDelegate.h"
+#import "RBConfig.h"
 #import "RBLog.h"
 #import "RBRootViewController.h"
 
@@ -8,9 +9,19 @@
     RBInstallCrashHandlers();
     RBLog(@"application launching");
 
+    // Mobile pages are the natural default on the touch-first Surf client.
+    // registerDefaults preserves an explicit user choice on upgrades.
+    [[NSUserDefaults standardUserDefaults] registerDefaults:@{RBDefaultsMobileLayoutKey: @YES}];
+
     self.window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
     self.window.rootViewController = [[RBRootViewController alloc] init];
     [self.window makeKeyAndVisible];
+    NSURL *launchURL = [launchOptions objectForKey:UIApplicationLaunchOptionsURLKey];
+    if (launchURL) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self application:application openURL:launchURL sourceApplication:nil annotation:nil];
+        });
+    }
     return YES;
 }
 
@@ -26,7 +37,10 @@
   sourceApplication:(NSString *)sourceApplication annotation:(id)annotation {
     NSString *raw = [url absoluteString];
     NSString *target = nil;
-    if ([raw hasPrefix:@"surf-http://"]) {
+    if ([[[url scheme] lowercaseString] isEqualToString:@"surf"] && [[[url host] lowercaseString] isEqualToString:@"pair"]) {
+        [[self rootController] openPairingURL:url];
+        return YES;
+    } else if ([raw hasPrefix:@"surf-http://"]) {
         target = [@"http://" stringByAppendingString:[raw substringFromIndex:[@"surf-http://" length]]];
     } else if ([raw hasPrefix:@"surf-https://"]) {
         target = [@"https://" stringByAppendingString:[raw substringFromIndex:[@"surf-https://" length]]];

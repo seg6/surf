@@ -13,6 +13,6 @@
 @interface RBPageSwitcherController : UIViewController <UIScrollViewDelegate>
 @property(nonatomic, assign) id<RBPageSwitcherDelegate> delegate;
 
-- (id)initWithTabs:(NSArray *)tabs thumbnails:(NSDictionary *)thumbnails baseURL:(NSURL *)baseURL;
+- (id)initWithTabs:(NSArray *)tabs thumbnails:(NSDictionary *)thumbnails baseURL:(NSURL *)baseURL fingerprint:(NSString *)fingerprint;
 - (void)updateTabs:(NSArray *)tabs thumbnails:(NSDictionary *)thumbnails;
 @end

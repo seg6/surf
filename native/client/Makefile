@@ -17,10 +17,11 @@ include $(THEOS)/makefiles/common.mk
 
 APPLICATION_NAME := Surf
 TOOL_NAME := surf-update-v2
-Surf_FILES := $(wildcard Classes/*.m) $(wildcard Classes/*.c)
+Surf_FILES := $(wildcard Classes/*.m) $(wildcard Classes/*.c) $(wildcard Classes/quirc/*.c)
 # VideoToolbox is intentionally absent: private on iOS 6, resolved via dlopen.
-Surf_FRAMEWORKS := UIKit CoreGraphics QuartzCore ImageIO Security CFNetwork AudioToolbox CoreMedia CoreVideo OpenGLES MessageUI
+Surf_FRAMEWORKS := UIKit CoreGraphics QuartzCore ImageIO Security CFNetwork AudioToolbox CoreMedia CoreVideo OpenGLES MessageUI AVFoundation
 Surf_CFLAGS := -fobjc-arc -Wall -Werror=return-type -Wno-deprecated-declarations -DRBAppVersion='@"$(VERSION)"' -DRBNativeVersion='@"$(PROTOCOL_VERSION)"'
+Surf_CODESIGN_FLAGS := -SResources/Surf.entitlements
 surf-update-v2_FILES := Updater/main.c
 surf-update-v2_INSTALL_PATH := /usr/libexec
 surf-update-v2_CFLAGS := -Wall -Werror

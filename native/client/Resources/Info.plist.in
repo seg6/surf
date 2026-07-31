@@ -72,6 +72,8 @@
   </array>
   <key>LSRequiresIPhoneOS</key>
   <true/>
+  <key>NSCameraUsageDescription</key>
+  <string>Scan a Surf server pairing code.</string>
   <key>MinimumOSVersion</key>
   <string>6.0</string>
   <key>UIDeviceFamily</key>

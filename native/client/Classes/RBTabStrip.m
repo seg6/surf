@@ -1,5 +1,6 @@
 #import "RBTabStrip.h"
 
+#import "RBSecureHTTPClient.h"
 #import "RBTheme.h"
 
 #import <QuartzCore/QuartzCore.h>
@@ -58,6 +59,8 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
 @property(nonatomic, strong) CALayer *rightBorder;
 @property(nonatomic, strong) CALayer *bottomBorder;
 @property(nonatomic, strong) UIButton *closeButton;
+@property(nonatomic, strong) UIImageView *faviconView;
+@property(nonatomic, copy) NSString *iconPath;
 @property(nonatomic, strong) UILabel *titleLabel;
 @end
 
@@ -68,6 +71,10 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
 @property(nonatomic, strong) NSArray *tabs;
 @property(nonatomic, strong) NSArray *hiddenTabs;
 @property(nonatomic, strong) NSMutableDictionary *cells;
+@property(nonatomic, strong) NSURL *baseURL;
+@property(nonatomic, copy) NSString *fingerprint;
+@property(nonatomic, strong) NSMutableDictionary *iconCache;
+@property(nonatomic, strong) NSMutableSet *iconFetches;
 @property(nonatomic, strong) UIActionSheet *overflowSheet;
 @end
 
@@ -131,6 +138,12 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
         [self.closeButton addTarget:self action:@selector(closeTapped:) forControlEvents:UIControlEventTouchUpInside];
         [self addSubview:self.closeButton];
 
+        self.faviconView = [[UIImageView alloc] initWithFrame:CGRectZero];
+        self.faviconView.backgroundColor = [UIColor clearColor];
+        self.faviconView.contentMode = UIViewContentModeScaleAspectFit;
+        self.faviconView.userInteractionEnabled = NO;
+        [self addSubview:self.faviconView];
+
         self.titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
         self.titleLabel.backgroundColor = [UIColor clearColor];
         self.titleLabel.font = [RBTheme fontOfSize:([RBTheme usesClassicAppearance] ? 11.0 : 12.0) bold:NO];
@@ -173,7 +186,11 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
     [CATransaction commit];
     CGFloat closeWidth = 27.0;
     self.closeButton.frame = CGRectMake(MAX(0.0, w - closeWidth), 0.0, closeWidth, h);
-    self.titleLabel.frame = CGRectMake(9.0, 0.0, MAX(8.0, w - closeWidth - 12.0), h);
+    BOOL hasIcon = self.faviconView.image != nil;
+    self.faviconView.hidden = !hasIcon;
+    self.faviconView.frame = CGRectMake(7.0, floorf((h - 14.0) / 2.0), 14.0, 14.0);
+    CGFloat titleX = hasIcon ? 26.0 : 9.0;
+    self.titleLabel.frame = CGRectMake(titleX, 0.0, MAX(8.0, w - closeWidth - titleX - 4.0), h);
 }
 
 - (void)tapped:(id)sender { [self.strip performSelector:@selector(cellTapped:) withObject:self]; }
@@ -207,22 +224,59 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
         [self.overflowButton addTarget:self action:@selector(overflowTapped:) forControlEvents:UIControlEventTouchUpInside];
         [self addSubview:self.overflowButton];
         self.addTabButton = [[RBTabAuxButton alloc] initWithFrame:CGRectZero];
-        [self.addTabButton setImage:[RBTheme icon:RBIconPlus size:16.0 color:[RBTheme primaryTextColor]]
-                           forState:UIControlStateNormal];
+        [self.addTabButton setTitle:@"+" forState:UIControlStateNormal];
+        [self.addTabButton setTitle:@"+" forState:UIControlStateHighlighted];
+        [self.addTabButton setTitleColor:[UIColor blackColor] forState:UIControlStateNormal];
+        [self.addTabButton setTitleColor:[UIColor blackColor] forState:UIControlStateHighlighted];
+        self.addTabButton.titleLabel.font = [RBTheme fontOfSize:23.0 bold:YES];
         [self.addTabButton addTarget:self action:@selector(newTapped:) forControlEvents:UIControlEventTouchUpInside];
         self.addTabButton.accessibilityLabel = @"New Tab";
         [self addSubview:self.addTabButton];
         self.cells = [NSMutableDictionary dictionary];
+        self.iconCache = [NSMutableDictionary dictionary];
+        self.iconFetches = [NSMutableSet set];
     }
     return self;
 }
 
-- (void)setTabs:(NSArray *)tabs baseURL:(NSURL *)baseURL {
+- (void)setTabs:(NSArray *)tabs baseURL:(NSURL *)baseURL fingerprint:(NSString *)fingerprint {
     self.tabs = tabs ?: @[];
+    self.baseURL = baseURL;
+    self.fingerprint = fingerprint;
     [self setNeedsLayout];
 }
 
-- (void)purgeIconCache {}
+- (void)purgeIconCache {
+    [self.iconCache removeAllObjects];
+    for (RBTabCell *cell in [self.cells allValues]) cell.faviconView.image = nil;
+}
+
+- (void)fetchIcon:(NSString *)iconPath {
+    if (![iconPath length] || !self.baseURL || [self.iconFetches containsObject:iconPath]) return;
+    NSURL *url = [NSURL URLWithString:iconPath relativeToURL:self.baseURL];
+    if (!url) return;
+    [self.iconFetches addObject:iconPath];
+    __weak RBTabStrip *weakSelf = self;
+    NSString *fingerprint = self.fingerprint;
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSURLRequest *request = [NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReturnCacheDataElseLoad timeoutInterval:15.0];
+        RBSecureHTTPClient *client = [[RBSecureHTTPClient alloc] initWithFingerprint:fingerprint allowUntrusted:NO];
+        NSHTTPURLResponse *response = nil; NSError *error = nil;
+        NSData *data = [client sendRequest:request response:&response error:&error];
+        UIImage *image = !error && [response statusCode] == 200 ? [UIImage imageWithData:data] : nil;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            RBTabStrip *strongSelf = weakSelf;
+            if (!strongSelf) return;
+            [strongSelf.iconFetches removeObject:iconPath];
+            if (!image) return;
+            [strongSelf.iconCache setObject:image forKey:iconPath];
+            for (RBTabCell *cell in [strongSelf.cells allValues]) {
+                if ([cell.iconPath isEqualToString:iconPath]) cell.faviconView.image = image;
+                if ([cell.iconPath isEqualToString:iconPath]) [cell setNeedsLayout];
+            }
+        });
+    });
+}
 
 - (NSString *)titleForTab:(NSDictionary *)tab {
     NSString *title = [tab objectForKey:@"title"];
@@ -295,6 +349,11 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
         CGFloat nextX = floor((visibleIndex + 1) * cellW);
         cell.frame = CGRectMake(cellX, 0.0, MAX(70.0, nextX - cellX), h);
         cell.titleLabel.text = [self titleForTab:tab];
+        id iconValue = [tab objectForKey:@"icon"];
+        cell.iconPath = [iconValue isKindOfClass:[NSString class]] ? iconValue : nil;
+        cell.faviconView.image = [self.iconCache objectForKey:cell.iconPath];
+        [cell setNeedsLayout];
+        if (!cell.faviconView.image) [self fetchIcon:cell.iconPath];
         cell.active = [[tab objectForKey:@"active"] boolValue];
         if (cell.active) activeCell = cell;
     }

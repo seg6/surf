@@ -3,26 +3,19 @@
 @class RBSettingsController;
 
 @protocol RBSettingsDelegate <NSObject>
-- (void)settings:(RBSettingsController *)settings connectToURL:(NSString *)url password:(NSString *)password;
+- (void)settingsWantsServers:(RBSettingsController *)settings;
 - (void)settingsDismissed:(RBSettingsController *)settings;
 @optional
-// DATA section: what = history|cookies|cache. Only offered while connected.
 - (void)settings:(RBSettingsController *)settings clearData:(NSString *)what;
 - (void)settings:(RBSettingsController *)settings diagnosticsVisible:(BOOL)visible;
 - (void)settings:(RBSettingsController *)settings preference:(NSString *)key enabled:(BOOL)enabled;
 - (void)settingsWantsMediaControls:(RBSettingsController *)settings;
 @end
 
-// App configuration as a real grouped settings screen (chrome rethink):
-// SERVER (url/password/connect + saved servers + Bonjour discovery),
-// DATA (clear), ABOUT (version).
-// Present wrapped in a UINavigationController form sheet.
 @interface RBSettingsController : UITableViewController
 @property(nonatomic, assign) id<RBSettingsDelegate> delegate;
-@property(nonatomic, assign) BOOL allowsCancel;
-// Data actions only make sense with a live session.
 @property(nonatomic, assign) BOOL connected;
 @property(nonatomic, assign) BOOL diagnosticsVisible;
-- (id)initWithServerURL:(NSString *)serverURL password:(NSString *)password;
-- (void)setStatusText:(NSString *)status isError:(BOOL)isError;
+- (id)initWithSelectedServerID:(NSString *)serverID;
+- (void)reloadServers;
 @end

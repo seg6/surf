@@ -1,15 +1,18 @@
 #import "RBPageSwitcherController.h"
 
 #import "RBTheme.h"
+#import "RBSecureHTTPClient.h"
 
 #import <QuartzCore/QuartzCore.h>
 
 @interface RBPageCard : UIView
 @property(nonatomic, assign) NSInteger tabID;
+@property(nonatomic, strong) UIView *headerView;
 @property(nonatomic, strong) UILabel *pageTitleLabel;
 @property(nonatomic, strong) UIImageView *previewView;
 @property(nonatomic, strong) UILabel *placeholderLabel;
-@property(nonatomic, strong) UIImageView *faviconView;
+@property(nonatomic, strong) UIImageView *titleFaviconView;
+@property(nonatomic, strong) UIImageView *placeholderFaviconView;
 @property(nonatomic, strong) UIButton *closeButton;
 @property(nonatomic, strong) UIView *closeDot;
 @property(nonatomic, copy) NSString *iconPath;
@@ -30,6 +33,7 @@
 @property(nonatomic, strong) UIButton *doneButton;
 @property(nonatomic, strong) NSMutableArray *cards;
 @property(nonatomic, strong) NSURL *baseURL;
+@property(nonatomic, copy) NSString *fingerprint;
 @property(nonatomic, strong) NSMutableDictionary *iconCache;
 @property(nonatomic, strong) NSMutableSet *iconFetches;
 @property(nonatomic, assign) NSInteger selectedIndex;
@@ -38,12 +42,13 @@
 
 @implementation RBPageSwitcherController
 
-- (id)initWithTabs:(NSArray *)tabs thumbnails:(NSDictionary *)thumbnails baseURL:(NSURL *)baseURL {
+- (id)initWithTabs:(NSArray *)tabs thumbnails:(NSDictionary *)thumbnails baseURL:(NSURL *)baseURL fingerprint:(NSString *)fingerprint {
     self = [super initWithNibName:nil bundle:nil];
     if (self) {
         self.tabs = tabs ?: @[];
         self.thumbnails = thumbnails ?: @{};
         self.baseURL = baseURL;
+        self.fingerprint = fingerprint;
         self.iconCache = [NSMutableDictionary dictionary];
         self.iconFetches = [NSMutableSet set];
         self.selectedIndex = [self activeIndexInTabs:self.tabs];
@@ -78,6 +83,9 @@
     self.scrollView = [[UIScrollView alloc] initWithFrame:CGRectZero];
     self.scrollView.backgroundColor = [UIColor clearColor];
     self.scrollView.pagingEnabled = YES;
+    self.scrollView.bounces = NO;
+    self.scrollView.alwaysBounceHorizontal = NO;
+    self.scrollView.alwaysBounceVertical = NO;
     self.scrollView.showsHorizontalScrollIndicator = NO;
     self.scrollView.delegate = self;
     [self.view addSubview:self.scrollView];
@@ -163,8 +171,13 @@
         card.layer.borderWidth = 0.0;
         card.layer.masksToBounds = YES;
 
+        UIView *header = [[UIView alloc] initWithFrame:CGRectZero];
+        header.backgroundColor = [UIColor colorWithWhite:0.90 alpha:1.0];
+        [card addSubview:header];
+        card.headerView = header;
+
         UILabel *title = [[UILabel alloc] initWithFrame:CGRectZero];
-        title.backgroundColor = [UIColor colorWithWhite:0.90 alpha:1.0];
+        title.backgroundColor = [UIColor clearColor];
         title.text = [self titleForTab:tab];
         title.textAlignment = NSTextAlignmentCenter;
         title.lineBreakMode = NSLineBreakByTruncatingTail;
@@ -172,6 +185,16 @@
         title.textColor = [RBTheme primaryTextColor];
         [card addSubview:title];
         card.pageTitleLabel = title;
+
+        NSString *iconPath = [tab objectForKey:@"icon"];
+        card.iconPath = [iconPath isKindOfClass:[NSString class]] ? iconPath : nil;
+        UIImageView *titleFavicon = [[UIImageView alloc] initWithFrame:CGRectZero];
+        titleFavicon.backgroundColor = [UIColor clearColor];
+        titleFavicon.contentMode = UIViewContentModeScaleAspectFit;
+        titleFavicon.image = [self.iconCache objectForKey:card.iconPath];
+        [card addSubview:titleFavicon];
+        card.titleFaviconView = titleFavicon;
+        if (!titleFavicon.image) [self fetchIcon:card.iconPath];
 
         UIImageView *preview = [[UIImageView alloc] initWithFrame:CGRectZero];
         preview.backgroundColor = [RBTheme pageBackgroundColor];
@@ -182,19 +205,15 @@
         card.previewView = preview;
 
         if (!preview.image) {
-            NSString *iconPath = [tab objectForKey:@"icon"];
-            card.iconPath = [iconPath isKindOfClass:[NSString class]] ? iconPath : nil;
             UIImageView *favicon = [[UIImageView alloc] initWithFrame:CGRectZero];
             favicon.backgroundColor = [UIColor clearColor];
             favicon.contentMode = UIViewContentModeScaleAspectFit;
             favicon.image = [self.iconCache objectForKey:card.iconPath];
             if (!favicon.image) {
-                favicon.image = [RBTheme icon:RBIconTabs size:42.0
-                                         color:[[RBTheme secondaryTextColor] colorWithAlphaComponent:0.34]];
                 [self fetchIcon:card.iconPath];
             }
             [card addSubview:favicon];
-            card.faviconView = favicon;
+            card.placeholderFaviconView = favicon;
 
             UILabel *placeholder = [[UILabel alloc] initWithFrame:CGRectZero];
             placeholder.backgroundColor = [UIColor clearColor];
@@ -256,12 +275,20 @@
         UILabel *title = card.pageTitleLabel;
         UIImageView *preview = card.previewView;
         UILabel *placeholder = card.placeholderLabel;
-        title.frame = CGRectMake(0.0, 0.0, cardW, 28.0);
+        card.headerView.frame = CGRectMake(0.0, 0.0, cardW, 28.0);
+        BOOL hasIcon = card.titleFaviconView.image != nil;
+        card.titleFaviconView.hidden = !hasIcon;
+        CGFloat titleX = hasIcon ? 54.0 : 34.0;
+        title.frame = CGRectMake(titleX, 0.0, MAX(1.0, cardW - titleX - 7.0), 28.0);
+        title.textAlignment = NSTextAlignmentLeft;
+        card.titleFaviconView.frame = CGRectMake(33.0, 6.0, 16.0, 16.0);
         preview.frame = CGRectMake(0.0, 28.0, cardW, cardH - 28.0);
         if (placeholder) {
             CGFloat centerY = CGRectGetMidY(preview.frame);
-            card.faviconView.frame = CGRectMake(floorf((cardW - 48.0) / 2.0), centerY - 62.0, 48.0, 48.0);
-            placeholder.frame = CGRectMake(24.0, centerY - 4.0, cardW - 48.0, 78.0);
+            BOOL hasPlaceholderIcon = card.placeholderFaviconView.image != nil;
+            card.placeholderFaviconView.hidden = !hasPlaceholderIcon;
+            card.placeholderFaviconView.frame = CGRectMake(floorf((cardW - 48.0) / 2.0), centerY - 62.0, 48.0, 48.0);
+            placeholder.frame = CGRectMake(24.0, hasPlaceholderIcon ? centerY - 4.0 : centerY - 38.0, cardW - 48.0, 78.0);
         }
         card.closeButton.frame = CGRectMake(0.0, 0.0, 32.0, 28.0);
         card.closeDot.frame = CGRectMake(8.0, 6.0, 16.0, 16.0);
@@ -282,18 +309,26 @@
                                             cachePolicy:NSURLRequestReturnCacheDataElseLoad
                                         timeoutInterval:15.0];
     __weak RBPageSwitcherController *weakSelf = self;
-    [NSURLConnection sendAsynchronousRequest:request queue:[NSOperationQueue mainQueue]
-                           completionHandler:^(NSURLResponse *response, NSData *data, NSError *error) {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        RBSecureHTTPClient *client = [[RBSecureHTTPClient alloc] initWithFingerprint:self.fingerprint allowUntrusted:NO];
+        NSHTTPURLResponse *response = nil; NSError *error = nil;
+        NSData *data = [client sendRequest:request response:&response error:&error];
+        dispatch_async(dispatch_get_main_queue(), ^{
         RBPageSwitcherController *strongSelf = weakSelf;
         [strongSelf.iconFetches removeObject:iconPath];
-        if (!strongSelf || error || ![data length]) return;
+        if (!strongSelf || error || [response statusCode] != 200 || ![data length]) return;
         UIImage *image = [UIImage imageWithData:data];
         if (!image) return;
         [strongSelf.iconCache setObject:image forKey:iconPath];
         for (RBPageCard *card in strongSelf.cards) {
-            if ([card.iconPath isEqualToString:iconPath]) card.faviconView.image = image;
+            if ([card.iconPath isEqualToString:iconPath]) {
+                card.titleFaviconView.image = image;
+                card.placeholderFaviconView.image = image;
+            }
         }
-    }];
+        [strongSelf.view setNeedsLayout];
+        });
+    });
 }
 
 - (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView {

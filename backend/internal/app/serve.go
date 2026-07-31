@@ -5,6 +5,7 @@ package app
 import (
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -12,13 +13,14 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/grandcat/zeroconf"
-
 	"surf-backend/internal/auth"
 	"surf-backend/internal/browser"
 	"surf-backend/internal/chromium"
 	"surf-backend/internal/config"
 	"surf-backend/internal/contentblocker"
+	"surf-backend/internal/control"
+	"surf-backend/internal/discovery"
+	"surf-backend/internal/identity"
 	"surf-backend/internal/process"
 	"surf-backend/internal/transport"
 	"surf-backend/internal/web"
@@ -44,11 +46,16 @@ func Serve() error {
 
 	releaseChildren := process.ProtectChildren()
 	defer releaseChildren()
-	a, err := auth.New(cfg.Profile, cfg.SurfPassword, cfg.AuthDays)
+	ident, err := identity.LoadOrCreate(cfg.SurfHome, cfg.ServerName)
+	if err != nil {
+		return fmt.Errorf("identity: %w", err)
+	}
+	a, err := auth.New(cfg.SurfHome, ident.Fingerprint)
 	if err != nil {
 		return fmt.Errorf("auth: %w", err)
 	}
 	hub := transport.New()
+	a.SetRevokeHandler(hub.CloseDevice)
 	b, err := browser.New(cfg, hub)
 	if err != nil {
 		return err
@@ -58,13 +65,48 @@ func Serve() error {
 	if err := b.Start(); err != nil {
 		return err
 	}
+	srv := web.New(cfg, a, ident, hub)
+	srv.SetHealthCheck(b.Health)
+	srv.SetStats(b.Stats)
+	b.RegisterRoutes(srv)
+	publicListener, err := net.Listen("tcp", net.JoinHostPort(cfg.BindAddr, fmt.Sprint(cfg.Port)))
+	if err != nil {
+		return fmt.Errorf("listen on %s:%d: %w", cfg.BindAddr, cfg.Port, err)
+	}
+	defer publicListener.Close()
+	controlListener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		return fmt.Errorf("listen for local control: %w", err)
+	}
+	defer controlListener.Close()
+	descriptor, err := control.New("https://"+controlListener.Addr().String(), ident.Fingerprint, config.NativeVersion, cfg.Port)
+	if err != nil {
+		return err
+	}
+	srv.SetAdminToken(descriptor.AdminToken)
+
+	serverErr := make(chan error, 2)
+	go func() {
+		serverErr <- fmt.Errorf("public listener: %w", web.ServeTLS(publicListener, ident, srv.Handler()))
+	}()
+	go func() {
+		serverErr <- fmt.Errorf("control listener: %w", web.ServeTLS(controlListener, ident, srv.Handler()))
+	}()
+	if err := control.Write(cfg.SurfHome, descriptor); err != nil {
+		return err
+	}
+	defer func() {
+		if err := control.RemoveOwned(cfg.SurfHome, descriptor.AdminToken); err != nil {
+			log.Printf("remove daemon descriptor: %v", err)
+		}
+	}()
 	if os.Getenv("SURF_ADVERTISE") != "0" {
 		port := cfg.Port
 		if value, err := strconv.Atoi(os.Getenv("SURF_ADVERTISE_PORT")); err == nil && value > 0 {
 			port = value
 		}
-		ad, err := zeroconf.Register("Surf", "_surf._tcp", "local.", port,
-			[]string{"path=/", "proto=http", "app=surf", "nv=" + config.NativeVersion}, nil)
+		ad, err := discovery.Register(cfg.ServerName, port,
+			[]string{"path=" + web.APIRoot, "proto=https", "api=v1", "id=" + ident.Fingerprint, "name=" + cfg.ServerName, "nv=" + config.NativeVersion})
 		if err != nil {
 			log.Printf("bonjour advertise failed: %v", err)
 		} else {
@@ -72,16 +114,12 @@ func Serve() error {
 			log.Printf("bonjour advertised Surf on _surf._tcp port %d", port)
 		}
 	}
-	srv := web.New(cfg, a, hub)
-	srv.SetHealthCheck(b.Health)
-	srv.SetStats(b.Stats)
-	b.RegisterRoutes(srv)
-	log.Printf("surf listening on %s:%d", cfg.BindAddr, cfg.Port)
+	log.Printf("surf daemon listening with TLS on %s:%d identity=%s", cfg.BindAddr, cfg.Port, ident.Fingerprint)
+	log.Printf("surf daemon control endpoint %s", descriptor.ControlURL)
 
-	serverErr := make(chan error, 1)
-	go func() { serverErr <- web.Listen(cfg.BindAddr, cfg.Port, srv.Handler()) }()
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sig)
 	select {
 	case err := <-serverErr:
 		return err

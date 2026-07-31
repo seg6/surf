@@ -148,6 +148,7 @@ func New(cfg *config.Config, hub *transport.Hub) (*Controller, error) {
 		return capture.StartVideo(media.EncoderConfig{
 			Codec: encoderCodec(width, height),
 			Width: width, Height: height, BitrateK: bitrateK,
+			Quantizer: cfg.StreamQuantizer,
 		}, b.onVideoFrame)
 	}
 	videoCfg.Stop = capture.StopVideo
@@ -336,7 +337,7 @@ func (b *Controller) Shutdown() {
 // Died signals that the Chromium connection is gone (supervisor restarts us).
 func (b *Controller) Died() <-chan struct{} { return b.cdp.Closed() }
 
-// Stats is the /health?stats=1 runtime snapshot: enough to see
+// Stats is the /api/v1/health?stats=1 runtime snapshot: enough to see
 // what the server thinks is happening without ssh + log spelunking.
 func (b *Controller) Stats() map[string]any {
 	b.mu.Lock()
@@ -474,6 +475,9 @@ func (b *Controller) onEvent(ev cdp.Event) {
 			b.mu.Lock()
 			t.loading = false
 			b.mu.Unlock()
+		}
+		if t, _ := b.tabBySession(ev.SessionID); t != nil {
+			go b.refreshFavicon(t)
 		}
 		go b.probeWidevine(ev.SessionID)
 	case "Controller.downloadWillBegin":

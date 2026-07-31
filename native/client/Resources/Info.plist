@@ -50,7 +50,7 @@
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.9.0</string>
+  <string>0.10.0</string>
   <key>CFBundleVersion</key>
   <string>20</string>
   <key>CFBundleSupportedPlatforms</key>
@@ -72,6 +72,8 @@
   </array>
   <key>LSRequiresIPhoneOS</key>
   <true/>
+  <key>NSCameraUsageDescription</key>
+  <string>Scan a Surf server pairing code.</string>
   <key>MinimumOSVersion</key>
   <string>6.0</string>
   <key>UIDeviceFamily</key>

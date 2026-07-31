@@ -19,11 +19,12 @@ func main() {
 		}
 		return
 	}
-	if len(os.Args) > 2 {
-		fmt.Fprintln(os.Stderr, "Usage: surf [serve|doctor|update|version]")
-		os.Exit(2)
+	args, err := applyHomeFlag(os.Args[1:])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "surf:", err)
+		os.Exit(1)
 	}
-	if len(os.Args) == 1 {
+	if len(args) == 0 {
 		if err := runTray(); err != nil {
 			fmt.Fprintln(os.Stderr, "surf:", err)
 			os.Exit(1)
@@ -31,23 +32,66 @@ func main() {
 		return
 	}
 
-	var err error
-	switch os.Args[1] {
-	case "serve":
-		err = app.Serve()
+	err = nil
+	switch args[0] {
+	case "daemon":
+		if len(args) != 1 {
+			err = fmt.Errorf("usage: surf daemon")
+		} else {
+			err = app.Serve()
+		}
+	case "status":
+		if len(args) != 1 {
+			err = fmt.Errorf("usage: surf status")
+		} else {
+			err = runStatusCommand()
+		}
 	case "doctor":
-		err = doctor()
+		if len(args) != 1 {
+			err = fmt.Errorf("usage: surf doctor")
+		} else {
+			err = doctor()
+		}
 	case "update":
-		err = runCommandUpdate()
+		if len(args) != 1 {
+			err = fmt.Errorf("usage: surf update")
+		} else {
+			err = runCommandUpdate()
+		}
 	case "version":
+		if len(args) != 1 {
+			err = fmt.Errorf("usage: surf version")
+			break
+		}
 		fmt.Printf("surf %s\nprotocol %s\n", config.AppVersion, config.NativeVersion)
 		return
+	case "pair":
+		if len(args) != 1 {
+			err = fmt.Errorf("usage: surf pair")
+			break
+		}
+		err = runPairCommand()
+	case "devices":
+		err = runDevicesCommand(args[1:])
 	default:
-		fmt.Fprintln(os.Stderr, "Usage: surf [serve|doctor|update|version]")
-		err = fmt.Errorf("unknown command %q", os.Args[1])
+		fmt.Fprintln(os.Stderr, "Usage: surf [--home PATH] [daemon|status|pair|devices|doctor|update|version]")
+		err = fmt.Errorf("unknown command %q", args[0])
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "surf:", err)
 		os.Exit(1)
 	}
+}
+
+func applyHomeFlag(args []string) ([]string, error) {
+	if len(args) == 0 || args[0] != "--home" {
+		return args, nil
+	}
+	if len(args) < 2 || args[1] == "" {
+		return nil, fmt.Errorf("usage: surf --home PATH COMMAND")
+	}
+	if err := os.Setenv("SURF_HOME", args[1]); err != nil {
+		return nil, fmt.Errorf("set SURF_HOME: %w", err)
+	}
+	return args[2:], nil
 }

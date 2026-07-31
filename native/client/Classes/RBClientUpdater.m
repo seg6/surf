@@ -1,5 +1,6 @@
 #import "RBClientUpdater.h"
 #import "RBLog.h"
+#import "RBSecureHTTPClient.h"
 #import <CommonCrypto/CommonDigest.h>
 #import <errno.h>
 #import <spawn.h>
@@ -12,6 +13,7 @@ static NSString *const RBUpdateResultPath = @"/var/mobile/Library/Surf/update-re
 @interface RBClientUpdater ()
 @property(nonatomic, strong) NSURL *baseURL;
 @property(nonatomic, strong) NSDictionary *update;
+@property(nonatomic, copy) NSString *fingerprint;
 @property(nonatomic, strong) NSURLConnection *connection;
 @property(nonatomic, strong) NSFileHandle *file;
 @property(nonatomic, copy) NSString *path;
@@ -20,13 +22,33 @@ static NSString *const RBUpdateResultPath = @"/var/mobile/Library/Surf/update-re
 
 @implementation RBClientUpdater
 
-- (id)initWithBaseURL:(NSURL *)baseURL update:(NSDictionary *)update {
+- (id)initWithBaseURL:(NSURL *)baseURL fingerprint:(NSString *)fingerprint update:(NSDictionary *)update {
     self = [super init];
     if (self) {
         self.baseURL = baseURL;
+        self.fingerprint = fingerprint;
         self.update = update;
     }
     return self;
+}
+
+- (BOOL)connection:(NSURLConnection *)connection canAuthenticateAgainstProtectionSpace:(NSURLProtectionSpace *)space {
+    return [[space authenticationMethod] isEqualToString:NSURLAuthenticationMethodServerTrust];
+}
+
+- (void)connection:(NSURLConnection *)connection didReceiveAuthenticationChallenge:(NSURLAuthenticationChallenge *)challenge {
+    if (![[[challenge protectionSpace] authenticationMethod] isEqualToString:NSURLAuthenticationMethodServerTrust]) {
+        [[challenge sender] performDefaultHandlingForAuthenticationChallenge:challenge];
+        return;
+    }
+    SecTrustRef trust = [[challenge protectionSpace] serverTrust];
+    NSString *observed = [RBSecureHTTPClient fingerprintForTrust:trust];
+    if ([observed isEqualToString:[self.fingerprint lowercaseString]]) {
+        [[challenge sender] useCredential:[NSURLCredential credentialForTrust:trust] forAuthenticationChallenge:challenge];
+    } else {
+        [[challenge sender] cancelAuthenticationChallenge:challenge];
+        [self fail:@"Server Identity Changed"];
+    }
 }
 
 - (void)start {
@@ -45,7 +67,26 @@ static NSString *const RBUpdateResultPath = @"/var/mobile/Library/Surf/update-re
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url
                                                            cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
                                                        timeoutInterval:60.0];
-    self.connection = [[NSURLConnection alloc] initWithRequest:request delegate:self startImmediately:YES];
+    [self.delegate clientUpdater:self progress:0.0];
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        RBSecureHTTPClient *client = [[RBSecureHTTPClient alloc] initWithFingerprint:self.fingerprint allowUntrusted:NO];
+        NSHTTPURLResponse *response = nil;
+        NSError *error = nil;
+        NSData *data = [client sendRequest:request response:&response error:&error];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (!data || [response statusCode] != 200) {
+                [self.file closeFile]; self.file = nil;
+                NSString *message = error ? [error localizedDescription] :
+                    [NSString stringWithFormat:@"Update download returned HTTP %d", (int)[response statusCode]];
+                [self fail:message];
+                return;
+            }
+            [self.file writeData:data];
+            self.received = [data length];
+            [self.delegate clientUpdater:self progress:1.0];
+            [self connectionDidFinishLoading:nil];
+        });
+    });
 }
 
 - (void)connection:(NSURLConnection *)connection didReceiveResponse:(NSURLResponse *)response {

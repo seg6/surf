@@ -2,6 +2,43 @@
 
 This file records the user-visible changes in every Surf release.
 
+## 0.10.0 - 2026-07-31
+
+- Replaced shared passwords and plaintext transport with Surf's built-in TLS
+  listener, persistent RSA server identity, exact certificate pinning, and a
+  separate device-only RSA Keychain key for every paired server.
+- Added server-initiated, single-use pairing invitations: self-contained QR
+  codes with direct identity pinning on camera-equipped iOS 6+ devices, address
+  plus six-digit code and an independently computed identity check for manual
+  pairing, five-attempt manual-code lockout, and Bonjour used only as a locator.
+  Pairing stays closed until the owner explicitly starts it.
+- Made legacy-camera QR pairing dependable with a compact identity-bound QR,
+  a larger low-glare desktop presentation, high-resolution capture, automatic
+  exposure/focus, and an on-device software decoder for iOS 6.
+- Made **Forget Server** revoke the backend approval when reachable, then remove
+  the local server and key regardless of network availability.
+- Added favicon discovery and caching to the iPad tab strip and phone Pages UI.
+- Added unlimited saved servers, explicit changed-identity failures, verified
+  alternative addresses, Rename, Forget, and Pair Again controls, automatic
+  reconnect to only the last selected server, and removal of all legacy
+  password/server defaults during the breaking upgrade.
+- Added a persistent `surf daemon`, authenticated loopback CLI discovery,
+  `surf status`, invitation creation through `surf pair`, and device management with
+  immediate revocation through `surf devices list/revoke`.
+- Moved every public interface to `/api/v1/...`, removed all legacy route
+  aliases, bumped the native protocol, and encrypted control, media, files,
+  diagnostics, and client updates without requiring a reverse proxy or public
+  certificate.
+- Added LAN-safe Bonjour advertisement on Windows and hardened the iOS 6
+  Secure Transport lifecycle so cancellation, backend restarts, and concurrent
+  media/control traffic reconnect without crashing the client.
+- Isolated short-lived device cookies in memory by pinned server identity, so
+  discovery probes and Surf instances sharing a hostname cannot receive one
+  another's authenticated session.
+- Made native-size browser text and page edges substantially sharper with
+  constant-quality H.264 at QP 12, retaining a 24 Mbps VBR compatibility
+  fallback without changing the low-latency 30 FPS delivery path.
+
 ## 0.9.0 - 2026-07-31
 
 - Rebuilt native browser chrome around classic Safari's device-specific

@@ -62,7 +62,7 @@
     .metric-label { color: var(--muted); font-size: 11px; }
     .metric-value { font-size: 20px; font-weight: 600; margin-top: 5px; }
     .metric-unit { color: var(--quiet); font-size: 11px; margin-left: 3px; }
-    .grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 12px; }
+    .grid { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 12px; }
     .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin-bottom: 14px; }
     .panel-copy { color: var(--muted); font-size: 12px; margin: 4px 0 0; line-height: 1.4; }
     .credential { display: grid; gap: 6px; margin-top: 12px; }
@@ -84,15 +84,49 @@
       border: 1px solid var(--line-strong); border-radius: 6px; outline: 0; padding: 9px 10px;
     }
     input:focus { border-color: var(--blue-bright); box-shadow: 0 0 0 1px var(--blue-bright); }
-    .password-field { position: relative; }
-    .password-field input { padding-right: 70px; }
-    .reveal { position: absolute; right: 8px; bottom: 7px; padding: 6px 8px; border: 0; background: transparent; color: var(--blue-bright); cursor: pointer; font-size: 11px; }
+    .full { grid-column: 1 / -1; }
     .form-actions { display: flex; gap: 10px; margin-top: 20px; }
     .check-row { display: flex; grid-template-columns: none; align-items: center; gap: 9px; margin-top: 14px; }
     .check-row input { width: auto; }
     .first-run { display: none; margin-bottom: 12px; border-color: var(--blue); }
     .first-run.show { display: block; }
     .note { color: var(--quiet); font-size: 11px; line-height: 1.5; margin-top: 14px; }
+    .device-section + .device-section { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 16px; }
+    .device-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
+    .device-section-title { font-size: 12px; font-weight: 600; }
+    .count {
+      min-width: 22px; padding: 2px 7px; border-radius: 999px; background: var(--blue);
+      color: #fff; font-size: 11px; font-weight: 600; text-align: center;
+    }
+    .count:empty { display: none; }
+    .device-list { display: grid; gap: 8px; }
+    .device {
+      border: 1px solid var(--line); border-radius: 6px; padding: 10px;
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    }
+    .device-main { min-width: 0; }
+    .device-name { font-size: 13px; font-weight: 600; }
+    .device-meta { color: var(--quiet); font-size: 11px; margin-top: 3px; overflow-wrap: anywhere; }
+    .verification-phrase {
+      color: var(--ink); font: 600 12px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
+      margin-top: 6px; overflow-wrap: anywhere;
+    }
+    .pairing-state { display: none; border: 1px solid var(--blue); border-radius: 8px; padding: 14px; margin-bottom: 16px; background: #1c2635; }
+    .pairing-state.show { display: block; }
+    .pairing-state-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .pairing-title { font-size: 13px; font-weight: 600; }
+    .pairing-content { display: grid; grid-template-columns: 1fr; align-items: start; gap: 10px; }
+    .pairing-code { color: var(--ink); font: 700 28px/1 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .12em; }
+    .pairing-note { color: var(--muted); font-size: 11px; line-height: 1.45; margin: 9px 0 0; }
+    .pairing-qr {
+      display: none; width: 280px; height: 280px; max-width: 100%; margin: 12px auto 0;
+      padding: 8px; background: #b9bec5; border-radius: 6px;
+      filter: brightness(.72) contrast(1.22); image-rendering: pixelated;
+    }
+    .pairing-qr.show { display: block; }
+    #add-device, #close-pairing { white-space: nowrap; }
+    [hidden] { display: none !important; }
+    .empty { color: var(--muted); font-size: 12px; padding: 8px 0; }
     details.panel { margin-top: 12px; padding: 0; }
     details > summary {
       cursor: pointer; padding: 14px 18px; font-size: 13px; font-weight: 600;
@@ -127,6 +161,13 @@
       .hero { align-items: flex-start; flex-direction: column; }
       .metrics { grid-template-columns: 1fr 1fr; }
       .form-grid { grid-template-columns: 1fr; }
+      .panel-head { align-items: flex-start; flex-direction: column; }
+      .panel-head .button { width: 100%; }
+      .pairing-content { grid-template-columns: 1fr; }
+      .pairing-qr { margin: 12px auto 0; }
+      .device { align-items: flex-start; flex-direction: column; }
+      .device > .hero-actions, .device > .button { width: 100%; }
+      .device > .hero-actions .button { flex: 1; }
     }
   </style>
 </head>
@@ -143,7 +184,7 @@
             <div class="engine-icon"><img src="/icon.png" alt=""></div>
             <div>
               <div class="status-line offline" id="hero-status"><span class="dot" id="hero-dot"></span><span id="hero-status-text">Connecting…</span></div>
-              <div class="engine-title">Backend</div>
+              <div class="engine-title" id="server-title">Backend</div>
               <div class="endpoint" id="endpoint">Loading local endpoint…</div>
             </div>
           </div>
@@ -155,7 +196,7 @@
 
       <div class="panel first-run" id="first-run">
         <h2>Start Surf automatically?</h2>
-        <p class="panel-copy">Surf must be running for the iPad to connect. Choose below, then save your settings.</p>
+        <p class="panel-copy">Clients can connect while Surf is running.</p>
       </div>
 
       <div class="metrics">
@@ -171,22 +212,62 @@
           <form id="settings-form">
             <div class="credential"><div class="credential-label">Server address</div><div class="copy-row"><div class="copy-value" id="lan-address">Loading…</div><button class="button secondary small" data-copy="lan-address" type="button">Copy</button></div></div>
             <div class="form-grid" style="margin-top:12px">
-              <label>iPad password
-                <span class="password-field"><input id="password" name="password" type="password" minlength="8" autocomplete="new-password" required><button class="reveal" id="reveal-password" type="button">Show</button></span>
-              </label>
+              <label>Server name<input id="server-name" name="serverName" maxlength="80" required></label>
               <label>Port<input id="port" name="port" type="number" min="1" max="65535" required></label>
+              <label class="full">Public address (optional)<input id="public-address" name="publicAddress" placeholder="surf.example.net:18080"></label>
             </div>
             <label class="check-row"><input id="start-at-login" name="startAtLogin" type="checkbox">Start Surf when I sign in</label>
-            <div class="form-actions"><button class="button primary" type="submit">Save &amp; restart</button><button class="button secondary" id="copy-settings-password" type="button">Copy password</button></div>
+            <div class="form-actions"><button class="button primary" type="submit">Save &amp; restart</button></div>
           </form>
         </div>
         <div class="panel">
-            <div class="panel-head"><div><h2>Media</h2></div></div>
-            <div class="health-list">
-              <div class="health-row"><span>Chromium capture</span><strong id="health-capture">—</strong></div>
-              <div class="health-row"><span>H.264 subscribers</span><strong id="health-video">—</strong></div>
-              <div class="health-row"><span>Audio subscribers</span><strong id="health-audio">—</strong></div>
+          <div class="panel-head">
+            <div><h2>Paired devices</h2><p class="panel-copy">Add or revoke clients.</p></div>
+            <button class="button primary" id="add-device" type="button" aria-controls="pairing-state" aria-expanded="false">Pair device</button>
+          </div>
+          <div class="pairing-state" id="pairing-state">
+            <div class="pairing-state-head">
+              <div>
+                <div class="pairing-title">Pair a device</div>
+                <p class="panel-copy" id="pairing-copy">Scan the QR code, or enter the address and code.</p>
+              </div>
+              <button class="button secondary small danger" id="close-pairing" type="button">Cancel pairing</button>
             </div>
+            <div class="pairing-content">
+              <div>
+                <div class="credential">
+                  <div class="credential-label">Code</div>
+                  <div class="pairing-code" id="pairing-code">------</div>
+                </div>
+                <div class="credential">
+                  <div class="credential-label">Address</div>
+                  <div class="copy-row">
+                    <div class="copy-value" id="pairing-address">Loading…</div>
+                    <button class="button secondary small" id="copy-pairing-address" type="button" disabled>Copy</button>
+                  </div>
+                </div>
+                <p class="pairing-note" id="pairing-note">Single use. Five wrong codes cancel it.</p>
+              </div>
+              <img class="pairing-qr" id="pairing-qr" alt="Pairing QR code">
+            </div>
+          </div>
+          <div class="device-section" id="pending-section" hidden>
+            <div class="device-section-head"><div class="device-section-title">Pending requests</div><span class="count" id="pending-count" aria-live="polite"></span></div>
+            <div class="device-list" id="pairing-candidates" aria-live="polite"><div class="empty">No pairing request.</div></div>
+          </div>
+          <div class="device-section">
+            <div class="device-section-head"><div class="device-section-title">Paired clients</div></div>
+            <div class="device-list" id="device-list"><div class="empty">Loading devices…</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:12px">
+        <div class="panel-head"><div><h2>Media</h2></div></div>
+        <div class="health-list">
+          <div class="health-row"><span>Chromium capture</span><strong id="health-capture">—</strong></div>
+          <div class="health-row"><span>H.264 subscribers</span><strong id="health-video">—</strong></div>
+          <div class="health-row"><span>Audio subscribers</span><strong id="health-audio">—</strong></div>
         </div>
       </div>
 
@@ -203,7 +284,7 @@
 
   <script>
     const $ = id => document.getElementById(id);
-    let config = null, previousAU = null, previousAt = null, toastTimer = null;
+    let config = null, previousAU = null, previousAt = null, toastTimer = null, pairingAddress = '', pairingCode = '', pairingOpen = false;
 
     function toast(message) {
       const node = $('toast'); node.textContent = message; node.classList.add('show');
@@ -226,7 +307,9 @@
       config = await (await request('/api/config')).json();
       $('endpoint').textContent = config.baseURL;
       $('lan-address').textContent = config.lanURL || `Port ${config.port} · no LAN address detected`;
-      $('password').value = config.password;
+      $('server-title').textContent = config.serverName || 'Surf';
+      $('server-name').value = config.serverName || 'Surf';
+      $('public-address').value = config.publicAddress || '';
       $('port').value = config.port;
       $('start-at-login').checked = Boolean(config.startAtLogin);
       $('first-run').classList.toggle('show', !config.startupChoiceMade);
@@ -291,13 +374,128 @@
         await loadConfig(); toast('Settings saved · backend restarting'); setOnline(false); previousAU = null;
       } catch (error) { toast(error.message); }
     });
-    $('reveal-password').addEventListener('click', () => {
-      const showing = $('password').type === 'text';
-      $('password').type = showing ? 'password' : 'text';
-      $('reveal-password').textContent = showing ? 'Show' : 'Hide';
-    });
-    $('copy-settings-password').addEventListener('click', () => copy($('password').value));
     document.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', () => copy($(button.dataset.copy).textContent)));
+
+    function emptyNode(message) {
+      const empty = document.createElement('div'); empty.className = 'empty'; empty.textContent = message;
+      return empty;
+    }
+    function deviceNode(device, candidate) {
+      const row = document.createElement('div'); row.className = 'device';
+      const main = document.createElement('div'); main.className = 'device-main';
+      const name = document.createElement('div'); name.className = 'device-name'; name.textContent = device.name || device.deviceName || 'Unnamed device';
+      const meta = document.createElement('div'); meta.className = 'device-meta';
+      if (candidate) {
+        const requested = device.requestedAt ? new Date(device.requestedAt).toLocaleString() : 'just now';
+        meta.textContent = `Waiting for confirmation · ${requested}`;
+        const phrase = document.createElement('div'); phrase.className = 'verification-phrase';
+        phrase.textContent = device.phrase || 'Identity phrase unavailable';
+        main.append(name, meta, phrase);
+      } else {
+        meta.textContent = `Paired ${new Date(device.pairedAt).toLocaleString()}${device.lastSeen ? ` · last seen ${new Date(device.lastSeen).toLocaleString()}` : ''}`;
+        main.append(name, meta);
+      }
+      row.append(main);
+      if (candidate) {
+        const actions = document.createElement('div'); actions.className = 'hero-actions';
+        const reject = document.createElement('button'); reject.className = 'button secondary small danger'; reject.textContent = 'Cancel pairing';
+        reject.addEventListener('click', () => rejectCandidate(device.id));
+        actions.append(reject); row.append(actions);
+      } else {
+        const revoke = document.createElement('button'); revoke.className = 'button secondary small danger'; revoke.textContent = 'Revoke';
+        revoke.addEventListener('click', () => revokeDevice(device.id, device.name)); row.append(revoke);
+      }
+      return row;
+    }
+    async function loadDevices() {
+      try {
+        const payload = await (await request('/api/backend/api/v1/admin/devices')).json();
+        const devices = payload.devices || [];
+        const list = $('device-list'); list.replaceChildren();
+        if (!devices.length) list.append(emptyNode('No paired devices.'));
+        else devices.forEach(device => list.append(deviceNode(device, false)));
+      } catch (error) { $('device-list').replaceChildren(emptyNode(`Could not load devices: ${error.message}`)); }
+    }
+    async function loadCandidates() {
+      try {
+        if (pairingOpen) {
+          const session = await (await request('/api/backend/api/v1/admin/pairing/session')).json();
+          if (!session.active) {
+            pairingOpen = false; pairingCode = '';
+            $('add-device').disabled = false;
+            $('pairing-state').classList.remove('show');
+            $('add-device').setAttribute('aria-expanded', 'false');
+          }
+        }
+        const payload = await (await request('/api/backend/api/v1/admin/pairing/candidates')).json();
+        const candidates = (payload.candidates || []).filter(candidate => !candidate.paired);
+        const list = $('pairing-candidates'); list.replaceChildren();
+        $('pending-section').hidden = candidates.length === 0;
+        $('pending-count').textContent = candidates.length ? String(candidates.length) : '';
+        if (!candidates.length) list.append(emptyNode(pairingOpen ? 'Waiting for a device…' : 'No pairing request.'));
+        else candidates.forEach(candidate => list.append(deviceNode(candidate, true)));
+      } catch (error) {
+        $('pending-section').hidden = false;
+        $('pending-count').textContent = '';
+        $('pairing-candidates').replaceChildren(emptyNode(`Could not check for pairing requests: ${error.message}`));
+      }
+    }
+    function renderPairingSession(state) {
+      pairingOpen = Boolean(state.active);
+      $('add-device').disabled = pairingOpen;
+      $('pairing-state').classList.add('show');
+      $('add-device').setAttribute('aria-expanded', 'true');
+      $('add-device').disabled = true;
+      pairingAddress = String(state.publicAddress || config?.publicAddress || config?.lanURL || '').trim();
+      pairingCode = String(state.code || '');
+      $('pairing-code').textContent = pairingCode || '------';
+      $('pairing-address').textContent = pairingAddress || 'No reachable address detected';
+      $('copy-pairing-address').disabled = !pairingAddress;
+      $('pairing-note').textContent = pairingAddress
+        ? 'Single use. Five wrong codes cancel it.'
+        : 'Set a public address, save, and try again.';
+      const qr = $('pairing-qr');
+      if (state.qrPNG) { qr.src = `data:image/png;base64,${state.qrPNG}`; qr.classList.add('show'); }
+      else { qr.removeAttribute('src'); qr.classList.remove('show'); }
+    }
+    async function showPairingInfo() {
+      $('pairing-state').classList.add('show');
+      $('add-device').setAttribute('aria-expanded', 'true');
+      $('pairing-code').textContent = '------';
+      $('pairing-address').textContent = 'Loading…';
+      try {
+        const address = String(config?.publicAddress || config?.lanURL || '').trim();
+        const state = await (await request('/api/backend/api/v1/admin/pairing/session', {
+          method:'POST', headers:{'Content-Type':'application/json','X-Surf-Desktop':'1'}, body:JSON.stringify({publicAddress:address})
+        })).json();
+        renderPairingSession(state);
+        await loadCandidates();
+      } catch (error) { $('add-device').disabled = false; toast(error.message); }
+    }
+    async function rejectCandidate(id) {
+      try {
+        await request(`/api/backend/api/v1/admin/pairing/reject/${encodeURIComponent(id)}`, {method:'POST', headers:{'X-Surf-Desktop':'1'}});
+        pairingOpen = false; $('add-device').disabled = false; $('pairing-state').classList.remove('show');
+        toast('Pairing cancelled'); await loadCandidates(); await loadDevices();
+      } catch (error) { toast(error.message); }
+    }
+    async function revokeDevice(id, name) {
+      if (!confirm(`Revoke ${name || 'this device'}?`)) return;
+      try {
+        await request(`/api/backend/api/v1/admin/devices/revoke/${encodeURIComponent(id)}`, {method:'POST', headers:{'X-Surf-Desktop':'1'}});
+        toast('Device revoked'); await loadDevices(); await loadCandidates();
+      } catch (error) { toast(error.message); }
+    }
+    $('add-device').addEventListener('click', showPairingInfo);
+    $('copy-pairing-address').addEventListener('click', () => { if (pairingAddress) copy(pairingAddress); });
+    $('close-pairing').addEventListener('click', async () => {
+      try { await request('/api/backend/api/v1/admin/pairing/session', {method:'DELETE', headers:{'X-Surf-Desktop':'1'}}); }
+      catch (error) { toast(error.message); return; }
+      pairingOpen = false; pairingCode = '';
+      $('add-device').disabled = false;
+      $('pairing-state').classList.remove('show'); $('add-device').setAttribute('aria-expanded', 'false');
+      await loadCandidates(); $('add-device').focus();
+    });
 
     async function loadLogs() {
       try {
@@ -310,6 +508,14 @@
 
     (async () => {
       try { await loadConfig(); } catch (error) { toast(error.message); }
+      try {
+        const session = await (await request('/api/backend/api/v1/admin/pairing/session')).json();
+        if (session.active) renderPairingSession(session);
+      } catch {}
+      await loadDevices();
+      await loadCandidates();
+      setInterval(loadCandidates, 1500);
+      setInterval(loadDevices, 5000);
       if (location.hash === '#logs') $('logs').open = true;
       await pollStatus();
       setInterval(pollStatus, 2000);

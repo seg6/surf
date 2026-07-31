@@ -92,7 +92,7 @@ func (b *Controller) handleDialogReply(m *protocol.DialogReplyCommand) {
 //
 // Page.setInterceptFileChooserDialog suppresses Chromium's chooser and emits
 // Page.fileChooserOpened with the input's backendNodeId. The client picks
-// files, POSTs them to /upload, and we attach them via DOM.setFileInputFiles.
+// files, POSTs them to /api/v1/uploads, and we attach them via DOM.setFileInputFiles.
 
 func (b *Controller) setupFileChooser(session string) {
 	_ = b.cdp.Dispatch(session, "DOM.enable", nil) // setFileInputFiles wants the DOM agent
@@ -116,7 +116,7 @@ func (b *Controller) onFileChooserOpened(ev cdp.Event) {
 	})
 }
 
-// handleUpload is the POST /upload route: multipart files land in UploadsDir
+// handleUpload is the POST /api/v1/uploads route: multipart files land in UploadsDir
 // and get attached to the intercepted input. An empty form cancels.
 func (b *Controller) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

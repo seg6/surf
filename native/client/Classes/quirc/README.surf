@@ -1,0 +1,3 @@
+quirc is vendored from https://github.com/dlbeer/quirc at commit
+927d680904dc95fdff4cd9d022eb374b438ff8f2. It is used only for the iOS 6
+camera QR fallback. See LICENSE in this directory.

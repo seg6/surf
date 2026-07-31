@@ -32,11 +32,11 @@ func (b *Controller) setupFeatures(t *Tab) {
 	b.setupSecurity(s)    // TLS state events (M2.5)
 }
 
-// onURLChanged fires on every main-frame URL change: record history and
-// (lazily) resolve the favicon.
+// onURLChanged fires on every main-frame URL change and records history.
+// Favicon discovery waits for the document to load so declared icon links
+// belong to the new page rather than the document being replaced.
 func (b *Controller) onURLChanged(t *Tab, u string) {
 	b.store.AddHistory(u, "")
-	b.refreshFavicon(t)
 }
 
 // ---- favicons ----------------------------------------------------------
@@ -53,7 +53,7 @@ func (b *Controller) iconURLLocked(t *Tab) string {
 	if ic == nil {
 		return ""
 	}
-	return fmt.Sprintf("/tabicon/%d?v=%s", t.ID, ic.hash)
+	return fmt.Sprintf("%s/tab-icons/%d?v=%s", web.APIRoot, t.ID, ic.hash)
 }
 
 // refreshFavicon resolves and caches the favicon for the tab's current origin.
@@ -94,12 +94,23 @@ func (b *Controller) refreshFavicon(t *Tab) {
 			delete(b.iconFetching, origin)
 			b.mu.Unlock()
 		}()
-		// Do not query the active renderer merely to discover a custom icon.
-		// Keep renderer-side feature work out of the capture-critical path.
-		// The conventional origin favicon is sufficient and can be fetched
-		// outside Chromium without disturbing capture cadence.
-		href := origin + "/favicon.ico"
+		b.mu.Lock()
+		session := t.Session
+		b.mu.Unlock()
+		// Prefer the page's declared touch icon: it is usually a PNG and works
+		// on old ImageIO versions that cannot render modern SVG favicons.
+		href, _ := b.cdp.EvaluateString(session, `(function(){
+			var selectors=['link[rel~="apple-touch-icon"]','link[rel~="icon"]','link[rel="shortcut icon"]'];
+			for(var i=0;i<selectors.length;i++){var n=document.querySelector(selectors[i]);if(n&&n.href)return n.href;}
+			return '';
+		})()`)
+		if href == "" {
+			href = origin + "/favicon.ico"
+		}
 		ic := fetchIcon(href)
+		if ic == nil && href != origin+"/favicon.ico" {
+			ic = fetchIcon(origin + "/favicon.ico")
+		}
 		if ic == nil {
 			return
 		}
@@ -247,10 +258,10 @@ func (b *Controller) downloadList() []protocol.DownloadItem {
 
 // ---- HTTP routes ---------------------------------------------------------
 
-// RegisterRoutes adds feature routes (all behind the auth cookie).
+// RegisterRoutes adds feature routes (all behind paired-device auth).
 func (b *Controller) RegisterRoutes(srv *web.Server) {
-	srv.Gated("/tabicon/", func(w http.ResponseWriter, r *http.Request) {
-		id, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/tabicon/"))
+	srv.Gated(web.APIRoot+"/tab-icons/", func(w http.ResponseWriter, r *http.Request) {
+		id, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Path, web.APIRoot+"/tab-icons/"))
 		b.mu.Lock()
 		var ic *favicon
 		if t := b.tabs[id]; t != nil {
@@ -265,9 +276,9 @@ func (b *Controller) RegisterRoutes(srv *web.Server) {
 		w.Header().Set("Cache-Control", "public, max-age=604800")
 		_, _ = w.Write(ic.data)
 	})
-	srv.Gated("/upload", b.handleUpload)
-	srv.Gated("/downloads/", func(w http.ResponseWriter, r *http.Request) {
-		name := filepath.Base(strings.TrimPrefix(r.URL.Path, "/downloads/"))
+	srv.Gated(web.APIRoot+"/uploads", b.handleUpload)
+	srv.Gated(web.APIRoot+"/downloads/", func(w http.ResponseWriter, r *http.Request) {
+		name := filepath.Base(strings.TrimPrefix(r.URL.Path, web.APIRoot+"/downloads/"))
 		if name == "." || name == "/" || strings.HasPrefix(name, ".") {
 			http.NotFound(w, r)
 			return

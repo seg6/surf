@@ -8,23 +8,22 @@ services:
         SURF_ARCHIVE_SHA256: ${SURF_ARCHIVE_SHA256:?set SURF_ARCHIVE_SHA256}
     restart: unless-stopped
     environment:
-      SURF_PASSWORD: ${SURF_PASSWORD:?set SURF_PASSWORD}
+      SURF_SERVER_NAME: ${SURF_SERVER_NAME:-Surf}
+      SURF_PUBLIC_ADDRESS: ${SURF_PUBLIC_ADDRESS:-}
       PORT: 8080
       SURF_HOME: /data/surf
       PROFILE: /data/profile
       DOWNLOADS: /data/downloads
       UPLOADS: /data/uploads
       CHROME: /usr/bin/chromium
-    expose:
-      - "8080"
+    ports:
+      - "${SURF_PORT:-18080}:8080"
     shm_size: "1g"
     volumes:
       - surf_runtime:/data/surf
       - surf_profile:/data/profile
       - surf_downloads:/data/downloads
       - surf_uploads:/data/uploads
-    networks:
-      - web
 
 volumes:
   surf_runtime:
@@ -35,7 +34,3 @@ volumes:
     name: ${SURF_DOWNLOADS_VOLUME:-surf_downloads}
   surf_uploads:
     name: ${SURF_UPLOADS_VOLUME:-surf_uploads}
-
-networks:
-  web:
-    external: true

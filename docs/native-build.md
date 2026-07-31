@@ -46,6 +46,9 @@ docker run --rm -v "$PWD:/src" surf-buildenv bash -c \
 The build environment pins Theos to commit
 `16362d3aa83a0acd56df4493d575d34306d42478` and the iOS toolchain to release
 `test-210562a`, with SHA-256 verification for each host-architecture archive.
+It also builds libplist 2.3.0 at a pinned commit so Theos's `plistutil` has the
+ABI it expects on current Debian hosts; this keeps clean package builds and
+binary-plist verification reproducible.
 
 Or use the root make target:
 

@@ -46,6 +46,21 @@ const webauthnShim = `
 })();
 `
 
+// Keep the remote page pinned at its scroll limits. Surf provides its own
+// touch gesture handling, so root-page rubber-banding only looks like the
+// streamed texture itself is being dragged beyond the viewport.
+const overscrollShim = `
+(function () {
+  function pinRootScroller() {
+    if (document.documentElement) document.documentElement.style.overscrollBehavior = 'none';
+    if (document.body) document.body.style.overscrollBehavior = 'none';
+  }
+  pinRootScroller();
+  document.addEventListener('DOMContentLoaded', pinRootScroller, false);
+})();
+`
+
 func (b *Controller) installCompatScripts(session string) {
 	_ = b.cdp.Dispatch(session, "Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": webauthnShim})
+	_ = b.cdp.Dispatch(session, "Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": overscrollShim})
 }

@@ -2,6 +2,8 @@
 #import "RBConfig.h"
 #import "RBLog.h"
 #import "RBInteractionTracker.h"
+#import "RBDeviceIdentity.h"
+#import "RBSecureHTTPClient.h"
 #import "RBSocket.h"
 
 static NSString *RBURLEscape(NSString *s);
@@ -9,18 +11,20 @@ static NSString *RBURLEscape(NSString *s);
 @interface RBSession () <RBSocketDelegate>
 @property(nonatomic, copy) NSString *baseURLString;
 @property(nonatomic, strong, readwrite) NSURL *baseURL;
+@property(nonatomic, strong, readwrite) NSDictionary *server;
 @property(nonatomic, assign, readwrite) RBSessionState state;
 @property(nonatomic, strong) RBSocket *socket;
 @property(nonatomic, copy) NSString *wsTicket;
 @property(nonatomic, assign) NSInteger viewWidth;
 @property(nonatomic, assign) NSInteger viewHeight;
 @property(nonatomic, assign) BOOL socketOpen;
-@property(nonatomic, copy) NSString *lastPassword;
+@property(nonatomic, assign) BOOL active;
 @property(nonatomic, assign) NSTimeInterval reconnectDelay;
 @property(nonatomic, assign) NSUInteger generation;
 @property(nonatomic, strong, readwrite) RBInteractionTracker *interactionTracker;
 @property(nonatomic, strong) NSDictionary *requiredClientUpdate;
 @property(nonatomic, copy) NSString *requiredServerVersion;
+@property(nonatomic, assign, readwrite) BOOL requiresPairing;
 @end
 
 @implementation RBSession
@@ -28,11 +32,12 @@ static NSString *RBURLEscape(NSString *s);
 @synthesize viewWidth = _viewWidth;
 @synthesize viewHeight = _viewHeight;
 
-- (id)initWithBaseURL:(NSString *)baseURL {
+- (id)initWithServer:(NSDictionary *)server {
     self = [super init];
     if (self) {
-        self.baseURLString = baseURL;
-        self.baseURL = [NSURL URLWithString:baseURL];
+        self.server = server;
+        self.baseURLString = [server objectForKey:@"lastEndpoint"];
+        self.baseURL = [NSURL URLWithString:self.baseURLString];
         self.viewWidth = 0;
         self.viewHeight = 0;
         self.state = RBSessionStateIdle;
@@ -49,9 +54,9 @@ static NSString *RBURLEscape(NSString *s);
     [self.delegate session:self didChangeState:state];
 }
 
-- (void)startWithPassword:(NSString *)password {
-    if (!self.baseURL || ![self.baseURL host]) {
-        [self.delegate sessionNeedsPassword:self message:@"Enter a valid server URL"];
+- (void)start {
+    if (!self.baseURL || ![self.baseURL host] || ![[[self.baseURL scheme] lowercaseString] isEqualToString:@"https"] || ![[self.server objectForKey:@"fingerprint"] length]) {
+        [self.delegate sessionNeedsServer:self message:@"Choose a paired Surf server"];
         return;
     }
     NSUInteger generation = ++self.generation;
@@ -59,27 +64,28 @@ static NSString *RBURLEscape(NSString *s);
     [self.socket close];
     self.socket = nil;
     self.socketOpen = NO;
-    self.lastPassword = password;
+    self.active = YES;
     self.requiredClientUpdate = nil;
     self.requiredServerVersion = nil;
+    self.requiresPairing = NO;
     [self moveToState:RBSessionStateConnecting];
-    RBLog(@"session start %@ passwordLen=%d", [self.baseURL absoluteString], (int)[password length]);
-    [self.delegate session:self status:@"logging in"];
+    RBLog(@"secure session start %@ server=%@", [self.baseURL absoluteString], [self.server objectForKey:@"serverID"]);
+    [self.delegate session:self status:@"authenticating device"];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSString *error = nil;
-        if (![self loginWithPassword:password error:&error] || ![self fetchNativeConfig:&error]) {
+        if (![self authenticateDevice:&error] || ![self fetchNativeConfig:&error]) {
             RBLog(@"session start failed: %@", error);
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (generation != self.generation) return;
                 [self moveToState:RBSessionStateIdle];
-                [self.delegate session:self status:error ?: @"login failed"];
+                [self.delegate session:self status:error ?: @"secure authentication failed"];
                 if (self.requiredClientUpdate) {
                     [self.delegate session:self requiresClientUpdate:self.requiredClientUpdate];
                 } else if (self.requiredServerVersion) {
                     [self.delegate sessionRequiresServerUpdate:self serverVersion:self.requiredServerVersion];
                 } else {
-                    self.lastPassword = nil;
-                    [self.delegate sessionNeedsPassword:self message:error ?: @"Login failed"];
+                    self.active = NO;
+                    [self.delegate sessionNeedsServer:self message:error ?: @"Secure authentication failed"];
                 }
             });
             return;
@@ -94,7 +100,7 @@ static NSString *RBURLEscape(NSString *s);
 
 - (void)shutdown {
     self.generation++;
-    self.lastPassword = nil;
+    self.active = NO;
     [NSObject cancelPreviousPerformRequestsWithTarget:self];
     self.socket.delegate = nil;
     [self.socket close];
@@ -104,45 +110,88 @@ static NSString *RBURLEscape(NSString *s);
     [self moveToState:RBSessionStateIdle];
 }
 
-- (BOOL)loginWithPassword:(NSString *)password error:(NSString **)error {
-    NSURL *url = [NSURL URLWithString:@"/login" relativeToURL:self.baseURL];
-    RBLog(@"login POST %@", [url absoluteString]);
+- (BOOL)revokeThisDevice:(NSString **)error {
+    if (![self authenticateDevice:error]) return NO;
+    NSInteger status = 0;
+    NSDictionary *result = [self sendJSONPath:@"/api/v1/auth/revoke" method:@"POST" body:nil status:&status error:error];
+    if (!result || status != 204) return NO;
+    RBLog(@"device revoked itself server=%@", [self.server objectForKey:@"serverID"]);
+    return YES;
+}
+
+- (NSDictionary *)sendJSONPath:(NSString *)path method:(NSString *)method body:(NSDictionary *)body status:(NSInteger *)status error:(NSString **)error {
+    NSURL *url = [NSURL URLWithString:path relativeToURL:self.baseURL];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:20.0];
-    [request setHTTPMethod:@"POST"];
-    NSString *body = [NSString stringWithFormat:@"password=%@", RBURLEscape(password ?: @"")];
-    [request setHTTPBody:[body dataUsingEncoding:NSUTF8StringEncoding]];
-    [request setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
+    [request setHTTPMethod:method];
+    if (body) {
+        [request setHTTPBody:[NSJSONSerialization dataWithJSONObject:body options:0 error:nil]];
+        [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    }
+    RBSecureHTTPClient *client = [[RBSecureHTTPClient alloc] initWithFingerprint:[self.server objectForKey:@"fingerprint"] allowUntrusted:NO];
     NSHTTPURLResponse *response = nil;
     NSError *requestError = nil;
-    NSData *data = [NSURLConnection sendSynchronousRequest:request returningResponse:&response error:&requestError];
-    if (!data || [response statusCode] >= 400) {
-        RBLog(@"login failed url=%@ status=%d err=%@ bytes=%d", [url absoluteString], (int)[response statusCode], [requestError localizedDescription] ?: @"", (int)[data length]);
-        if (error) *error = @"login failed — check the server address and password";
+    NSData *data = [client sendRequest:request response:&response error:&requestError];
+    if (status) *status = [response statusCode];
+    if (!data || [response statusCode] < 200 || [response statusCode] >= 300) {
+        NSString *serverMessage = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+        RBLog(@"secure API failed url=%@ status=%d err=%@", [url absoluteString], (int)[response statusCode], [requestError localizedDescription] ?: @"");
+        if (error) *error = [requestError localizedDescription] ?: ([serverMessage length] ? serverMessage : @"Secure server request failed");
+        return nil;
+    }
+    if (![data length]) return @{};
+    id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if (![json isKindOfClass:[NSDictionary class]]) {
+        if (error) *error = @"Surf returned invalid secure API data";
+        return nil;
+    }
+    return json;
+}
+
+- (BOOL)authenticateDevice:(NSString **)error {
+    NSString *serverID = [self.server objectForKey:@"serverID"];
+    NSError *keyError = nil;
+    NSString *deviceID = [RBDeviceIdentity deviceIDForServerID:serverID error:&keyError];
+    if (!deviceID) {
+        if (error) *error = [keyError localizedDescription];
         return NO;
     }
-    RBLog(@"login ok url=%@ status=%d", [url absoluteString], (int)[response statusCode]);
+    NSInteger challengeStatus = 0;
+    NSDictionary *challenge = [self sendJSONPath:@"/api/v1/auth/challenge" method:@"POST" body:@{@"deviceID": deviceID}
+                                             status:&challengeStatus error:error];
+    if (!challenge) {
+        if (challengeStatus == 401) {
+            self.requiresPairing = YES;
+            if (error) *error = @"Pairing Required. This device is no longer approved by the server. Tap the saved server to pair again.";
+        }
+        return NO;
+    }
+    NSString *signature = [RBDeviceIdentity signAuthenticationForServerID:serverID deviceID:deviceID
+                                                               challengeID:[challenge objectForKey:@"id"]
+                                                                     nonce:[challenge objectForKey:@"nonce"] error:&keyError];
+    if (!signature) {
+        if (error) *error = [keyError localizedDescription];
+        return NO;
+    }
+    NSInteger completeStatus = 0;
+    NSDictionary *complete = [self sendJSONPath:@"/api/v1/auth/complete" method:@"POST"
+                                           body:@{@"challengeID": [challenge objectForKey:@"id"] ?: @"", @"signature": signature}
+                                         status:&completeStatus error:error];
+    if (!complete) {
+        if (completeStatus == 401) {
+            self.requiresPairing = YES;
+            if (error) *error = @"Pairing Required. This device is no longer approved by the server. Tap the saved server to pair again.";
+        }
+        return NO;
+    }
+    RBLog(@"device authentication ok server=%@ device=%@", serverID, deviceID);
     return YES;
 }
 
 - (BOOL)fetchNativeConfig:(NSString **)error {
-    NSString *path = [NSString stringWithFormat:@"/native-config?av=%@&nv=%@",
+    NSString *path = [NSString stringWithFormat:@"/api/v1/config?av=%@&nv=%@",
                       RBURLEscape(RBAppVersion), RBURLEscape(RBNativeVersion)];
-    NSURL *url = [NSURL URLWithString:path relativeToURL:self.baseURL];
-    RBLog(@"native-config GET %@", [url absoluteString]);
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:20.0];
-    NSHTTPURLResponse *response = nil;
-    NSError *requestError = nil;
-    NSData *data = [NSURLConnection sendSynchronousRequest:request returningResponse:&response error:&requestError];
-    if (!data || [response statusCode] != 200) {
-        RBLog(@"native-config failed url=%@ status=%d err=%@ bytes=%d", [url absoluteString], (int)[response statusCode], [requestError localizedDescription] ?: @"", (int)[data length]);
-        if (error) *error = @"native-config failed — wrong password or old server?";
-        return NO;
-    }
-    NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-    if (![json isKindOfClass:[NSDictionary class]]) {
-        if (error) *error = @"native-config was not JSON";
-        return NO;
-    }
+    NSDictionary *json = [self sendJSONPath:path method:@"GET" body:nil status:nil error:error];
+    if (!json) return NO;
     self.wsTicket = [json objectForKey:@"ticket"];
     NSInteger serverWidth = [[json objectForKey:@"vw"] integerValue] ?: 1024;
     NSInteger serverHeight = [[json objectForKey:@"vh"] integerValue] ?: 768;
@@ -177,7 +226,7 @@ static NSString *RBURLEscape(NSString *s) {
 }
 
 - (void)connectSocket {
-    if (!self.lastPassword) return;
+    if (!self.active) return;
     self.socket.delegate = nil;
     [self.socket close];
     self.socket = nil;
@@ -186,9 +235,8 @@ static NSString *RBURLEscape(NSString *s) {
     NSString *host = [self.baseURL host];
     NSInteger port = [[self.baseURL port] integerValue];
     if (port == 0) port = [[[self.baseURL scheme] lowercaseString] isEqualToString:@"https"] ? 443 : 80;
-    NSString *path = [NSString stringWithFormat:@"/ws?ticket=%@&nv=%@", RBURLEscape(self.wsTicket ?: @""), RBURLEscape(RBNativeVersion)];
-    BOOL secure = [[[self.baseURL scheme] lowercaseString] isEqualToString:@"https"];
-    self.socket = [[RBSocket alloc] initWithHost:host port:port path:path secure:secure];
+    NSString *path = [NSString stringWithFormat:@"/api/v1/ws?ticket=%@&nv=%@", RBURLEscape(self.wsTicket ?: @""), RBURLEscape(RBNativeVersion)];
+    self.socket = [[RBSocket alloc] initWithHost:host port:port path:path secure:YES fingerprint:[self.server objectForKey:@"fingerprint"]];
     self.socket.delegate = self;
     [self.delegate session:self status:@"connecting websocket"];
     [self.socket connect];
@@ -241,10 +289,10 @@ static NSString *RBURLEscape(NSString *s) {
     if (socket != self.socket) return; // stale socket from before a shutdown
     self.socketOpen = NO;
     [self.delegate session:self status:error ?: @"socket closed"];
-    if (self.lastPassword) {
+    if (self.active) {
         [self moveToState:RBSessionStateRetrying];
         if ([error rangeOfString:@"upgrade rejected"].location != NSNotFound) {
-            [self startWithPassword:self.lastPassword];
+            [self start];
             return;
         }
         NSTimeInterval delay = self.reconnectDelay;
@@ -252,7 +300,7 @@ static NSString *RBURLEscape(NSString *s) {
         NSUInteger generation = self.generation;
         [self.delegate session:self status:[NSString stringWithFormat:@"reconnecting in %.1fs", delay]];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (generation == self.generation && self.lastPassword && self.socket == socket) [self connectSocket];
+            if (generation == self.generation && self.active && self.socket == socket) [self connectSocket];
         });
     } else {
         [self moveToState:RBSessionStateIdle];

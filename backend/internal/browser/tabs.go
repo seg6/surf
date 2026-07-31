@@ -341,6 +341,9 @@ func (b *Controller) tabNavigated(session, url string) {
 		b.noteNavigationError(t)
 		return
 	}
+	if pageOrigin(t.URL) != pageOrigin(url) {
+		t.IconKey = ""
+	}
 	t.URL = url
 	t.awaitingPageFrame = true
 	active := t.ID == b.activeID

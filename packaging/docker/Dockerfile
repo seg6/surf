@@ -35,4 +35,4 @@ RUN mkdir -p /data/surf /data/profile /data/downloads /data/uploads
 VOLUME ["/data/surf", "/data/profile", "/data/downloads", "/data/uploads"]
 EXPOSE 8080
 
-ENTRYPOINT ["/usr/local/bin/surf", "serve"]
+ENTRYPOINT ["/usr/local/bin/surf", "daemon"]

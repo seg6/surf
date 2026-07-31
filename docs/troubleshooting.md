@@ -1,161 +1,91 @@
 # Troubleshooting
 
-## Surf Cannot Connect To LAN Backend
+## The client cannot find the server
 
-Check the backend health endpoint from another device on the same network:
+- Confirm Surf is running and the computer firewall allows TCP port `18080`.
+- Test locally with `curl -k https://127.0.0.1:18080/api/v1/health`.
+- Bonjour is only discovery. Enter the LAN hostname or IP manually if it is
+  filtered by the network.
+- Use the computer's address, not the iOS device's address.
 
-```text
-http://YOUR_COMPUTER_IP:18080/health
-```
+## Pairing is not started
 
-If local health works but the iOS device times out, your computer firewall is
-probably blocking inbound TCP `18080`.
+Open **Paired Devices**, choose **Pair device**, then scan that QR code or
+enter its six-digit code. For a headless daemon, run `surf pair`. Pairing is
+closed before this step, even when Bonjour or manual address entry finds the
+server.
 
-For `ufw`:
+The invitation does not expire on a timer. It closes when one client uses it,
+the owner cancels it, the daemon restarts, or five incorrect codes are entered.
+A client that has not presented the invitation credential has no access to
+browser data or media.
 
-```sh
-sudo ufw allow from 192.168.0.0/16 to any port 18080 proto tcp
-```
+Manual pairing must show the same six words on both endpoints. If the phrases
+differ, cancel: something is presenting a different server identity.
 
-## Wrong Password
+If a CLI command says the daemon is not running, start `surf daemon` under your
+service manager and run the command with the same `SURF_HOME`. `surf status`
+shows the daemon and control connection selected by the CLI.
 
-Restart the backend with the intended `SURF_PASSWORD`, then reconnect from Surf.
+## Pairing shows an SSL error
 
-## Backend Tool Check Fails
+The self-signed Surf certificate is expected; the client validates its exact
+fingerprint instead of a public CA. Confirm the computer and iOS device clocks
+are reasonably correct, then retry with the computer's LAN address rather than
+`127.0.0.1`. If the endpoint belongs to a saved server, do not bypass a changed
+identity warning—verify the host or explicitly forget and pair it again.
 
-Run:
+## Server Identity Changed
 
-```sh
-make surf-binary
-./backend/surf doctor
-```
+Surf refuses an endpoint whose certificate differs from the saved pin. This
+can mean the address now reaches another server, `SURF_HOME` was replaced, or a
+connection is being intercepted. Verify the host first. To accept a genuinely
+reinstalled server, explicitly **Forget Server** and pair again.
 
-Surf installs managed ungoogled-chromium when no compatible system Edge or
-Chromium is present. Compatible Microsoft Edge installations are detected on
-each desktop platform.
-If a download is blocked, permit access to GitHub Releases or set `CHROME` to an
-explicit extension-capable local executable. Audio and video use Surf's built-in
-Chromium extension on every platform and need no capture driver.
+## A paired device is rejected
 
-## Managed Runtime Download Fails
+Check `surf devices list`. A revoked device must pair again. If the client lost
+its device-only Keychain key, use **Pair Again**; copying app preferences does
+not copy the private key.
 
-Retry with the default managed runtime settings:
+## QR scanning on iOS 6
 
-```sh
-make surf-binary
-unset CHROME SURF_BROWSER_DOWNLOAD SURF_CONTENT_BLOCKER_DOWNLOAD
-SURF_PASSWORD='change-me' ./backend/surf serve
-```
+Surf includes a software QR decoder for camera-equipped iOS 6 devices. If the
+device has no usable camera, enter the address and six-digit code instead.
+Manual pairing also uses the six-word identity comparison.
 
-Downloads are checksum-verified and stored below `SURF_HOME/runtime`. This
-includes the browser and uBlock Origin Lite. Set the corresponding
-`*_DOWNLOAD=0` variable only when provisioning that runtime yourself.
+## Video, audio, or input trouble
 
-## Browser Is Visible Or Frames Stop When Unfocused
+- Open **More > Surf Settings > Performance Overlay** for decoder, latency,
+  network, and audio health.
+- Use **Retry Video** after a transient encoder failure.
+- Check the desktop logs for Chromium capture or WebCodecs errors.
+- Make sure the client and backend have the same Surf/protocol release.
 
-The current backend always uses Chrome `--headless=new`; it does not use Xvfb
-or desktop capture. A visible window means an old backend process or an
-explicitly launched browser is still running. Stop all old `surf serve`
-processes, rebuild, and start the current binary.
+Surf's active-tab capture handles audio and video directly. Installing FFmpeg,
+PulseAudio, or a virtual audio device will not help this path.
 
-## App Installed But Icon Did Not Update
+## Widevine or streaming-site sign-in
 
-Run on the device:
+Open `chrome://components` in the remote browser and confirm the host browser
+provides Widevine. Surf does not ship a CDM. A site may still reject playback
+because of account, DRM, output-protection, or browser-policy requirements.
 
-```sh
-uicache
-```
+## Native package will not install
 
-If needed, respring.
-
-## Native Package Will Not Install Or Launch
-
-The official native package is `iphoneos-arm` for rootful jailbreaks. It
-contains an armv7 slice with an iOS 6.0 minimum and an arm64 slice with an iOS
-7.0 minimum. It enables iPhone, iPod touch, and iPad through iOS 14; it is not a
-rootless `iphoneos-arm64` package.
-
-After a local build, verify the exact package recorded by Theos:
+Run the package verifier from the repository root:
 
 ```sh
-cat native/client/.theos/last_package
 docker run --rm -v "$PWD:/src" surf-buildenv \
   bash /src/native/client/verify-package.sh
 ```
 
-The verifier checks both binaries and fails if a CPU slice, minimum iOS
-version, package identifier, architecture value, device family, required
-phone/tablet resource, or privileged updater mode is wrong. On the device,
-reinstall that exact package, run `uicache`, and respring before diagnosing a
-launch failure.
+The package must contain armv7 and arm64 slices, declare device families 1 and
+2, and retain the privileged updater's root ownership/setuid mode. After a
+manual install, run `uicache` and respring if the icon does not appear.
 
-## Widevine Or DRM Media Does Not Play
+## Collect logs
 
-Surf never downloads or redistributes Widevine. It uses the selected browser's
-own Encrypted Media Extensions and CDM installation on Linux, Windows, and
-macOS. Component registration and updates remain enabled so a browser-provided
-CDM can load.
-
-After an HTTPS or localhost page finishes loading, authenticated
-`/health?stats=1` output reports `widevine` as `available`, `unavailable`, or
-`unknown`. `unknown` means Surf has not yet had a trustworthy page on which to
-run the probe. The managed ungoogled-chromium fallback usually reports
-`unavailable`; select a compatible browser that includes Widevine with
-`CHROME=/path/to/browser`.
-
-An `available` result confirms `com.widevine.alpha` is exposed to the page, but
-does not override the streaming provider's license, HDCP, resolution, or
-capture policy. Protected video can still be rejected or appear black if the
-provider forbids this output path.
-
-Account sign-in happens before DRM playback and can fail independently. Surf
-preserves coherent browser and platform Client Hints for sites with anti-bot
-checks, but it does not bypass CAPTCHAs or a provider's account-security rules.
-If a provider returns a generic sign-in error, clear that site's cookies, leave
-mobile-site mode off, and retry before treating it as a Widevine problem.
-
-## Logs
-
-Backend:
-
-```sh
-SURF_PASSWORD='change-me' ./backend/surf serve
-```
-
-The backend runs in the foreground and writes logs to the terminal.
-
-Native app:
-
-```text
-/var/mobile/Library/Surf/surf.log
-```
-
-Triple-tap the streamed page to show the on-device performance overlay. The
-H.264 lane remains paced at 30 FPS even on a static page; evaluate visible
-smoothness on a moving or scrolling page. Useful signals are:
-
-- `AU RATE`: frames arriving from the backend.
-- `PRESENTED`: frames shown by the display link, rather than merely decoded.
-- `VT CALLBACK`: VideoToolbox decode completion time.
-- `INPUT → SCREEN`: the complete interaction-to-presentation duration.
-- `RTT`: current control connection round-trip time.
-
-For a reproducible motion-only check, run the repository's local probe while a
-development backend owns `~/.surf/profile`:
-
-```sh
-cd backend
-go run ./tools/motionprobe -duration 30s
-```
-
-This verifies capture, encoding, transport, decode, and presentation. Exercise
-Chromium's compositor scroll path separately with the same high-frequency
-pixel-wheel events used by the native client:
-
-```sh
-go run ./tools/motionprobe -scroll -duration 30s
-```
-
-The scroll probe still bypasses the iPad input/network leg, so use a real
-finger drag to evaluate `INPUT → SCREEN` and the backend's motion-source gap
-and stall counters.
+Desktop logs are available from the Surf tray Settings page. The native client
+writes `/var/mobile/Library/Surf/surf.log`; avoid publishing complete logs until
+you have checked them for visited URLs and device names.

@@ -3,10 +3,13 @@ Description=Surf
 After=network-online.target
 
 [Service]
-EnvironmentFile=%h/.config/surf/env
-ExecStart=%h/.local/bin/surf serve
+Type=simple
+EnvironmentFile=-%h/.config/surf/env
+ExecStart=%h/.local/bin/surf daemon
 Restart=on-failure
 RestartSec=3
+UMask=0077
+KillMode=control-group
 
 [Install]
 WantedBy=default.target

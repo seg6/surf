@@ -93,14 +93,16 @@ verify_binary "$app"
 verify_binary "$updater"
 
 plist="$tmp/Applications/Surf.app/Info.plist"
-device_families="$(sed -n '/<key>UIDeviceFamily<\/key>/,/<\/array>/p' "$plist")"
+plist_xml="$tmp/Info.xml"
+plistutil -i "$plist" -f xml -o "$plist_xml"
+device_families="$(sed -n '/<key>UIDeviceFamily<\/key>/,/<\/array>/p' "$plist_xml")"
 phone_family_count="$(printf '%s\n' "$device_families" | grep -c '<integer>1</integer>' || true)"
 tablet_family_count="$(printf '%s\n' "$device_families" | grep -c '<integer>2</integer>' || true)"
 if [ "$phone_family_count" != 1 ] || [ "$tablet_family_count" != 1 ]; then
   echo "UIDeviceFamily must contain phone/iPod (1) and iPad (2) exactly once" >&2
   exit 1
 fi
-if sed -n '/<key>UIRequiredDeviceCapabilities<\/key>/,/<\/array>/p' "$plist" |
+if sed -n '/<key>UIRequiredDeviceCapabilities<\/key>/,/<\/array>/p' "$plist_xml" |
     grep -q '<string>armv7</string>'; then
   echo "Info.plist still excludes arm64-only devices" >&2
   exit 1

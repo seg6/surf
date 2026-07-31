@@ -86,14 +86,18 @@ The backend runs on:
 Download the package for your computer and the universal iOS `.deb` from the
 [latest release](https://github.com/seg6/surf/releases/latest).
 
-The desktop build provides a Settings window for the password, port, detected
-LAN address, logs, and updates. For a terminal or server installation:
+The desktop build provides a Settings window for the server name, port, paired
+devices, detected LAN address, logs, and updates. For a terminal or server
+installation:
 
 ```sh
-SURF_PASSWORD='choose-a-strong-password' ./surf serve
+./surf daemon
 ```
 
-Surf listens on port `18080` by default. Windows archives contain `surf.exe`.
+The daemon stays in the foreground so systemd, Docker, or another service
+manager can supervise it. In another terminal, `surf status`, `surf pair`, and
+`surf devices ...` connect to that one running daemon. Surf listens on port
+`18080` by default. Windows archives contain `surf.exe`.
 
 ### 2. Install the iOS client
 
@@ -107,18 +111,33 @@ ssh root@DEVICE_IP 'dpkg -i /tmp/surf.deb && uicache || true'
 
 Respring or run `uicache` again if the icon does not appear.
 
-### 3. Connect
+### 3. Pair and connect
 
-Open **More > Surf Settings** in the client, tap **Find Local Surf**, select the
-backend, enter its password, and connect. If discovery is unavailable, enter
-the computer's LAN address manually:
+On the computer, open **Paired Devices** and choose **Pair device**, or run
+`surf pair` beside a headless daemon. Surf creates one single-use invitation.
+
+On any camera-equipped supported device, scan the QR code. It contains the
+address, pinned identity, and one-time secret. Devices without a camera can
+enter the address and six-digit code instead:
 
 ```text
-http://192.168.1.50:18080
+192.168.1.50:18080
 ```
 
 Use the computer's address, not the address of the iOS device. If the backend
 is unreachable, allow inbound TCP port `18080` through the host firewall.
+
+QR pairing pins the server identity from the code and completes directly.
+Manual pairing also asks you to compare six words; the short numeric code
+authorizes the attempt, while the words verify that the self-signed server was
+not replaced or relayed. Pairing is closed unless the server owner creates an
+invitation. It accepts exactly one client and is cancelled after five incorrect
+manual codes.
+
+Surf serves pinned TLS itself. A direct LAN or VPS setup needs one reachable
+Surf port, not Caddy, Cloudflare, a public certificate, or a certificate
+installed on the iOS device. Set `SURF_PUBLIC_ADDRESS=host:port` when a
+headless VPS should include its public endpoint in pairing codes.
 
 ## Browser and DRM support
 
@@ -164,8 +183,8 @@ you can do that on Ko-fi.
 
 Surf is an AI-assisted project. Its direction, device testing, deployment
 decisions, and release judgment are human-directed. Treat it like any other
-experimental systems project: review the code, test your setup, and do not
-expose it to the internet with a weak password.
+experimental systems project: review the code, test your setup, protect the
+server's `SURF_HOME`, and revoke devices you no longer use.
 
 ## License
 

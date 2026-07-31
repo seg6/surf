@@ -12,7 +12,7 @@
 @interface RBSocket : NSObject
 @property(nonatomic, weak) id<RBSocketDelegate> delegate;
 
-- (id)initWithHost:(NSString *)host port:(NSInteger)port path:(NSString *)path secure:(BOOL)secure;
+- (id)initWithHost:(NSString *)host port:(NSInteger)port path:(NSString *)path secure:(BOOL)secure fingerprint:(NSString *)fingerprint;
 - (void)connect;
 - (void)close;
 - (void)sendJSON:(NSDictionary *)message;

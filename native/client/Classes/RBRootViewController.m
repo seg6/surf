@@ -17,8 +17,13 @@
 #import "RBInteractionTracker.h"
 #import "RBOmnibox.h"
 #import "RBProtocol.h"
+#import "RBQRScannerController.h"
 #import "RBPageSwitcherController.h"
+#import "RBPairingController.h"
 #import "RBPhoneToolbar.h"
+#import "RBSecureHTTPClient.h"
+#import "RBServerStore.h"
+#import "RBServersController.h"
 #import "RBSession.h"
 #import "RBSettingsController.h"
 #import "RBStreamView.h"
@@ -42,6 +47,15 @@ static BOOL RBIsPad(void) {
     return UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad;
 }
 
+// iOS 6 form sheets keep the keyboard on screen even after their child view
+// resigns first responder unless the navigation controller opts out.
+@interface RBModalNavigationController : UINavigationController
+@end
+
+@implementation RBModalNavigationController
+- (BOOL)disablesAutomaticKeyboardDismissal { return NO; }
+@end
+
 // H.264 4:2:0 requires even coded dimensions. Keep the visible stream surface
 // even as well so Chromium, VideoEncoder, and OpenGL all operate at the same
 // pixel size instead of scaling an odd viewport down and back up.
@@ -54,12 +68,14 @@ static CGFloat RBEvenExtent(CGFloat value) {
 @interface RBRootViewController () <UITextFieldDelegate, RBSessionDelegate, RBChromeBarDelegate,
                                     RBPhoneToolbarDelegate, RBPageSwitcherDelegate,
                                     RBOmniboxDelegate, RBTabStripDelegate, RBSuggestPanelDelegate,
-                                    RBFindBarDelegate, RBSettingsDelegate, RBMediaPipelineDelegate, RBStreamViewDelegate,
+                                    RBFindBarDelegate, RBSettingsDelegate, RBServersControllerDelegate,
+                                    RBPairingControllerDelegate, RBMediaPipelineDelegate, RBStreamViewDelegate,
                                     RBNewTabViewDelegate, RBBrowserStateViewDelegate,
                                     RBMediaControllerDelegate,
                                     RBInteractionTrackerDelegate, RBClientUpdaterDelegate,
                                     UIDocumentInteractionControllerDelegate, UIPopoverControllerDelegate,
-                                    UIAlertViewDelegate, UIActionSheetDelegate,
+                                     UIAlertViewDelegate, UIActionSheetDelegate,
+                                     RBQRScannerDelegate,
                                     UIImagePickerControllerDelegate, UINavigationControllerDelegate,
                                     MFMailComposeViewControllerDelegate>
 // Views
@@ -81,6 +97,9 @@ static CGFloat RBEvenExtent(CGFloat value) {
 // Controllers
 @property(nonatomic, strong) RBSession *session;
 @property(nonatomic, strong) RBSettingsController *settingsController;
+@property(nonatomic, strong) RBServersController *serversController;
+@property(nonatomic, strong) RBPairingController *pairingController;
+@property(nonatomic, strong) UINavigationController *modalNavigationController;
 @property(nonatomic, strong) RBPageSwitcherController *pageSwitcherController;
 @property(nonatomic, strong) UIPopoverController *popover;
 @property(nonatomic, strong) UIViewController *compactPopoverController;
@@ -89,8 +108,8 @@ static CGFloat RBEvenExtent(CGFloat value) {
 @property(nonatomic, strong) UIDocumentInteractionController *docController;
 @property(nonatomic, strong) RBMediaController *pageMediaController;
 // Connect flow
-@property(nonatomic, copy) NSString *pendingServerURL;
-@property(nonatomic, copy) NSString *pendingPassword;
+@property(nonatomic, strong) NSDictionary *currentServer;
+@property(nonatomic, assign) NSUInteger verificationGeneration;
 @property(nonatomic, strong) NSDictionary *pendingClientUpdate;
 @property(nonatomic, strong) RBClientUpdater *clientUpdater;
 @property(nonatomic, strong) UIAlertView *updateAlert;
@@ -177,6 +196,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    [RBServerStore performBreakingMigrationIfNeeded];
     self.view.backgroundColor = [UIColor blackColor];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillShow:)
                                                  name:UIKeyboardWillShowNotification object:nil];
@@ -317,15 +337,10 @@ static CGFloat RBEvenExtent(CGFloat value) {
 
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
-    if (self.session || self.settingsController) return;
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSString *url = [defaults stringForKey:RBDefaultsServerURLKey];
-    NSString *password = [defaults stringForKey:RBDefaultsPasswordKey];
-    if ([url length] && [password length]) {
-        [self connectToURL:url password:password];
-    } else {
-        [self presentSettingsAllowingCancel:NO message:nil];
-    }
+    if (self.session || self.settingsController || self.serversController) return;
+    NSDictionary *server = [RBServerStore lastSelectedServer];
+    if (server) [self connectToServer:server];
+    else [self presentServersAllowingCancel:NO firstLaunch:YES message:nil];
 }
 
 - (void)didReceiveMemoryWarning {
@@ -441,23 +456,24 @@ static CGFloat RBEvenExtent(CGFloat value) {
 
 // ------------------------------------------------------------ connect flow
 
-- (void)connectToURL:(NSString *)url password:(NSString *)password {
-    NSURL *base = [NSURL URLWithString:url ?: @""];
-    NSString *scheme = [[base scheme] lowercaseString];
-    if (!base || ![base host] || (![scheme isEqualToString:@"http"] && ![scheme isEqualToString:@"https"])) {
-        [self presentSettingsAllowingCancel:YES message:@"Enter a valid http:// or https:// server URL"];
+- (void)connectToServer:(NSDictionary *)server {
+    NSString *endpoint = [RBServerStore normalizeEndpoint:[server objectForKey:@"lastEndpoint"]];
+    if (!endpoint || ![[server objectForKey:@"fingerprint"] length]) {
+        [self presentServersAllowingCancel:YES firstLaunch:NO message:@"Choose a valid paired Surf server."];
         return;
     }
-    self.pendingServerURL = url;
-    self.pendingPassword = password;
+    NSMutableDictionary *normalized = [server mutableCopy];
+    [normalized setObject:endpoint forKey:@"lastEndpoint"];
+    self.currentServer = normalized;
+    [RBServerStore saveServer:normalized select:YES];
     [self leaveVideoMode];
     RBSession *oldSession = self.session;
     oldSession.delegate = nil;
     [oldSession shutdown];
-    self.session = [[RBSession alloc] initWithBaseURL:url];
+    self.session = [[RBSession alloc] initWithServer:normalized];
     self.session.delegate = self;
     self.session.interactionTracker.delegate = self;
-    [self.session startWithPassword:password];
+    [self.session start];
 }
 
 - (void)interactionTracker:(RBInteractionTracker *)tracker
@@ -465,30 +481,43 @@ static CGFloat RBEvenExtent(CGFloat value) {
 }
 
 - (void)presentSettingsAllowingCancel:(BOOL)allowsCancel message:(NSString *)message {
-    if (self.settingsController && !self.presentedViewController &&
-        (![self.settingsController isViewLoaded] || !self.settingsController.view.window)) {
-        // A presentation attempted during an iOS 6 dismissal transition can
-        // be ignored by UIKit. Do not let that stale controller make every
-        // later Settings tap look like a no-op.
-        self.settingsController = nil;
-    }
-    if (self.settingsController) {
-        if (message) [self.settingsController setStatusText:message isError:YES];
-        return;
-    }
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSString *url = [defaults stringForKey:RBDefaultsServerURLKey] ?: RBDefaultServerURL;
-    NSString *password = [defaults stringForKey:RBDefaultsPasswordKey] ?: RBDefaultPassword;
-    RBSettingsController *settings = [[RBSettingsController alloc] initWithServerURL:url password:password];
+    if (self.settingsController && self.settingsController.view.window) return;
+    self.settingsController = nil;
+    self.serversController = nil;
+    self.pairingController = nil;
+    RBSettingsController *settings = [[RBSettingsController alloc] initWithSelectedServerID:[self.currentServer objectForKey:@"serverID"]];
     settings.delegate = self;
-    settings.allowsCancel = allowsCancel;
     settings.connected = self.session.state == RBSessionStateOpen;
     settings.diagnosticsVisible = self.debugVisible;
     self.settingsController = settings;
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:settings];
+    UINavigationController *nav = [[RBModalNavigationController alloc] initWithRootViewController:settings];
     nav.modalPresentationStyle = RBIsPad() ? UIModalPresentationFormSheet : UIModalPresentationFullScreen;
+    self.modalNavigationController = nav;
     [self presentViewController:nav animated:YES completion:nil];
-    if (message) [settings setStatusText:message isError:YES];
+}
+
+- (void)presentServersAllowingCancel:(BOOL)allowsCancel firstLaunch:(BOOL)firstLaunch message:(NSString *)message {
+    if (self.serversController && self.serversController.view.window) {
+        if (message) [self.serversController setStatusText:message isError:YES];
+        return;
+    }
+    RBServersController *servers = [[RBServersController alloc] initWithSelectedServerID:[self.currentServer objectForKey:@"serverID"]
+                                                                             firstLaunch:firstLaunch];
+    servers.delegate = self;
+    servers.allowsCancel = allowsCancel;
+    servers.connected = self.session.state == RBSessionStateOpen;
+    self.serversController = servers;
+    if (message) [servers setStatusText:message isError:YES];
+    if (self.settingsController && self.settingsController.navigationController.view.window) {
+        [self.settingsController.navigationController pushViewController:servers animated:YES];
+        return;
+    }
+    self.settingsController = nil;
+    self.pairingController = nil;
+    UINavigationController *nav = [[RBModalNavigationController alloc] initWithRootViewController:servers];
+    nav.modalPresentationStyle = RBIsPad() ? UIModalPresentationFormSheet : UIModalPresentationFullScreen;
+    self.modalNavigationController = nav;
+    [self presentViewController:nav animated:YES completion:nil];
 }
 
 // ---- settings delegate (chrome rethink) ----------------------------------
@@ -509,57 +538,188 @@ static CGFloat RBEvenExtent(CGFloat value) {
 
 - (void)settingsWantsMediaControls:(RBSettingsController *)settings {
     self.settingsController = nil;
+    self.serversController = nil;
+    self.modalNavigationController = nil;
     [self dismissViewControllerAnimated:YES completion:^{
         UIButton *anchor = RBIsPad() ? self.chromeBar.moreButton : self.phoneToolbar.moreButton;
         [self presentMediaControlsFromButton:anchor];
     }];
 }
 
-- (void)settings:(RBSettingsController *)settings connectToURL:(NSString *)url password:(NSString *)password {
-    [self connectToURL:url password:password];
+- (void)settingsWantsServers:(RBSettingsController *)settings {
+    [self presentServersAllowingCancel:NO firstLaunch:NO message:nil];
+}
+
+- (void)serversController:(RBServersController *)controller connectToServer:(NSDictionary *)server {
+    [controller setConnectingServerID:[server objectForKey:@"serverID"]];
+    [controller setStatusText:@"Connecting securely…" isError:NO];
+    [self connectToServer:server];
+}
+
+- (void)serversController:(RBServersController *)controller
+              pairEndpoint:(NSString *)endpoint
+          expectedServerID:(NSString *)expectedServerID
+         replacementServer:(NSDictionary *)replacementServer
+                    qrToken:(NSString *)qrToken {
+    RBPairingController *pairing = [[RBPairingController alloc] initWithEndpoint:endpoint
+                                                                 expectedServerID:expectedServerID
+                                                                replacementServer:replacementServer
+                                                                           qrToken:qrToken];
+    pairing.delegate = self;
+    self.pairingController = pairing;
+    [controller.navigationController pushViewController:pairing animated:YES];
+}
+
+- (void)serversControllerWantsQRScanner:(RBServersController *)controller {
+    RBQRScannerController *scanner = [[RBQRScannerController alloc] init];
+    scanner.delegate = self;
+    UINavigationController *navigation = [[UINavigationController alloc] initWithRootViewController:scanner];
+    navigation.modalPresentationStyle = UIModalPresentationFullScreen;
+    [controller presentViewController:navigation animated:YES completion:nil];
+}
+
+- (void)qrScannerDidCancel:(RBQRScannerController *)scanner {
+    [scanner dismissViewControllerAnimated:YES completion:nil];
+}
+
+- (void)qrScanner:(RBQRScannerController *)scanner didScanValue:(NSString *)value {
+    [scanner dismissViewControllerAnimated:YES completion:^{
+        [self openPairingURL:[NSURL URLWithString:value]];
+    }];
+}
+
+static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
+    for (NSString *item in [[url query] componentsSeparatedByString:@"&"]) {
+        NSRange separator = [item rangeOfString:@"="];
+        NSString *name = separator.location == NSNotFound ? item : [item substringToIndex:separator.location];
+        if (![name isEqualToString:key]) continue;
+        NSString *value = separator.location == NSNotFound ? @"" : [item substringFromIndex:separator.location + 1];
+        return [value stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding] ?: value;
+    }
+    return nil;
+}
+
+- (void)openPairingURL:(NSURL *)url {
+    if (![[[url scheme] lowercaseString] isEqualToString:@"surf"] || ![[[url host] lowercaseString] isEqualToString:@"pair"]) return;
+    NSString *host = RBPairQueryValue(url, @"h") ?: RBPairQueryValue(url, @"host");
+    NSString *serverID = RBPairQueryValue(url, @"i") ?: RBPairQueryValue(url, @"id");
+    NSString *token = RBPairQueryValue(url, @"t") ?: RBPairQueryValue(url, @"token");
+    NSString *endpoint = [RBServerStore normalizeEndpoint:host];
+    if (!endpoint || ![serverID length] || ![token length]) {
+        [self presentServersAllowingCancel:YES firstLaunch:NO message:@"This is not a complete Surf pairing code."];
+        return;
+    }
+    if (!self.serversController) [self presentServersAllowingCancel:YES firstLaunch:NO message:nil];
+    [self serversController:self.serversController pairEndpoint:endpoint expectedServerID:serverID replacementServer:nil qrToken:token];
+}
+
+- (void)serversController:(RBServersController *)controller verifyAddress:(NSString *)endpoint forServer:(NSDictionary *)server {
+    endpoint = [RBServerStore normalizeEndpoint:endpoint];
+    if (!endpoint) { [controller setStatusText:@"Enter a valid HTTPS server address." isError:YES]; return; }
+    NSUInteger generation = ++self.verificationGeneration;
+    [controller setStatusText:@"Verifying the pinned server identity…" isError:NO];
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSURL *url = [NSURL URLWithString:@"/api/v1/server" relativeToURL:[NSURL URLWithString:endpoint]];
+        NSURLRequest *request = [NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:20];
+        RBSecureHTTPClient *client = [[RBSecureHTTPClient alloc] initWithFingerprint:[server objectForKey:@"fingerprint"] allowUntrusted:NO];
+        NSHTTPURLResponse *response = nil; NSError *error = nil;
+        NSData *data = [client sendRequest:request response:&response error:&error];
+        NSDictionary *info = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        BOOL valid = [response statusCode] == 200 && [[info objectForKey:@"serverID"] isEqualToString:[server objectForKey:@"serverID"]];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (generation != self.verificationGeneration) return;
+            if (!valid) {
+                [controller setStatusText:[error localizedDescription] ?: @"The server at this address no longer matches the saved identity." isError:YES];
+                return;
+            }
+            [RBServerStore addVerifiedEndpoint:endpoint toServerID:[server objectForKey:@"serverID"]];
+            NSDictionary *updated = [RBServerStore serverWithID:[server objectForKey:@"serverID"]];
+            [controller reloadServers];
+            [controller setStatusText:@"Address verified and saved." isError:NO];
+            [self connectToServer:updated];
+        });
+    });
+}
+
+- (void)pairingController:(RBPairingController *)controller didPairServer:(NSDictionary *)server {
+    self.serversController.pairingRequiredServerID = nil;
+    [self.serversController reloadServers];
+    [self.serversController setConnectingServerID:[server objectForKey:@"serverID"]];
+    [self connectToServer:server];
+}
+
+- (void)pairingController:(RBPairingController *)controller foundKnownServer:(NSDictionary *)server endpoint:(NSString *)endpoint {
+    [controller.navigationController popToViewController:self.serversController animated:YES];
+    self.pairingController = nil;
+    [self serversController:self.serversController verifyAddress:endpoint forServer:server];
+}
+
+- (void)pairingControllerDidCancel:(RBPairingController *)controller {
+    self.pairingController = nil;
+    if (self.serversController) [controller.navigationController popToViewController:self.serversController animated:YES];
+    else [controller.navigationController popViewControllerAnimated:YES];
+}
+
+- (void)serversController:(RBServersController *)controller forgetServer:(NSDictionary *)server {
+    NSString *serverID = [server objectForKey:@"serverID"];
+    if ([[self.currentServer objectForKey:@"serverID"] isEqualToString:serverID]) {
+        [self.session shutdown];
+        self.session = nil;
+        self.currentServer = nil;
+        controller.connected = NO;
+        [self.browserStateView showState:RBBrowserStateDisconnected detail:@"Choose or pair a Surf server."];
+    }
+    [RBServerStore forgetServerID:serverID];
+    [controller reloadServers];
+    [self.settingsController reloadServers];
+}
+
+- (void)serversControllerDidCancel:(RBServersController *)controller {
+    self.serversController = nil;
+    self.pairingController = nil;
+    self.modalNavigationController = nil;
+    [self dismissViewControllerAnimated:YES completion:nil];
 }
 
 - (void)settingsDismissed:(RBSettingsController *)settings {
-    // First-launch settings (no cancel) must stay up until a connection works.
-    if (!settings.allowsCancel && self.session.state != RBSessionStateOpen) return;
     self.settingsController = nil;
+    self.serversController = nil;
+    self.pairingController = nil;
+    self.modalNavigationController = nil;
     [self dismissViewControllerAnimated:YES completion:nil];
 }
 
 - (void)sessionDidAuthenticate:(RBSession *)session {
     if (session != self.session) return;
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    [defaults setObject:self.pendingServerURL forKey:RBDefaultsServerURLKey];
-    [defaults setObject:self.pendingPassword forKey:RBDefaultsPasswordKey];
-    [self saveServerURL:self.pendingServerURL password:self.pendingPassword];
-    [defaults synchronize];
-    if (self.settingsController) {
-        [self.settingsController setStatusText:@"Connected" isError:NO];
-        RBSettingsController *presented = self.settingsController;
+    NSMutableDictionary *updated = [self.currentServer mutableCopy];
+    [updated setObject:[NSDate date] forKey:@"lastConnected"];
+    self.currentServer = updated;
+    [RBServerStore saveServer:updated select:YES];
+    [self.settingsController reloadServers];
+    if (self.serversController) {
+        self.serversController.connected = YES;
+        [self.serversController setConnectingServerID:nil];
+        [self.serversController setStatusText:@"Connected securely." isError:NO];
+    }
+    if (self.settingsController || self.serversController) {
         self.settingsController = nil;
-        [presented.presentingViewController dismissViewControllerAnimated:YES completion:nil];
+        self.serversController = nil;
+        self.pairingController = nil;
+        self.modalNavigationController = nil;
+        [self dismissViewControllerAnimated:YES completion:nil];
     }
 }
 
-- (void)saveServerURL:(NSString *)url password:(NSString *)password {
-    if (![url length]) return;
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSArray *old = [defaults arrayForKey:RBDefaultsServersKey] ?: @[];
-    NSMutableArray *servers = [NSMutableArray arrayWithCapacity:MIN(8, [old count] + 1)];
-    NSString *title = [url isEqualToString:RBDefaultServerURL] ? @"Surf VPS" : ([[NSURL URLWithString:url] host] ?: url);
-    [servers addObject:@{@"title": title, @"url": url, @"password": password ?: @""}];
-    for (NSDictionary *entry in old) {
-        NSString *u = [entry objectForKey:@"url"];
-        if (![u length] || [u isEqualToString:url]) continue;
-        [servers addObject:entry];
-        if ([servers count] >= 8) break;
-    }
-    [defaults setObject:servers forKey:RBDefaultsServersKey];
-}
-
-- (void)sessionNeedsPassword:(RBSession *)session message:(NSString *)message {
+- (void)sessionNeedsServer:(RBSession *)session message:(NSString *)message {
     if (session != self.session) return;
-    [self presentSettingsAllowingCancel:NO message:message ?: @"Login failed"];
+    NSString *resolvedMessage = message ?: @"Secure connection failed";
+    if (session.requiresPairing) {
+        resolvedMessage = @"Pairing Required. This device is no longer approved by the server. Tap the saved server to pair again.";
+    }
+    [self presentServersAllowingCancel:[[RBServerStore servers] count] > 0
+                           firstLaunch:NO message:resolvedMessage];
+    self.serversController.pairingRequiredServerID =
+        session.requiresPairing ? [session.server objectForKey:@"serverID"] : nil;
 }
 
 - (void)session:(RBSession *)session requiresClientUpdate:(NSDictionary *)update {
@@ -585,6 +745,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
 
 - (void)startClientUpdate {
     self.clientUpdater = [[RBClientUpdater alloc] initWithBaseURL:self.session.baseURL
+                                                      fingerprint:[self.currentServer objectForKey:@"fingerprint"]
                                                            update:self.pendingClientUpdate];
     self.clientUpdater.delegate = self;
     self.connectionPill.hidden = NO;
@@ -825,7 +986,8 @@ static CGFloat RBEvenExtent(CGFloat value) {
             [self cacheThumbnailForTabKey:oldActiveKey];
         }
         self.lastTabs = nextTabs;
-        [self.tabStrip setTabs:self.lastTabs baseURL:self.session.baseURL];
+        [self.tabStrip setTabs:self.lastTabs baseURL:self.session.baseURL
+                    fingerprint:[self.currentServer objectForKey:@"fingerprint"]];
         [self.phoneToolbar setTabCount:[self.lastTabs count]];
         NSMutableSet *liveTabIDs = [NSMutableSet set];
         NSString *activeTitle = nil;
@@ -1452,9 +1614,9 @@ static CGFloat RBEvenExtent(CGFloat value) {
 // ------------------------------------------------------------ browser states
 
 - (void)reconnectCurrentServer {
-    NSString *url = self.pendingServerURL ?: [[NSUserDefaults standardUserDefaults] stringForKey:RBDefaultsServerURLKey];
-    NSString *password = self.pendingPassword ?: [[NSUserDefaults standardUserDefaults] stringForKey:RBDefaultsPasswordKey];
-    if ([url length]) [self connectToURL:url password:password ?: @""];
+    NSDictionary *server = self.currentServer ?: [RBServerStore lastSelectedServer];
+    if (server) [self connectToServer:server];
+    else [self presentServersAllowingCancel:NO firstLaunch:YES message:@"Add a Surf server to reconnect."];
 }
 
 - (void)browserStateViewPrimaryAction:(RBBrowserStateView *)view {
@@ -1486,7 +1648,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
             [self reconnectCurrentServer];
             break;
         default:
-            [self presentSettingsAllowingCancel:YES message:nil];
+            [self presentServersAllowingCancel:YES firstLaunch:NO message:nil];
             break;
     }
 }
@@ -1539,7 +1701,8 @@ static CGFloat RBEvenExtent(CGFloat value) {
     RBPageSwitcherController *controller = [[RBPageSwitcherController alloc]
                                              initWithTabs:self.lastTabs
                                              thumbnails:self.tabThumbnails
-                                             baseURL:self.session.baseURL];
+                                             baseURL:self.session.baseURL
+                                             fingerprint:[self.currentServer objectForKey:@"fingerprint"]];
     controller.delegate = self;
     self.pageSwitcherController = controller;
     [self presentViewController:controller animated:YES completion:nil];
@@ -1726,13 +1889,16 @@ static CGFloat RBEvenExtent(CGFloat value) {
 - (void)openDownloadNamed:(NSString *)name {
     if (![name length]) return;
     NSString *escaped = [name stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
-    NSURL *url = [NSURL URLWithString:[@"/downloads/" stringByAppendingString:escaped] relativeToURL:self.session.baseURL];
+    NSURL *url = [NSURL URLWithString:[@"/api/v1/downloads/" stringByAppendingString:escaped] relativeToURL:self.session.baseURL];
     if (!url) return;
     [self showToast:[NSString stringWithFormat:@"Fetching %@…", name]];
     RBLog(@"download fetch GET %@", [url absoluteString]);
     NSURLRequest *request = [NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:120.0];
-    [NSURLConnection sendAsynchronousRequest:request queue:[NSOperationQueue mainQueue]
-                           completionHandler:^(NSURLResponse *response, NSData *data, NSError *error) {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        RBSecureHTTPClient *client = [[RBSecureHTTPClient alloc] initWithFingerprint:[self.currentServer objectForKey:@"fingerprint"] allowUntrusted:NO];
+        NSHTTPURLResponse *response = nil; NSError *error = nil;
+        NSData *data = [client sendRequest:request response:&response error:&error];
+        dispatch_async(dispatch_get_main_queue(), ^{
         NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]] ? [(NSHTTPURLResponse *)response statusCode] : 0;
         RBLog(@"download fetch result status=%d bytes=%d err=%@", (int)status, (int)[data length], [error localizedDescription] ?: @"");
         if (error || status >= 400 || ![data length]) {
@@ -1763,7 +1929,8 @@ static CGFloat RBEvenExtent(CGFloat value) {
         if (!presented) {
             [self showToast:@"No app can open this file"];
         }
-    }];
+        });
+    });
 }
 
 // These three are optional on the delegate and Apple only calls them if the
@@ -2009,10 +2176,10 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
     [self postUploadData:nil filename:nil]; // clears the pending chooser
 }
 
-// postUploadData ships one file (or nothing = cancel) to POST /upload; the
-// auth cookie from login rides along in the shared cookie jar.
+// postUploadData ships one file (or nothing = cancel) through the pinned,
+// authenticated API. The device session rides in the shared cookie jar.
 - (void)postUploadData:(NSData *)data filename:(NSString *)filename {
-    NSURL *url = [NSURL URLWithString:@"/upload" relativeToURL:self.session.baseURL];
+    NSURL *url = [NSURL URLWithString:@"/api/v1/uploads" relativeToURL:self.session.baseURL];
     if (!url) return;
     NSString *boundary = [NSString stringWithFormat:@"rbsurf-%08x", arc4random()];
     NSMutableData *body = [NSMutableData data];
@@ -2035,8 +2202,11 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
    forHTTPHeaderField:@"Content-Type"];
     request.HTTPBody = body;
     BOOL wasCancel = ![data length];
-    [NSURLConnection sendAsynchronousRequest:request queue:[NSOperationQueue mainQueue]
-                           completionHandler:^(NSURLResponse *response, NSData *rdata, NSError *error) {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        RBSecureHTTPClient *client = [[RBSecureHTTPClient alloc] initWithFingerprint:[self.currentServer objectForKey:@"fingerprint"] allowUntrusted:NO];
+        NSHTTPURLResponse *response = nil; NSError *error = nil;
+        [client sendRequest:request response:&response error:&error];
+        dispatch_async(dispatch_get_main_queue(), ^{
         if (wasCancel) return;
         NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]] ? [(NSHTTPURLResponse *)response statusCode] : 0;
         if (error || status >= 400) {
@@ -2045,7 +2215,8 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
         } else {
             [self showToast:@"Photo attached"];
         }
-    }];
+        });
+    });
 }
 
 // ---------------------------------------------------- link context menu (M2.4)

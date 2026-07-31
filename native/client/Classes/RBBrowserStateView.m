@@ -66,27 +66,27 @@
             self.detailLabel.text = detail ?: @"Starting your browser session…";
             [self.spinner startAnimating];
             self.primaryButton.hidden = YES;
-            [self.secondaryButton setTitle:@"Server Settings" forState:UIControlStateNormal];
+            [self.secondaryButton setTitle:@"Choose Server" forState:UIControlStateNormal];
             break;
         case RBBrowserStateStartingVideo:
             self.titleLabel.text = @"Starting Video";
             self.detailLabel.text = detail ?: @"Preparing the live browser view…";
             [self.spinner startAnimating];
             self.primaryButton.hidden = YES;
-            [self.secondaryButton setTitle:@"Server Settings" forState:UIControlStateNormal];
+            [self.secondaryButton setTitle:@"Choose Server" forState:UIControlStateNormal];
             break;
         case RBBrowserStateReconnecting:
             self.titleLabel.text = @"Reconnecting";
             self.detailLabel.text = detail ?: @"The page is safe. Surf is reconnecting to the server.";
             [self.spinner startAnimating];
             [self.primaryButton setTitle:@"Reconnect Now" forState:UIControlStateNormal];
-            [self.secondaryButton setTitle:@"Server Settings" forState:UIControlStateNormal];
+            [self.secondaryButton setTitle:@"Choose Server" forState:UIControlStateNormal];
             break;
         case RBBrowserStateDisconnected:
             self.titleLabel.text = @"Surf Is Offline";
             self.detailLabel.text = detail ?: @"Check the server or choose another saved connection.";
             [self.primaryButton setTitle:@"Reconnect" forState:UIControlStateNormal];
-            [self.secondaryButton setTitle:@"Server Settings" forState:UIControlStateNormal];
+            [self.secondaryButton setTitle:@"Choose Server" forState:UIControlStateNormal];
             break;
         case RBBrowserStatePageError:
             self.titleLabel.text = @"Page Couldn’t Load";
