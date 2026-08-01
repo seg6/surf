@@ -2,6 +2,12 @@
 
 This file records the user-visible changes in every Surf release.
 
+## 0.10.4 - 2026-08-01
+
+- Made `surf pair` prefer `SURF_PUBLIC_ADDRESS` when generating pairing
+  invitations, so Docker, NAT, and remotely hosted servers encode their actual
+  reachable address instead of a private container address.
+
 ## 0.10.3 - 2026-08-01
 
 - Made Windows upgrades force-close the installed Surf process tree before
