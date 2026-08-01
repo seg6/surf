@@ -132,10 +132,7 @@ func runPairCommand() error {
 	if err != nil {
 		return err
 	}
-	address := ""
-	if urls := localLANURLs(admin.descriptor.PublicPort); len(urls) != 0 {
-		address = strings.TrimPrefix(urls[0], "https://")
-	}
+	address := pairCommandAddress(admin.descriptor.PublicPort)
 	var session struct {
 		Active     bool   `json:"active"`
 		ServerID   string `json:"serverID"`
@@ -193,6 +190,16 @@ func runPairCommand() error {
 			fmt.Println("Compare these words on the client, then confirm there. The code is already consumed.")
 		}
 	}
+}
+
+func pairCommandAddress(port int) string {
+	if address := strings.TrimSpace(os.Getenv("SURF_PUBLIC_ADDRESS")); address != "" {
+		return address
+	}
+	if urls := localLANURLs(port); len(urls) != 0 {
+		return strings.TrimPrefix(urls[0], "https://")
+	}
+	return ""
 }
 
 func runDevicesCommand(args []string) error {

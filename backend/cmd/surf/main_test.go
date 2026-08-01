@@ -325,6 +325,13 @@ func TestManagementPairingUIUsesServerInitiatedInvitation(t *testing.T) {
 	}
 }
 
+func TestPairCommandAddressPrefersConfiguredPublicAddress(t *testing.T) {
+	t.Setenv("SURF_PUBLIC_ADDRESS", "surf.example:18080")
+	if got := pairCommandAddress(8080); got != "surf.example:18080" {
+		t.Fatalf("pairCommandAddress() = %q", got)
+	}
+}
+
 func TestDiagnosticsRouteRemoved(t *testing.T) {
 	app := &desktopApp{}
 	response := httptest.NewRecorder()
