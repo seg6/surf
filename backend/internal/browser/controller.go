@@ -85,8 +85,10 @@ type Controller struct {
 	// userAgent is populated from Browser.getVersion for full Chrome
 	// headless-new. Chrome still exposes a HeadlessChrome token even though
 	// this is the ordinary browser binary; normalize that single token while
-	// preserving the real platform and version.
-	userAgent string
+	// preserving the real platform and version. userAgentMetadata is sampled
+	// from Chrome itself and must never be synthesized from the UA string.
+	userAgent         string
+	userAgentMetadata map[string]any
 	// widevineState is probed through EME on the first trustworthy page,
 	// making the diagnostic independent of host OS and browser brand.
 	widevineState   string
@@ -251,6 +253,15 @@ func (b *Controller) Start() (err error) {
 		if json.Unmarshal(raw, &version) == nil {
 			b.userAgent = NormalizeHeadlessUserAgent(version.UserAgent)
 		}
+	}
+	if metadata, metadataErr := nativeUserAgentMetadata(client); metadataErr != nil {
+		// A partial override suppresses Chrome's client hints, which is less
+		// faithful than leaving the native headless identity untouched.
+		b.userAgent = ""
+		log.Printf("browser identity: native metadata unavailable, leaving user agent unchanged: %v", metadataErr)
+	} else {
+		b.userAgentMetadata = metadata
+		log.Printf("browser identity: preserving native client hints")
 	}
 	client.OnEvent(func(event cdp.Event) { b.events <- event })
 	// Full Chrome restores its previous pages and also creates the explicit

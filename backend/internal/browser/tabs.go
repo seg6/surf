@@ -2,7 +2,6 @@ package browser
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"sort"
 	"strings"
@@ -99,7 +98,7 @@ func (b *Controller) attachTarget(info targetInfo) {
 	_ = b.cdp.Dispatch(s, "Page.enable", nil)
 	_ = b.cdp.Dispatch(s, "Runtime.enable", nil)
 	b.mu.Lock()
-	userAgentParams := userAgentOverrideParams(b.userAgent, b.mobile)
+	userAgentParams := userAgentOverrideParams(b.userAgent, b.userAgentMetadata, b.mobile)
 	b.mu.Unlock()
 	if userAgentParams != nil {
 		_ = b.cdp.Dispatch(s, "Network.enable", nil)
@@ -114,142 +113,6 @@ func (b *Controller) attachTarget(info targetInfo) {
 		_ = b.cdp.Dispatch(s, "Page.navigate", map[string]any{"url": b.cfg.StartURL})
 	}
 	b.switchActive(id)
-}
-
-func NormalizeHeadlessUserAgent(userAgent string) string {
-	return strings.ReplaceAll(userAgent, "HeadlessChrome/", "Chrome/")
-}
-
-func chromeVersionFromUserAgent(userAgent string) string {
-	return versionFromUserAgent(userAgent, "Chrome/")
-}
-
-func versionFromUserAgent(userAgent, marker string) string {
-	start := strings.Index(userAgent, marker)
-	if start < 0 {
-		return ""
-	}
-	version := userAgent[start+len(marker):]
-	if end := strings.IndexByte(version, ' '); end >= 0 {
-		version = version[:end]
-	}
-	return version
-}
-
-func majorVersion(version string) string {
-	if dot := strings.IndexByte(version, '.'); dot >= 0 {
-		return version[:dot]
-	}
-	return version
-}
-
-func desktopUserAgentMetadata(userAgent string) map[string]any {
-	chromiumVersion := chromeVersionFromUserAgent(userAgent)
-	if chromiumVersion == "" {
-		return nil
-	}
-	chromiumMajor := majorVersion(chromiumVersion)
-	brands := []any{
-		map[string]any{"brand": "Chromium", "version": chromiumMajor},
-		map[string]any{"brand": "Not_A Brand", "version": "99"},
-	}
-	fullVersions := []any{
-		map[string]any{"brand": "Chromium", "version": chromiumVersion},
-		map[string]any{"brand": "Not_A Brand", "version": "99.0.0.0"},
-	}
-	fullVersion := chromiumVersion
-	for _, product := range []struct {
-		marker string
-		brand  string
-	}{
-		{"Edg/", "Microsoft Edge"},
-		{"OPR/", "Opera"},
-	} {
-		if version := versionFromUserAgent(userAgent, product.marker); version != "" {
-			brands = append(brands, map[string]any{
-				"brand": product.brand, "version": majorVersion(version),
-			})
-			fullVersions = append(fullVersions, map[string]any{
-				"brand": product.brand, "version": version,
-			})
-			fullVersion = version
-			break
-		}
-	}
-
-	platform, platformVersion := "", ""
-	switch {
-	case strings.Contains(userAgent, "Windows"):
-		platform, platformVersion = "Windows", "10.0.0"
-	case strings.Contains(userAgent, "Macintosh"):
-		platform = "macOS"
-	case strings.Contains(userAgent, "Linux"):
-		platform = "Linux"
-	}
-	architecture, bitness := "", ""
-	switch {
-	case strings.Contains(userAgent, "Win64"), strings.Contains(userAgent, "x86_64"):
-		architecture, bitness = "x86", "64"
-	case strings.Contains(userAgent, "aarch64"), strings.Contains(userAgent, "arm64"):
-		architecture, bitness = "arm", "64"
-	}
-	return map[string]any{
-		"brands":          brands,
-		"fullVersionList": fullVersions,
-		"fullVersion":     fullVersion,
-		"platform":        platform,
-		"platformVersion": platformVersion,
-		"architecture":    architecture,
-		"model":           "",
-		"mobile":          false,
-		"bitness":         bitness,
-		"wow64":           false,
-		"formFactors":     []any{"Desktop"},
-	}
-}
-
-func userAgentOverrideParams(desktopUserAgent string, mobile bool) map[string]any {
-	if desktopUserAgent == "" {
-		return nil
-	}
-	if !mobile {
-		params := map[string]any{"userAgent": desktopUserAgent}
-		if metadata := desktopUserAgentMetadata(desktopUserAgent); metadata != nil {
-			params["userAgentMetadata"] = metadata
-		}
-		return params
-	}
-	version := chromeVersionFromUserAgent(desktopUserAgent)
-	if version == "" {
-		return map[string]any{"userAgent": desktopUserAgent}
-	}
-	major := majorVersion(version)
-	mobileUserAgent := fmt.Sprintf(
-		"Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 "+
-			"(KHTML, like Gecko) Chrome/%s Mobile Safari/537.36", version)
-	return map[string]any{
-		"userAgent": mobileUserAgent,
-		"platform":  "Linux armv8l",
-		"userAgentMetadata": map[string]any{
-			"brands": []any{
-				map[string]any{"brand": "Chromium", "version": major},
-				map[string]any{"brand": "Not_A Brand", "version": "99"},
-			},
-			"fullVersionList": []any{
-				map[string]any{"brand": "Chromium", "version": version},
-				map[string]any{"brand": "Not_A Brand", "version": "99.0.0.0"},
-			},
-			"fullVersion":     version,
-			"platform":        "Android",
-			"platformVersion": "13.0.0",
-			"architecture":    "",
-			"model":           "Pixel 7",
-			"mobile":          true,
-			"bitness":         "",
-			"wow64":           false,
-			"formFactors":     []any{"Mobile"},
-		},
-	}
 }
 
 func (b *Controller) dropTarget(targetID string) {

@@ -86,6 +86,14 @@ CDM used by Chromium can work without appearing there. Surf does not ship a
 CDM. A site may still reject sign-in or playback because of its account,
 datacenter-IP, DRM, output-protection, or browser-policy requirements.
 
+For desktop pages, Surf changes only the classic `HeadlessChrome/` product
+token to `Chrome/`. Browser brands, full versions, platform details, and
+`Sec-CH-UA-*` values are read from the selected Chrome/Chromium build and
+returned unchanged. **Mobile Websites** is the deliberate exception: it
+requests an Android/mobile device identity while retaining the browser's
+native brand and version list. Keep that option off when testing a service's
+desktop Linux support.
+
 ## Native package will not install
 
 Run the package verifier from the repository root:

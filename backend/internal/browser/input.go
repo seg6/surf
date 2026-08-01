@@ -296,7 +296,7 @@ func (b *Controller) handleMobileLayout(on bool) {
 			sessions = append(sessions, tab.Session)
 		}
 	}
-	userAgentParams := userAgentOverrideParams(b.userAgent, on)
+	userAgentParams := userAgentOverrideParams(b.userAgent, b.userAgentMetadata, on)
 	b.mu.Unlock()
 	log.Printf("layout: request mobile sites=%t changed=%t", on, changed)
 	if !changed {

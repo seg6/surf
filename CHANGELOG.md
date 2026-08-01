@@ -2,6 +2,16 @@
 
 This file records the user-visible changes in every Surf release.
 
+## 0.10.6 - 2026-08-01
+
+- Made the desktop user-agent adjustment surgical: Surf now changes only the
+  `HeadlessChrome/` product token and preserves the selected browser's native
+  brands, versions, platform details, and client hints.
+- Kept Mobile Websites coherent by changing only its device-facing fields
+  while retaining Chrome, Edge, or Chromium's authentic brand/version list.
+- Isolated browser-identity probing from Surf tabs and made failures fall back
+  to the browser's completely native identity instead of partial metadata.
+
 ## 0.10.5 - 2026-08-01
 
 - Loaded Surf's tab-capture and content-blocking extensions through Chrome's
