@@ -2,6 +2,12 @@
 
 This file records the user-visible changes in every Surf release.
 
+## 0.10.7 - 2026-08-01
+
+- Made native browser-identity discovery reliable on slower ARM64 hosts by
+  probing a private loopback origin and waiting for Chrome's real execution
+  context, without sending a request off-host or fabricating Client Hints.
+
 ## 0.10.6 - 2026-08-01
 
 - Made the desktop user-agent adjustment surgical: Surf now changes only the

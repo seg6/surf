@@ -1,8 +1,10 @@
 package browser
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNormalizeHeadlessUserAgent(t *testing.T) {
@@ -77,6 +79,35 @@ func TestUserAgentOverrideRequiresNativeMetadata(t *testing.T) {
 	if got := userAgentOverrideParams("Chrome/151.0.0.0", nil, false); got != nil {
 		t.Fatalf("partial override = %#v, want nil", got)
 	}
+}
+
+func TestAwaitNativeUserAgentMetadataSurvivesInitialDocument(t *testing.T) {
+	caller := &identitySequenceCaller{}
+	metadata, err := awaitNativeUserAgentMetadata(caller, "session", 100*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if caller.calls != 2 {
+		t.Fatalf("Runtime.evaluate calls = %d, want 2", caller.calls)
+	}
+	if metadata["platform"] != "Linux" {
+		t.Fatalf("metadata = %#v", metadata)
+	}
+}
+
+type identitySequenceCaller struct {
+	calls int
+}
+
+func (c *identitySequenceCaller) Call(_, method string, _ any) (json.RawMessage, error) {
+	if method != "Runtime.evaluate" {
+		return nil, nil
+	}
+	c.calls++
+	if c.calls == 1 {
+		return json.RawMessage(`{"result":{"value":null}}`), nil
+	}
+	return json.RawMessage(`{"result":{"value":{"platform":"Linux"}}}`), nil
 }
 
 func testChromeMetadata() map[string]any {

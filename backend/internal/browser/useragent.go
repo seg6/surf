@@ -3,7 +3,10 @@ package browser
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
 	"strings"
+	"time"
 )
 
 const nativeUserAgentMetadataExpression = `(async () => {
@@ -19,11 +22,18 @@ type userAgentMetadataCaller interface {
 }
 
 // nativeUserAgentMetadata asks the browser itself for the client hints it
-// would expose without automation. chrome://version is a trustworthy local
-// origin, so the high-entropy API is available without a network request.
-// The target is created before discovery is enabled and never becomes a Surf
-// tab.
+// would expose without automation. A temporary loopback origin is used because
+// userAgentData is deliberately restricted to trustworthy contexts and some
+// Chrome builds do not expose it on chrome:// pages. No request leaves the
+// machine. The target is created before discovery is enabled and never becomes
+// a Surf tab.
 func nativeUserAgentMetadata(client userAgentMetadataCaller) (map[string]any, error) {
+	origin, closeOrigin, err := browserIdentityOrigin()
+	if err != nil {
+		return nil, err
+	}
+	defer closeOrigin()
+
 	contextRaw, err := client.Call("", "Target.createBrowserContext", nil)
 	if err != nil {
 		return nil, fmt.Errorf("create browser identity context: %w", err)
@@ -44,7 +54,7 @@ func nativeUserAgentMetadata(client userAgentMetadataCaller) (map[string]any, er
 	}()
 
 	targetRaw, err := client.Call("", "Target.createTarget", map[string]any{
-		"url":              "chrome://version",
+		"url":              origin,
 		"browserContextId": browserContext.ID,
 	})
 	if err != nil {
@@ -76,29 +86,9 @@ func nativeUserAgentMetadata(client userAgentMetadataCaller) (map[string]any, er
 		return nil, fmt.Errorf("decode browser identity session: missing sessionId")
 	}
 
-	raw, err := client.Call(attached.SessionID, "Runtime.evaluate", map[string]any{
-		"expression":    nativeUserAgentMetadataExpression,
-		"awaitPromise":  true,
-		"returnByValue": true,
-	})
+	metadata, err := awaitNativeUserAgentMetadata(client, attached.SessionID, 3*time.Second)
 	if err != nil {
-		return nil, fmt.Errorf("read native browser identity: %w", err)
-	}
-	var evaluated struct {
-		Result struct {
-			Value map[string]any `json:"value"`
-		} `json:"result"`
-		ExceptionDetails json.RawMessage `json:"exceptionDetails"`
-	}
-	if err := json.Unmarshal(raw, &evaluated); err != nil {
-		return nil, fmt.Errorf("decode native browser identity: %w", err)
-	}
-	if len(evaluated.ExceptionDetails) != 0 && string(evaluated.ExceptionDetails) != "null" {
-		return nil, fmt.Errorf("native browser identity evaluation failed")
-	}
-	metadata := evaluated.Result.Value
-	if metadata == nil {
-		return nil, fmt.Errorf("browser did not expose user-agent metadata")
+		return nil, err
 	}
 	if fullVersion, ok := metadata["uaFullVersion"]; ok {
 		metadata["fullVersion"] = fullVersion
@@ -114,6 +104,59 @@ func nativeUserAgentMetadata(client userAgentMetadataCaller) (map[string]any, er
 		return nil, fmt.Errorf("browser user-agent metadata has no brands")
 	}
 	return metadata, nil
+}
+
+func browserIdentityOrigin() (string, func(), error) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		return "", nil, fmt.Errorf("listen for browser identity probe: %w", err)
+	}
+	server := &http.Server{
+		ReadHeaderTimeout: time.Second,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte("<!doctype html><title>Surf</title>"))
+		}),
+	}
+	go func() { _ = server.Serve(listener) }()
+	closeOrigin := func() { _ = server.Close() }
+	return "http://" + listener.Addr().String() + "/", closeOrigin, nil
+}
+
+func awaitNativeUserAgentMetadata(client userAgentMetadataCaller, sessionID string, timeout time.Duration) (map[string]any, error) {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		raw, err := client.Call(sessionID, "Runtime.evaluate", map[string]any{
+			"expression":    nativeUserAgentMetadataExpression,
+			"awaitPromise":  true,
+			"returnByValue": true,
+		})
+		if err != nil {
+			lastErr = fmt.Errorf("read native browser identity: %w", err)
+		} else {
+			var evaluated struct {
+				Result struct {
+					Value map[string]any `json:"value"`
+				} `json:"result"`
+				ExceptionDetails json.RawMessage `json:"exceptionDetails"`
+			}
+			if err := json.Unmarshal(raw, &evaluated); err != nil {
+				lastErr = fmt.Errorf("decode native browser identity: %w", err)
+			} else if len(evaluated.ExceptionDetails) != 0 && string(evaluated.ExceptionDetails) != "null" {
+				lastErr = fmt.Errorf("native browser identity evaluation failed")
+			} else if evaluated.Result.Value != nil {
+				return evaluated.Result.Value, nil
+			} else {
+				lastErr = fmt.Errorf("browser did not expose user-agent metadata")
+			}
+		}
+		if time.Now().After(deadline) {
+			return nil, lastErr
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 }
 
 // NormalizeHeadlessUserAgent performs Surf's only desktop identity change.

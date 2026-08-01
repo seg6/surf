@@ -71,7 +71,7 @@ func TestBrowserIdentityRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, info := range targets.Infos {
-		if strings.HasPrefix(info.URL, "chrome://version") {
+		if strings.Contains(info.URL, "<title>Surf</title>") || strings.HasPrefix(info.URL, "http://127.0.0.1:") {
 			t.Fatalf("browser identity target leaked into tab discovery: %q", info.URL)
 		}
 	}
