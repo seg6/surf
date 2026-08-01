@@ -179,6 +179,8 @@ browser may be used, subject to each service's DRM and output-protection rules.
 ## Updates
 
 Desktop releases use the signed release manifest and SHA-256-verified assets.
+On Windows, the installer closes the installed Surf process tree before
+replacing the executable and starts the new version after a silent update.
 The native `.deb` update travels over its already authenticated, pinned Surf
 connection and is verified again before the privileged installer applies it.
 See [Security](security.md#updates) for what that protects and which host trust

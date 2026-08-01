@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -46,6 +47,20 @@ func TestDesktopConfigRoundTrip(t *testing.T) {
 	got, err = loadDesktopConfig(home)
 	if err != nil || got != want {
 		t.Fatalf("replacement config=%+v err=%v", got, err)
+	}
+}
+
+func TestWindowsInstallerArgumentsForceTakeoverAndRelaunch(t *testing.T) {
+	want := []string{
+		"/VERYSILENT",
+		"/SUPPRESSMSGBOXES",
+		"/SP-",
+		"/NORESTART",
+		"/FORCECLOSEAPPLICATIONS",
+		"/NORESTARTAPPLICATIONS",
+	}
+	if got := windowsInstallerArguments(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("windows installer arguments = %q, want %q", got, want)
 	}
 }
 

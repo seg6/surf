@@ -2,6 +2,12 @@
 
 This file records the user-visible changes in every Surf release.
 
+## 0.10.3 - 2026-08-01
+
+- Made Windows upgrades force-close the installed Surf process tree before
+  replacing its executable, avoiding Restart Manager error 5.
+- Made silent desktop updates launch the newly installed Surf automatically.
+
 ## 0.10.2 - 2026-08-01
 
 - Prevented a force-closed desktop tray from leaving its managed daemon,

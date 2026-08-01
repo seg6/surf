@@ -118,6 +118,13 @@ an invalid TLS identity, preserve the directory and repair or deliberately
 replace only `identity/`; clients will correctly reject a replacement identity
 until explicitly forgotten and paired again.
 
+## A Windows update does not reopen Surf
+
+Install Surf 0.10.3 or later. Those installers force-close the installed Surf
+process tree before replacing it and launch the new version after a silent
+update. `SURF_HOME` is not removed, so the server identity, pairings, and
+browser profile remain in place.
+
 ## Collect logs
 
 Desktop logs are available from the Surf tray Settings page. The native client

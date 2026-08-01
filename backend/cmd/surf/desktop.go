@@ -786,7 +786,7 @@ func (a *desktopApp) applyDesktopUpdate(release updater.Release) {
 		a.updateState = "applying"
 		a.mu.Unlock()
 		a.stopBackend()
-		command := exec.Command(installer, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS")
+		command := exec.Command(installer, windowsInstallerArguments()...)
 		if err := command.Start(); err != nil {
 			a.setUpdateFailure(err)
 			_ = a.startBackend()
@@ -846,6 +846,17 @@ func (a *desktopApp) applyDesktopUpdate(release updater.Release) {
 		return
 	}
 	systray.Quit()
+}
+
+func windowsInstallerArguments() []string {
+	return []string{
+		"/VERYSILENT",
+		"/SUPPRESSMSGBOXES",
+		"/SP-",
+		"/NORESTART",
+		"/FORCECLOSEAPPLICATIONS",
+		"/NORESTARTAPPLICATIONS",
+	}
 }
 
 func (a *desktopApp) setUpdateFailure(err error) {

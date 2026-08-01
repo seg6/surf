@@ -13,7 +13,8 @@ OutputDir=@OUTPUT_DIR@
 OutputBaseFilename=surf-{#SurfVersion}-windows-amd64-setup
 Compression=lzma2
 SolidCompression=yes
-CloseApplications=yes
+CloseApplications=force
+RestartApplications=no
 UninstallDisplayIcon={app}\surf.exe
 WizardStyle=modern
 
@@ -30,8 +31,8 @@ Name: "{group}\Uninstall Surf"; Filename: "{uninstallexe}"
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "Surf"; Flags: uninsdeletevalue dontcreatekey
 
 [Run]
-Filename: "{cmd}"; Parameters: "/C taskkill /IM surf.exe /T /F >NUL 2>&1"; Flags: runhidden waituntilterminated; StatusMsg: "Stopping existing Surf processes..."
 Filename: "{app}\surf.exe"; Description: "Launch Surf"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\surf.exe"; Flags: nowait skipifnotsilent
 
 [UninstallRun]
 Filename: "{cmd}"; Parameters: "/C taskkill /IM surf.exe /T /F"; Flags: runhidden; RunOnceId: "StopSurf"
