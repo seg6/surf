@@ -159,10 +159,12 @@ and Widevine capability state.
 
 ## Browser and media
 
-Surf prefers a compatible installed Chromium or Microsoft Edge, otherwise it
-uses its verified managed Chromium build. Active-tab `tabCapture` supplies both
-video and audio; no FFmpeg, PulseAudio, desktop capture, or virtual audio device
-is required.
+Surf prefers a compatible installed Google Chrome, Microsoft Edge, or Chromium,
+otherwise it uses its verified managed Chromium build. Capture and
+content-blocking extensions are loaded through CDP so branded browsers do not
+depend on the ignored `--load-extension` switch. Active-tab `tabCapture`
+supplies both video and audio; no FFmpeg, PulseAudio, desktop capture, or
+virtual audio device is required.
 
 The native client reports the exact even-sized stream surface left by its
 current chrome; the backend does not choose from hard-coded device profiles.

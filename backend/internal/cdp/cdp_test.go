@@ -1,6 +1,7 @@
 package cdp
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -65,8 +66,9 @@ func TestLaunchArgsContentBlocker(t *testing.T) {
 		Profile: "/tmp/profile", W: 1024, H: 768,
 		ExtensionPaths: []string{"/tmp/ubol"},
 	}.Args()
-	if !hasArg(args, "--disable-extensions-except=/tmp/ubol") ||
-		!hasArg(args, "--load-extension=/tmp/ubol") {
+	if hasArg(args, "--disable-extensions-except=/tmp/ubol") ||
+		!hasArg(args, "--load-extension=/tmp/ubol") ||
+		!hasArg(args, "--enable-unsafe-extension-debugging") {
 		t.Fatalf("missing content blocker args: %v", args)
 	}
 }
@@ -76,9 +78,47 @@ func TestLaunchArgsMultipleExtensions(t *testing.T) {
 		Profile: "/tmp/profile", W: 1024, H: 768,
 		ExtensionPaths: []string{"/tmp/ubol", "/tmp/audio"},
 	}.Args()
-	if !hasArg(args, "--disable-extensions-except=/tmp/ubol,/tmp/audio") ||
-		!hasArg(args, "--load-extension=/tmp/ubol,/tmp/audio") {
+	if hasArg(args, "--disable-extensions-except=/tmp/ubol,/tmp/audio") ||
+		!hasArg(args, "--load-extension=/tmp/ubol,/tmp/audio") ||
+		!hasArg(args, "--enable-unsafe-extension-debugging") {
 		t.Fatalf("missing combined extension args: %v", args)
+	}
+}
+
+type extensionCall struct {
+	method string
+	path   string
+}
+
+type fakeExtensionCaller struct {
+	installed string
+	calls     []extensionCall
+}
+
+func (f *fakeExtensionCaller) Call(_ string, method string, params any) (json.RawMessage, error) {
+	call := extensionCall{method: method}
+	if values, ok := params.(map[string]any); ok {
+		call.path, _ = values["path"].(string)
+	}
+	f.calls = append(f.calls, call)
+	if method == "Extensions.getExtensions" {
+		return json.Marshal(map[string]any{
+			"extensions": []map[string]string{{"path": f.installed}},
+		})
+	}
+	return json.RawMessage(`{"id":"loaded"}`), nil
+}
+
+func TestEnsureUnpackedExtensionsLoadsOnlyMissingPaths(t *testing.T) {
+	client := &fakeExtensionCaller{installed: "/tmp/already"}
+	if err := ensureUnpackedExtensions(client, []string{"/tmp/already", "/tmp/missing"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.calls) != 2 {
+		t.Fatalf("calls=%v, want list plus one load", client.calls)
+	}
+	if got := client.calls[1]; got.method != "Extensions.loadUnpacked" || got.path != "/tmp/missing" {
+		t.Fatalf("load call=%v", got)
 	}
 }
 

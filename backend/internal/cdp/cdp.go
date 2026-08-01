@@ -124,8 +124,11 @@ func (cfg LaunchConfig) Args() []string {
 	if len(cfg.ExtensionPaths) != 0 {
 		paths := strings.Join(cfg.ExtensionPaths, ",")
 		args = append(args,
-			"--disable-extensions-except="+paths,
 			"--load-extension="+paths,
+			// Branded Chrome ignores --load-extension, but exposes the CDP
+			// Extensions domain when this flag is present. Launch loads the
+			// unpacked extensions through that domain after connecting.
+			"--enable-unsafe-extension-debugging",
 		)
 	}
 	args = append(args, cfg.ExtraArgs...)
@@ -172,7 +175,55 @@ func Launch(cfg LaunchConfig) (*Client, *os.Process, error) {
 		process.Kill(started.Process.Pid)
 		return nil, nil, err
 	}
+	if err := ensureUnpackedExtensions(c, cfg.ExtensionPaths); err != nil {
+		c.Close()
+		process.Kill(started.Process.Pid)
+		return nil, nil, err
+	}
 	return c, started.Process, nil
+}
+
+type extensionCaller interface {
+	Call(sessionID, method string, params any) (json.RawMessage, error)
+}
+
+// ensureUnpackedExtensions bridges the two browser behaviors Surf supports:
+// Chromium still honors --load-extension, while branded Chrome requires the
+// Extensions.loadUnpacked CDP command. Already-loaded paths are left alone so
+// Chromium extensions are not needlessly restarted during browser startup.
+func ensureUnpackedExtensions(client extensionCaller, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	raw, err := client.Call("", "Extensions.getExtensions", nil)
+	if err != nil {
+		return fmt.Errorf("list unpacked extensions: %w", err)
+	}
+	var result struct {
+		Extensions []struct {
+			Path string `json:"path"`
+		} `json:"extensions"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return fmt.Errorf("decode unpacked extensions: %w", err)
+	}
+	loaded := make(map[string]struct{}, len(result.Extensions))
+	for _, extension := range result.Extensions {
+		if extension.Path != "" {
+			loaded[filepath.Clean(extension.Path)] = struct{}{}
+		}
+	}
+	for _, path := range paths {
+		cleanPath := filepath.Clean(path)
+		if _, ok := loaded[cleanPath]; ok {
+			continue
+		}
+		if _, err := client.Call("", "Extensions.loadUnpacked", map[string]any{"path": cleanPath}); err != nil {
+			return fmt.Errorf("load unpacked extension %s: %w", filepath.Base(cleanPath), err)
+		}
+		loaded[cleanPath] = struct{}{}
+	}
+	return nil
 }
 
 type activePortState struct {

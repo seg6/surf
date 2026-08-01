@@ -80,9 +80,11 @@ the same protocol build, then collect both logs around the transition.
 
 ## Widevine or streaming-site sign-in
 
-Open `chrome://components` in the remote browser and confirm the host browser
-provides Widevine. Surf does not ship a CDM. A site may still reject playback
-because of account, DRM, output-protection, or browser-policy requirements.
+Check Surf's authenticated runtime statistics for the live Widevine EME probe.
+`chrome://components` only lists browser-managed components; a host-supplied
+CDM used by Chromium can work without appearing there. Surf does not ship a
+CDM. A site may still reject sign-in or playback because of its account,
+datacenter-IP, DRM, output-protection, or browser-policy requirements.
 
 ## Native package will not install
 

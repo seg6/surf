@@ -219,12 +219,8 @@ func (b *Controller) Start() (err error) {
 	if b.cfg.ContentBlockerPath != "" {
 		extensionPaths = append(extensionPaths, b.cfg.ContentBlockerPath)
 	}
-	var extraArgs []string
 	if b.capture != nil {
 		extensionPaths = append(extensionPaths, b.capture.ExtensionPath())
-		// Required by CDP's Extensions domain, used to invoke the capture
-		// extension action as the active tab's user gesture.
-		extraArgs = append(extraArgs, "--enable-unsafe-extension-debugging")
 	}
 	client, cmd, err := cdp.Launch(cdp.LaunchConfig{
 		ChromePath:     b.cfg.ChromePath,
@@ -234,7 +230,6 @@ func (b *Controller) Start() (err error) {
 		NoSandbox:      b.cfg.ChromeNoSandbox,
 		EnableGPU:      b.cfg.ChromeGPU,
 		ExtensionPaths: extensionPaths,
-		ExtraArgs:      extraArgs,
 	})
 	if err != nil {
 		return err

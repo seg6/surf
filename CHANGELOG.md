@@ -2,6 +2,17 @@
 
 This file records the user-visible changes in every Surf release.
 
+## 0.10.5 - 2026-08-01
+
+- Loaded Surf's tab-capture and content-blocking extensions through Chrome's
+  DevTools extension API, restoring support for branded Google Chrome and Edge
+  builds that ignore the legacy command-line extension switch.
+- Preferred compatible installed Google Chrome before Edge or Chromium, making
+  host-provided Widevine and streaming-site browser compatibility available
+  without copying the CDM into another browser.
+- Made the live EME capability probe authoritative when externally supplied
+  Widevine does not appear on `chrome://components`.
+
 ## 0.10.4 - 2026-08-01
 
 - Made `surf pair` prefer `SURF_PUBLIC_ADDRESS` when generating pairing

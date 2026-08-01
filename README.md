@@ -152,10 +152,13 @@ update-package trust boundaries.
 
 ## Browser and DRM support
 
-Surf prefers a compatible installed Edge or Chromium and otherwise manages a
-verified ungoogled-chromium build in its private data directory. Video and
-audio come from Chromium's tab-capture APIs; no FFmpeg, PulseAudio, virtual
-audio device, or desktop capture is required.
+Surf prefers a compatible installed Google Chrome, Microsoft Edge, or Chromium
+and otherwise manages a verified ungoogled-chromium build in its private data
+directory. Surf loads its capture and content-blocking extensions through the
+browser's DevTools extension API, including in branded Chrome and Edge builds
+that ignore the legacy command-line extension switch. Video and audio come
+from Chromium's tab-capture APIs; no FFmpeg, PulseAudio, virtual audio device,
+or desktop capture is required.
 
 The stream follows the exact even-sized surface left by native chrome; it is
 not selected from a fixed phone/iPad resolution list. Rotation and Surf

@@ -54,13 +54,12 @@ type artifact struct {
 	Size    int64
 }
 
-// Resolve prefers unbranded Chromium because current branded
-// Google Chrome ignores command-line requests to load unpacked extensions.
+// Resolve prefers a compatible installed browser, then falls back to Surf's
+// managed ungoogled-chromium. Surf loads its unpacked extensions through CDP,
+// which works in branded Chrome and Edge even when they ignore the legacy
+// --load-extension command-line switch.
 func Resolve(home string) (string, string, error) {
 	for _, candidate := range systemCandidates() {
-		if candidate.branded {
-			continue
-		}
 		path := candidate.path
 		if !filepath.IsAbs(path) {
 			resolved, err := exec.LookPath(path)
@@ -361,5 +360,4 @@ func executableOK(path string) bool {
 
 type candidate struct {
 	path, label string
-	branded     bool
 }
