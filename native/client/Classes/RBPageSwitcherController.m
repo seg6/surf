@@ -310,7 +310,7 @@
                                         timeoutInterval:15.0];
     __weak RBPageSwitcherController *weakSelf = self;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        RBSecureHTTPClient *client = [[RBSecureHTTPClient alloc] initWithFingerprint:self.fingerprint allowUntrusted:NO];
+        RBSecureHTTPClient *client = [RBSecureHTTPClient clientForEndpoint:[self.baseURL absoluteString] fingerprint:self.fingerprint];
         NSHTTPURLResponse *response = nil; NSError *error = nil;
         NSData *data = [client sendRequest:request response:&response error:&error];
         dispatch_async(dispatch_get_main_queue(), ^{

@@ -90,7 +90,7 @@ static void RBSetBrightScreenExposureBias(AVCaptureDevice *camera) {
         RBSetBrightScreenExposureBias(camera);
         [camera unlockForConfiguration];
     } else {
-        RBLog(@"qr: camera configuration unavailable %@", [error localizedDescription] ?: @"");
+        RBLogEvent(@"qr", @"warn", @{@"error": [error localizedDescription] ?: @""}, @"Camera configuration unavailable");
         error = nil;
     }
     AVCaptureDeviceInput *input = camera ? [AVCaptureDeviceInput deviceInputWithDevice:camera error:&error] : nil;
@@ -102,7 +102,7 @@ static void RBSetBrightScreenExposureBias(AVCaptureDevice *camera) {
     else if ([session canSetSessionPreset:AVCaptureSessionPreset640x480])
         session.sessionPreset = AVCaptureSessionPreset640x480;
     if (!input || ![session canAddInput:input]) {
-        RBLog(@"qr: camera input unavailable %@", [error localizedDescription] ?: @"");
+        RBLogEvent(@"qr", @"error", @{@"error": [error localizedDescription] ?: @""}, @"Camera input unavailable");
         [self showUnavailable:[error localizedDescription] ?: @"Camera unavailable."];
         return;
     }
@@ -120,7 +120,7 @@ static void RBSetBrightScreenExposureBias(AVCaptureDevice *camera) {
                 output.metadataObjectTypes = @[qrType];
                 usingNativeQR = YES;
             } else {
-                RBLog(@"qr: native metadata output has no QR type; using software decoder");
+                RBLogEvent(@"qr", @"warn", @{@"fallback": @"software"}, @"Native metadata output has no QR type");
                 [session removeOutput:output];
             }
         }
@@ -131,20 +131,20 @@ static void RBSetBrightScreenExposureBias(AVCaptureDevice *camera) {
         output.videoSettings = @{(id)kCVPixelBufferPixelFormatTypeKey:
                                      [NSNumber numberWithUnsignedInt:kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange]};
         if (![session canAddOutput:output]) {
-            RBLog(@"qr: video data output unavailable");
+            RBLogEvent(@"qr", @"error", @{}, @"Video data output unavailable");
             [self showUnavailable:@"QR scanner unavailable."];
             return;
         }
         _decoder = quirc_new();
         if (!_decoder) {
-            RBLog(@"qr: software decoder allocation failed");
+            RBLogEvent(@"qr", @"error", @{}, @"Software decoder allocation failed");
             [self showUnavailable:@"QR scanner unavailable."];
             return;
         }
         _decodeQueue = dispatch_queue_create("space.seg6.surf.qr", DISPATCH_QUEUE_SERIAL);
         [output setSampleBufferDelegate:self queue:_decodeQueue];
         [session addOutput:output];
-        RBLog(@"qr: software decoder active");
+        RBLogEvent(@"qr", @"info", @{@"decoder": @"software"}, @"QR decoder active");
     }
     self.captureSession = session;
     self.previewLayer = [AVCaptureVideoPreviewLayer layerWithSession:session];

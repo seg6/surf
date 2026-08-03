@@ -69,12 +69,16 @@ static NSString *RBURLEscape(NSString *s);
     self.requiredServerVersion = nil;
     self.requiresPairing = NO;
     [self moveToState:RBSessionStateConnecting];
-    RBLog(@"secure session start %@ server=%@", [self.baseURL absoluteString], [self.server objectForKey:@"serverID"]);
+    RBLogEvent(@"session", @"info",
+               @{@"host": [self.baseURL host] ?: @"",
+                 @"port": [self.baseURL port] ?: @443,
+                 @"server_id": [self.server objectForKey:@"serverID"] ?: @""},
+               @"Secure session starting");
     [self.delegate session:self status:@"authenticating device"];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSString *error = nil;
         if (![self authenticateDevice:&error] || ![self fetchNativeConfig:&error]) {
-            RBLog(@"session start failed: %@", error);
+            RBLogEvent(@"session", @"error", @{@"error": error ?: @""}, @"Secure session failed");
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (generation != self.generation) return;
                 [self moveToState:RBSessionStateIdle];
@@ -115,7 +119,7 @@ static NSString *RBURLEscape(NSString *s);
     NSInteger status = 0;
     NSDictionary *result = [self sendJSONPath:@"/api/v1/auth/revoke" method:@"POST" body:nil status:&status error:error];
     if (!result || status != 204) return NO;
-    RBLog(@"device revoked itself server=%@", [self.server objectForKey:@"serverID"]);
+    RBLogEvent(@"authentication", @"info", @{@"server_id": [self.server objectForKey:@"serverID"] ?: @""}, @"Device authorization revoked");
     return YES;
 }
 
@@ -127,14 +131,15 @@ static NSString *RBURLEscape(NSString *s);
         [request setHTTPBody:[NSJSONSerialization dataWithJSONObject:body options:0 error:nil]];
         [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
     }
-    RBSecureHTTPClient *client = [[RBSecureHTTPClient alloc] initWithFingerprint:[self.server objectForKey:@"fingerprint"] allowUntrusted:NO];
+    RBSecureHTTPClient *client = [RBSecureHTTPClient clientForServer:self.server];
     NSHTTPURLResponse *response = nil;
     NSError *requestError = nil;
     NSData *data = [client sendRequest:request response:&response error:&requestError];
     if (status) *status = [response statusCode];
     if (!data || [response statusCode] < 200 || [response statusCode] >= 300) {
         NSString *serverMessage = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
-        RBLog(@"secure API failed url=%@ status=%d err=%@", [url absoluteString], (int)[response statusCode], [requestError localizedDescription] ?: @"");
+        RBLogEvent(@"api", @"error", @{@"host": [url host] ?: @"", @"path": [url path] ?: @"",
+                   @"status": @([response statusCode]), @"error": [requestError localizedDescription] ?: @""}, @"Secure API request failed");
         if (error) *error = [requestError localizedDescription] ?: ([serverMessage length] ? serverMessage : @"Secure server request failed");
         return nil;
     }
@@ -183,7 +188,7 @@ static NSString *RBURLEscape(NSString *s);
         }
         return NO;
     }
-    RBLog(@"device authentication ok server=%@ device=%@", serverID, deviceID);
+    RBLogEvent(@"authentication", @"info", @{@"server_id": serverID ?: @"", @"device_id": deviceID ?: @""}, @"Device authenticated");
     return YES;
 }
 
@@ -216,7 +221,7 @@ static NSString *RBURLEscape(NSString *s);
         if (error) *error = [NSString stringWithFormat:@"version mismatch app=%@ server=%@", RBNativeVersion, nv ?: @"?"];
         return NO;
     }
-    RBLog(@"native config ok vw=%d vh=%d nv=%@", (int)self.viewWidth, (int)self.viewHeight, nv);
+    RBLogEvent(@"session", @"info", @{@"viewport_width": @(self.viewWidth), @"viewport_height": @(self.viewHeight), @"protocol": nv ?: @""}, @"Native configuration accepted");
     return YES;
 }
 
@@ -236,7 +241,14 @@ static NSString *RBURLEscape(NSString *s) {
     NSInteger port = [[self.baseURL port] integerValue];
     if (port == 0) port = [[[self.baseURL scheme] lowercaseString] isEqualToString:@"https"] ? 443 : 80;
     NSString *path = [NSString stringWithFormat:@"/api/v1/ws?ticket=%@&nv=%@", RBURLEscape(self.wsTicket ?: @""), RBURLEscape(RBNativeVersion)];
-    self.socket = [[RBSocket alloc] initWithHost:host port:port path:path secure:YES fingerprint:[self.server objectForKey:@"fingerprint"]];
+    BOOL tunneled = [RBSecureHTTPClient endpoint:self.baseURLString usesTunnelInServer:self.server];
+    if (tunneled) {
+        self.socket = [[RBSocket alloc] initWithHost:host port:port path:path secure:YES
+                                        fingerprint:[self.server objectForKey:@"fingerprint"]
+                                         tunnelHost:host tunnelPort:port];
+    } else {
+        self.socket = [[RBSocket alloc] initWithHost:host port:port path:path secure:YES fingerprint:[self.server objectForKey:@"fingerprint"]];
+    }
     self.socket.delegate = self;
     [self.delegate session:self status:@"connecting websocket"];
     [self.socket connect];
@@ -261,7 +273,7 @@ static NSString *RBURLEscape(NSString *s) {
     self.viewWidth = width;
     self.viewHeight = height;
     if (self.socketOpen) {
-        RBLog(@"viewport update %dx%d%@", (int)width, (int)height, force ? @" forced" : @"");
+        RBLogEvent(@"session", @"info", @{@"viewport_width": @(width), @"viewport_height": @(height), @"forced": @(force)}, @"Viewport updated");
         [self sendMessage:@{@"t": @"size", @"w": [NSNumber numberWithInteger:width], @"h": [NSNumber numberWithInteger:height]}];
     }
 }

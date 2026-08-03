@@ -60,10 +60,28 @@ func TestLaunchArgsX11(t *testing.T) {
 
 func TestLaunchArgsVirGL(t *testing.T) {
 	args := LaunchConfig{Profile: "/tmp/profile", W: 1024, H: 768, EnableGPU: true, VirGL: true}.Args()
-	for _, want := range []string{"--headless=new", "--ignore-gpu-blocklist", "--use-gl=angle", "--use-angle=gl-egl"} {
+	for _, want := range []string{
+		"--headless=new", "--ignore-gpu-blocklist", "--use-gl=angle",
+		"--use-angle=gl-egl",
+	} {
 		if !hasArg(args, want) {
 			t.Fatalf("VirGL launch args missing %q: %v", want, args)
 		}
+	}
+}
+
+func TestLaunchEnvironmentVirGL(t *testing.T) {
+	env := LaunchConfig{VirGL: true, Env: []string{"SURF_TEST=1"}}.Environment()
+	for _, want := range []string{
+		"SURF_TEST=1", "GALLIUM_DRIVER=virpipe", "LIBGL_ALWAYS_SOFTWARE=true",
+		"MESA_GL_VERSION_OVERRIDE=4.1COMPAT", "MESA_GLSL_VERSION_OVERRIDE=410",
+	} {
+		if !hasArg(env, want) {
+			t.Fatalf("VirGL launch environment missing %q: %v", want, env)
+		}
+	}
+	if got := (LaunchConfig{}).Environment(); len(got) != 0 {
+		t.Fatalf("normal launch environment = %v, want empty", got)
 	}
 }
 

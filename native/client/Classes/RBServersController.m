@@ -108,6 +108,7 @@ enum {
 - (void)setStatusText:(NSString *)status isError:(BOOL)isError {
     self.statusText = status;
     self.statusIsError = isError;
+    [self.detailController setStatusText:status isError:isError];
     if ([self isViewLoaded]) [self updateHeader];
 }
 
@@ -144,7 +145,7 @@ enum {
     NSUInteger generation = ++self.searchGeneration;
     self.serviceBrowser = [[NSNetServiceBrowser alloc] init];
     self.serviceBrowser.delegate = self;
-    RBLog(@"bonjour: searching for _surf._tcp.local");
+    RBLogEvent(@"discovery", @"info", @{@"service": @"_surf._tcp", @"domain": @"local"}, @"Nearby server search started");
     [self.serviceBrowser searchForServicesOfType:@"_surf._tcp." inDomain:@"local."];
     [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:RBServersNearbySection] withRowAnimation:UITableViewRowAnimationNone];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{

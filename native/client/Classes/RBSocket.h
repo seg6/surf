@@ -13,7 +13,10 @@
 @property(nonatomic, weak) id<RBSocketDelegate> delegate;
 
 - (id)initWithHost:(NSString *)host port:(NSInteger)port path:(NSString *)path secure:(BOOL)secure fingerprint:(NSString *)fingerprint;
+- (id)initWithHost:(NSString *)host port:(NSInteger)port path:(NSString *)path secure:(BOOL)secure fingerprint:(NSString *)fingerprint systemTrust:(BOOL)systemTrust;
+- (id)initWithHost:(NSString *)host port:(NSInteger)port path:(NSString *)path secure:(BOOL)secure fingerprint:(NSString *)fingerprint tunnelHost:(NSString *)tunnelHost tunnelPort:(NSInteger)tunnelPort;
 - (void)connect;
 - (void)close;
 - (void)sendJSON:(NSDictionary *)message;
+- (void)sendBinary:(NSData *)data;
 @end

@@ -69,7 +69,7 @@ static NSString *const RBUpdateResultPath = @"/var/mobile/Library/Surf/update-re
                                                        timeoutInterval:60.0];
     [self.delegate clientUpdater:self progress:0.0];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        RBSecureHTTPClient *client = [[RBSecureHTTPClient alloc] initWithFingerprint:self.fingerprint allowUntrusted:NO];
+        RBSecureHTTPClient *client = [RBSecureHTTPClient clientForEndpoint:[self.baseURL absoluteString] fingerprint:self.fingerprint];
         NSHTTPURLResponse *response = nil;
         NSError *error = nil;
         NSData *data = [client sendRequest:request response:&response error:&error];
@@ -176,11 +176,14 @@ static NSString *const RBUpdateResultPath = @"/var/mobile/Library/Surf/update-re
             [[result objectForKey:@"version"] isEqualToString:version] &&
             [[[result objectForKey:@"sha256"] lowercaseString] isEqualToString:[hash lowercaseString]];
         int exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-        RBLog(@"client update installer spawn=%d wait=%d exited=%d exit=%d record=%@",
-              spawnError, waitError, WIFEXITED(status), exitCode, result ?: @{});
+        BOOL installSucceeded = recordedSuccess || (spawnError == 0 && waitError == 0 &&
+                                                     WIFEXITED(status) && exitCode == 0);
+        RBLogEvent(@"updater", installSucceeded ? @"info" : @"error",
+                   @{@"spawn_status": @(spawnError), @"wait_status": @(waitError),
+                     @"exited": @(WIFEXITED(status)), @"exit_code": @(exitCode),
+                     @"installer": result ?: @{}}, @"Client installer completed");
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (recordedSuccess || (spawnError == 0 && waitError == 0 &&
-                                    WIFEXITED(status) && exitCode == 0)) {
+            if (installSucceeded) {
                 [self.delegate clientUpdaterDidInstall:self];
             } else {
                 NSString *stage = [result objectForKey:@"stage"];
@@ -192,7 +195,7 @@ static NSString *const RBUpdateResultPath = @"/var/mobile/Library/Surf/update-re
                 if ([installerLog length] > 16384) {
                     installerLog = [installerLog substringFromIndex:[installerLog length] - 16384];
                 }
-                if ([installerLog length]) RBLog(@"client update dpkg output:\n%@", installerLog);
+                if ([installerLog length]) RBLogEvent(@"updater", @"error", @{@"output": installerLog}, @"Client installer output captured");
                 if (![stage length]) stage = spawnError ? @"launch" : (waitError ? @"wait" : @"installer");
                 if (code == 0) code = spawnError ?: (waitError ?: exitCode);
                 [self fail:[NSString stringWithFormat:@"Installer failed during %@ (%d)", stage, code]];
@@ -218,7 +221,7 @@ static NSString *const RBUpdateResultPath = @"/var/mobile/Library/Surf/update-re
 }
 
 - (void)fail:(NSString *)message {
-    RBLog(@"client update failed: %@", message);
+    RBLogEvent(@"updater", @"error", @{@"error": message ?: @""}, @"Client update failed");
     [[NSFileManager defaultManager] removeItemAtPath:self.path error:nil];
     [self.delegate clientUpdater:self failed:message ?: @"Update failed"];
 }

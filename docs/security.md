@@ -20,6 +20,12 @@ presents the pinned certificate.
 Bonjour advertises an address and server ID but is only a locator. A spoofed
 advertisement cannot satisfy an existing certificate pin.
 
+When `SURF_TUNNEL_HOST` is configured, Cloudflare terminates only the outer
+public WebSocket connection. That WebSocket transports an independent Surf TLS
+connection whose certificate is checked against the existing server pin.
+Cloudflare can observe connection metadata and encrypted byte volume, but not
+Surf control messages, media, credentials, browsing data, or client updates.
+
 ## Pairing
 
 Pairing is closed until the server owner chooses **Pair device** or runs

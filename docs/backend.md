@@ -60,6 +60,12 @@ This does not provide NAT traversal. LAN firewalls and VPS security groups must
 allow the selected port. Protect `SURF_HOME`: copying it copies the server
 identity and paired-device registry.
 
+Cloudflare Tunnel can provide NAT traversal without changing Surf's trust
+anchor. Route a hostname to the Surf HTTPS listener, set that hostname in
+`SURF_TUNNEL_HOST`, and use it as `SURF_PUBLIC_ADDRESS`. The public WebSocket is
+only an opaque carrier; the client establishes a second, certificate-pinned
+Surf TLS connection through it.
+
 ## Configuration
 
 Surf reads configuration from environment variables:
@@ -69,6 +75,7 @@ Surf reads configuration from environment variables:
 | `SURF_HOME` | `~/.surf` | Identity, devices, browser profile, downloads, logs |
 | `SURF_SERVER_NAME` | `Surf` | Friendly name shown while pairing and in Bonjour |
 | `SURF_PUBLIC_ADDRESS` | empty | Reachable host/IP and optional port for pairing QR codes |
+| `SURF_TUNNEL_HOST` | empty | Exact public hostname that enables the opaque WebSocket roaming transport |
 | `SURF_ADVERTISE_IP` | auto | Explicit LAN address for Bonjour; useful in containers and PRoot |
 | `BIND_ADDR` | `0.0.0.0` | Listener address |
 | `PORT` | `18080` | TLS/API port |

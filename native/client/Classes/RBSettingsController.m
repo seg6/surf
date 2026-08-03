@@ -1,5 +1,6 @@
 #import "RBSettingsController.h"
 #import "RBConfig.h"
+#import "RBLogViewController.h"
 #import "RBServerStore.h"
 #import "RBTheme.h"
 
@@ -65,7 +66,7 @@ static const NSInteger kRBClearDataAlert = 4101;
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == RBSettingsConnectionSection) return 1;
     if (section == RBSettingsBrowsingSection) return 3;
-    if (section == RBSettingsDiagnosticsSection) return 1;
+    if (section == RBSettingsDiagnosticsSection) return 2;
     if (section == RBSettingsDataSection) return 3;
     return 1;
 }
@@ -76,7 +77,7 @@ static const NSInteger kRBClearDataAlert = 4101;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == RBSettingsDiagnosticsSection) return @"Shows live video, latency, decoder, network, and audio health over the page.";
+    if (section == RBSettingsDiagnosticsSection) return @"Inspect live performance and structured application events.";
     if (section == RBSettingsDataSection && !self.connected) return @"Connect to a server to manage its browsing data.";
     return nil;
 }
@@ -124,6 +125,13 @@ static const NSInteger kRBClearDataAlert = 4101;
         return cell;
     }
     if (section == RBSettingsDiagnosticsSection) {
+        if (row == 1) {
+            UITableViewCell *cell = [self cell:@"live-log" style:UITableViewCellStyleSubtitle];
+            cell.textLabel.text = @"Logs";
+            cell.detailTextLabel.text = @"application events, warnings, and errors";
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            return cell;
+        }
         UITableViewCell *cell = [self cell:@"diagnostics" style:UITableViewCellStyleDefault];
         cell.textLabel.text = @"Performance Overlay";
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
@@ -157,6 +165,10 @@ static const NSInteger kRBClearDataAlert = 4101;
     if (indexPath.section == RBSettingsBrowsingSection && indexPath.row == 0 && self.connected &&
         [self.delegate respondsToSelector:@selector(settingsWantsMediaControls:)]) {
         [self.delegate settingsWantsMediaControls:self];
+        return;
+    }
+    if (indexPath.section == RBSettingsDiagnosticsSection && indexPath.row == 1) {
+        [self.navigationController pushViewController:[[RBLogViewController alloc] init] animated:YES];
         return;
     }
     if (indexPath.section == RBSettingsDataSection && self.connected) {

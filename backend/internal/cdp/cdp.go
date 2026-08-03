@@ -83,6 +83,22 @@ type LaunchConfig struct {
 	ExtraArgs      []string
 }
 
+// Environment returns browser-only variables needed by optional graphics
+// bridges. VirGL uses Mesa's software loader to select virpipe; rendering is
+// still executed remotely by the Android VirGL server on ANGLE/Vulkan/Mali.
+func (cfg LaunchConfig) Environment() []string {
+	env := append([]string(nil), cfg.Env...)
+	if cfg.VirGL {
+		env = append(env,
+			"GALLIUM_DRIVER=virpipe",
+			"LIBGL_ALWAYS_SOFTWARE=true",
+			"MESA_GL_VERSION_OVERRIDE=4.1COMPAT",
+			"MESA_GLSL_VERSION_OVERRIDE=410",
+		)
+	}
+	return env
+}
+
 // Args builds the managed Chrome headless-new launch flags.
 func (cfg LaunchConfig) Args() []string {
 	args := []string{
@@ -158,7 +174,7 @@ func Launch(cfg LaunchConfig) (*Client, *os.Process, error) {
 	// instance to an older Chromium that happens to use the same profile.
 	previousEndpoint := readActivePortState(cfg.Profile)
 	started, err := process.Start(cfg.ChromePath, cfg.Args(), process.Options{
-		Env:    append(os.Environ(), cfg.Env...),
+		Env:    append(os.Environ(), cfg.Environment()...),
 		Stderr: true,
 	})
 	if err != nil {

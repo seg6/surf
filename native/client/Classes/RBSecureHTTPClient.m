@@ -1,8 +1,10 @@
 #import "RBSecureHTTPClient.h"
+#import "RBServerStore.h"
 #import <CommonCrypto/CommonDigest.h>
 #import <Security/SecureTransport.h>
 #import <arpa/inet.h>
 #import <errno.h>
+#import <fcntl.h>
 #import <netdb.h>
 #import <netinet/in.h>
 #import <sys/socket.h>
@@ -15,7 +17,12 @@ static NSMutableDictionary *RBDeviceSessionCookies;
 
 typedef struct {
     int fd;
+    CFAbsoluteTime deadline;
 } RBTLSConnection;
+
+static BOOL RBTLSDeadlineExpired(RBTLSConnection *transport) {
+    return transport->deadline > 0 && CFAbsoluteTimeGetCurrent() >= transport->deadline;
+}
 
 static NSError *RBTLSError(NSInteger code, NSString *message) {
     return [NSError errorWithDomain:RBTLSErrorDomain code:code
@@ -34,7 +41,7 @@ static OSStatus RBTLSReadCallback(SSLConnectionRef connection, void *data, size_
     }
     *dataLength = 0;
     if (count == 0) return errSSLClosedGraceful;
-    if (errno == EAGAIN || errno == EWOULDBLOCK) return errSSLWouldBlock;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) return RBTLSDeadlineExpired(transport) ? errSecIO : errSSLWouldBlock;
     return errSecIO;
 }
 
@@ -49,7 +56,7 @@ static OSStatus RBTLSWriteCallback(SSLConnectionRef connection, const void *data
         return (size_t)count == requested ? noErr : errSSLWouldBlock;
     }
     *dataLength = 0;
-    if (errno == EAGAIN || errno == EWOULDBLOCK) return errSSLWouldBlock;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) return RBTLSDeadlineExpired(transport) ? errSecIO : errSSLWouldBlock;
     return errSecIO;
 }
 
@@ -66,7 +73,7 @@ static int RBConnectSocket(NSString *host, NSInteger port, NSTimeInterval timeou
         fd = socket(address->ai_family, address->ai_socktype, address->ai_protocol);
         if (fd < 0) continue;
         struct timeval value;
-        value.tv_sec = MAX(1, (int)timeout);
+        value.tv_sec = 1;
         value.tv_usec = 0;
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &value, sizeof(value));
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &value, sizeof(value));
@@ -74,7 +81,29 @@ static int RBConnectSocket(NSString *host, NSInteger port, NSTimeInterval timeou
         int one = 1;
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
 #endif
-        if (connect(fd, address->ai_addr, address->ai_addrlen) == 0) break;
+        int flags = fcntl(fd, F_GETFL, 0);
+        if (flags >= 0) fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+        int connected = connect(fd, address->ai_addr, address->ai_addrlen);
+        if (connected < 0 && errno == EINPROGRESS) {
+            fd_set writable;
+            FD_ZERO(&writable);
+            FD_SET(fd, &writable);
+            struct timeval connectTimeout;
+            connectTimeout.tv_sec = MAX(1, (int)timeout);
+            connectTimeout.tv_usec = 0;
+            connected = select(fd + 1, NULL, &writable, NULL, &connectTimeout);
+            if (connected > 0) {
+                int socketError = 0;
+                socklen_t socketErrorLength = sizeof(socketError);
+                if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &socketError, &socketErrorLength) < 0 || socketError) connected = -1;
+            } else {
+                connected = -1;
+            }
+        }
+        if (connected == 0 || connected > 0) {
+            if (flags >= 0) fcntl(fd, F_SETFL, flags);
+            break;
+        }
         close(fd);
         fd = -1;
     }
@@ -140,6 +169,7 @@ static NSString *RBTrimHeaderValue(NSString *value) {
 @interface RBSecureHTTPClient ()
 @property(nonatomic, copy) NSString *expectedFingerprint;
 @property(nonatomic, assign) BOOL allowUntrusted;
+@property(nonatomic, assign) BOOL systemTrust;
 @property(nonatomic, copy, readwrite) NSString *observedFingerprint;
 @end
 
@@ -160,10 +190,15 @@ static NSString *RBTrimHeaderValue(NSString *value) {
 }
 
 - (id)initWithFingerprint:(NSString *)fingerprint allowUntrusted:(BOOL)allowUntrusted {
+    return [self initWithFingerprint:fingerprint allowUntrusted:allowUntrusted systemTrust:NO];
+}
+
+- (id)initWithFingerprint:(NSString *)fingerprint allowUntrusted:(BOOL)allowUntrusted systemTrust:(BOOL)systemTrust {
     self = [super init];
     if (self) {
         self.expectedFingerprint = [[fingerprint lowercaseString] copy];
         self.allowUntrusted = allowUntrusted;
+        self.systemTrust = systemTrust;
     }
     return self;
 }
@@ -181,6 +216,59 @@ static NSString *RBTrimHeaderValue(NSString *value) {
     return result;
 }
 
++ (BOOL)endpoint:(NSString *)endpoint usesTunnelInServer:(NSDictionary *)server {
+    id values = [server objectForKey:@"tunnelEndpoints"];
+    return [endpoint length] && [values isKindOfClass:[NSArray class]] && [values containsObject:endpoint];
+}
+
++ (RBSecureHTTPClient *)clientForServer:(NSDictionary *)server {
+    NSString *endpoint = [server objectForKey:@"lastEndpoint"];
+    return [[RBSecureHTTPClient alloc] initWithFingerprint:[server objectForKey:@"fingerprint"]
+                                            allowUntrusted:NO
+                                                systemTrust:[self endpoint:endpoint usesTunnelInServer:server]];
+}
+
++ (RBSecureHTTPClient *)clientForEndpoint:(NSString *)endpoint fingerprint:(NSString *)fingerprint {
+    for (NSDictionary *server in [RBServerStore servers]) {
+        if (![[server objectForKey:@"fingerprint"] isEqualToString:fingerprint]) continue;
+        return [[RBSecureHTTPClient alloc] initWithFingerprint:fingerprint allowUntrusted:NO
+                                                   systemTrust:[self endpoint:endpoint usesTunnelInServer:server]];
+    }
+    return [[RBSecureHTTPClient alloc] initWithFingerprint:fingerprint allowUntrusted:NO];
+}
+
+- (NSData *)sendSystemTrustedRequest:(NSURLRequest *)request response:(NSHTTPURLResponse **)response error:(NSError **)error {
+    NSMutableURLRequest *systemRequest = [request mutableCopy];
+    [systemRequest setHTTPShouldHandleCookies:NO];
+    if ([self.expectedFingerprint length] && ![[systemRequest allHTTPHeaderFields] objectForKey:@"Cookie"]) {
+        NSString *cookie = nil;
+        @synchronized ([RBSecureHTTPClient class]) {
+            cookie = [RBDeviceSessionCookies objectForKey:self.expectedFingerprint];
+        }
+        if ([cookie length]) [systemRequest setValue:cookie forHTTPHeaderField:@"Cookie"];
+    }
+    NSURLResponse *rawResponse = nil;
+    NSData *data = [NSURLConnection sendSynchronousRequest:systemRequest returningResponse:&rawResponse error:error];
+    NSHTTPURLResponse *httpResponse = [rawResponse isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *)rawResponse : nil;
+    if (response) *response = httpResponse;
+    if (data && [self.expectedFingerprint length]) {
+        NSDictionary *headers = [httpResponse allHeaderFields];
+        for (NSHTTPCookie *cookie in [NSHTTPCookie cookiesWithResponseHeaderFields:headers forURL:[request URL]]) {
+            if (![[cookie name] isEqualToString:RBDeviceSessionCookieName]) continue;
+            NSDate *expires = [cookie expiresDate];
+            @synchronized ([RBSecureHTTPClient class]) {
+                if (![[cookie value] length] || (expires && [expires timeIntervalSinceNow] <= 0)) {
+                    [RBDeviceSessionCookies removeObjectForKey:self.expectedFingerprint];
+                } else {
+                    [RBDeviceSessionCookies setObject:[NSString stringWithFormat:@"%@=%@", [cookie name], [cookie value]]
+                                                forKey:self.expectedFingerprint];
+                }
+            }
+        }
+    }
+    return data;
+}
+
 - (BOOL)handshake:(SSLContextRef)context error:(NSError **)error {
     BOOL checkedIdentity = NO;
     for (;;) {
@@ -192,9 +280,13 @@ static NSString *RBTrimHeaderValue(NSString *value) {
                 return NO;
             }
             self.observedFingerprint = [RBSecureHTTPClient fingerprintForTrust:trust];
+            SecTrustResultType trustResult = kSecTrustResultInvalid;
+            OSStatus trustStatus = self.systemTrust ? SecTrustEvaluate(trust, &trustResult) : noErr;
             CFRelease(trust);
+            BOOL trustedBySystem = trustStatus == noErr &&
+                (trustResult == kSecTrustResultProceed || trustResult == kSecTrustResultUnspecified);
             checkedIdentity = [self.observedFingerprint length] &&
-                (self.allowUntrusted || [self.observedFingerprint isEqualToString:self.expectedFingerprint]);
+                (self.allowUntrusted || trustedBySystem || [self.observedFingerprint isEqualToString:self.expectedFingerprint]);
             if (!checkedIdentity) {
                 if (error) *error = RBTLSError(2, @"Server Identity Changed");
                 return NO;
@@ -210,10 +302,15 @@ static NSString *RBTrimHeaderValue(NSString *value) {
             SecTrustRef trust = NULL;
             if (SSLCopyPeerTrust(context, &trust) == noErr && trust) {
                 self.observedFingerprint = [RBSecureHTTPClient fingerprintForTrust:trust];
+                SecTrustResultType trustResult = kSecTrustResultInvalid;
+                OSStatus trustStatus = self.systemTrust ? SecTrustEvaluate(trust, &trustResult) : noErr;
+                BOOL trustedBySystem = trustStatus == noErr &&
+                    (trustResult == kSecTrustResultProceed || trustResult == kSecTrustResultUnspecified);
                 CFRelease(trust);
+                if (self.systemTrust && !trustedBySystem) self.observedFingerprint = nil;
             }
             checkedIdentity = [self.observedFingerprint length] &&
-                (self.allowUntrusted || [self.observedFingerprint isEqualToString:self.expectedFingerprint]);
+                (self.allowUntrusted || self.systemTrust || [self.observedFingerprint isEqualToString:self.expectedFingerprint]);
         }
         if (!checkedIdentity) {
             if (error) *error = RBTLSError(2, @"Server Identity Changed");
@@ -314,13 +411,14 @@ static NSString *RBTrimHeaderValue(NSString *value) {
         if (error) *error = RBTLSError(1, @"Surf requires an HTTPS server address");
         return nil;
     }
+    if (self.systemTrust) return [self sendSystemTrustedRequest:request response:response error:error];
     NSInteger port = [[url port] integerValue] ?: 443;
     int fd = RBConnectSocket([url host], port, MAX(1.0, [request timeoutInterval]));
     if (fd < 0) { if (error) *error = RBTLSError(3, @"Could not connect to the Surf server"); return nil; }
 
     SSLContextRef context = SSLCreateContext(kCFAllocatorDefault, kSSLClientSide, kSSLStreamType);
     if (!context) { close(fd); if (error) *error = RBTLSError(4, @"Could not create TLS context"); return nil; }
-    RBTLSConnection transport = { fd };
+    RBTLSConnection transport = { fd, CFAbsoluteTimeGetCurrent() + MAX(1.0, [request timeoutInterval]) };
     OSStatus ioStatus = SSLSetIOFuncs(context, RBTLSReadCallback, RBTLSWriteCallback);
     OSStatus connectionStatus = SSLSetConnection(context, &transport);
     OSStatus peerStatus = SSLSetPeerDomainName(context, [[url host] UTF8String], strlen([[url host] UTF8String]));

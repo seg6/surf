@@ -34,7 +34,8 @@
     self.videoAUs = 0;
     self.expectedAUSequence = 0;
     self.videoActive = YES;
-    RBLog(@"video: lane up %dx%d", self.decoder.codedWidth, self.decoder.codedHeight);
+    RBLogEvent(@"media", @"info", @{@"lane": @"video", @"state": @"ready",
+               @"coded_width": @(self.decoder.codedWidth), @"coded_height": @(self.decoder.codedHeight)}, @"Video lane ready");
 }
 
 - (void)stopVideo {
@@ -53,7 +54,7 @@
     NSString *error = nil;
     RBFrame *frame = [RBProtocol frameFromData:data error:&error];
     if (!frame) {
-        RBLog(@"bad frame: %@", error);
+        RBLogEvent(@"protocol", @"error", @{@"error": error ?: @""}, @"Invalid media frame received");
         return;
     }
     if (frame.type == 3) {
@@ -66,7 +67,8 @@
             self.decoder.codedHeight = frame.height;
             [self.decoder reset];
             self.videoAUs = 0;
-            RBLog(@"video: coded size changed to %dx%d", self.decoder.codedWidth, self.decoder.codedHeight);
+            RBLogEvent(@"media", @"info", @{@"coded_width": @(self.decoder.codedWidth),
+                       @"coded_height": @(self.decoder.codedHeight)}, @"Video coded size changed");
         }
         self.videoAUs++;
         [self.decoder feedAU:frame.payload idr:(frame.flags & 1) != 0

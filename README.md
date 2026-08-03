@@ -145,6 +145,19 @@ Surf port, not Caddy, Cloudflare, a public certificate, or a certificate
 installed on the iOS device. Set `SURF_PUBLIC_ADDRESS=host:port` when a
 headless VPS should include its public endpoint in pairing codes.
 
+For roaming behind Cloudflare Tunnel, route a public hostname to Surf's HTTPS
+listener and set both variables:
+
+```sh
+SURF_PUBLIC_ADDRESS=surf-roam.example.net:443 \
+SURF_TUNNEL_HOST=surf-roam.example.net \
+./surf daemon
+```
+
+The client opens a Cloudflare WebSocket and carries Surf's original pinned TLS
+session inside it. Cloudflare provides reachability but cannot decrypt the
+browser stream. Keep a direct LAN endpoint saved for the lowest local latency.
+
 After pairing, every saved server is identified by its exact certificate pin
 and a per-server device key in the iOS Keychain. See the concise
 [security model](docs/security.md) for the pairing, MITM, revocation, and

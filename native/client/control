@@ -1,6 +1,6 @@
 Package: space.seg6.surf
 Name: Surf
-Version: 0.10.7
+Version: 0.11.0
 Architecture: iphoneos-arm
 Description: Native Surf browser client
 Maintainer: seg6 <hi@seg6.space>

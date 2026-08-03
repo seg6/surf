@@ -1,6 +1,7 @@
 #import "RBSocket.h"
 #import "RBLog.h"
 #import "RBSecureHTTPClient.h"
+#import "RBTunnelPipe.h"
 
 #import <CFNetwork/CFSocketStream.h>
 #import <CommonCrypto/CommonDigest.h>
@@ -146,7 +147,11 @@ static BOOL RBReadAll(int fd, void *buf, NSUInteger len) {
 @property(nonatomic, copy) NSString *path;
 @property(nonatomic, assign) NSInteger port;
 @property(nonatomic, assign) BOOL secure;
+@property(nonatomic, assign) BOOL systemTrust;
 @property(nonatomic, copy) NSString *expectedFingerprint;
+@property(nonatomic, copy) NSString *tunnelHost;
+@property(nonatomic, assign) NSInteger tunnelPort;
+@property(nonatomic, strong) RBTunnelPipe *tunnelPipe;
 @property(nonatomic, assign) int fd;
 @property(nonatomic, assign) BOOL running;
 @property(nonatomic, assign) BOOL connectStarted;
@@ -195,17 +200,31 @@ static OSStatus RBSocketTLSWrite(SSLConnectionRef connection, const void *data, 
 - (int)socketFileDescriptor { return self.fd; }
 
 - (id)initWithHost:(NSString *)host port:(NSInteger)port path:(NSString *)path secure:(BOOL)secure fingerprint:(NSString *)fingerprint {
+    return [self initWithHost:host port:port path:path secure:secure fingerprint:fingerprint systemTrust:NO];
+}
+
+- (id)initWithHost:(NSString *)host port:(NSInteger)port path:(NSString *)path secure:(BOOL)secure fingerprint:(NSString *)fingerprint systemTrust:(BOOL)systemTrust {
     self = [super init];
     if (self) {
         self.host = host;
         self.port = port;
         self.path = path;
         self.secure = secure;
+        self.systemTrust = systemTrust;
         self.expectedFingerprint = [fingerprint lowercaseString];
         self.fd = -1;
         self.writeLock = [[NSLock alloc] init];
         self.tlsLock = [[NSLock alloc] init];
         self.writeQueue = dispatch_queue_create("surf.socket.write", DISPATCH_QUEUE_SERIAL);
+    }
+    return self;
+}
+
+- (id)initWithHost:(NSString *)host port:(NSInteger)port path:(NSString *)path secure:(BOOL)secure fingerprint:(NSString *)fingerprint tunnelHost:(NSString *)tunnelHost tunnelPort:(NSInteger)tunnelPort {
+    self = [self initWithHost:host port:port path:path secure:secure fingerprint:fingerprint systemTrust:NO];
+    if (self) {
+        self.tunnelHost = tunnelHost;
+        self.tunnelPort = tunnelPort;
     }
     return self;
 }
@@ -252,6 +271,8 @@ static OSStatus RBSocketTLSWrite(SSLConnectionRef connection, const void *data, 
         self.tlsContext = NULL;
     }
     if (self.fd >= 0) { close(self.fd); self.fd = -1; }
+    [self.tunnelPipe close];
+    self.tunnelPipe = nil;
     [self.tlsLock unlock];
 }
 
@@ -319,11 +340,22 @@ static OSStatus RBSocketTLSWrite(SSLConnectionRef connection, const void *data, 
         return NO;
     }
     NSString *safePath = [[self.path componentsSeparatedByString:@"?"] objectAtIndex:0];
-    RBLog(@"websocket open %@%@:%d%@", self.secure ? @"tls " : @"", self.host, (int)self.port, safePath);
+    RBLogEvent(@"socket", @"info", @{@"secure": @(self.secure), @"host": self.host ?: @"", @"port": @(self.port), @"path": safePath ?: @""}, @"WebSocket opened");
     return YES;
 }
 
 - (BOOL)openTCP:(NSString **)error {
+    if ([self.tunnelHost length]) {
+        self.tunnelPipe = [[RBTunnelPipe alloc] initWithHost:self.tunnelHost port:self.tunnelPort];
+        int tunneledFD = [self.tunnelPipe open:error];
+        if (tunneledFD < 0) {
+            self.tunnelPipe = nil;
+            return NO;
+        }
+        self.fd = tunneledFD;
+        RBSetSocketOptions(self.fd);
+        return YES;
+    }
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
     hints.ai_socktype = SOCK_STREAM;
@@ -406,8 +438,13 @@ static OSStatus RBSocketTLSWrite(SSLConnectionRef connection, const void *data, 
             SecTrustRef trust = NULL;
             if (SSLCopyPeerTrust(context, &trust) == noErr && trust) {
                 NSString *fingerprint = [RBSecureHTTPClient fingerprintForTrust:trust];
+                SecTrustResultType trustResult = kSecTrustResultInvalid;
+                OSStatus trustStatus = self.systemTrust ? SecTrustEvaluate(trust, &trustResult) : noErr;
                 CFRelease(trust);
-                checkedIdentity = [self.expectedFingerprint length] && [fingerprint isEqualToString:self.expectedFingerprint];
+                BOOL trustedBySystem = trustStatus == noErr &&
+                    (trustResult == kSecTrustResultProceed || trustResult == kSecTrustResultUnspecified);
+                checkedIdentity = self.systemTrust ? trustedBySystem :
+                    ([self.expectedFingerprint length] && [fingerprint isEqualToString:self.expectedFingerprint]);
             }
             if (!checkedIdentity) {
                 if (error) *error = @"Server Identity Changed";
@@ -586,6 +623,10 @@ static OSStatus RBSocketTLSWrite(SSLConnectionRef connection, const void *data, 
     if (data) [self sendFrameOpcode:0x1 payload:data async:YES];
 }
 
+- (void)sendBinary:(NSData *)data {
+    if (data) [self sendFrameOpcode:0x2 payload:data async:NO];
+}
+
 - (void)sendFrameOpcode:(unsigned char)opcode payload:(NSData *)payload {
 	[self sendFrameOpcode:opcode payload:payload async:NO];
 }
@@ -597,7 +638,7 @@ static OSStatus RBSocketTLSWrite(SSLConnectionRef connection, const void *data, 
         CFTimeInterval enqueuedAt = CACurrentMediaTime();
         dispatch_async(self.writeQueue, ^{
             double dwellMS = (CACurrentMediaTime() - enqueuedAt) * 1000.0;
-            if (dwellMS >= 10.0) RBLog(@"socket control queue dwell %.1fms", dwellMS);
+            if (dwellMS >= 10.0) RBLogEvent(@"socket", @"warn", @{@"queue": @"control", @"dwell_ms": @(dwellMS)}, @"Socket queue dwell exceeded threshold");
             [self sendFrameOpcode:opcode payload:payloadCopy async:NO];
         });
         return;

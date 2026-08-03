@@ -339,7 +339,7 @@ static unsigned char RBClampByte(int value) {
     glBindRenderbuffer(GL_RENDERBUFFER, _renderbuffer);
     BOOL presented = drawError == GL_NO_ERROR &&
         [self.glContext presentRenderbuffer:GL_RENDERBUFFER];
-    if (!presented) RBLog(@"video: OpenGL draw failed error=0x%x", drawError);
+    if (!presented) RBLogEvent(@"presentation", @"error", @{@"gl_error": @(drawError)}, @"OpenGL presentation failed");
     CFRelease(yTexture);
     CFRelease(uvTexture);
     CVOpenGLESTextureCacheFlush(_textureCache, 0);

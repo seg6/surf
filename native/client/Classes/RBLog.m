@@ -14,9 +14,115 @@ static NSDateFormatter *RBLogDateFormatter;
 static NSFileHandle *RBLogHandle;
 static unsigned long long RBLogSize;
 
+static NSString *RBMigratedLevelForMessage(NSString *message) {
+    NSString *lower = [message lowercaseString], *level = @"info";
+    if ([lower rangeOfString:@"error"].location != NSNotFound ||
+        [lower rangeOfString:@"failed"].location != NSNotFound ||
+        [lower rangeOfString:@"rejected"].location != NSNotFound ||
+        [lower rangeOfString:@"fatal"].location != NSNotFound) level = @"error";
+    else if ([lower rangeOfString:@"warning"].location != NSNotFound ||
+             [lower rangeOfString:@"timeout"].location != NSNotFound ||
+             [lower rangeOfString:@"stalled"].location != NSNotFound ||
+             [lower rangeOfString:@"drop"].location != NSNotFound) level = @"warn";
+    return level;
+}
+
+static NSString *RBMigratedComponentForMessage(NSString *message) {
+    NSRange colon = [message rangeOfString:@":"];
+    if (colon.location != NSNotFound && colon.location > 0 && colon.location <= 24) {
+        return [[message substringToIndex:colon.location] lowercaseString];
+    }
+    NSArray *words = [message componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    NSString *first = [words count] ? [words objectAtIndex:0] : nil;
+    return [first length] && [first length] <= 18 ? [first lowercaseString] : @"app";
+}
+
+static id RBMigratedTypedFieldValue(NSString *value) {
+    if ([value isEqualToString:@"true"] || [value isEqualToString:@"yes"]) return @YES;
+    if ([value isEqualToString:@"false"] || [value isEqualToString:@"no"]) return @NO;
+    NSScanner *integerScanner = [NSScanner scannerWithString:value];
+    long long integer = 0;
+    if ([integerScanner scanLongLong:&integer] && [integerScanner isAtEnd]) return @(integer);
+    NSScanner *doubleScanner = [NSScanner scannerWithString:value];
+    double number = 0;
+    if ([doubleScanner scanDouble:&number] && [doubleScanner isAtEnd]) return @(number);
+    return value;
+}
+
+static NSDictionary *RBMigratedFieldsForMessage(NSString *message) {
+    NSMutableDictionary *fields = [NSMutableDictionary dictionary];
+    NSCharacterSet *validKey = [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"];
+    NSCharacterSet *trailing = [NSCharacterSet characterSetWithCharactersInString:@",;)"];
+    for (NSString *token in [message componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]) {
+        NSRange equals = [token rangeOfString:@"="];
+        if (equals.location == NSNotFound || equals.location == 0 || equals.location + 1 >= [token length]) continue;
+        NSString *key = [[token substringToIndex:equals.location] lowercaseString];
+        if ([key rangeOfCharacterFromSet:[validKey invertedSet]].location != NSNotFound) continue;
+        NSString *value = [token substringFromIndex:equals.location + 1];
+        while ([value length] && [trailing characterIsMember:[value characterAtIndex:[value length] - 1]]) {
+            value = [value substringToIndex:[value length] - 1];
+        }
+        if ([value length]) [fields setObject:RBMigratedTypedFieldValue(value) forKey:key];
+    }
+    return fields;
+}
+
+static NSData *RBJSONLine(NSDictionary *record) {
+    NSData *json = [NSJSONSerialization dataWithJSONObject:record options:0 error:nil];
+    if (!json) return nil;
+    NSMutableData *line = [json mutableCopy];
+    [line appendBytes:"\n" length:1];
+    return line;
+}
+
+static void RBMigrateLegacyLog(NSFileManager *fm) {
+    NSData *existing = [NSData dataWithContentsOfFile:RBLogFile];
+    if (![existing length]) return;
+    NSString *text = [[NSString alloc] initWithData:existing encoding:NSUTF8StringEncoding];
+    if (![text length]) return;
+    NSMutableData *migrated = [NSMutableData data];
+    BOOL changed = NO;
+    for (NSString *line in [text componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]]) {
+        if (![line length]) continue;
+        NSData *lineData = [line dataUsingEncoding:NSUTF8StringEncoding];
+        id decoded = [NSJSONSerialization JSONObjectWithData:lineData options:0 error:nil];
+        if ([decoded isKindOfClass:[NSDictionary class]]) {
+            [migrated appendData:lineData];
+            [migrated appendBytes:"\n" length:1];
+            continue;
+        }
+        changed = YES;
+        NSString *timestamp = nil, *message = line;
+        if ([line length] >= 24 && [line characterAtIndex:4] == '-' && [line characterAtIndex:10] == ' ') {
+            timestamp = [line substringToIndex:23];
+            message = [line substringFromIndex:24];
+        }
+        if (![timestamp length]) timestamp = [RBLogDateFormatter stringFromDate:[NSDate date]];
+        NSMutableDictionary *fields = [NSMutableDictionary dictionaryWithDictionary:RBMigratedFieldsForMessage(message)];
+        [fields setObject:@YES forKey:@"migrated"];
+        [fields setObject:@"legacy-text" forKey:@"format"];
+        NSDictionary *record = @{ @"ts": timestamp,
+                                  @"level": RBMigratedLevelForMessage(message),
+                                  @"component": RBMigratedComponentForMessage(message),
+                                  @"message": message,
+                                  @"fields": fields };
+        NSData *recordLine = RBJSONLine(record);
+        if (recordLine) [migrated appendData:recordLine];
+    }
+    if (!changed) return;
+    NSString *temporary = [RBLogFile stringByAppendingString:@".migrating"];
+    if ([migrated writeToFile:temporary atomically:YES]) {
+        [fm removeItemAtPath:RBLogFile error:nil];
+        [fm moveItemAtPath:temporary toPath:RBLogFile error:nil];
+    } else {
+        [fm removeItemAtPath:temporary error:nil];
+    }
+}
+
 static void RBOpenLog(void) {
     NSFileManager *fm = [NSFileManager defaultManager];
     [fm createDirectoryAtPath:RBLogDirectory withIntermediateDirectories:YES attributes:nil error:nil];
+    RBMigrateLegacyLog(fm);
     NSDictionary *attrs = [fm attributesOfItemAtPath:RBLogFile error:nil];
     RBLogSize = [[attrs objectForKey:NSFileSize] unsignedLongLongValue];
     if (RBLogSize > 1024 * 1024) {
@@ -48,21 +154,33 @@ NSString *RBCurrentLogPath(void) {
     return RBLogFile;
 }
 
-void RBLog(NSString *format, ...) {
-    if (!format) return;
-    va_list ap;
-    va_start(ap, format);
-    NSString *message = [[NSString alloc] initWithFormat:format arguments:ap];
-    va_end(ap);
+void RBClearLog(void) {
+    RBInitializeLog();
+    dispatch_async(RBLogQueue, ^{
+        [RBLogHandle closeFile];
+        RBLogHandle = nil;
+        [[NSFileManager defaultManager] removeItemAtPath:RBLogFile error:nil];
+        RBLogSize = 0;
+        RBOpenLog();
+    });
+}
 
-    // NSLog is intentionally omitted in release operation: it is synchronous
-    // on old iOS and made media error bursts contend with touch/display work.
+static void RBWriteRecord(NSString *component, NSString *level, NSDictionary *fields, NSString *message) {
     RBInitializeLog();
     dispatch_async(RBLogQueue, ^{
         if (!RBLogHandle) RBOpenLog();
-        NSString *line = [NSString stringWithFormat:@"%@ %@\n",
-                          [RBLogDateFormatter stringFromDate:[NSDate date]], message];
-        NSData *data = [line dataUsingEncoding:NSUTF8StringEncoding];
+        NSDictionary *record = @{@"ts": [RBLogDateFormatter stringFromDate:[NSDate date]],
+                                 @"level": level ?: @"info",
+                                 @"component": component ?: @"app",
+                                 @"message": message ?: @"",
+                                 @"fields": fields ?: @{}};
+        NSData *data = RBJSONLine(record);
+        if (!data) {
+            record = @{@"ts": [RBLogDateFormatter stringFromDate:[NSDate date]],
+                       @"level": @"error", @"component": @"logging",
+                       @"message": @"Could not encode structured log fields", @"fields": @{}};
+            data = RBJSONLine(record);
+        }
         if (RBLogSize + [data length] > 1024 * 1024) {
             [RBLogHandle closeFile];
             RBLogHandle = nil;
@@ -78,6 +196,17 @@ void RBLog(NSString *format, ...) {
     });
 }
 
+void RBLogEvent(NSString *component, NSString *level, NSDictionary *fields, NSString *format, ...) {
+    if (!format) return;
+    va_list ap;
+    va_start(ap, format);
+    NSString *message = [[NSString alloc] initWithFormat:format arguments:ap];
+    va_end(ap);
+    RBWriteRecord([component length] ? [component lowercaseString] : @"app",
+                  [level length] ? [level lowercaseString] : @"info",
+                  [fields isKindOfClass:[NSDictionary class]] ? fields : @{}, message);
+}
+
 static void RBWriteCrashLine(const char *line) {
     mkdir("/var/mobile/Library/Surf", 0755);
     int fd = open("/var/mobile/Library/Surf/surf.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
@@ -88,8 +217,8 @@ static void RBWriteCrashLine(const char *line) {
 }
 
 static void RBSignalHandler(int sig) {
-    char buf[96];
-    snprintf(buf, sizeof(buf), "fatal signal %d\n", sig);
+    char buf[256];
+    snprintf(buf, sizeof(buf), "{\"ts\":\"\",\"level\":\"error\",\"component\":\"crash\",\"message\":\"Fatal signal received\",\"fields\":{\"signal\":%d}}\n", sig);
     RBWriteCrashLine(buf);
     // Do not raise the signal from inside its handler. On iOS 6 that can
     // nominate an unrelated thread as the crash site and discard the useful
@@ -99,8 +228,10 @@ static void RBSignalHandler(int sig) {
 }
 
 static void RBExceptionHandler(NSException *exception) {
-    RBLog(@"uncaught exception: %@ %@", [exception name], [exception reason]);
-    RBLog(@"stack: %@", [[exception callStackSymbols] componentsJoinedByString:@" | "]);
+    RBLogEvent(@"crash", @"error", @{@"name": [exception name] ?: @"",
+               @"reason": [exception reason] ?: @"",
+               @"stack": [[exception callStackSymbols] componentsJoinedByString:@" | "] ?: @""},
+               @"Uncaught exception");
 }
 
 void RBInstallCrashHandlers(void) {
@@ -111,5 +242,5 @@ void RBInstallCrashHandlers(void) {
     signal(SIGSEGV, RBSignalHandler);
     signal(SIGBUS, RBSignalHandler);
     signal(SIGFPE, RBSignalHandler);
-    RBLog(@"crash/log handlers installed at %@", RBLogFile);
+    RBLogEvent(@"logging", @"info", @{@"path": RBLogFile ?: @""}, @"Crash and log handlers installed");
 }

@@ -39,14 +39,14 @@ static BOOL RBResolveVT(void) {
         void *handle = NULL;
         for (unsigned i = 0; i < 2 && !handle; i++) handle = dlopen(paths[i], RTLD_NOW);
         if (!handle) {
-            RBLog(@"video: VideoToolbox dlopen failed: %s", dlerror());
+            RBLogEvent(@"decoder", @"error", @{@"framework": @"VideoToolbox", @"error": [NSString stringWithUTF8String:dlerror() ?: ""]}, @"Framework loading failed");
             return;
         }
         rbVTCreate = (RBVTDecompressionSessionCreateFn)dlsym(handle, "VTDecompressionSessionCreate");
         rbVTDecode = (RBVTDecompressionSessionDecodeFrameFn)dlsym(handle, "VTDecompressionSessionDecodeFrame");
         rbVTInvalidate = (RBVTDecompressionSessionInvalidateFn)dlsym(handle, "VTDecompressionSessionInvalidate");
         ok = rbVTCreate && rbVTDecode && rbVTInvalidate;
-        RBLog(@"video: VideoToolbox %@", ok ? @"resolved" : @"missing symbols");
+        RBLogEvent(@"decoder", ok ? @"info" : @"error", @{@"framework": @"VideoToolbox", @"resolved": @(ok)}, @"Framework symbols checked");
     });
     return ok;
 }
@@ -224,7 +224,7 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
     self.resyncs++;
     self.waitingForIDR = YES;
     if (self.resyncs > kRBMaxResyncs) {
-        RBLog(@"video: %d resyncs in 30s, giving up on the lane", self.resyncs);
+        RBLogEvent(@"decoder", @"error", @{@"resyncs": @(self.resyncs), @"window_seconds": @30}, @"Decoder resync budget exhausted");
         self.failed = YES;
         [self teardownSession];
         dispatch_async(dispatch_get_main_queue(), ^{ [self.delegate videoDecoderDidFail:self]; });
@@ -265,7 +265,7 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
     CFRelease(atoms);
     CFRelease(avccData);
     if (status != noErr || !_format) {
-        RBLog(@"video: CMVideoFormatDescriptionCreate failed: %d", (int)status);
+        RBLogEvent(@"decoder", @"error", @{@"operation": @"create_format", @"status": @(status)}, @"Video format creation failed");
         return NO;
     }
 
@@ -287,7 +287,7 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
     status = rbVTCreate(NULL, _format, NULL, destAttrs, &record, &session);
     CFRelease(destAttrs);
     if (status != noErr || !session) {
-        RBLog(@"video: VTDecompressionSessionCreate failed: %d", (int)status);
+        RBLogEvent(@"decoder", @"error", @{@"operation": @"create_session", @"status": @(status)}, @"VideoToolbox session creation failed");
         CFRelease(_format);
         _format = NULL;
         return NO;
@@ -295,7 +295,7 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
     _session = session;
     self.currentSPS = sps;
     self.currentPPS = pps;
-    RBLog(@"video: VT session up (sps %u bytes, pps %u bytes)", (unsigned)info->sps_len, (unsigned)info->pps_len);
+    RBLogEvent(@"decoder", @"info", @{@"sps_bytes": @(info->sps_len), @"pps_bytes": @(info->pps_len)}, @"VideoToolbox session ready");
     return YES;
 }
 
@@ -376,7 +376,7 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
     if (status == kVTInvalidSessionErr) {
         // Classic after app resume: session died under us. Rebuild at the
         // next IDR (repeat-headers guarantees fresh SPS/PPS there).
-        RBLog(@"video: VT session invalidated, rebuilding at next IDR");
+        RBLogEvent(@"decoder", @"warn", @{@"recovery": @"next_idr"}, @"VideoToolbox session invalidated");
         [self teardownSession];
         self.currentSPS = nil;
         self.currentPPS = nil;

@@ -137,6 +137,8 @@ browser profile remain in place.
 
 ## Collect logs
 
-Desktop logs are available from the Surf tray Settings page. The native client
-writes `/var/mobile/Library/Surf/surf.log`; avoid publishing complete logs until
-you have checked them for visited URLs and device names.
+Desktop logs are available from the Surf tray Settings page. On iOS, open
+**Settings > Diagnostics > Logs** for color-coded structured events, expandable
+typed fields, live updates, copy, and clear controls. The bounded NDJSON store
+is `/var/mobile/Library/Surf/surf.log`; Surf excludes credentials, tickets,
+query strings, and full URLs, but review exported logs before publishing them.

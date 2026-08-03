@@ -15,6 +15,7 @@ extern NSString *const RBLastServerIDDefaultsKey;
 + (void)forgetServerID:(NSString *)serverID;
 + (void)renameServerID:(NSString *)serverID name:(NSString *)name;
 + (BOOL)addVerifiedEndpoint:(NSString *)endpoint toServerID:(NSString *)serverID;
++ (BOOL)addVerifiedEndpoint:(NSString *)endpoint transport:(NSString *)transport toServerID:(NSString *)serverID;
 + (NSString *)normalizeEndpoint:(NSString *)value;
 
 @end

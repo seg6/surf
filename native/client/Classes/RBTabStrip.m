@@ -260,7 +260,7 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
     NSString *fingerprint = self.fingerprint;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSURLRequest *request = [NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReturnCacheDataElseLoad timeoutInterval:15.0];
-        RBSecureHTTPClient *client = [[RBSecureHTTPClient alloc] initWithFingerprint:fingerprint allowUntrusted:NO];
+        RBSecureHTTPClient *client = [RBSecureHTTPClient clientForEndpoint:[self.baseURL absoluteString] fingerprint:fingerprint];
         NSHTTPURLResponse *response = nil; NSError *error = nil;
         NSData *data = [client sendRequest:request response:&response error:&error];
         UIImage *image = !error && [response statusCode] == 200 ? [UIImage imageWithData:data] : nil;

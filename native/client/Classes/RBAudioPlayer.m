@@ -63,16 +63,16 @@ static void RBAudioQueueCallback(void *userData, AudioQueueRef queue, AudioQueue
 
     OSStatus st = AudioQueueNewOutput(&fmt, RBAudioQueueCallback, (__bridge void *)self, NULL, NULL, 0, &_queue);
     if (st != noErr || !self.queue) {
-        RBLog(@"audio: AudioQueueNewOutput failed %ld", (long)st);
+        RBLogEvent(@"audio", @"error", @{@"operation": @"create_queue", @"status": @(st)}, @"Audio queue creation failed");
         self.queue = NULL;
         return;
     }
     for (int i = 0; i < RBAudioBufferCount; i++) {
         st = AudioQueueAllocateBuffer(self.queue, 4096, &_buffers[i]);
         _bufferFree[i] = st == noErr;
-        if (st != noErr) RBLog(@"audio: allocate buffer failed %ld", (long)st);
+        if (st != noErr) RBLogEvent(@"audio", @"error", @{@"operation": @"allocate_buffer", @"buffer_index": @(i), @"status": @(st)}, @"Audio buffer allocation failed");
     }
-    RBLog(@"audio: queue configured %dHz ch=%d", sampleRate, channels);
+    RBLogEvent(@"audio", @"info", @{@"sample_rate": @(sampleRate), @"channels": @(channels)}, @"Audio queue configured");
 }
 
 - (BOOL)fillBufferLocked:(AudioQueueBufferRef)buffer allowSilence:(BOOL)allowSilence {
@@ -176,7 +176,7 @@ static void RBAudioQueueCallback(void *userData, AudioQueueRef queue, AudioQueue
         if (st == noErr) {
             self.restartCount++;
         } else {
-            RBLog(@"audio: start failed %ld", (long)st);
+            RBLogEvent(@"audio", @"error", @{@"operation": @"start", @"status": @(st)}, @"Audio queue start failed");
             [self resetForFreshAudio];
         }
     }
@@ -205,7 +205,7 @@ static void RBAudioQueueCallback(void *userData, AudioQueueRef queue, AudioQueue
     if (q) {
         AudioQueueStop(q, true);
         AudioQueueDispose(q, true);
-        RBLog(@"audio: queue stopped");
+        RBLogEvent(@"audio", @"info", @{@"state": @"stopped"}, @"Audio queue stopped");
     }
 }
 

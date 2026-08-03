@@ -67,6 +67,7 @@ func (b *Controller) onVideoFrame(frame media.VideoFrame) {
 		return
 	}
 	b.noteEncodedAU(frame.Fresh)
+	b.noteCaptureStages(frame)
 	telemetry.Emit("encoded_au_received", "capture", "webcodecs", map[string]any{
 		"fresh": frame.Fresh, "capture_sequence": frame.SourceSeq,
 	})

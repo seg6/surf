@@ -2,6 +2,28 @@
 
 This file records the user-visible changes in every Surf release.
 
+## 0.11.0 - 2026-08-03
+
+- Added roaming through Cloudflare Tunnel while retaining Surf's existing
+  certificate-pinned TLS session end to end inside an opaque WebSocket bridge.
+- Kept direct LAN endpoints unchanged and stored transport per endpoint, so a
+  paired server can use low-latency LAN access nearby and roaming elsewhere.
+- Added bounded tunnel capacity, binary-only framing, idle deadlines, and
+  byte-integrity coverage without exposing arbitrary loopback services.
+- Made roaming-address verification deadline-bound and routed public HTTPS
+  discovery through Apple's system networking stack while retaining custom
+  certificate pinning for direct Surf endpoints and the inner tunnel session.
+- Rebuilt the on-device application log as a structured event system with
+  explicit severity, component, message, and typed fields for every event.
+- Added a readable, color-coded Logs screen grouped by date, with expandable
+  event details, field inspection, copy, clear, and live auto-follow controls.
+- Migrated existing text log history to structured NDJSON while preserving its
+  timestamps and messages, and removed the legacy runtime logging API.
+- Displayed address-verification progress and actionable DNS, TLS, transport,
+  and identity failures directly on the visible Server Details screen.
+- Excluded credentials, query strings, pairing tickets, and full URLs from
+  structured diagnostics.
+
 ## 0.10.7 - 2026-08-01
 
 - Made native browser-identity discovery reliable on slower ARM64 hosts by

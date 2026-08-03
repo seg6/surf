@@ -13,7 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const videoHeaderBytes = 20
+const videoHeaderBytes = 32
 
 type EncoderConfig struct {
 	Codec     string `json:"codec"`
@@ -24,12 +24,15 @@ type EncoderConfig struct {
 }
 
 type VideoFrame struct {
-	Data      []byte
-	Key       bool
-	Fresh     bool
-	SourceSeq uint32
-	Width     int
-	Height    int
+	Data       []byte
+	Key        bool
+	Fresh      bool
+	SourceSeq  uint32
+	Width      int
+	Height     int
+	RawGap     time.Duration
+	SubmitWait time.Duration
+	EncodeTime time.Duration
 }
 
 func (s *Capture) StartVideo(config EncoderConfig, handler func(VideoFrame)) error {
@@ -248,12 +251,15 @@ func (s *Capture) handleVideoFrame(message []byte) {
 		return
 	}
 	frame := VideoFrame{
-		Data:      append([]byte(nil), message[headerBytes:]...),
-		Key:       message[4]&1 != 0,
-		Fresh:     message[4]&2 != 0,
-		SourceSeq: binary.BigEndian.Uint32(message[16:20]),
-		Width:     int(binary.BigEndian.Uint16(message[8:10])),
-		Height:    int(binary.BigEndian.Uint16(message[10:12])),
+		Data:       append([]byte(nil), message[headerBytes:]...),
+		Key:        message[4]&1 != 0,
+		Fresh:      message[4]&2 != 0,
+		SourceSeq:  binary.BigEndian.Uint32(message[16:20]),
+		Width:      int(binary.BigEndian.Uint16(message[8:10])),
+		Height:     int(binary.BigEndian.Uint16(message[10:12])),
+		RawGap:     time.Duration(binary.BigEndian.Uint32(message[20:24])) * time.Microsecond,
+		SubmitWait: time.Duration(binary.BigEndian.Uint32(message[24:28])) * time.Microsecond,
+		EncodeTime: time.Duration(binary.BigEndian.Uint32(message[28:32])) * time.Microsecond,
 	}
 	s.mu.Lock()
 	handler, active := s.videoHandler, s.videoActive

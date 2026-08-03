@@ -18,6 +18,8 @@ let videoLastKeyTimestamp = null;
 let videoOutputReported = false;
 let videoLatestFrame = null;
 let videoLatestSourceSequence = 0;
+let videoLatestFrameRawAt = 0;
+let videoLatestFrameRawGapMS = 0;
 let videoPendingFrames = [];
 let videoPumpWake = null;
 
@@ -174,21 +176,27 @@ function connectVideoSocket() {
   return videoSocketPromise;
 }
 
-function encodedVideoMessage(chunk, config, source) {
+function encodedVideoMessage(chunk, config, source, outputAt) {
   const payload = new Uint8Array(chunk.byteLength);
   chunk.copyTo(payload);
-  const message = new ArrayBuffer(20 + payload.byteLength);
+  const message = new ArrayBuffer(32 + payload.byteLength);
   const bytes = new Uint8Array(message);
   bytes.set([0x53, 0x56, 0x49, 0x32], 0); // SVI2
   const view = new DataView(message);
   view.setUint8(4, (chunk.type === "key" ? 1 : 0) |
     (source.fresh ? 2 : 0));
-  view.setUint16(6, 20, false);
+  view.setUint16(6, 32, false);
   view.setUint16(8, config.width, false);
   view.setUint16(10, config.height, false);
   view.setUint32(12, payload.byteLength, false);
   view.setUint32(16, source.sequence, false);
-  bytes.set(payload, 20);
+  view.setUint32(20, Math.min(0xffffffff,
+    Math.max(0, Math.round(source.rawGapMS * 1000))), false);
+  view.setUint32(24, Math.min(0xffffffff,
+    Math.max(0, Math.round((source.submitAt - source.rawAt) * 1000))), false);
+  view.setUint32(28, Math.min(0xffffffff,
+    Math.max(0, Math.round((outputAt - source.submitAt) * 1000))), false);
+  bytes.set(payload, 32);
   return message;
 }
 
@@ -304,7 +312,7 @@ async function startVideoEncoder(track) {
           });
         }
         activeSocket.send(encodedVideoMessage(
-          chunk, videoConfig, source));
+          chunk, videoConfig, source, performance.now()));
         // A newer source image may have replaced the mailbox while this AU
         // was encoding. Give it an immediate chance to enter the paced pump
         // now that the one-in-flight slot is available.
@@ -406,6 +414,9 @@ async function startVideoEncoder(track) {
     videoPendingFrames.push({
       sequence: sourceSequence,
       fresh,
+      rawAt: videoLatestFrameRawAt,
+      rawGapMS: videoLatestFrameRawGapMS,
+      submitAt: now,
     });
     try {
       const encodeOptions = {keyFrame};
@@ -435,6 +446,7 @@ async function startVideoEncoder(track) {
   videoPumpWake = scheduleVideoEncode;
 
   const readFrames = async () => {
+    let lastRawAt = 0;
     try {
       while (generation === videoGeneration) {
         const {value: frame, done} = await reader.read();
@@ -446,6 +458,10 @@ async function startVideoEncoder(track) {
           break;
         }
         videoLatestSourceSequence++;
+        const rawAt = performance.now();
+        videoLatestFrameRawAt = rawAt;
+        videoLatestFrameRawGapMS = lastRawAt === 0 ? 0 : rawAt - lastRawAt;
+        lastRawAt = rawAt;
         const previous = videoLatestFrame;
         videoLatestFrame = frame;
         if (previous) {

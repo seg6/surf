@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"surf-backend/internal/cdp"
 	"surf-backend/internal/process"
@@ -198,11 +199,17 @@ func TestVideoFrameBridgeHeader(t *testing.T) {
 	binary.BigEndian.PutUint16(message[10:12], 950)
 	binary.BigEndian.PutUint32(message[12:16], uint32(len(payload)))
 	binary.BigEndian.PutUint32(message[16:20], 42)
+	binary.BigEndian.PutUint32(message[20:24], 33333)
+	binary.BigEndian.PutUint32(message[24:28], 1200)
+	binary.BigEndian.PutUint32(message[28:32], 8400)
 	copy(message[videoHeaderBytes:], payload)
 
 	source.handleVideoFrame(message)
 	if !got.Key || !got.Fresh || got.SourceSeq != 42 ||
 		got.Width != 768 || got.Height != 950 ||
+		got.RawGap != 33333*time.Microsecond ||
+		got.SubmitWait != 1200*time.Microsecond ||
+		got.EncodeTime != 8400*time.Microsecond ||
 		string(got.Data) != string(payload) {
 		t.Fatalf("decoded frame = %+v", got)
 	}

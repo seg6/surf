@@ -46,6 +46,7 @@ type Config struct {
 	ViewH         int
 	ServerName    string
 	PublicAddress string
+	TunnelHost    string
 	DownloadsDir  string
 	UploadsDir    string
 
@@ -125,6 +126,7 @@ func load() (*Config, error) {
 		ViewH:           viewH,
 		ServerName:      envStr("SURF_SERVER_NAME", "Surf"),
 		PublicAddress:   os.Getenv("SURF_PUBLIC_ADDRESS"),
+		TunnelHost:      strings.ToLower(strings.TrimSpace(os.Getenv("SURF_TUNNEL_HOST"))),
 		DownloadsDir:    envStr("DOWNLOADS", filepath.Join(home, "downloads")),
 		UploadsDir:      envStr("UPLOADS", filepath.Join(home, "uploads")),
 		ChromeNoSandbox: envBool("CHROME_NO_SANDBOX", os.Geteuid() == 0),

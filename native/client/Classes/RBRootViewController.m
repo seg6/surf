@@ -20,6 +20,7 @@
 #import "RBQRScannerController.h"
 #import "RBPageSwitcherController.h"
 #import "RBPairingController.h"
+#import "RBPairingClient.h"
 #import "RBPhoneToolbar.h"
 #import "RBSecureHTTPClient.h"
 #import "RBServerStore.h"
@@ -325,7 +326,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
 
     [NSTimer scheduledTimerWithTimeInterval:1.0 target:self selector:@selector(watchdogTick:) userInfo:nil repeats:YES];
 
-    RBLog(@"root view loaded, native %@", RBNativeVersion);
+    RBLogEvent(@"application", @"info", @{@"protocol": RBNativeVersion ?: @""}, @"Browser interface loaded");
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -648,20 +649,16 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
     NSUInteger generation = ++self.verificationGeneration;
     [controller setStatusText:@"Verifying the pinned server identity…" isError:NO];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSURL *url = [NSURL URLWithString:@"/api/v1/server" relativeToURL:[NSURL URLWithString:endpoint]];
-        NSURLRequest *request = [NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:20];
-        RBSecureHTTPClient *client = [[RBSecureHTTPClient alloc] initWithFingerprint:[server objectForKey:@"fingerprint"] allowUntrusted:NO];
-        NSHTTPURLResponse *response = nil; NSError *error = nil;
-        NSData *data = [client sendRequest:request response:&response error:&error];
-        NSDictionary *info = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
-        BOOL valid = [response statusCode] == 200 && [[info objectForKey:@"serverID"] isEqualToString:[server objectForKey:@"serverID"]];
+        NSError *error = nil;
+        NSDictionary *info = [RBPairingClient inspectEndpoint:endpoint error:&error];
+        BOOL valid = [[info objectForKey:@"serverID"] isEqualToString:[server objectForKey:@"serverID"]];
         dispatch_async(dispatch_get_main_queue(), ^{
             if (generation != self.verificationGeneration) return;
             if (!valid) {
                 [controller setStatusText:[error localizedDescription] ?: @"The server at this address no longer matches the saved identity." isError:YES];
                 return;
             }
-            [RBServerStore addVerifiedEndpoint:endpoint toServerID:[server objectForKey:@"serverID"]];
+            [RBServerStore addVerifiedEndpoint:endpoint transport:[info objectForKey:@"transport"] toServerID:[server objectForKey:@"serverID"]];
             NSDictionary *updated = [RBServerStore serverWithID:[server objectForKey:@"serverID"]];
             [controller reloadServers];
             [controller setStatusText:@"Address verified and saved." isError:NO];
@@ -907,7 +904,7 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
 }
 
 - (void)mediaPipelineDidFailVideo:(RBMediaPipeline *)pipeline {
-    RBLog(@"video: decoder gave up; explicit retry required");
+    RBLogEvent(@"media", @"error", @{@"lane": @"video", @"recovery": @"explicit_retry"}, @"Video decoder unavailable");
     [self leaveVideoMode];
     [self showVideoUnavailable:@"decoder-failed"];
 }
@@ -924,7 +921,7 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
 }
 
 - (void)session:(RBSession *)session status:(NSString *)status {
-    RBLog(@"session status: %@", status);
+    RBLogEvent(@"session", @"info", @{@"status": status ?: @""}, @"Session status changed");
 }
 
 // --------------------------------------------------------- incoming frames
@@ -987,10 +984,10 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
         if ([[message objectForKey:@"ok"] boolValue]) {
             [self.mediaPipeline configureAudioSampleRate:[[message objectForKey:@"rate"] intValue]
                                                 channels:[[message objectForKey:@"channels"] intValue]];
-            RBLog(@"audio: lane up");
+            RBLogEvent(@"media", @"info", @{@"lane": @"audio", @"state": @"ready"}, @"Audio lane ready");
         } else {
             [self.mediaPipeline stopAudio];
-            RBLog(@"audio: lane down");
+            RBLogEvent(@"media", @"info", @{@"lane": @"audio", @"state": @"stopped"}, @"Audio lane stopped");
         }
     } else if ([t isEqualToString:@"copytext"]) {
         NSString *text = [message objectForKey:@"text"] ?: @"";
@@ -1350,7 +1347,7 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
                    image:[RBTheme icon:icon size:48.0 color:[UIColor blackColor]]
                  handler:^{
         weakSelf.pendingActivityAction = action;
-        RBLog(@"activity selected %@", action);
+        RBLogEvent(@"activity", @"info", @{@"action": action ?: @""}, @"Page action selected");
     }];
 }
 
@@ -1450,7 +1447,7 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
 }
 
 - (void)handlePageAction:(NSString *)action {
-    RBLog(@"activity executing %@", action ?: @"(nil)");
+    RBLogEvent(@"activity", @"info", @{@"action": action ?: @""}, @"Page action executing");
     if ([action isEqualToString:@"forward"]) {
         [self.session sendMessage:@{@"t": @"fwd"}];
     } else if ([action isEqualToString:@"library"]) {
@@ -1939,15 +1936,17 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
     NSURL *url = [NSURL URLWithString:[@"/api/v1/downloads/" stringByAppendingString:escaped] relativeToURL:self.session.baseURL];
     if (!url) return;
     [self showToast:[NSString stringWithFormat:@"Fetching %@…", name]];
-    RBLog(@"download fetch GET %@", [url absoluteString]);
+    RBLogEvent(@"download", @"info", @{@"host": [url host] ?: @"", @"name": name ?: @""}, @"Download started");
     NSURLRequest *request = [NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:120.0];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        RBSecureHTTPClient *client = [[RBSecureHTTPClient alloc] initWithFingerprint:[self.currentServer objectForKey:@"fingerprint"] allowUntrusted:NO];
+        RBSecureHTTPClient *client = [RBSecureHTTPClient clientForServer:self.currentServer];
         NSHTTPURLResponse *response = nil; NSError *error = nil;
         NSData *data = [client sendRequest:request response:&response error:&error];
         dispatch_async(dispatch_get_main_queue(), ^{
         NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]] ? [(NSHTTPURLResponse *)response statusCode] : 0;
-        RBLog(@"download fetch result status=%d bytes=%d err=%@", (int)status, (int)[data length], [error localizedDescription] ?: @"");
+        RBLogEvent(@"download", (error || status >= 400) ? @"error" : @"info",
+                   @{@"status": @(status), @"bytes": @([data length]),
+                     @"error": [error localizedDescription] ?: @""}, @"Download request completed");
         if (error || status >= 400 || ![data length]) {
             [self showToast:@"Download failed"];
             return;
@@ -1955,24 +1954,27 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
         NSString *dir = [RBLogDirectory stringByAppendingPathComponent:@"Downloads"];
         NSError *dirError = nil;
         if (![[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:&dirError]) {
-            RBLog(@"download open: mkdir %@ failed: %@", dir, [dirError localizedDescription]);
+            RBLogEvent(@"download", @"error", @{@"operation": @"create_directory",
+                       @"error": [dirError localizedDescription] ?: @""}, @"Download directory creation failed");
         }
         NSString *path = [dir stringByAppendingPathComponent:name];
         if (![data writeToFile:path atomically:YES]) {
-            RBLog(@"download fetch: writeToFile failed for %@", path);
+            RBLogEvent(@"download", @"error", @{@"operation": @"write_file", @"name": [path lastPathComponent] ?: @""}, @"Downloaded file could not be saved");
             [self showToast:@"Could not save file"];
             return;
         }
         self.docController = [UIDocumentInteractionController interactionControllerWithURL:[NSURL fileURLWithPath:path]];
         self.docController.delegate = self;
-        RBLog(@"download open: path=%@ UTI=%@ apps=%d", path, self.docController.UTI, (int)[self.docController.gestureRecognizers count]);
+        RBLogEvent(@"download", @"info", @{@"name": [path lastPathComponent] ?: @"",
+                   @"uti": self.docController.UTI ?: @"",
+                   @"handlers": @([self.docController.gestureRecognizers count])}, @"Download open menu prepared");
         // Present over the Library if it's up, else from the library button.
         UIView *host = self.presentedViewController ? self.presentedViewController.view : self.view;
         CGRect anchor = self.presentedViewController
             ? CGRectMake(host.bounds.size.width / 2.0 - 22.0, 40.0, 44.0, 44.0)
             : [self.chromeBar.libraryButton convertRect:self.chromeBar.libraryButton.bounds toView:self.view];
         BOOL presented = [self.docController presentOpenInMenuFromRect:anchor inView:host animated:YES];
-        RBLog(@"download open: presentOpenInMenu -> %d", presented);
+        RBLogEvent(@"download", presented ? @"info" : @"warn", @{@"presented": @(presented)}, @"Download open menu requested");
         if (!presented) {
             [self showToast:@"No app can open this file"];
         }
@@ -1985,15 +1987,15 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
 // an app in the "Open In" list ever reaches the OS at all, or dies earlier
 // (e.g. in the popover itself).
 - (void)documentInteractionController:(UIDocumentInteractionController *)controller willBeginSendingToApplication:(NSString *)application {
-    RBLog(@"download open: willBeginSendingToApplication=%@", application ?: @"(nil)");
+    RBLogEvent(@"download", @"info", @{@"application": application ?: @""}, @"Sending download to application");
 }
 
 - (void)documentInteractionController:(UIDocumentInteractionController *)controller didEndSendingToApplication:(NSString *)application {
-    RBLog(@"download open: didEndSendingToApplication=%@", application ?: @"(nil)");
+    RBLogEvent(@"download", @"info", @{@"application": application ?: @""}, @"Download handoff completed");
 }
 
 - (void)documentInteractionControllerDidDismissOpenInMenu:(UIDocumentInteractionController *)controller {
-    RBLog(@"download open: OpenInMenu dismissed");
+    RBLogEvent(@"download", @"info", @{@"state": @"dismissed"}, @"Download open menu dismissed");
 }
 
 // ----------------------------------------------------------- keyboard shim
@@ -2250,14 +2252,14 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
     request.HTTPBody = body;
     BOOL wasCancel = ![data length];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        RBSecureHTTPClient *client = [[RBSecureHTTPClient alloc] initWithFingerprint:[self.currentServer objectForKey:@"fingerprint"] allowUntrusted:NO];
+        RBSecureHTTPClient *client = [RBSecureHTTPClient clientForServer:self.currentServer];
         NSHTTPURLResponse *response = nil; NSError *error = nil;
         [client sendRequest:request response:&response error:&error];
         dispatch_async(dispatch_get_main_queue(), ^{
         if (wasCancel) return;
         NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]] ? [(NSHTTPURLResponse *)response statusCode] : 0;
         if (error || status >= 400) {
-            RBLog(@"upload failed status=%d err=%@", (int)status, error);
+            RBLogEvent(@"upload", @"error", @{@"status": @(status), @"error": [error localizedDescription] ?: @""}, @"Upload failed");
             [self showToast:@"Upload failed"];
         } else {
             [self showToast:@"Photo attached"];
@@ -2459,28 +2461,24 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
     if (report) {
         int queued = self.mediaPipeline.queuedAUs;
         [self.session sendMessage:[report mediaStatsMessage]];
-        RBLog(@"perf lane=%@ presented_fps=%.1f image_fps=%.1f aups=%.1f vt_done=%.1f/s q=%d drops+%u overwritten=%u max_gap=%.1fms rtt=%.1fms vt_submit=%.2fms vt_callback=%.2fms wrap=%.2fms errs+%u audio_q=%d audio_drop=%u audio_underrun=%u audio_restart=%u age=%.2fs view=%.0fx%.0f",
-              self.videoActive ? @"video" : @"starting",
-              report.presentedFPS,
-              report.imageFPS,
-              report.AURate,
-              report.decodeRate,
-              queued,
-              (unsigned)report.dropDelta,
-              (unsigned)self.streamView.overwrittenVideoFrames,
-              report.recentGapMS,
-              self.diagnostics.lastRTTMS,
-              self.mediaPipeline.averageSubmitMS,
-              self.mediaPipeline.averageCallbackMS,
-              self.mediaPipeline.averageWrapMS,
-              (unsigned)report.errorDelta,
-              self.mediaPipeline.audioQueuedBuffers,
-              (unsigned)self.mediaPipeline.audioDroppedPCM,
-              (unsigned)self.mediaPipeline.audioUnderruns,
-              (unsigned)self.mediaPipeline.audioRestartCount,
-              report.ageSeconds,
-              self.streamView.bounds.size.width,
-              self.streamView.bounds.size.height);
+        RBLogEvent(@"performance", report.recentGapMS >= 100.0 ? @"warn" : @"info",
+                   @{@"lane": self.videoActive ? @"video" : @"starting",
+                     @"presented_fps": @(report.presentedFPS), @"image_fps": @(report.imageFPS),
+                     @"au_rate": @(report.AURate), @"decode_rate": @(report.decodeRate),
+                     @"video_queue": @(queued), @"drop_delta": @(report.dropDelta),
+                     @"overwritten_frames": @(self.streamView.overwrittenVideoFrames),
+                     @"max_gap_ms": @(report.recentGapMS), @"rtt_ms": @(self.diagnostics.lastRTTMS),
+                     @"decode_submit_ms": @(self.mediaPipeline.averageSubmitMS),
+                     @"decode_callback_ms": @(self.mediaPipeline.averageCallbackMS),
+                     @"frame_wrap_ms": @(self.mediaPipeline.averageWrapMS),
+                     @"error_delta": @(report.errorDelta),
+                     @"audio_queue": @(self.mediaPipeline.audioQueuedBuffers),
+                     @"audio_dropped_pcm": @(self.mediaPipeline.audioDroppedPCM),
+                     @"audio_underruns": @(self.mediaPipeline.audioUnderruns),
+                     @"audio_restarts": @(self.mediaPipeline.audioRestartCount),
+                     @"frame_age_seconds": @(report.ageSeconds),
+                     @"view_width": @(self.streamView.bounds.size.width),
+                     @"view_height": @(self.streamView.bounds.size.height)}, @"Performance sample");
     }
     [self refreshDebugOverlayWithAge:age];
 }

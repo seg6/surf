@@ -28,21 +28,22 @@ import (
 const APIRoot = "/api/v1"
 
 type Server struct {
-	cfg        *config.Config
-	auth       *auth.Manager
-	identity   *identity.Identity
-	hub        *transport.Hub
-	extra      map[string]http.HandlerFunc
-	health     func() error
-	stats      func() map[string]any
-	client     *clientPackage
-	adminToken string
+	cfg         *config.Config
+	auth        *auth.Manager
+	identity    *identity.Identity
+	hub         *transport.Hub
+	extra       map[string]http.HandlerFunc
+	health      func() error
+	stats       func() map[string]any
+	client      *clientPackage
+	adminToken  string
+	tunnelSlots chan struct{}
 }
 
 func New(cfg *config.Config, manager *auth.Manager, ident *identity.Identity, hub *transport.Hub) *Server {
 	s := &Server{
 		cfg: cfg, auth: manager, identity: ident, hub: hub,
-		extra: map[string]http.HandlerFunc{},
+		extra: map[string]http.HandlerFunc{}, tunnelSlots: make(chan struct{}, 8),
 	}
 	if client := embeddedClientPackage(); client != nil {
 		s.client = client
@@ -89,6 +90,9 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		return
 	case p == APIRoot+"/server":
 		s.handleServerInfo(w, r)
+		return
+	case p == APIRoot+"/tunnel":
+		s.handleTunnel(w, r)
 		return
 	case p == APIRoot+"/pairing/request":
 		s.handlePairRequest(w, r)
@@ -172,12 +176,20 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	_, _ = fmt.Fprint(w, "ok")
 }
 
-func (s *Server) handleServerInfo(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
+func (s *Server) handleServerInfo(w http.ResponseWriter, r *http.Request) {
+	info := map[string]any{
 		"api": "v1", "name": s.cfg.ServerName, "serverID": s.identity.Fingerprint,
 		"fingerprint": s.identity.Fingerprint, "protocol": config.NativeVersion, "version": config.AppVersion,
 		"pairing": s.auth.PairingAvailable(),
-	})
+	}
+	host := strings.ToLower(r.Host)
+	if parsed, _, err := net.SplitHostPort(host); err == nil {
+		host = parsed
+	}
+	if s.cfg.TunnelHost != "" && host == s.cfg.TunnelHost {
+		info["transport"] = "tunnel"
+	}
+	writeJSON(w, http.StatusOK, info)
 }
 
 func (s *Server) handlePairRequest(w http.ResponseWriter, r *http.Request) {

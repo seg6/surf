@@ -428,6 +428,14 @@ typedef enum {
     NSString *endpoint = [server objectForKey:@"lastEndpoint"];
     if ([endpoint length] && ![endpoints containsObject:endpoint]) [endpoints addObject:endpoint];
     [server setObject:endpoints forKey:@"endpoints"];
+    NSMutableArray *tunnels = [NSMutableArray array];
+    id oldTunnels = [self.replacementServer objectForKey:@"tunnelEndpoints"];
+    if ([oldTunnels isKindOfClass:[NSArray class]]) [tunnels addObjectsFromArray:oldTunnels];
+    id newTunnels = [server objectForKey:@"tunnelEndpoints"];
+    if ([newTunnels isKindOfClass:[NSArray class]]) {
+        for (NSString *value in newTunnels) if (![tunnels containsObject:value]) [tunnels addObject:value];
+    }
+    [server setObject:tunnels forKey:@"tunnelEndpoints"];
     return server;
 }
 

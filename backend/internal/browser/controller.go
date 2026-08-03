@@ -127,6 +127,15 @@ type Controller struct {
 	sourceGapSumMS     float64
 	sourceGapMaxMS     float64
 	duplicateAUs       int
+	rawGapN            int
+	rawGapSumMS        float64
+	rawGapMaxMS        float64
+	submitWaitN        int
+	submitWaitSumMS    float64
+	submitWaitMaxMS    float64
+	encodeTimeN        int
+	encodeTimeSumMS    float64
+	encodeTimeMaxMS    float64
 
 	// verbMu guards the small M2 state: pending JS dialogs and the pending
 	// file-chooser interception (one at a time is plenty for one user).

@@ -1,4 +1,5 @@
 #import "RBServerDetailController.h"
+#import "RBLog.h"
 #import "RBSession.h"
 #import "RBServerStore.h"
 #import "RBTheme.h"
@@ -205,7 +206,11 @@ static const NSInteger kRBServerForgetAlert = 3203;
         [self reloadServer];
         [self.delegate serverDetailControllerDidChangeServer:self];
     } else if (alertView.tag == kRBServerAddAddressAlert) {
-        [self.delegate serverDetailController:self verifyAddress:[alertView textFieldAtIndex:0].text forServer:self.server];
+        NSString *address = [alertView textFieldAtIndex:0].text;
+    NSString *loggedEndpoint = [RBServerStore normalizeEndpoint:address] ?: @"";
+    RBLogEvent(@"verification", @"info", @{@"phase": @"tap", @"endpoint": loggedEndpoint},
+               @"Verify address requested");
+        [self.delegate serverDetailController:self verifyAddress:address forServer:self.server];
     } else if (alertView.tag == kRBServerForgetAlert) {
         self.tableView.userInteractionEnabled = NO;
         [self setStatusText:@"Forgetting this server\u2026" isError:NO];

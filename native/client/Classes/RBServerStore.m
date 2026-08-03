@@ -75,6 +75,10 @@ static NSString *const RBMigrationDefaultsKey = @"RBSecureServersMigrationV1";
 }
 
 + (BOOL)addVerifiedEndpoint:(NSString *)endpoint toServerID:(NSString *)serverID {
+    return [self addVerifiedEndpoint:endpoint transport:nil toServerID:serverID];
+}
+
++ (BOOL)addVerifiedEndpoint:(NSString *)endpoint transport:(NSString *)transport toServerID:(NSString *)serverID {
     endpoint = [self normalizeEndpoint:endpoint];
     NSDictionary *existing = [self serverWithID:serverID];
     if (!existing || !endpoint) return NO;
@@ -84,6 +88,13 @@ static NSString *const RBMigrationDefaultsKey = @"RBSecureServersMigrationV1";
     if (![endpoints containsObject:endpoint]) [endpoints addObject:endpoint];
     [updated setObject:endpoints forKey:@"endpoints"];
     [updated setObject:endpoint forKey:@"lastEndpoint"];
+    NSMutableArray *tunnels = [([existing objectForKey:@"tunnelEndpoints"] ?: @[]) mutableCopy];
+    if ([[transport lowercaseString] isEqualToString:@"tunnel"]) {
+        if (![tunnels containsObject:endpoint]) [tunnels addObject:endpoint];
+    } else {
+        [tunnels removeObject:endpoint];
+    }
+    [updated setObject:tunnels forKey:@"tunnelEndpoints"];
     [self saveServer:updated select:NO];
     return YES;
 }

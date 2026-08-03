@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"surf-backend/internal/media"
 	"surf-backend/internal/protocol"
 	"surf-backend/internal/telemetry"
 	"surf-backend/internal/transport"
@@ -172,7 +173,6 @@ func (b *Controller) handleCommand(c *transport.Client, command protocol.Command
 		b.video.RequestKeyframe()
 		return
 	}
-
 	t := b.active()
 	if t == nil {
 		return
@@ -465,6 +465,9 @@ func (b *Controller) noteClientMessage(t string) {
 	motionN, motionSumMS, motionMaxMS := b.motionGapN, b.motionGapSumMS, b.motionGapMaxMS
 	sourceN, sourceSumMS, sourceMaxMS := b.sourceGapN, b.sourceGapSumMS, b.sourceGapMaxMS
 	duplicateAUs := b.duplicateAUs
+	rawN, rawSumMS, rawMaxMS := b.rawGapN, b.rawGapSumMS, b.rawGapMaxMS
+	submitN, submitSumMS, submitMaxMS := b.submitWaitN, b.submitWaitSumMS, b.submitWaitMaxMS
+	encodeN, encodeSumMS, encodeMaxMS := b.encodeTimeN, b.encodeTimeSumMS, b.encodeTimeMaxMS
 	b.perfCounts = map[string]int{}
 	b.perfLatN, b.perfLatSumMS, b.perfLatMaxMS = 0, 0, 0
 	b.perfALatN, b.perfALatSumMS, b.perfALatMaxMS = 0, 0, 0
@@ -472,6 +475,9 @@ func (b *Controller) noteClientMessage(t string) {
 	b.motionGapN, b.motionGapSumMS, b.motionGapMaxMS = 0, 0, 0
 	b.sourceGapN, b.sourceGapSumMS, b.sourceGapMaxMS = 0, 0, 0
 	b.duplicateAUs = 0
+	b.rawGapN, b.rawGapSumMS, b.rawGapMaxMS = 0, 0, 0
+	b.submitWaitN, b.submitWaitSumMS, b.submitWaitMaxMS = 0, 0, 0
+	b.encodeTimeN, b.encodeTimeSumMS, b.encodeTimeMaxMS = 0, 0, 0
 	b.perfSince = now
 	b.perfMu.Unlock()
 
@@ -495,7 +501,13 @@ func (b *Controller) noteClientMessage(t string) {
 	if sourceN > 0 {
 		sourceMeanMS = sourceSumMS / float64(sourceN)
 	}
-	log.Printf("perf input %.1fs: click=%.1f/s scroll=%.1f/s key=%.1f/s nav=%d size=%d lp=%d other=%d | input->image mean=%.1fms max=%.1fms n=%d | motion AU gap mean=%.1fms max=%.1fms n=%d | source gap mean=%.1fms max=%.1fms n=%d dup=%d | video queue mean=%.1fms max=%.1fms n=%d | audio lat mean=%.1fms max=%.1fms n=%d",
+	mean := func(sum float64, n int) float64 {
+		if n == 0 {
+			return 0
+		}
+		return sum / float64(n)
+	}
+	log.Printf("perf input %.1fs: click=%.1f/s scroll=%.1f/s key=%.1f/s nav=%d size=%d lp=%d other=%d | input->image mean=%.1fms max=%.1fms n=%d | motion AU gap mean=%.1fms max=%.1fms n=%d | fresh AU gap mean=%.1fms max=%.1fms n=%d dup=%d | capture raw-gap=%.1f/%.1fms submit-wait=%.1f/%.1fms encode=%.1f/%.1fms | video queue mean=%.1fms max=%.1fms n=%d | audio lat mean=%.1fms max=%.1fms n=%d",
 		dt,
 		float64(counts["click"])/dt,
 		float64(counts["scroll"])/dt,
@@ -506,8 +518,30 @@ func (b *Controller) noteClientMessage(t string) {
 		auMeanMS, auMaxMS, auN,
 		motionMeanMS, motionMaxMS, motionN,
 		sourceMeanMS, sourceMaxMS, sourceN, duplicateAUs,
+		mean(rawSumMS, rawN), rawMaxMS,
+		mean(submitSumMS, submitN), submitMaxMS,
+		mean(encodeSumMS, encodeN), encodeMaxMS,
 		latMeanMS, latMaxMS, latN,
 		aLatMeanMS, aLatMaxMS, aLatN)
+}
+
+func (b *Controller) noteCaptureStages(frame media.VideoFrame) {
+	b.perfMu.Lock()
+	record := func(d time.Duration, n *int, sum, max *float64) {
+		if d <= 0 {
+			return
+		}
+		ms := float64(d) / float64(time.Millisecond)
+		*n++
+		*sum += ms
+		if ms > *max {
+			*max = ms
+		}
+	}
+	record(frame.RawGap, &b.rawGapN, &b.rawGapSumMS, &b.rawGapMaxMS)
+	record(frame.SubmitWait, &b.submitWaitN, &b.submitWaitSumMS, &b.submitWaitMaxMS)
+	record(frame.EncodeTime, &b.encodeTimeN, &b.encodeTimeSumMS, &b.encodeTimeMaxMS)
+	b.perfMu.Unlock()
 }
 
 func (b *Controller) noteRenderInput() {

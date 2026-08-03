@@ -70,7 +70,7 @@ static NSError *RBKeyError(OSStatus status, NSString *message) {
         if (publicKey) CFRelease(publicKey);
         if (privateKey) CFRelease(privateKey);
         if (status != errSecSuccess) {
-            RBLog(@"device key generation failed status=%d", (int)status);
+            RBLogEvent(@"identity", @"error", @{@"status": @(status)}, @"Device key generation failed");
             if (error) *error = RBKeyError(status, @"Could not create this device's Surf key");
             return nil;
         }

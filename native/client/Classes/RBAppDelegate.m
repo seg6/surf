@@ -7,7 +7,7 @@
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     RBInstallCrashHandlers();
-    RBLog(@"application launching");
+    RBLogEvent(@"application", @"info", @{@"state": @"launching"}, @"Application launching");
 
     // Mobile pages are the natural default on the touch-first Surf client.
     // registerDefaults preserves an explicit user choice on upgrades.
@@ -53,7 +53,7 @@
         }
     }
     if (![target length]) return NO;
-    RBLog(@"open-url %@ -> %@", raw, target);
+    RBLogEvent(@"application", @"info", @{@"action": @"open_url", @"target": target ?: @""}, @"External URL opened");
     [[self rootController] openURLString:target];
     return YES;
 }
@@ -64,11 +64,11 @@
 }
 
 - (void)applicationDidReceiveMemoryWarning:(UIApplication *)application {
-    RBLog(@"memory warning");
+    RBLogEvent(@"application", @"warn", @{@"event": @"memory_warning"}, @"Memory warning received");
 }
 
 - (void)applicationWillTerminate:(UIApplication *)application {
-    RBLog(@"application terminating");
+    RBLogEvent(@"application", @"info", @{@"state": @"terminating"}, @"Application terminating");
 }
 
 @end

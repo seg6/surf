@@ -65,8 +65,9 @@
     self.lastInteractionToPresentMS = (CACurrentMediaTime() - [sent doubleValue]) * 1000.0;
     self.presentedInteractions++;
     if (self.presentedInteractions % 30 == 0 || self.lastInteractionToPresentMS >= 100.0) {
-        RBLog(@"interaction present iid=%llu latency=%.1fms pending=%u",
-              interactionID, self.lastInteractionToPresentMS, (unsigned)[self.sentAt count]);
+        RBLogEvent(@"interaction", self.lastInteractionToPresentMS >= 100.0 ? @"warn" : @"info",
+                   @{@"interaction_id": @(interactionID), @"latency_ms": @(self.lastInteractionToPresentMS),
+                     @"pending": @([self.sentAt count])}, @"Interaction presented");
     }
 }
 
