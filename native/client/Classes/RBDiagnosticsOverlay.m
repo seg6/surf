@@ -84,7 +84,6 @@ static const NSUInteger kRBChartSamples = 60;
 @property(nonatomic, strong) RBDiagnosticsChart *latencyChart;
 @property(nonatomic, strong) RBDiagnosticsChart *rttChart;
 @property(nonatomic, assign) CFTimeInterval lastSampleAt;
-@property(nonatomic, assign) unsigned long long lastPresented;
 @property(nonatomic, assign) unsigned long long lastAUs;
 @end
 
@@ -113,6 +112,8 @@ static const NSUInteger kRBChartSamples = 60;
 
         self.statusLabel = [self labelWithSize:11.0 color:[UIColor colorWithWhite:0.72 alpha:1.0] bold:NO];
         self.statusLabel.textAlignment = NSTextAlignmentRight;
+        self.statusLabel.adjustsFontSizeToFitWidth = YES;
+        self.statusLabel.minimumFontSize = 8.0;
         [self addSubview:self.statusLabel];
 
         UIColor *primary = [UIColor colorWithWhite:0.98 alpha:1.0];
@@ -123,7 +124,7 @@ static const NSUInteger kRBChartSamples = 60;
         self.fpsCaption = [self labelWithSize:10.0 color:secondary bold:YES];
         self.latencyCaption = [self labelWithSize:10.0 color:secondary bold:YES];
         self.rttCaption = [self labelWithSize:10.0 color:secondary bold:YES];
-        self.fpsCaption.text = @"MOTION FPS";
+        self.fpsCaption.text = @"UNIQUE IMAGE FPS";
         self.latencyCaption.text = @"INPUT → SCREEN";
         self.rttCaption.text = @"NETWORK RTT";
         for (UIView *view in @[self.fpsValue, self.latencyValue, self.rttValue,
@@ -155,7 +156,7 @@ static const NSUInteger kRBChartSamples = 60;
         self.groupLabels = groups;
 
         NSArray *metricNames = @[
-            @"AU RATE", @"FRAME AGE", @"MAX GAP",
+            @"AU RATE", @"FRAME AGE", @"5S MAX GAP",
             @"QUEUE", @"AU LOSS", @"OVERWRITTEN",
             @"SUBMIT", @"CALLBACK", @"ERRORS / DROPS",
             @"QUEUE", @"DROPS", @"UNDERRUNS / RESTARTS"
@@ -244,21 +245,16 @@ static const NSUInteger kRBChartSamples = 60;
 
 - (void)updateWithSnapshot:(NSDictionary *)snapshot {
     CFTimeInterval now = CACurrentMediaTime();
-    unsigned long long presented = [[snapshot objectForKey:@"presented"] unsignedLongLongValue];
     unsigned long long aus = [[snapshot objectForKey:@"aus"] unsignedLongLongValue];
-    double sampledFPS = 0.0;
     double aups = 0.0;
     if (self.lastSampleAt > 0.0 && now > self.lastSampleAt) {
         double dt = now - self.lastSampleAt;
-        if (presented >= self.lastPresented) sampledFPS = (presented - self.lastPresented) / dt;
         if (aus >= self.lastAUs) aups = (aus - self.lastAUs) / dt;
     }
     self.lastSampleAt = now;
-    self.lastPresented = presented;
     self.lastAUs = aus;
 
-    double motionFPS = [self number:snapshot key:@"motionFPS"];
-    double fps = motionFPS > 0.0 ? motionFPS : sampledFPS;
+    double fps = [self number:snapshot key:@"imageFPS"];
     double latency = [self number:snapshot key:@"latency"];
     double rtt = [self number:snapshot key:@"rtt"];
     [self.fpsChart addSample:fps];
@@ -267,7 +263,8 @@ static const NSUInteger kRBChartSamples = 60;
     self.fpsValue.text = [NSString stringWithFormat:@"%.1f", fps];
     self.latencyValue.text = latency > 0.0 ? [NSString stringWithFormat:@"%.0f ms", latency] : @"—";
     self.rttValue.text = rtt > 0.0 ? [NSString stringWithFormat:@"%.0f ms", rtt] : @"—";
-    self.statusLabel.text = [NSString stringWithFormat:@"%@  •  %@  •  triple-tap to close",
+    self.statusLabel.text = [NSString stringWithFormat:@"%@  •  %@  •  %@  •  triple-tap to close",
+                             [snapshot objectForKey:@"server"] ?: @"Surf",
                              [snapshot objectForKey:@"state"] ?: @"idle",
                              [snapshot objectForKey:@"version"] ?: @""];
 

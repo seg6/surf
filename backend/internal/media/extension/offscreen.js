@@ -19,15 +19,20 @@ let videoOutputReported = false;
 let videoLatestFrame = null;
 let videoLatestSourceSequence = 0;
 let videoPendingFrames = [];
+let videoPumpWake = null;
 
-// Oversample Chromium's compositor at 60 Hz, then encode the newest available
-// image on a strict 30 Hz clock. Asking the source for only 30 Hz made normal
+// Oversample Chromium's compositor at 60 Hz, then admit the newest fresh image
+// to a source-driven 30 FPS pump. Asking the source for only 30 Hz made normal
 // compositor jitter visible verbatim on the iPad. The latest-only handoff
 // absorbs that jitter without ever building a queue of old pictures.
-const captureFrameRate = 60;
+// Keep source capture at the presentation ceiling. GPU-backed tab frames must
+// cross the compositor/codec boundary; oversampling that boundary at 60 Hz
+// doubles work without increasing the native client's 30 FPS output.
+const captureFrameRate = 30;
 const outputFrameRate = 30;
 function stopVideoEncoder() {
   videoGeneration++;
+  videoPumpWake = null;
   if (videoReader) {
     void videoReader.cancel();
     videoReader = null;
@@ -145,6 +150,9 @@ function connectVideoSocket() {
         }
       } else if (message.type === "keyframe") {
         videoNeedsKeyframe = true;
+        if (videoPumpWake) {
+          videoPumpWake();
+        }
       } else if (message.type === "stop-video") {
         stopVideoEncoder();
       }
@@ -246,7 +254,10 @@ async function startVideoEncoder(track) {
     height: videoConfig.height,
     framerate: outputFrameRate,
     latencyMode: "realtime",
-    hardwareAcceleration: "no-preference",
+    // Linux VirGL accelerates Chromium compositing but does not expose a
+    // hardware video codec. Prefer the direct software AVC implementation so
+    // WebCodecs does not route encode work back through the VirGL bridge.
+    hardwareAcceleration: "prefer-software",
     contentHint: "detail",
     avc: {format: "annexb"},
   };
@@ -294,6 +305,12 @@ async function startVideoEncoder(track) {
         }
         activeSocket.send(encodedVideoMessage(
           chunk, videoConfig, source));
+        // A newer source image may have replaced the mailbox while this AU
+        // was encoding. Give it an immediate chance to enter the paced pump
+        // now that the one-in-flight slot is available.
+        if (videoPumpWake) {
+          videoPumpWake();
+        }
       }
     },
     error: (error) => {
@@ -326,6 +343,97 @@ async function startVideoEncoder(track) {
     quantizer: rateControl === "quantizer" ? quantizer : -1,
   });
 
+  // Keep exactly one latest raw image and at most one H.264 encode in flight.
+  // The source is deliberately allowed to run faster than the 30 FPS output
+  // ceiling, but a late tick is never made up with a burst. Static pages do
+  // not consume encoder CPU: an unchanged image is encoded only when an
+  // explicit keyframe request needs to bootstrap or repair a decoder.
+  const intervalMS = 1000 / outputFrameRate;
+  let lastSubmitAt = -intervalMS;
+  let lastEncodedSourceSequence = 0;
+  let encodeTimer = null;
+  const scheduleVideoEncode = () => {
+    if (generation !== videoGeneration || encoder.state !== "configured" ||
+        !videoLatestFrame) {
+      return;
+    }
+    const fresh = videoLatestSourceSequence !== lastEncodedSourceSequence;
+    if (!fresh && !videoNeedsKeyframe) {
+      return;
+    }
+    // encodeQueueSize only counts requests waiting to enter the codec; it can
+    // return to zero before the matching output callback fires. The metadata
+    // FIFO is therefore also the authoritative in-flight guard, keeping the
+    // source-to-AU mapping one-frame-in/one-AU-out and bounded to one entry.
+    if (videoPendingFrames.length > 0 || encoder.encodeQueueSize > 0) {
+      return;
+    }
+    const now = performance.now();
+    const waitMS = intervalMS - (now - lastSubmitAt);
+    if (waitMS > 0.5) {
+      if (encodeTimer === null) {
+        encodeTimer = setTimeout(() => {
+          encodeTimer = null;
+          scheduleVideoEncode();
+        }, waitMS);
+      }
+      return;
+    }
+    let frame;
+    try {
+      frame = videoLatestFrame.clone();
+    } catch (_) {
+      return;
+    }
+    const sourceSequence = videoLatestSourceSequence;
+    const frameTimestamp = now * 1000;
+    const keyFrame = videoNeedsKeyframe ||
+      videoLastKeyTimestamp === null ||
+      frameTimestamp < videoLastKeyTimestamp ||
+      frameTimestamp - videoLastKeyTimestamp >= 2000000;
+    if (videoFrameNumber === 0) {
+      sendVideoJSON({
+        type: "video-frame",
+        codedWidth: frame.codedWidth,
+        codedHeight: frame.codedHeight,
+        displayWidth: frame.displayWidth,
+        displayHeight: frame.displayHeight,
+        visibleWidth: frame.visibleRect ? frame.visibleRect.width : 0,
+        visibleHeight: frame.visibleRect ? frame.visibleRect.height : 0,
+        rotation: Number.isFinite(frame.rotation) ? frame.rotation : 0,
+      });
+    }
+    videoPendingFrames.push({
+      sequence: sourceSequence,
+      fresh,
+    });
+    try {
+      const encodeOptions = {keyFrame};
+      if (rateControl === "quantizer") {
+        encodeOptions.avc = {quantizer};
+      }
+      encoder.encode(frame, encodeOptions);
+    } catch (error) {
+      videoPendingFrames.pop();
+      frame.close();
+      if (generation === videoGeneration) {
+        sendVideoJSON({type: "video-error", error: String(error)});
+      }
+      return;
+    }
+    frame.close();
+    lastSubmitAt = now;
+    if (fresh) {
+      lastEncodedSourceSequence = sourceSequence;
+    }
+    videoNeedsKeyframe = false;
+    if (keyFrame) {
+      videoLastKeyTimestamp = frameTimestamp;
+    }
+    videoFrameNumber++;
+  };
+  videoPumpWake = scheduleVideoEncode;
+
   const readFrames = async () => {
     try {
       while (generation === videoGeneration) {
@@ -343,6 +451,7 @@ async function startVideoEncoder(track) {
         if (previous) {
           previous.close();
         }
+        scheduleVideoEncode();
       }
     } catch (error) {
       if (generation === videoGeneration) {
@@ -350,78 +459,18 @@ async function startVideoEncoder(track) {
       }
     }
   };
-  void readFrames();
-
-  const intervalMS = 1000 / outputFrameRate;
-  let nextTick = performance.now();
-  let lastEncodedSourceSequence = 0;
   try {
-    while (generation === videoGeneration) {
-      nextTick += intervalMS;
-      const waitMS = nextTick - performance.now();
-      if (waitMS > 0) {
-        await new Promise((resolve) => setTimeout(resolve, waitMS));
-      } else if (waitMS < -intervalMS) {
-        // Do not burst several stale frames after the offscreen document was
-        // descheduled. Resume from the current wall-clock tick.
-        nextTick = performance.now();
-      }
-      if (!videoLatestFrame || encoder.encodeQueueSize > 1) {
-        continue;
-      }
-      let frame;
-      try {
-        frame = videoLatestFrame.clone();
-      } catch (_) {
-        continue;
-      }
-      const sourceSequence = videoLatestSourceSequence;
-      const fresh = sourceSequence !== lastEncodedSourceSequence;
-      if (fresh) {
-        lastEncodedSourceSequence = sourceSequence;
-      }
-      if (videoFrameNumber === 0) {
-        sendVideoJSON({
-          type: "video-frame",
-          codedWidth: frame.codedWidth,
-          codedHeight: frame.codedHeight,
-          displayWidth: frame.displayWidth,
-          displayHeight: frame.displayHeight,
-          visibleWidth: frame.visibleRect ? frame.visibleRect.width : 0,
-          visibleHeight: frame.visibleRect ? frame.visibleRect.height : 0,
-          rotation: Number.isFinite(frame.rotation) ? frame.rotation : 0,
-        });
-      }
-      const frameTimestamp = performance.now() * 1000;
-      const keyFrame = videoNeedsKeyframe ||
-        videoLastKeyTimestamp === null ||
-        frameTimestamp < videoLastKeyTimestamp ||
-        frameTimestamp - videoLastKeyTimestamp >= 2000000;
-      videoNeedsKeyframe = false;
-      if (keyFrame) {
-        videoLastKeyTimestamp = frameTimestamp;
-      }
-      videoFrameNumber++;
-      videoPendingFrames.push({
-        sequence: sourceSequence,
-        fresh,
-      });
-      try {
-        const encodeOptions = {keyFrame};
-        if (rateControl === "quantizer") {
-          encodeOptions.avc = {quantizer};
-        }
-        encoder.encode(frame, encodeOptions);
-      } catch (error) {
-        videoPendingFrames.pop();
-        frame.close();
-        throw error;
-      }
-      frame.close();
-    }
+    await readFrames();
   } catch (error) {
     if (generation === videoGeneration) {
       sendVideoJSON({type: "video-error", error: String(error)});
+    }
+  } finally {
+    if (encodeTimer !== null) {
+      clearTimeout(encodeTimer);
+    }
+    if (videoPumpWake === scheduleVideoEncode) {
+      videoPumpWake = null;
     }
   }
 }

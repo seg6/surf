@@ -390,7 +390,7 @@ func (c *Client) write(msgType int, data []byte) error {
 	}
 }
 
-func (c *Client) SendJSON(v any) {
+func (c *Client) SendJSON(v protocol.Event) {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return
@@ -398,7 +398,7 @@ func (c *Client) SendJSON(v any) {
 	_ = c.write(websocket.TextMessage, b)
 }
 
-func (h *Hub) BroadcastJSON(v any) {
+func (h *Hub) BroadcastJSON(v protocol.Event) {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return

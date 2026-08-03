@@ -231,6 +231,8 @@ func (b *Controller) Start() (err error) {
 		H:              b.cfg.ViewH,
 		NoSandbox:      b.cfg.ChromeNoSandbox,
 		EnableGPU:      b.cfg.ChromeGPU,
+		X11:            b.cfg.ChromeX11,
+		VirGL:          b.cfg.ChromeVirGL,
 		ExtensionPaths: extensionPaths,
 	})
 	if err != nil {
@@ -276,8 +278,12 @@ func (b *Controller) Start() (err error) {
 		return err
 	}
 	b.setupDownloads()
-	log.Printf("browser ready, view %dx%d (headless-new, source=tabCapture/WebCodecs, profile %s)",
-		b.viewW, b.viewH, b.cfg.Profile)
+	platform := "headless-new"
+	if b.cfg.ChromeX11 {
+		platform = "x11"
+	}
+	log.Printf("browser ready, view %dx%d (%s, source=tabCapture/WebCodecs, profile %s)",
+		b.viewW, b.viewH, platform, b.cfg.Profile)
 	started = true
 	return nil
 }

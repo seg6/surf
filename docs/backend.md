@@ -69,6 +69,7 @@ Surf reads configuration from environment variables:
 | `SURF_HOME` | `~/.surf` | Identity, devices, browser profile, downloads, logs |
 | `SURF_SERVER_NAME` | `Surf` | Friendly name shown while pairing and in Bonjour |
 | `SURF_PUBLIC_ADDRESS` | empty | Reachable host/IP and optional port for pairing QR codes |
+| `SURF_ADVERTISE_IP` | auto | Explicit LAN address for Bonjour; useful in containers and PRoot |
 | `BIND_ADDR` | `0.0.0.0` | Listener address |
 | `PORT` | `18080` | TLS/API port |
 | `CHROME` | auto | Chromium or Edge executable |
@@ -81,6 +82,8 @@ Surf reads configuration from environment variables:
 | `STREAM_QUANTIZER` | `12` | H.264 constant-quality QP (0–51; lower is sharper) |
 | `STREAM_SCALE` | empty | Optional maximum stream size |
 | `SURF_CHROME_GPU` | `1` | Enable Chromium GPU support |
+| `SURF_CHROME_X11` | `0` | Launch Chromium on the X11 Ozone platform instead of software-only headless Ozone; requires `DISPLAY` |
+| `SURF_CHROME_VIRGL` | `0` | Select Chrome's headless ANGLE `gl-egl` path for a Mesa `virpipe` environment; requires an external VirGL server and shared socket |
 | `SURF_CONTENT_BLOCKER` | `1` | Manage uBlock Origin Lite |
 | `SURF_ADAPTIVE_VIDEO` | `0` | Experimental adaptive stream profile |
 | `CHROME_NO_SANDBOX` | automatic for root | Disable Chromium sandbox where required |

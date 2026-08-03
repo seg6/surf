@@ -293,42 +293,37 @@ func (b *Controller) RegisterRoutes(srv *web.Server) {
 
 // handleFeatureMessage handles message types beyond the M1 set.
 func (b *Controller) handleFeatureMessage(c *transport.Client, t *Tab, session string, command protocol.Command) {
-	switch command.Kind() {
-	case "zoom":
-		b.handleZoom(t, session, command.(*protocol.ZoomCommand))
-	case "paste":
-		m := command.(*protocol.TextCommand)
+	kind := command.Kind()
+	switch m := command.(type) {
+	case *protocol.ZoomCommand:
+		if kind == "zoom" {
+			b.handleZoom(t, session, m)
+		}
+	case *protocol.TextCommand:
+		if kind != "paste" {
+			return
+		}
 		if m.Text != "" {
 			_ = b.cdp.Dispatch(session, "Input.insertText", map[string]any{"text": m.Text})
 		}
-	case "find":
-		b.handleFind(c, t, session, command.(*protocol.FindCommand))
-	case "suggest":
-		m := command.(*protocol.QueryCommand)
-		c.SendJSON(protocol.SuggestEvent{Type: "suggest", Items: b.store.Suggest(m.Q)})
-	case "hist":
-		b.mu.Lock()
-		u := t.URL
-		b.mu.Unlock()
-		c.SendJSON(protocol.LibraryEvent{
-			Type: "hist", History: b.store.Recent(50), Bookmarks: b.store.Bookmarks(),
-			Starred: b.store.IsBookmarked(u),
-		})
-	case "bookmark":
-		b.mu.Lock()
-		u, title := t.URL, t.Title
-		b.mu.Unlock()
-		on := b.store.ToggleBookmark(u, title)
-		msg := "bookmark removed"
-		if on {
-			msg = "bookmarked"
+	case *protocol.FindCommand:
+		if kind == "find" {
+			b.handleFind(c, t, session, m)
 		}
-		c.SendJSON(protocol.TextEvent{Type: "toast", Text: msg})
-		c.SendJSON(protocol.BoolEvent{Type: "starred", On: on})
-	case "downloads":
-		c.SendJSON(protocol.DownloadsEvent{Type: "downloads", Items: b.downloadList()})
-	case "dldel":
-		m := command.(*protocol.NameCommand)
+	case *protocol.QueryCommand:
+		switch kind {
+		case "suggest":
+			c.SendJSON(protocol.SuggestEvent{Type: "suggest", Items: b.store.Suggest(m.Q)})
+		case "history":
+			items, total := b.store.Search(m.Q, m.Offset, 50)
+			c.SendJSON(protocol.HistoryPageEvent{
+				Type: "history", Query: m.Q, Items: items, Offset: m.Offset, Total: total,
+			})
+		}
+	case *protocol.NameCommand:
+		if kind != "dldel" {
+			return
+		}
 		// Delete a completed download from the server (Library UI). Name is
 		// path-sanitized the same way the /downloads/ route is.
 		name := filepath.Base(m.Name)
@@ -336,8 +331,10 @@ func (b *Controller) handleFeatureMessage(c *transport.Client, t *Tab, session s
 			_ = os.Remove(filepath.Join(b.cfg.DownloadsDir, name))
 		}
 		c.SendJSON(protocol.DownloadsEvent{Type: "downloads", Items: b.downloadList()})
-	case "hit":
-		m := command.(*protocol.PointCommand)
+	case *protocol.PointCommand:
+		if kind != "hit" {
+			return
+		}
 		// Long-press hit-test (M2.4): coordinates arrive as fractions like all
 		// input; convert to CSS px of the (possibly zoomed) viewport.
 		b.mu.Lock()
@@ -348,28 +345,49 @@ func (b *Controller) handleFeatureMessage(c *transport.Client, t *Tab, session s
 			z = 1
 		}
 		b.handleHit(c, session, m.X*float64(vw)/z, m.Y*float64(vh)/z)
-	case "reader":
-		go b.handleReader(c, t, session) // heavy evaluate; off the read loop
-	case "history":
-		m := command.(*protocol.QueryCommand)
-		items, total := b.store.Search(m.Q, m.Offset, 50)
-		c.SendJSON(protocol.HistoryPageEvent{
-			Type: "history", Query: m.Q, Items: items, Offset: m.Offset, Total: total,
-		})
-	case "histdel":
-		m := command.(*protocol.HistoryDeleteCommand)
-		b.store.DeleteHistory(m.URL, m.TS)
-		c.SendJSON(protocol.TextEvent{Type: "toast", Text: "removed"})
-	case "bmdel":
-		m := command.(*protocol.URLCommand)
-		b.store.RemoveBookmark(m.URL)
-		b.mu.Lock()
-		u := t.URL
-		b.mu.Unlock()
-		c.SendJSON(protocol.BoolEvent{Type: "starred", On: b.store.IsBookmarked(u)})
-	case "clear":
-		m := command.(*protocol.ClearCommand)
-		b.handleClear(c, session, m.What)
+	case *protocol.HistoryDeleteCommand:
+		if kind == "histdel" {
+			b.store.DeleteHistory(m.URL, m.TS)
+			c.SendJSON(protocol.TextEvent{Type: "toast", Text: "removed"})
+		}
+	case *protocol.URLCommand:
+		if kind == "bmdel" {
+			b.store.RemoveBookmark(m.URL)
+			b.mu.Lock()
+			u := t.URL
+			b.mu.Unlock()
+			c.SendJSON(protocol.BoolEvent{Type: "starred", On: b.store.IsBookmarked(u)})
+		}
+	case *protocol.ClearCommand:
+		if kind == "clear" {
+			b.handleClear(c, session, m.What)
+		}
+	case *protocol.EmptyCommand:
+		switch kind {
+		case "hist":
+			b.mu.Lock()
+			u := t.URL
+			b.mu.Unlock()
+			c.SendJSON(protocol.LibraryEvent{
+				Type: "hist", History: b.store.Recent(50), Bookmarks: b.store.Bookmarks(),
+				Starred: b.store.IsBookmarked(u),
+			})
+		case "bookmark":
+			b.mu.Lock()
+			u, title := t.URL, t.Title
+			b.mu.Unlock()
+			on := b.store.ToggleBookmark(u, title)
+			msg := "bookmark removed"
+			if on {
+				msg = "bookmarked"
+			}
+			c.SendJSON(protocol.TextEvent{Type: "toast", Text: msg})
+			c.SendJSON(protocol.BoolEvent{Type: "starred", On: on})
+		case "downloads":
+			c.SendJSON(protocol.DownloadsEvent{Type: "downloads", Items: b.downloadList()})
+		case "reader":
+			go b.handleReader(c, t, session) // heavy evaluate; off the controller loop
+		}
 	}
 }
 

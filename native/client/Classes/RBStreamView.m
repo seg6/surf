@@ -10,7 +10,10 @@
 
 #include <stdlib.h>
 
-enum { kRBMotionRateSamples = 31 };
+enum {
+    kRBUniqueRateSamples = 64,
+    kRBTargetPresentationFPS = 30
+};
 
 @interface RBStreamView () {
     CVPixelBufferRef _pendingBuffer;
@@ -21,9 +24,9 @@ enum { kRBMotionRateSamples = 31 };
     GLuint _program;
     GLint _positionSlot;
     GLint _texCoordSlot;
-    CFTimeInterval _motionPresentationTimes[kRBMotionRateSamples];
-    NSUInteger _motionPresentationCount;
-    NSUInteger _motionPresentationCursor;
+    CFTimeInterval _uniquePresentationTimes[kRBUniqueRateSamples];
+    NSUInteger _uniquePresentationCount;
+    NSUInteger _uniquePresentationCursor;
 }
 @property(nonatomic, strong) EAGLContext *glContext;
 @property(nonatomic, strong) CADisplayLink *videoDisplayLink;
@@ -31,10 +34,9 @@ enum { kRBMotionRateSamples = 31 };
 @property(nonatomic, assign) NSUInteger presentedFrames;
 @property(nonatomic, assign) NSUInteger overwrittenVideoFrames;
 @property(nonatomic, assign) CFTimeInterval lastPresentationAt;
-@property(nonatomic, assign) double maximumPresentationGapMS;
 @property(nonatomic, assign) double recentMaximumPresentationGapMS;
-@property(nonatomic, assign) double motionPresentationFPS;
 @property(nonatomic, assign) unsigned int lastPresentedSourceSequence;
+@property(nonatomic, assign) CFTimeInterval lastUniquePresentationAt;
 @property(nonatomic, assign) NSUInteger motionEpoch;
 @property(nonatomic, assign) NSUInteger lastPresentedMotionEpoch;
 @property(nonatomic, assign) BOOL motionTracking;
@@ -153,13 +155,13 @@ static GLuint RBCompileShader(GLenum type, const char *source) {
         if (_currentBuffer) { CVPixelBufferRelease(_currentBuffer); _currentBuffer = NULL; }
         self.pendingMetadata = nil;
         self.lastPresentationAt = 0.0;
+        self.lastUniquePresentationAt = 0.0;
         self.lastPresentedSourceSequence = 0;
         self.lastPresentedMotionEpoch = 0;
         self.motionTracking = NO;
         self.motionUntil = 0.0;
-        _motionPresentationCount = 0;
-        _motionPresentationCursor = 0;
-        self.motionPresentationFPS = 0.0;
+        _uniquePresentationCount = 0;
+        _uniquePresentationCursor = 0;
     }
 }
 
@@ -169,10 +171,7 @@ static GLuint RBCompileShader(GLenum type, const char *source) {
     self.lastPresentedMotionEpoch = 0;
     self.motionTracking = YES;
     self.motionUntil = 0.0;
-    self.maximumPresentationGapMS = 0.0;
     self.recentMaximumPresentationGapMS = 0.0;
-    _motionPresentationCount = 0;
-    _motionPresentationCursor = 0;
 }
 
 - (void)continueMotionWindow {
@@ -361,33 +360,44 @@ static unsigned char RBClampByte(int value) {
     if (![self drawPixelBuffer:_currentBuffer]) return;
     CFTimeInterval now = CACurrentMediaTime();
     BOOL inMotionWindow = self.motionTracking || now <= self.motionUntil;
-    if (inMotionWindow && self.lastPresentedMotionEpoch == self.motionEpoch &&
-        self.lastPresentationAt > 0.0) {
-        double gapMS = (now - self.lastPresentationAt) * 1000.0;
-        if (gapMS > self.maximumPresentationGapMS) self.maximumPresentationGapMS = gapMS;
+    BOOL uniqueSourceImage = !metadata || metadata.sourceSequence == 0 ||
+        self.lastPresentedSourceSequence == 0 ||
+        metadata.sourceSequence != self.lastPresentedSourceSequence;
+    if (uniqueSourceImage && inMotionWindow &&
+        self.lastPresentedMotionEpoch == self.motionEpoch &&
+        self.lastUniquePresentationAt > 0.0) {
+        double gapMS = (now - self.lastUniquePresentationAt) * 1000.0;
         if (gapMS > self.recentMaximumPresentationGapMS) self.recentMaximumPresentationGapMS = gapMS;
     }
-    if (inMotionWindow) {
-        _motionPresentationTimes[_motionPresentationCursor] = now;
-        _motionPresentationCursor = (_motionPresentationCursor + 1) % kRBMotionRateSamples;
-        if (_motionPresentationCount < kRBMotionRateSamples) _motionPresentationCount++;
-        if (_motionPresentationCount >= 2) {
-            NSUInteger oldest = (_motionPresentationCursor + kRBMotionRateSamples -
-                                 _motionPresentationCount) % kRBMotionRateSamples;
-            NSUInteger newest = (_motionPresentationCursor + kRBMotionRateSamples - 1) %
-                                kRBMotionRateSamples;
-            CFTimeInterval elapsed = _motionPresentationTimes[newest] -
-                                     _motionPresentationTimes[oldest];
-            if (elapsed > 0.0) {
-                self.motionPresentationFPS = (_motionPresentationCount - 1) / elapsed;
-            }
-        }
+    if (uniqueSourceImage) {
+        _uniquePresentationTimes[_uniquePresentationCursor] = now;
+        _uniquePresentationCursor = (_uniquePresentationCursor + 1) % kRBUniqueRateSamples;
+        if (_uniquePresentationCount < kRBUniqueRateSamples) _uniquePresentationCount++;
+        self.lastUniquePresentationAt = now;
     }
-    self.lastPresentedMotionEpoch = inMotionWindow ? self.motionEpoch : 0;
+    if (uniqueSourceImage) {
+        self.lastPresentedMotionEpoch = inMotionWindow ? self.motionEpoch : 0;
+    }
     self.lastPresentationAt = now;
-    self.lastPresentedSourceSequence = metadata.sourceSequence;
+    if (metadata) self.lastPresentedSourceSequence = metadata.sourceSequence;
     self.presentedFrames++;
     [self.presentationDelegate streamView:self didPresentMetadata:metadata];
+}
+
+- (double)uniquePresentationFPS {
+    if (_uniquePresentationCount == 0) return 0.0;
+    CFTimeInterval cutoff = CACurrentMediaTime() - 1.0;
+    NSUInteger recent = 0;
+    for (NSUInteger i = 0; i < _uniquePresentationCount; i++) {
+        NSUInteger index = (_uniquePresentationCursor + kRBUniqueRateSamples - 1 - i) %
+                           kRBUniqueRateSamples;
+        if (_uniquePresentationTimes[index] < cutoff) break;
+        recent++;
+    }
+    // The stream is intentionally capped at 30 FPS. A rolling one-second
+    // window can contain both boundary samples and briefly count 31 frames;
+    // do not present that sampling artifact as throughput above the cap.
+    return MIN((double)kRBTargetPresentationFPS, (double)recent);
 }
 
 - (double)consumeRecentMaximumPresentationGapMS {

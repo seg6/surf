@@ -77,6 +77,8 @@ type LaunchConfig struct {
 	Env            []string
 	NoSandbox      bool
 	EnableGPU      bool
+	X11            bool
+	VirGL          bool
 	ExtensionPaths []string
 	ExtraArgs      []string
 }
@@ -109,7 +111,19 @@ func (cfg LaunchConfig) Args() []string {
 		"--disable-features=Translate,MediaRouter,AcceptCHFrame,OptimizationHints",
 		fmt.Sprintf("--window-size=%d,%d", cfg.W, cfg.H),
 	}
-	args = append(args, "--test-type", "--headless=new")
+	args = append(args, "--test-type")
+	if cfg.X11 {
+		args = append(args, "--ozone-platform=x11")
+	} else {
+		args = append(args, "--headless=new")
+	}
+	if cfg.VirGL {
+		args = append(args,
+			"--ignore-gpu-blocklist",
+			"--use-gl=angle",
+			"--use-angle=gl-egl",
+		)
+	}
 	if cfg.EnableGPU {
 		// Modern headless otherwise forces SwiftShader for reproducibility.
 		// This merely permits native driver selection; Chromium can still

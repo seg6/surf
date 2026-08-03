@@ -14,8 +14,9 @@
 @property(nonatomic, readonly) NSUInteger presentedFrames;
 @property(nonatomic, readonly) NSUInteger overwrittenVideoFrames;
 @property(nonatomic, readonly) CFTimeInterval lastPresentationAt;
-@property(nonatomic, readonly) double maximumPresentationGapMS;
-@property(nonatomic, readonly) double motionPresentationFPS;
+// Unique source images presented during the trailing one-second window.
+// Repeated recovery/keyframe AUs do not inflate this value.
+@property(nonatomic, readonly) double uniquePresentationFPS;
 @property(nonatomic, readonly) unsigned int lastPresentedSourceSequence;
 
 - (void)displayVideoPixelBuffer:(CVPixelBufferRef)pixelBuffer metadata:(RBFrameMetadata *)metadata;

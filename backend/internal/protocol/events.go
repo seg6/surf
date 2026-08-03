@@ -1,5 +1,12 @@
 package protocol
 
+// Event is the complete set of JSON messages that the backend may send to a
+// native client. Keeping the marker private prevents browser and transport
+// code from accidentally putting an arbitrary map or CDP result on the wire.
+type Event interface {
+	isClientEvent()
+}
+
 type HelloEvent struct {
 	Type string `json:"t"`
 	W    int    `json:"vw"`
@@ -170,3 +177,29 @@ type PageFrameEvent struct {
 	Type      string `json:"t"`
 	SourceSeq uint32 `json:"sourceSeq"`
 }
+
+func (HelloEvent) isClientEvent()            {}
+func (TabsEvent) isClientEvent()             {}
+func (VideoConfigEvent) isClientEvent()      {}
+func (AudioConfigEvent) isClientEvent()      {}
+func (BoolEvent) isClientEvent()             {}
+func (TextEvent) isClientEvent()             {}
+func (ClockEvent) isClientEvent()            {}
+func (EmptyEvent) isClientEvent()            {}
+func (URLStateEvent) isClientEvent()         {}
+func (HistoryStateEvent) isClientEvent()     {}
+func (NameEvent) isClientEvent()             {}
+func (DownloadProgressEvent) isClientEvent() {}
+func (SuggestEvent) isClientEvent()          {}
+func (LibraryEvent) isClientEvent()          {}
+func (HistoryPageEvent) isClientEvent()      {}
+func (DownloadsEvent) isClientEvent()        {}
+func (ScaleEvent) isClientEvent()            {}
+func (DialogEvent) isClientEvent()           {}
+func (FileChooserEvent) isClientEvent()      {}
+func (LinkInfoEvent) isClientEvent()         {}
+func (SecurityEvent) isClientEvent()         {}
+func (ReaderEvent) isClientEvent()           {}
+func (EditableEvent) isClientEvent()         {}
+func (MediaStateEvent) isClientEvent()       {}
+func (PageFrameEvent) isClientEvent()        {}

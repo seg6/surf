@@ -3,8 +3,8 @@
 #import "RBChromeBar.h"
 #import "RBBrowserStateView.h"
 #import "RBConfig.h"
-#import "RBClockSync.h"
 #import "RBClientUpdater.h"
+#import "RBDiagnostics.h"
 #import "RBDiagnosticsOverlay.h"
 #import "RBFindBar.h"
 #import "RBLibraryController.h"
@@ -114,16 +114,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
 @property(nonatomic, strong) RBClientUpdater *clientUpdater;
 @property(nonatomic, strong) UIAlertView *updateAlert;
 @property(nonatomic, strong) UIAlertView *updateInstalledAlert;
-// Presentation metrics
-@property(nonatomic, assign) CFTimeInterval lastPerfLogAt;
-@property(nonatomic, assign) NSUInteger perfLastFramesDisplayed;
-@property(nonatomic, assign) NSUInteger perfLastVideoAUs;
-@property(nonatomic, assign) NSUInteger perfLastDecodedFrames;
-@property(nonatomic, assign) NSUInteger perfLastDecodeErrors;
-@property(nonatomic, assign) NSUInteger perfLastVideoDrops;
-@property(nonatomic, assign) double perfRecentGapMS;
 @property(nonatomic, assign) BOOL audioRequested;
-@property(nonatomic, assign) BOOL hadMemoryWarning;
 // Page state
 @property(nonatomic, assign) BOOL loading;
 @property(nonatomic, assign) BOOL fullscreen;
@@ -154,7 +145,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
 @property(nonatomic, assign) BOOL longPressMoved;
 // Video lane
 @property(nonatomic, strong) RBMediaPipeline *mediaPipeline;
-@property(nonatomic, strong) RBClockSync *clockSync;
+@property(nonatomic, strong) RBDiagnostics *diagnostics;
 @property(nonatomic, assign) BOOL videoActive;   // server confirmed video-config ok
 @property(nonatomic, assign) BOOL videoStarting; // server is starting the automatic video lane
 // Keyboard avoidance (editable rect, viewport fractions)
@@ -220,7 +211,8 @@ static CGFloat RBEvenExtent(CGFloat value) {
     [self.view addSubview:self.browserStateView];
     self.mediaPipeline = [[RBMediaPipeline alloc] init];
     self.mediaPipeline.delegate = self;
-    self.clockSync = [[RBClockSync alloc] init];
+    self.diagnostics = [[RBDiagnostics alloc] initWithMediaPipeline:self.mediaPipeline
+                                                         streamView:self.streamView];
 
     UITapGestureRecognizer *tripleTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggleDebug:)];
     tripleTap.numberOfTapsRequired = 3;
@@ -346,7 +338,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
 
 - (void)didReceiveMemoryWarning {
     [super didReceiveMemoryWarning];
-    self.hadMemoryWarning = YES;
+    [self.diagnostics noteMemoryWarning];
     [self.tabStrip purgeIconCache];
     [self.tabThumbnails removeAllObjects];
     [self.thumbnailLRU removeAllObjects];
@@ -506,6 +498,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
     RBSession *oldSession = self.session;
     oldSession.delegate = nil;
     [oldSession shutdown];
+    [self.diagnostics resetConnection];
     self.session = [[RBSession alloc] initWithServer:normalized];
     self.session.delegate = self;
     self.session.interactionTracker.delegate = self;
@@ -943,7 +936,7 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
 // ------------------------------------------------------- control messages
 
 - (void)session:(RBSession *)session didReceiveControlMessage:(NSDictionary *)message {
-    if ([self.clockSync consumeControlMessage:message]) return;
+    if ([self.diagnostics consumeControlMessage:message]) return;
     NSString *t = [message objectForKey:@"t"];
     if ([t isEqualToString:@"url"]) {
         NSString *url = [message objectForKey:@"url"];
@@ -2439,29 +2432,15 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
     if (!self.debugVisible) return;
     NSString *state = self.session.state == RBSessionStateOpen ? @"open" : (self.session.state == RBSessionStateConnecting ? @"connecting" : @"idle");
     NSString *lane = self.videoActive ? @"H.264 ready" : (self.videoStarting ? @"H.264 starting" : @"video idle");
-    [self.diagnosticsOverlay updateWithSnapshot:@{
-        @"version": [NSString stringWithFormat:@"%@  %@", RBNativeVersion, lane],
-        @"state": state,
-        @"presented": @(self.streamView.presentedFrames),
-        @"motionFPS": @(self.streamView.motionPresentationFPS),
-        @"aus": @(self.mediaPipeline.videoAUs),
-        @"latency": @(self.session.interactionTracker.lastInteractionToPresentMS),
-        @"rtt": @(self.clockSync.lastRTTMS),
-        @"age": @(age * 1000.0),
-        @"maxGap": @(self.streamView.maximumPresentationGapMS),
-        @"queue": @(self.mediaPipeline.queuedAUs),
-        @"gaps": @(self.mediaPipeline.sequenceGaps),
-        @"overwritten": @(self.streamView.overwrittenVideoFrames),
-        @"submitMS": @(self.mediaPipeline.averageSubmitMS),
-        @"callbackMS": @(self.mediaPipeline.averageCallbackMS),
-        @"wrapMS": @(self.mediaPipeline.averageWrapMS),
-        @"errors": @(self.mediaPipeline.decodeErrors),
-        @"drops": @(self.mediaPipeline.droppedAUs),
-        @"audioQueue": @(self.mediaPipeline.audioQueuedBuffers),
-        @"audioDrops": @(self.mediaPipeline.audioDroppedPCM),
-        @"audioUnderruns": @(self.mediaPipeline.audioUnderruns),
-        @"audioRestarts": @(self.mediaPipeline.audioRestartCount)
-    }];
+    NSString *server = [self.currentServer objectForKey:@"name"];
+    if (server.length == 0) server = self.session.baseURL.host;
+    if (server.length == 0) server = @"Surf";
+    NSDictionary *snapshot = [self.diagnostics overlaySnapshotForServer:server
+                                                                 version:[NSString stringWithFormat:@"%@  %@", RBNativeVersion, lane]
+                                                                   state:state
+                                                                 latency:self.session.interactionTracker.lastInteractionToPresentMS
+                                                                     age:age];
+    [self.diagnosticsOverlay updateWithSnapshot:snapshot];
 }
 
 - (void)watchdogTick:(NSTimer *)timer {
@@ -2471,69 +2450,37 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
     // a fault signal because capture can be quiet on static pages.
     // Keep a recent low-RTT sample for the performance overlay.
     if (self.session.state == RBSessionStateOpen) {
-        NSDictionary *probe = [self.clockSync probeIfIdle];
+        NSDictionary *probe = [self.diagnostics clockProbeIfIdle];
         if (probe) [self.session sendMessage:probe];
     }
 
     CFTimeInterval now = CACurrentMediaTime();
-    if (self.lastPerfLogAt <= 0.0) self.lastPerfLogAt = now;
-    if (now - self.lastPerfLogAt >= 5.0) {
-        double dt = MAX(0.001, now - self.lastPerfLogAt);
-        NSUInteger decoded = self.mediaPipeline.decodedFrames;
-        NSUInteger errors = self.mediaPipeline.decodeErrors;
-        NSUInteger drops = self.mediaPipeline.droppedAUs;
-        NSUInteger presented = self.streamView.presentedFrames;
-        double fps = presented >= self.perfLastFramesDisplayed ? (presented - self.perfLastFramesDisplayed) / dt : 0.0;
-        double motionFPS = self.streamView.motionPresentationFPS;
-        double aups = self.mediaPipeline.videoAUs >= self.perfLastVideoAUs ?
-            (self.mediaPipeline.videoAUs - self.perfLastVideoAUs) / dt : 0.0;
-        double vtDone = decoded >= self.perfLastDecodedFrames ?
-            (decoded - self.perfLastDecodedFrames) / dt : 0.0;
-        NSUInteger dropDelta = drops >= self.perfLastVideoDrops ? drops - self.perfLastVideoDrops : drops;
-        NSUInteger errDelta = errors >= self.perfLastDecodeErrors ? errors - self.perfLastDecodeErrors : errors;
+    RBDiagnosticsReport *report = [self.diagnostics reportAtTime:now age:age];
+    if (report) {
         int queued = self.mediaPipeline.queuedAUs;
-        double recentGap = [self.streamView consumeRecentMaximumPresentationGapMS];
-        self.perfRecentGapMS = recentGap;
-        double dropPercent = (self.mediaPipeline.videoAUs >= self.perfLastVideoAUs &&
-                              self.mediaPipeline.videoAUs - self.perfLastVideoAUs > 0) ?
-            100.0 * dropDelta / (double)(self.mediaPipeline.videoAUs - self.perfLastVideoAUs) : 0.0;
-        [self.session sendMessage:@{
-            @"t": @"media-stats",
-            @"fps": @(motionFPS > 0.0 ? motionFPS : fps),
-            @"auRate": @(aups),
-            @"callbackMs": @(self.mediaPipeline.averageCallbackMS),
-            @"gapMs": @(recentGap),
-            @"dropPct": @(dropPercent),
-            @"memoryWarn": @(self.hadMemoryWarning)
-        }];
-        self.hadMemoryWarning = NO;
-        RBLog(@"perf lane=%@ presented_fps=%.1f motion_fps=%.1f aups=%.1f vt_done=%.1f/s q=%d drops+%u overwritten=%u max_gap=%.1fms vt_submit=%.2fms vt_callback=%.2fms wrap=%.2fms errs+%u audio_q=%d audio_drop=%u audio_underrun=%u audio_restart=%u age=%.2fs view=%.0fx%.0f",
+        [self.session sendMessage:[report mediaStatsMessage]];
+        RBLog(@"perf lane=%@ presented_fps=%.1f image_fps=%.1f aups=%.1f vt_done=%.1f/s q=%d drops+%u overwritten=%u max_gap=%.1fms rtt=%.1fms vt_submit=%.2fms vt_callback=%.2fms wrap=%.2fms errs+%u audio_q=%d audio_drop=%u audio_underrun=%u audio_restart=%u age=%.2fs view=%.0fx%.0f",
               self.videoActive ? @"video" : @"starting",
-              fps,
-              motionFPS,
-              aups,
-              vtDone,
+              report.presentedFPS,
+              report.imageFPS,
+              report.AURate,
+              report.decodeRate,
               queued,
-              (unsigned)dropDelta,
+              (unsigned)report.dropDelta,
               (unsigned)self.streamView.overwrittenVideoFrames,
-              self.streamView.maximumPresentationGapMS,
+              report.recentGapMS,
+              self.diagnostics.lastRTTMS,
               self.mediaPipeline.averageSubmitMS,
               self.mediaPipeline.averageCallbackMS,
               self.mediaPipeline.averageWrapMS,
-              (unsigned)errDelta,
+              (unsigned)report.errorDelta,
               self.mediaPipeline.audioQueuedBuffers,
               (unsigned)self.mediaPipeline.audioDroppedPCM,
               (unsigned)self.mediaPipeline.audioUnderruns,
               (unsigned)self.mediaPipeline.audioRestartCount,
-              age,
+              report.ageSeconds,
               self.streamView.bounds.size.width,
               self.streamView.bounds.size.height);
-        self.lastPerfLogAt = now;
-        self.perfLastFramesDisplayed = presented;
-        self.perfLastVideoAUs = self.mediaPipeline.videoAUs;
-        self.perfLastDecodedFrames = decoded;
-        self.perfLastDecodeErrors = errors;
-        self.perfLastVideoDrops = drops;
     }
     [self refreshDebugOverlayWithAge:age];
 }

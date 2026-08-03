@@ -44,8 +44,8 @@ func (s *Capture) StartVideo(config EncoderConfig, handler func(VideoFrame)) err
 		s.mu.Unlock()
 		return errors.New("tab capture source is not attached")
 	}
-	previousConfig := s.videoConfig
 	s.videoActive = true
+	previousConfig := s.videoConfig
 	s.videoConfig = config
 	s.videoHandler = handler
 	if s.videoRunning {
@@ -57,8 +57,10 @@ func (s *Capture) StartVideo(config EncoderConfig, handler func(VideoFrame)) err
 	ready := s.videoReady
 	mediaActive := s.mediaActive
 	reacquire := mediaActive && previousConfig != config
+	var captureReady <-chan error
 	if !mediaActive || reacquire {
 		s.ready = make(chan error, 1)
+		captureReady = s.ready
 	}
 	s.mu.Unlock()
 
@@ -68,10 +70,6 @@ func (s *Capture) StartVideo(config EncoderConfig, handler func(VideoFrame)) err
 			return err
 		}
 	}
-	// Configure only after the old track is fully detached. Configuring first
-	// made the offscreen worker start WebCodecs on a track that the following
-	// restart immediately stopped, producing one guaranteed failed generation
-	// on every rotation/fullscreen transition.
 	s.sendVideoConfig()
 	if !mediaActive || reacquire {
 		if _, err := s.triggerActive(true); err != nil {
@@ -85,6 +83,12 @@ func (s *Capture) StartVideo(config EncoderConfig, handler func(VideoFrame)) err
 	defer timeout.Stop()
 	for {
 		select {
+		case err := <-captureReady:
+			captureReady = nil
+			if err != nil {
+				s.StopVideo()
+				return fmt.Errorf("reacquire tab capture for video: %w", err)
+			}
 		case err := <-ready:
 			if err != nil {
 				s.StopVideo()
@@ -107,10 +111,6 @@ func (s *Capture) StartVideo(config EncoderConfig, handler func(VideoFrame)) err
 	}
 }
 
-// stopCaptureForReconfigure releases the current audio-only (or differently
-// sized) tabCapture stream before requesting a new stream ID for the same tab.
-// Chromium does not allow two simultaneous captures of one tab, so merely
-// triggering the extension again leaves the video transition stuck forever.
 func (s *Capture) stopCaptureForReconfigure() error {
 	s.mu.Lock()
 	conn := s.conn

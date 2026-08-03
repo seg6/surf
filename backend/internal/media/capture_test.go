@@ -122,7 +122,7 @@ func TestBrowserTabCaptureIntegration(t *testing.T) {
 	}
 }
 
-func TestVideoCaptureOversamplesAndPacesStableThirtyFPS(t *testing.T) {
+func TestVideoCaptureOversamplesAndPacesFreshFramesWithoutBursts(t *testing.T) {
 	source, err := NewCapture(t.TempDir())
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -148,7 +148,7 @@ func TestVideoCaptureOversamplesAndPacesStableThirtyFPS(t *testing.T) {
 		"height: constraints.height",
 		"width: videoConfig.height",
 		"height: videoConfig.width",
-		"const captureFrameRate = 60",
+		"const captureFrameRate = 30",
 		"const outputFrameRate = 30",
 		"maxWidth: Math.max(videoConfig.width, videoConfig.height)",
 		"maxHeight: Math.max(videoConfig.width, videoConfig.height)",
@@ -158,13 +158,27 @@ func TestVideoCaptureOversamplesAndPacesStableThirtyFPS(t *testing.T) {
 		"frameTimestamp - videoLastKeyTimestamp >= 2000000",
 		"maxBufferSize: 1",
 		"videoLatestFrame.clone()",
-		"setTimeout(resolve, waitMS)",
-		"const fresh = sourceSequence !== lastEncodedSourceSequence",
+		"const scheduleVideoEncode = () =>",
+		"videoLatestSourceSequence !== lastEncodedSourceSequence",
+		"if (!fresh && !videoNeedsKeyframe)",
+		"videoPendingFrames.length > 0",
+		"encoder.encodeQueueSize > 0",
+		"intervalMS - (now - lastSubmitAt)",
+		"setTimeout(() =>",
+		"videoPumpWake = scheduleVideoEncode",
 		`event.data === "restart"`,
 		`sendJSON({type: "inactive"})`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("offscreen source pacing is missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"nextTick += intervalMS",
+		"encoder.encodeQueueSize > 1",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("offscreen source pacing still contains burst/queue behavior %q", forbidden)
 		}
 	}
 }

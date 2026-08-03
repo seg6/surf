@@ -39,6 +39,7 @@
     self.addressField.autocorrectionType = UITextAutocorrectionTypeNo;
     self.addressField.autocapitalizationType = UITextAutocapitalizationTypeNone;
     self.addressField.clearButtonMode = UITextFieldViewModeWhileEditing;
+    self.addressField.contentVerticalAlignment = UIControlContentVerticalAlignmentCenter;
     [self.addressField addTarget:self action:@selector(addressChanged:) forControlEvents:UIControlEventEditingChanged];
 
     self.nextButton = [[UIBarButtonItem alloc] initWithTitle:@"Next" style:UIBarButtonItemStyleDone
@@ -55,6 +56,10 @@
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 1; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return 1; }
 
+- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
+    return 36.0;
+}
+
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     return @"Server Address";
 }
@@ -68,8 +73,9 @@
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:identifier];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:identifier];
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    self.addressField.frame = CGRectMake(15.0, 7.0, cell.contentView.bounds.size.width - 30.0, 30.0);
-    self.addressField.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    self.addressField.frame = CGRectMake(15.0, 5.0, cell.contentView.bounds.size.width - 30.0,
+                                         MAX(22.0, cell.contentView.bounds.size.height - 10.0));
+    self.addressField.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     if (self.addressField.superview != cell.contentView) {
         [self.addressField removeFromSuperview];
         [cell.contentView addSubview:self.addressField];

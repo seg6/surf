@@ -16,11 +16,22 @@
     return self;
 }
 
+- (void)reset {
+    self.sentAt = 0.0;
+    self.lastProbeAt = 0.0;
+    self.lastRTTMS = 0.0;
+    [self.roundTrips removeAllObjects];
+}
+
 - (NSDictionary *)probeIfIdle {
     CFTimeInterval now = CACurrentMediaTime();
     if (self.sentAt > 0.0 && now - self.sentAt <= 10.0) return nil;
     if (self.sentAt > 0.0) self.sentAt = 0.0;
-    if (self.lastProbeAt > 0.0 && now - self.lastProbeAt < 30.0) return nil;
+    // Connection setup competes with the first IDR, decoder creation, and
+    // AudioQueue startup. Take a short burst of samples so one noisy startup
+    // exchange cannot be displayed as the path RTT for the next 30 seconds.
+    double interval = [self.roundTrips count] < 4 ? 1.0 : 30.0;
+    if (self.lastProbeAt > 0.0 && now - self.lastProbeAt < interval) return nil;
     self.lastProbeAt = now;
     self.sentAt = now;
     return @{@"t": @"clock", @"c0": [NSNumber numberWithUnsignedLongLong:(unsigned long long)(now * 1e9)]};
@@ -40,7 +51,9 @@
     if ([self.roundTrips count] > 8) [self.roundTrips removeObjectAtIndex:0];
     double best = rtt;
     for (NSNumber *sample in self.roundTrips) best = MIN(best, [sample doubleValue]);
-    self.lastRTTMS = best;
+    // Do not publish the first handshake-era sample. The next watchdog tick
+    // supplies a second sample and the lowest-RTT estimator converges quickly.
+    if ([self.roundTrips count] >= 2) self.lastRTTMS = best;
     self.sentAt = 0.0;
     return YES;
 }

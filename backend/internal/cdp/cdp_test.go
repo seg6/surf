@@ -51,6 +51,22 @@ func TestLaunchArgsNoSandbox(t *testing.T) {
 	}
 }
 
+func TestLaunchArgsX11(t *testing.T) {
+	args := LaunchConfig{Profile: "/tmp/profile", W: 1024, H: 768, EnableGPU: true, X11: true}.Args()
+	if hasArg(args, "--headless=new") || !hasArg(args, "--ozone-platform=x11") {
+		t.Fatalf("X11 launch args=%v", args)
+	}
+}
+
+func TestLaunchArgsVirGL(t *testing.T) {
+	args := LaunchConfig{Profile: "/tmp/profile", W: 1024, H: 768, EnableGPU: true, VirGL: true}.Args()
+	for _, want := range []string{"--headless=new", "--ignore-gpu-blocklist", "--use-gl=angle", "--use-angle=gl-egl"} {
+		if !hasArg(args, want) {
+			t.Fatalf("VirGL launch args missing %q: %v", want, args)
+		}
+	}
+}
+
 func TestLaunchArgsExtraArgsAppendedBeforeURL(t *testing.T) {
 	args := LaunchConfig{Profile: "/tmp/profile", W: 1024, H: 768, ExtraArgs: []string{"--foo=bar"}}.Args()
 	if !hasArg(args, "--foo=bar") {

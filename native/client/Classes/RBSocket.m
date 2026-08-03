@@ -49,6 +49,30 @@ static BOOL RBWriteAll(int fd, const void *buf, NSUInteger len) {
     return YES;
 }
 
+static BOOL RBWaitForSocket(int fd, BOOL writable) {
+    if (fd < 0) return NO;
+    for (;;) {
+        fd_set readSet;
+        fd_set writeSet;
+        FD_ZERO(&readSet);
+        FD_ZERO(&writeSet);
+        if (writable) FD_SET(fd, &writeSet);
+        else FD_SET(fd, &readSet);
+        struct timeval timeout;
+        timeout.tv_sec = 1;
+        timeout.tv_usec = 0;
+        int result = select(fd + 1, writable ? NULL : &readSet,
+                            writable ? &writeSet : NULL, NULL, &timeout);
+        if (result < 0 && errno == EINTR) continue;
+        return result > 0;
+    }
+}
+
+static BOOL RBSetNonBlocking(int fd) {
+    int flags = fcntl(fd, F_GETFL, 0);
+    return flags >= 0 && fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
+}
+
 static void RBSetSocketOptions(int fd) {
     struct timeval tv;
     tv.tv_sec = RBSocketTimeoutSeconds;
@@ -285,6 +309,15 @@ static OSStatus RBSocketTLSWrite(SSLConnectionRef connection, const void *data, 
         if (error) *error = @"bad websocket accept";
         return NO;
     }
+    // Secure Transport is serialized below for compatibility with early iOS,
+    // but neither direction may hold that lock while waiting on the network.
+    // Switch only after TLS and the HTTP upgrade are complete; runtime
+    // SSLRead/SSLWrite calls then return WouldBlock and wait on the fd outside
+    // the context lock.
+    if (self.secure && !RBSetNonBlocking(self.fd)) {
+        if (error) *error = @"websocket nonblocking setup failed";
+        return NO;
+    }
     NSString *safePath = [[self.path componentsSeparatedByString:@"?"] objectAtIndex:0];
     RBLog(@"websocket open %@%@:%d%@", self.secure ? @"tls " : @"", self.host, (int)self.port, safePath);
     return YES;
@@ -400,6 +433,12 @@ static OSStatus RBSocketTLSWrite(SSLConnectionRef connection, const void *data, 
     if (!self.secure) return self.fd >= 0 && RBReadAll(self.fd, buf, len);
     unsigned char *p = (unsigned char *)buf;
     while (len > 0 && self.running) {
+        size_t buffered = 0;
+        [self.tlsLock lock];
+        SSLContextRef bufferedContext = self.running ? self.tlsContext : NULL;
+        if (bufferedContext) SSLGetBufferedReadSize(bufferedContext, &buffered);
+        [self.tlsLock unlock];
+        if (!buffered && !RBWaitForSocket(self.fd, NO)) continue;
         size_t count = 0;
         [self.tlsLock lock];
         SSLContextRef context = self.running ? self.tlsContext : NULL;
@@ -417,6 +456,7 @@ static OSStatus RBSocketTLSWrite(SSLConnectionRef connection, const void *data, 
     if (!self.secure) return self.fd >= 0 && RBWriteAll(self.fd, buf, len);
     const unsigned char *p = (const unsigned char *)buf;
     while (len > 0 && self.running) {
+        if (!RBWaitForSocket(self.fd, YES)) continue;
         size_t count = 0;
         [self.tlsLock lock];
         SSLContextRef context = self.running ? self.tlsContext : NULL;
