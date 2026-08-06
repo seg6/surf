@@ -2,7 +2,7 @@
 
 This file records the user-visible changes in every Surf release.
 
-## Unreleased
+## 0.12.2 - 2026-08-06
 
 - Replaced the CGO-based desktop tray with pinned pure-Go platform bindings,
   allowing Linux, Windows, and both macOS architectures to cross-compile from
