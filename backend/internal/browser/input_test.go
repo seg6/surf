@@ -3,8 +3,6 @@ package browser
 import (
 	"testing"
 	"time"
-
-	"surf-backend/internal/protocol"
 )
 
 func TestNormalizeNavURL(t *testing.T) {
@@ -42,34 +40,20 @@ func TestMotionStallAccounting(t *testing.T) {
 	}
 }
 
-func TestScrollEventParamsArePrecisePixels(t *testing.T) {
-	params := scrollEventParams(&protocol.ScrollCommand{
-		X:  1.2,
-		Y:  -0.1,
-		DX: -0.25,
-		DY: 0.1,
-	}, 768, 950)
-	if params["type"] != "mouseWheel" {
-		t.Fatalf("unexpected wheel envelope: %#v", params)
-	}
-	if params["x"] != float64(768) || params["y"] != float64(0) {
-		t.Fatalf("coordinates were not clamped and scaled: %#v", params)
-	}
-	if params["deltaX"] != float64(-192) || params["deltaY"] != float64(95) {
-		t.Fatalf("deltas were not scaled to CSS pixels: %#v", params)
-	}
-}
-
 func TestIsActiveSession(t *testing.T) {
+	active := &Tab{ID: 1, Session: "active"}
+	inactive := &Tab{ID: 2, Session: "inactive"}
 	b := &Controller{
-		tabs:     map[int]*Tab{},
-		activeID: 1,
+		tabs:      map[int]*Tab{1: active, 2: inactive},
+		bySession: map[string]*Tab{"active": active, "child": active, "inactive": inactive},
+		activeID:  1,
 	}
-	b.tabs[1] = &Tab{ID: 1, Session: "active"}
-	b.tabs[2] = &Tab{ID: 2, Session: "inactive"}
 
 	if !b.isActiveSession("active") {
 		t.Fatal("active session was not recognized")
+	}
+	if !b.isActiveSession("child") {
+		t.Fatal("active tab child session was not recognized")
 	}
 	if b.isActiveSession("inactive") {
 		t.Fatal("inactive session was treated as active")

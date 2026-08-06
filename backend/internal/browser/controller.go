@@ -33,10 +33,9 @@ type Tab struct {
 	loading           bool
 	awaitingPageFrame bool
 
-	Zoom       float64 // page zoom, 1..3; applied via device metrics
-	IconKey    string  // favicon cache key (origin), "" when unknown
-	Security   string  // last Security.securityStateChanged state, "" unknown
-	Fullscreen bool    // page Fullscreen API state
+	IconKey    string // favicon cache key (origin), "" when unknown
+	Security   string // last Security.securityStateChanged state, "" unknown
+	Fullscreen bool   // page Fullscreen API state
 }
 
 type Controller struct {
@@ -46,6 +45,7 @@ type Controller struct {
 	hub      *transport.Hub
 	commands chan controllerCommand
 	events   chan cdp.Event
+	touch    *touchInput
 
 	mu           sync.Mutex
 	tabs         map[int]*Tab
@@ -193,6 +193,7 @@ func New(cfg *config.Config, hub *transport.Hub) (*Controller, error) {
 		startedAt:      time.Now(),
 		widevineState:  "unknown",
 	}
+	b.touch = newTouchInput(b)
 	go b.runController()
 	return b, nil
 }
@@ -359,6 +360,9 @@ func (b *Controller) Shutdown() {
 		if b.audio != nil {
 			b.audio.Shutdown()
 		}
+		if b.touch != nil {
+			b.touch.close()
+		}
 		if b.cdp != nil {
 			b.cdp.Close()
 		}
@@ -446,6 +450,12 @@ func (b *Controller) onEvent(ev cdp.Event) {
 	// this goroutine: blocking the dispatch loop stalls every other event,
 	// deadlocking the whole browser.
 	switch ev.Method {
+	case "Target.attachedToTarget":
+		b.onEditableTargetAttached(ev)
+	case "Target.detachedFromTarget":
+		b.onEditableTargetDetached(ev)
+	case "Runtime.executionContextCreated":
+		b.onEditableExecutionContext(ev)
 	case "Target.targetCreated":
 		var p struct {
 			TargetInfo targetInfo `json:"targetInfo"`
@@ -528,5 +538,6 @@ func (b *Controller) onEvent(ev cdp.Event) {
 		b.onSecurityStateChanged(ev)
 	case "Runtime.bindingCalled":
 		b.onFullscreenBinding(ev)
+		b.onEditableBinding(ev)
 	}
 }

@@ -76,11 +76,15 @@ experimental.
 
 </details>
 
-The backend runs on:
+The computer running Surf must be 64-bit. Surf supports:
 
-- Windows x86-64
-- macOS 12+ on Intel or Apple Silicon
-- Linux x86-64 or ARM64
+- 64-bit Windows PCs
+- Macs running macOS 12 or newer
+- 64-bit Linux PCs and ARM computers
+
+Thirty-two-bit computers and operating systems are not supported. An older PC
+can still work if its processor is 64-bit and you install a lightweight 64-bit
+Linux system on it.
 
 ## Quick start
 

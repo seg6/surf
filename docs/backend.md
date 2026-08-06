@@ -185,6 +185,44 @@ reconfigured, so rotation, Surf fullscreen, and page Fullscreen API transitions
 retain the authenticated socket and media subscription. Page fullscreen state
 is synchronized to native fullscreen in both directions.
 
+### Physical input and website mode
+
+The iOS `UIEvent` stream is the touch source of truth in both website modes.
+Each physical contact gets one stable ID for its lifetime. Start/end/cancel
+edges are reliable ordered messages; move messages contain the complete active
+contact snapshot and may replace an older queued move. Coordinates and contact
+radii are normalized against the exact encoder generation currently presented
+on the device.
+
+The backend owns the corresponding Chromium touch state on one serialized
+worker. It rejects stale generations, clients, contact IDs, and sequence
+numbers, and sends `touchCancel` across navigation, tab, viewport, website-mode,
+and disconnect boundaries. Before dispatch it maps normalized surface points
+through `Page.getLayoutMetrics().cssVisualViewport`, then sends real
+`Input.dispatchTouchEvent` events. This distinction matters on mobile pages
+whose CSS viewport is wider than the streamed surface.
+
+Touch dispatch is ordered but nonblocking, so an expensive website event
+handler cannot stall later move or release delivery. On lift, the backend
+promotes UIKit's final contact position to a complete final move snapshot, then
+briefly separates that move from the all-contact release. That boundary lets
+Chromium commit the gesture's final velocity and continue compositor-driven
+fling after the finger leaves the screen.
+
+**Mobile Websites** changes Chromium's mobile metrics and browser identity; it
+does not change an iPad into a mouse. Physical input remains touch in both
+modes, so Chromium owns tap activation, compositor scrolling and fling,
+multi-touch pinch zoom, Pointer Events, and Touch Events. A page may still
+restrict zoom through its own viewport policy, as it can in an ordinary touch
+browser.
+
+Editable focus is event-driven. A runtime binding listens to `focusin` and
+`focusout`, follows the active element through open shadow roots, and tells the
+client when to show its native keyboard. Plain insertions use Chromium text
+insertion; marked iOS text uses IME composition update/commit/cancel messages.
+The protocol is gated by the exact value in `PROTOCOL_VERSION`; obsolete input
+commands are not accepted.
+
 Surf does not distribute Widevine. A working CDM supplied by the selected host
 browser may be used, subject to each service's DRM and output-protection rules.
 

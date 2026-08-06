@@ -2,7 +2,8 @@
 // client.
 //
 // Input coordinates travel as fractions of the remote viewport (0..1), not
-// pixels, so mid-gesture resolution switches can never misplace a tap.
+// pixels, and are accepted only for the encoder generation presented by the
+// client.
 package protocol
 
 import "encoding/binary"
@@ -13,9 +14,8 @@ const (
 	// width[2], height[2], payload len[4], interaction ID[8],
 	// source-receive ns[8], encode-complete ns[8], socket-write ns[8],
 	// encoder generation[4], reserved[4], backend input-receive ns[8],
-	// CDP-dispatch-complete ns[8], scroll x/y Q16.16[4+4],
-	// page scale Q16.16[4], adaptive profile[1], reserved[3].
-	FrameHeaderBytes = 96
+	// CDP-dispatch-complete ns[8], adaptive profile[1], reserved[3].
+	FrameHeaderBytes = 84
 	FrameMagic       = "RBR1"
 	// FrameTypeVideo carries one complete H.264 Annex-B access unit; sent
 	// to native clients. flags bit0 = IDR.
@@ -34,19 +34,7 @@ type VideoMeta struct {
 	SocketWriteNS                     uint64
 	EncoderGeneration                 uint32
 	InputReceiveNS, CDPAcceptedNS     uint64
-	ScrollX, ScrollY, PageScale       float64
 	Profile                           uint8
-}
-
-func fixed16(v float64) uint32 {
-	n := int64(v * 65536)
-	if n > int64(^uint32(0)>>1) {
-		n = int64(^uint32(0) >> 1)
-	}
-	if n < -int64(^uint32(0)>>1)-1 {
-		n = -int64(^uint32(0)>>1) - 1
-	}
-	return uint32(int32(n))
 }
 
 func clamp16(v int) uint16 {
@@ -85,10 +73,7 @@ func EncodeVideo(meta VideoMeta, idr bool, au []byte) []byte {
 	binary.BigEndian.PutUint32(out[56:60], meta.EncoderGeneration)
 	binary.BigEndian.PutUint64(out[64:72], meta.InputReceiveNS)
 	binary.BigEndian.PutUint64(out[72:80], meta.CDPAcceptedNS)
-	binary.BigEndian.PutUint32(out[80:84], fixed16(meta.ScrollX))
-	binary.BigEndian.PutUint32(out[84:88], fixed16(meta.ScrollY))
-	binary.BigEndian.PutUint32(out[88:92], fixed16(meta.PageScale))
-	out[92] = meta.Profile
+	out[80] = meta.Profile
 	copy(out[FrameHeaderBytes:], au)
 	return out
 }

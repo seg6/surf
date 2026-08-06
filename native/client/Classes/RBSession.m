@@ -25,6 +25,7 @@ static NSString *RBURLEscape(NSString *s);
 @property(nonatomic, strong) NSDictionary *requiredClientUpdate;
 @property(nonatomic, copy) NSString *requiredServerVersion;
 @property(nonatomic, assign, readwrite) BOOL requiresPairing;
+@property(nonatomic, assign) unsigned long long touchSequence;
 @end
 
 @implementation RBSession
@@ -278,11 +279,18 @@ static NSString *RBURLEscape(NSString *s) {
     }
 }
 
-- (void)sendClickX:(CGFloat)x y:(CGFloat)y { [self sendMessage:@{@"t": @"click", @"x": [NSNumber numberWithFloat:x], @"y": [NSNumber numberWithFloat:y]}]; }
-- (void)sendScrollPhase:(NSString *)phase x:(CGFloat)x y:(CGFloat)y dx:(CGFloat)dx dy:(CGFloat)dy {
-    [self sendMessage:@{@"t": @"scroll", @"phase": phase ?: @"end",
-                        @"x": [NSNumber numberWithFloat:x], @"y": [NSNumber numberWithFloat:y],
-                        @"dx": [NSNumber numberWithFloat:dx], @"dy": [NSNumber numberWithFloat:dy]}];
+- (void)sendTouchPhase:(NSString *)phase
+                points:(NSArray *)points
+             timestamp:(unsigned long long)timestamp
+               surface:(unsigned int)surface {
+    if (!self.socketOpen || ![phase length] || !surface) return;
+    NSDictionary *message = @{@"t": @"touch", @"phase": phase,
+                              @"seq": [NSNumber numberWithUnsignedLongLong:++self.touchSequence],
+                              @"surface": [NSNumber numberWithUnsignedInt:surface],
+                              @"ts": [NSNumber numberWithUnsignedLongLong:timestamp],
+                              @"points": points ?: @[]};
+    NSDictionary *decorated = [self.interactionTracker decorateMessage:message];
+    [self.socket sendTouchJSON:decorated coalescible:[phase isEqualToString:@"move"]];
 }
 
 - (void)socketDidOpen:(RBSocket *)socket {

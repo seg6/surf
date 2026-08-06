@@ -159,9 +159,14 @@ static BOOL RBReadAll(int fd, void *buf, NSUInteger len) {
 @property(nonatomic, strong) NSLock *writeLock;
 @property(nonatomic, strong) NSLock *tlsLock;
 @property(nonatomic, strong) dispatch_queue_t writeQueue;
+@property(nonatomic, strong) NSMutableArray *controlOutbox;
+@property(nonatomic, assign) BOOL controlDrainScheduled;
 @property(nonatomic, assign) SSLContextRef tlsContext;
 @property(nonatomic, assign) BOOL closing;
 - (int)socketFileDescriptor;
+- (void)enqueueJSON:(NSDictionary *)object coalescible:(BOOL)coalescible;
+- (void)drainControlOutbox;
+- (void)sendFrameOpcode:(unsigned char)opcode payload:(NSData *)payload;
 @end
 
 static OSStatus RBSocketTLSRead(SSLConnectionRef connection, void *data, size_t *dataLength) {
@@ -216,6 +221,7 @@ static OSStatus RBSocketTLSWrite(SSLConnectionRef connection, const void *data, 
         self.writeLock = [[NSLock alloc] init];
         self.tlsLock = [[NSLock alloc] init];
         self.writeQueue = dispatch_queue_create("surf.socket.write", DISPATCH_QUEUE_SERIAL);
+        self.controlOutbox = [NSMutableArray array];
     }
     return self;
 }
@@ -259,6 +265,7 @@ static OSStatus RBSocketTLSWrite(SSLConnectionRef connection, const void *data, 
         if (self.closing) return;
         self.closing = YES;
         self.running = NO;
+        [self.controlOutbox removeAllObjects];
     }
 
     // Wake a blocked TLS operation before waiting for the context owner. Old
@@ -619,30 +626,78 @@ static OSStatus RBSocketTLSWrite(SSLConnectionRef connection, const void *data, 
 }
 
 - (void)sendJSON:(NSDictionary *)message {
+    [self enqueueJSON:message coalescible:NO];
+}
+
+- (void)sendTouchJSON:(NSDictionary *)message coalescible:(BOOL)coalescible {
+    [self enqueueJSON:message coalescible:coalescible];
+}
+
+- (void)enqueueJSON:(NSDictionary *)message coalescible:(BOOL)coalescible {
     NSData *data = [NSJSONSerialization dataWithJSONObject:message options:0 error:nil];
-    if (data) [self sendFrameOpcode:0x1 payload:data async:YES];
+    if (!data) return;
+    BOOL schedule = NO;
+    BOOL overflow = NO;
+    @synchronized (self) {
+        if (!self.running) return;
+        NSDictionary *packet = @{ @"data": data, @"move": [NSNumber numberWithBool:coalescible] };
+        NSDictionary *last = [self.controlOutbox lastObject];
+        if (coalescible && [[last objectForKey:@"move"] boolValue]) {
+            [self.controlOutbox replaceObjectAtIndex:[self.controlOutbox count] - 1 withObject:packet];
+        } else {
+            [self.controlOutbox addObject:packet];
+        }
+        if ([self.controlOutbox count] > 128) {
+            NSUInteger moveIndex = NSNotFound;
+            for (NSUInteger i = 0; i < [self.controlOutbox count]; i++) {
+                if ([[[self.controlOutbox objectAtIndex:i] objectForKey:@"move"] boolValue]) {
+                    moveIndex = i;
+                    break;
+                }
+            }
+            if (moveIndex != NSNotFound) [self.controlOutbox removeObjectAtIndex:moveIndex];
+            else overflow = YES;
+        }
+        if (!self.controlDrainScheduled) {
+            self.controlDrainScheduled = YES;
+            schedule = YES;
+        }
+    }
+    if (overflow) {
+        RBLogEvent(@"socket", @"error", @{ @"queue": @"control" }, @"Reliable control queue overflowed");
+        [self close];
+        return;
+    }
+    if (schedule) dispatch_async(self.writeQueue, ^{ [self drainControlOutbox]; });
+}
+
+- (void)drainControlOutbox {
+    NSDictionary *packet = nil;
+    @synchronized (self) {
+        if (self.running && [self.controlOutbox count]) {
+            packet = [self.controlOutbox objectAtIndex:0];
+            [self.controlOutbox removeObjectAtIndex:0];
+        } else {
+            self.controlDrainScheduled = NO;
+        }
+    }
+    if (!packet) return;
+    [self sendFrameOpcode:0x1 payload:[packet objectForKey:@"data"]];
+    BOOL again = NO;
+    @synchronized (self) {
+        again = self.running && [self.controlOutbox count] > 0;
+        if (!again) self.controlDrainScheduled = NO;
+    }
+    if (again) dispatch_async(self.writeQueue, ^{ [self drainControlOutbox]; });
 }
 
 - (void)sendBinary:(NSData *)data {
-    if (data) [self sendFrameOpcode:0x2 payload:data async:NO];
+    if (data) [self sendFrameOpcode:0x2 payload:data];
 }
 
 - (void)sendFrameOpcode:(unsigned char)opcode payload:(NSData *)payload {
-	[self sendFrameOpcode:opcode payload:payload async:NO];
-}
-
-- (void)sendFrameOpcode:(unsigned char)opcode payload:(NSData *)payload async:(BOOL)async {
     if (!self.running) return;
     NSData *payloadCopy = [payload copy];
-    if (async) {
-        CFTimeInterval enqueuedAt = CACurrentMediaTime();
-        dispatch_async(self.writeQueue, ^{
-            double dwellMS = (CACurrentMediaTime() - enqueuedAt) * 1000.0;
-            if (dwellMS >= 10.0) RBLogEvent(@"socket", @"warn", @{@"queue": @"control", @"dwell_ms": @(dwellMS)}, @"Socket queue dwell exceeded threshold");
-            [self sendFrameOpcode:opcode payload:payloadCopy async:NO];
-        });
-        return;
-    }
     NSUInteger len = [payloadCopy length];
     NSMutableData *frame = [NSMutableData data];
     unsigned char b0 = 0x80 | opcode;

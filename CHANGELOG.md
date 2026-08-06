@@ -2,6 +2,28 @@
 
 This file records the user-visible changes in every Surf release.
 
+## 0.12.0 - 2026-08-06
+
+- Replaced synthesized click, scroll, long-press, and zoom commands with raw
+  UIKit multi-touch contacts dispatched through Chromium's native touch input.
+- Kept physical input touch-based in both Desktop and Mobile Websites modes,
+  restoring tap activation, vertical navigation, compositor fling and inertia,
+  and multi-touch pinch zoom on mobile pages.
+- Added ordered, bounded, and move-coalescing input queues with stable contact
+  IDs, exact video-generation validation, CSS visual-viewport mapping, and
+  cancellation across navigation, tab, viewport, website-mode, and disconnect
+  boundaries.
+- Kept Chromium gesture delivery nonblocking under expensive page handlers and
+  committed UIKit's final lift position before release, preserving fling
+  velocity when mobile pages process the move and release in adjacent frames.
+- Replaced editable polling with event-driven focus reporting across documents,
+  open shadow roots, and out-of-process frames, restoring the native keyboard
+  for login fields such as Reddit's.
+- Added iOS marked-text composition update, commit, and cancel handling plus
+  appropriate native keyboard types for common HTML input modes.
+- Removed the obsolete input commands and frame scroll metadata. This release
+  requires the exact protocol version `20260806-1` on both ends.
+
 ## 0.11.0 - 2026-08-03
 
 - Added roaming through Cloudflare Tunnel while retaining Surf's existing

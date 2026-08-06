@@ -45,6 +45,8 @@ typedef enum {
 - (void)updateViewportWidth:(NSInteger)width height:(NSInteger)height;
 - (void)updateViewportWidth:(NSInteger)width height:(NSInteger)height force:(BOOL)force;
 - (void)sendMessage:(NSDictionary *)message;
-- (void)sendClickX:(CGFloat)x y:(CGFloat)y;
-- (void)sendScrollPhase:(NSString *)phase x:(CGFloat)x y:(CGFloat)y dx:(CGFloat)dx dy:(CGFloat)dy;
+- (void)sendTouchPhase:(NSString *)phase
+                points:(NSArray *)points
+             timestamp:(unsigned long long)timestamp
+               surface:(unsigned int)surface;
 @end

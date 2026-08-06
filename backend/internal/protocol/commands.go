@@ -44,24 +44,26 @@ type ToggleCommand struct {
 	CommandBase
 	On bool `json:"on"`
 }
-type PointCommand struct {
-	CommandBase
-	X float64 `json:"x"`
-	Y float64 `json:"y"`
+type TouchPoint struct {
+	ID      int     `json:"id"`
+	X       float64 `json:"x"`
+	Y       float64 `json:"y"`
+	RadiusX float64 `json:"rx,omitempty"`
+	RadiusY float64 `json:"ry,omitempty"`
+	Force   float64 `json:"force,omitempty"`
 }
-type ScrollCommand struct {
+
+// TouchCommand carries physical contacts from UIKit: lifecycle edges contain
+// changed contacts and move contains a complete active-contact snapshot.
+// Coordinates and radii are fractions of the exact presented video surface;
+// the browser input worker maps them through Chromium's CSS visual viewport.
+type TouchCommand struct {
 	CommandBase
-	Phase string  `json:"phase"`
-	X     float64 `json:"x,omitempty"`
-	Y     float64 `json:"y,omitempty"`
-	DX    float64 `json:"dx,omitempty"`
-	DY    float64 `json:"dy,omitempty"`
-}
-type LongPressUpCommand struct {
-	CommandBase
-	X   float64 `json:"x"`
-	Y   float64 `json:"y"`
-	Sel bool    `json:"sel"`
+	Phase       string       `json:"phase"`
+	Sequence    uint64       `json:"seq"`
+	Surface     uint32       `json:"surface"`
+	TimestampNS uint64       `json:"ts"`
+	Points      []TouchPoint `json:"points"`
 }
 type KeyCommand struct {
 	CommandBase
@@ -75,11 +77,12 @@ type TextCommand struct {
 	CommandBase
 	Text string `json:"text"`
 }
-type ZoomCommand struct {
+type CompositionCommand struct {
 	CommandBase
-	Scale float64 `json:"scale"`
-	CX    float64 `json:"cx"`
-	CY    float64 `json:"cy"`
+	Phase          string `json:"phase"`
+	Text           string `json:"text"`
+	SelectionStart int    `json:"start,omitempty"`
+	SelectionEnd   int    `json:"end,omitempty"`
 }
 type QueryCommand struct {
 	CommandBase
@@ -144,18 +147,14 @@ func DecodeCommand(data []byte) (Command, error) {
 		}
 	case "audio", "mobile", "fullscreen":
 		dst = &ToggleCommand{}
-	case "click", "lpdown", "lpmove", "hit":
-		dst = &PointCommand{}
-	case "scroll":
-		dst = &ScrollCommand{}
-	case "lpup":
-		dst = &LongPressUpCommand{}
+	case "touch":
+		dst = &TouchCommand{}
 	case "key":
 		dst = &KeyCommand{}
 	case "paste":
 		dst = &TextCommand{}
-	case "zoom":
-		dst = &ZoomCommand{}
+	case "compose":
+		dst = &CompositionCommand{}
 	case "find":
 		dst = &FindCommand{}
 	case "suggest", "history":

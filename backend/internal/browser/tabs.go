@@ -58,7 +58,7 @@ func (b *Controller) attachTarget(info targetInfo) {
 	}
 	b.seq++
 	id := b.seq
-	t := &Tab{ID: id, TargetID: info.TargetID, Title: info.Title, URL: info.URL, Zoom: 1}
+	t := &Tab{ID: id, TargetID: info.TargetID, Title: info.Title, URL: info.URL}
 	b.tabs[id] = t
 	b.byTarget[info.TargetID] = t
 	first := id == 1
@@ -105,6 +105,7 @@ func (b *Controller) attachTarget(info targetInfo) {
 		_ = b.cdp.Dispatch(s, "Network.setUserAgentOverride", userAgentParams)
 	}
 	b.installCompatScripts(s)
+	b.setupEditableAutoAttach(s)
 	b.setupFeatures(t)
 	// The compatibility override must be queued before the first real
 	// navigation; otherwise the initial request and document expose different
@@ -125,7 +126,11 @@ func (b *Controller) dropTarget(targetID string) {
 	delete(b.tabs, t.ID)
 	delete(b.byTarget, targetID)
 	if t.Session != "" {
-		delete(b.bySession, t.Session)
+		for session, attachedTab := range b.bySession {
+			if attachedTab == t {
+				delete(b.bySession, session)
+			}
+		}
 	}
 	wasActive := b.activeID == t.ID
 	if wasActive {
@@ -212,6 +217,7 @@ func (b *Controller) tabNavigated(session, url string) {
 	active := t.ID == b.activeID
 	b.mu.Unlock()
 	if active {
+		b.touch.cancel(false)
 		b.setTouchMode(session)
 		b.hub.BroadcastJSON(b.urlMessage(url))
 		b.pushNavState()
@@ -301,11 +307,12 @@ func (b *Controller) isActiveSession(session string) bool {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	t := b.tabs[b.activeID]
-	return t != nil && t.Session == session
+	t := b.bySession[session]
+	return t != nil && t.ID == b.activeID
 }
 
 func (b *Controller) switchActive(id int) {
+	b.touch.cancel(true)
 	b.mu.Lock()
 	next := b.tabs[id]
 	if next == nil {
@@ -352,17 +359,11 @@ func (b *Controller) isActiveGeneration(id int, generation uint64) bool {
 }
 
 // applyView makes Chrome's viewport exactly the client's screen. Emulation is
-// independent of Chrome's hidden platform window, so any dimensions work. Zoom shrinks
-// the CSS viewport and raises deviceScaleFactor by the same factor, so frames
-// stay at the client's pixel size but everything renders larger and sharp.
+// independent of Chrome's hidden platform window, so any dimensions work.
 func (b *Controller) applyView(t *Tab) {
 	b.mu.Lock()
-	z := t.Zoom
-	if z < 1 {
-		z = 1
-	}
-	w := int(float64(b.viewW)/z + 0.5)
-	h := int(float64(b.viewH)/z + 0.5)
+	w := b.viewW
+	h := b.viewH
 	pixelW, pixelH := b.viewW, b.viewH
 	mobile := b.mobile
 	s := t.Session
@@ -377,7 +378,7 @@ func (b *Controller) applyView(t *Tab) {
 	b.resizeCaptureSurface(t.TargetID, pixelW, pixelH)
 	b.setTouchMode(s)
 	metrics := map[string]any{
-		"width": w, "height": h, "deviceScaleFactor": z, "mobile": mobile,
+		"width": w, "height": h, "deviceScaleFactor": 1, "mobile": mobile,
 		"screenWidth": pixelW, "screenHeight": pixelH,
 		"screenOrientation": map[string]any{
 			"type": orientation, "angle": angle,

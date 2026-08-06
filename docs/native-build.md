@@ -150,6 +150,10 @@ For device acceptance, verify both idioms rather than resizing one layout:
 - Exercise rapid portrait/landscape changes as well as entering and leaving a
   player such as YouTube. Returning from page fullscreen must restore the
   device-specific chrome at the correct viewport without black borders.
+- In both Desktop and Mobile Websites modes, verify a normal tap, a long page
+  fling, TikTok-style vertical swipe navigation, multi-touch pinch zoom, the
+  Speedometer 3.1 **Start Test** button, and text/password keyboard focus inside
+  an open shadow root (Reddit login is a representative live check).
 - Cover representative compact phone/iPod, modern phone, iPad, and iPad Pro
   surfaces. Every requested even size must remain exact rather than being
   coerced to the dimensions of another device family.

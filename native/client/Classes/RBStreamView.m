@@ -118,6 +118,22 @@ static GLuint RBCompileShader(GLenum type, const char *source) {
     return self;
 }
 
+- (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event {
+    [self.presentationDelegate streamView:self touchesBegan:touches withEvent:event];
+}
+
+- (void)touchesMoved:(NSSet *)touches withEvent:(UIEvent *)event {
+    [self.presentationDelegate streamView:self touchesMoved:touches withEvent:event];
+}
+
+- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event {
+    [self.presentationDelegate streamView:self touchesEnded:touches withEvent:event];
+}
+
+- (void)touchesCancelled:(NSSet *)touches withEvent:(UIEvent *)event {
+    [self.presentationDelegate streamView:self touchesCancelled:touches withEvent:event];
+}
+
 - (void)layoutSubviews {
     [super layoutSubviews];
     if (!self.glContext) return;
@@ -181,10 +197,10 @@ static GLuint RBCompileShader(GLenum type, const char *source) {
 
 - (void)endMotionWindow {
     self.motionTracking = NO;
-    // Client inertia has already ended. Allow only the final in-flight
-    // capture/encode/decode frame to land; a later static-page update is not
-    // a scroll hitch and must not inflate the motion gap.
-    self.motionUntil = CACurrentMediaTime() + 0.12;
+    // Chromium's compositor can keep flinging after the finger lifts. Keep
+    // presentation diagnostics attached to that browser-owned motion long
+    // enough to include its trailing frames.
+    self.motionUntil = CACurrentMediaTime() + 1.0;
 }
 
 - (void)displayVideoPixelBuffer:(CVPixelBufferRef)pixelBuffer metadata:(RBFrameMetadata *)metadata {

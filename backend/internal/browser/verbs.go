@@ -1,5 +1,5 @@
 // verbs.go implements the "browser verbs" the stream viewer lacked: JS
-// dialogs, file-upload interception, link hit-testing, TLS state, native
+// dialogs, file-upload interception, TLS state, native
 // error surfaces, reader-mode extraction, latency echo and data clearing.
 // All wire additions are additive JSON, individually listed in config.Caps.
 package browser
@@ -242,43 +242,6 @@ func cleanupUploadedFiles(paths []string) {
 func scheduleUploadCleanup(paths []string) {
 	keep := append([]string(nil), paths...)
 	time.AfterFunc(uploadCleanupDelay, func() { cleanupUploadedFiles(keep) })
-}
-
-// ---- link hit-test (M2.4) ------------------------------------------------
-
-// hitExpr climbs from the element under a point to the nearest link and/or
-// image. Coordinates are CSS px of the emulated viewport (like all input).
-const hitExpr = `(function(x,y){
-  var e = document.elementFromPoint(x,y), href='', img='', text='';
-  for (var n=e; n; n=n.parentElement) {
-    if (!img && n.tagName==='IMG' && n.src) img=n.src;
-    if (!href && n.tagName==='A' && n.href) { href=n.href; text=(n.textContent||'').trim().slice(0,120); break; }
-  }
-  return {href:href, img:img, text:text};
-})(%d,%d)`
-
-// handleHit answers a long-press hit-test: what's under the finger?
-func (b *Controller) handleHit(c *transport.Client, session string, x, y float64) {
-	res, err := b.cdp.Call(session, "Runtime.evaluate", map[string]any{
-		"expression": fmt.Sprintf(hitExpr, int(x), int(y)), "returnByValue": true,
-	})
-	if err != nil {
-		return
-	}
-	var p struct {
-		Result struct {
-			Value struct {
-				Href string `json:"href"`
-				Img  string `json:"img"`
-				Text string `json:"text"`
-			} `json:"value"`
-		} `json:"result"`
-	}
-	if json.Unmarshal(res, &p) != nil {
-		return
-	}
-	v := p.Result.Value
-	c.SendJSON(protocol.LinkInfoEvent{Type: "linkinfo", Href: v.Href, Img: v.Img, Text: v.Text})
 }
 
 // openInNewTab backgrounds nothing: new tabs auto-focus by design (popups).

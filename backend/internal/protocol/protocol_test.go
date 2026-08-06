@@ -10,8 +10,7 @@ func TestVideoEncode(t *testing.T) {
 	data := []byte{0, 0, 1}
 	meta := VideoMeta{AUSeq: 7, SourceSeq: 6, W: 1024, H: 768, InteractionID: 42,
 		SourceReceiveNS: 100, EncodeCompleteNS: 200, EncoderGeneration: 3,
-		InputReceiveNS: 50, CDPAcceptedNS: 75, ScrollX: 12.5, ScrollY: -3.25,
-		PageScale: 1.0, Profile: 2}
+		InputReceiveNS: 50, CDPAcceptedNS: 75, Profile: 2}
 	b := EncodeVideo(meta, true, data)
 	if len(b) != FrameHeaderBytes+3 {
 		t.Fatalf("length %d", len(b))
@@ -35,10 +34,7 @@ func TestVideoEncode(t *testing.T) {
 		binary.BigEndian.Uint64(b[40:48]) != 200 || binary.BigEndian.Uint32(b[56:60]) != 3 {
 		t.Fatal("bad metadata")
 	}
-	if binary.BigEndian.Uint64(b[64:72]) != 50 || binary.BigEndian.Uint64(b[72:80]) != 75 ||
-		int32(binary.BigEndian.Uint32(b[80:84])) != 12*65536+32768 ||
-		int32(binary.BigEndian.Uint32(b[84:88])) != -3*65536-16384 ||
-		binary.BigEndian.Uint32(b[88:92]) != 65536 || b[92] != 2 {
+	if binary.BigEndian.Uint64(b[64:72]) != 50 || binary.BigEndian.Uint64(b[72:80]) != 75 || b[80] != 2 {
 		t.Fatal("bad extended metadata")
 	}
 	StampSocketWrite(b, 300)

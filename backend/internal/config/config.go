@@ -22,7 +22,6 @@ var AppVersion = "dev"
 var Caps = []string{
 	"dialog",      // JS dialog forwarding + dialogreply
 	"filechooser", // upload intercept + POST /api/v1/uploads
-	"linkinfo",    // hit message -> linkinfo reply
 	"history2",    // paginated history query + histdel/clear
 	"reader",      // reader-mode extraction
 	"security",    // TLS state on url messages

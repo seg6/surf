@@ -31,6 +31,7 @@ func (b *Controller) setupFeatures(t *Tab) {
 	b.setupFileChooser(s) // upload interception (M2.2)
 	b.setupSecurity(s)    // TLS state events (M2.5)
 	b.setupPageFullscreen(s)
+	b.setupEditableObserver(s)
 }
 
 // onURLChanged fires on every main-frame URL change and records history.
@@ -295,10 +296,6 @@ func (b *Controller) RegisterRoutes(srv *web.Server) {
 func (b *Controller) handleFeatureMessage(c *transport.Client, t *Tab, session string, command protocol.Command) {
 	kind := command.Kind()
 	switch m := command.(type) {
-	case *protocol.ZoomCommand:
-		if kind == "zoom" {
-			b.handleZoom(t, session, m)
-		}
 	case *protocol.TextCommand:
 		if kind != "paste" {
 			return
@@ -331,20 +328,6 @@ func (b *Controller) handleFeatureMessage(c *transport.Client, t *Tab, session s
 			_ = os.Remove(filepath.Join(b.cfg.DownloadsDir, name))
 		}
 		c.SendJSON(protocol.DownloadsEvent{Type: "downloads", Items: b.downloadList()})
-	case *protocol.PointCommand:
-		if kind != "hit" {
-			return
-		}
-		// Long-press hit-test (M2.4): coordinates arrive as fractions like all
-		// input; convert to CSS px of the (possibly zoomed) viewport.
-		b.mu.Lock()
-		z := t.Zoom
-		vw, vh := b.viewW, b.viewH
-		b.mu.Unlock()
-		if z < 1 {
-			z = 1
-		}
-		b.handleHit(c, session, m.X*float64(vw)/z, m.Y*float64(vh)/z)
 	case *protocol.HistoryDeleteCommand:
 		if kind == "histdel" {
 			b.store.DeleteHistory(m.URL, m.TS)
@@ -389,56 +372,6 @@ func (b *Controller) handleFeatureMessage(c *transport.Client, t *Tab, session s
 			go b.handleReader(c, t, session) // heavy evaluate; off the controller loop
 		}
 	}
-}
-
-// handleZoom applies an absolute page zoom, recentering on the gesture focus
-// (CX/CY are viewport fractions).
-func (b *Controller) handleZoom(t *Tab, session string, m *protocol.ZoomCommand) {
-	z := m.Scale
-	if z < 1.05 {
-		z = 1
-	}
-	if z > 3 {
-		z = 3
-	}
-	b.mu.Lock()
-	oldZ := t.Zoom
-	if oldZ < 1 {
-		oldZ = 1
-	}
-	t.Zoom = z
-	vw, vh := b.viewW, b.viewH
-	b.mu.Unlock()
-
-	b.applyView(t)
-	if z != oldZ {
-		// Keep the gesture focus point on screen: scroll so it's centered.
-		expr := fmt.Sprintf(
-			`(function(){var px=window.pageXOffset+%f, py=window.pageYOffset+%f;`+
-				`window.scrollTo(Math.max(0,px-%d/2), Math.max(0,py-%d/2));})()`,
-			m.CX*float64(vw)/oldZ, m.CY*float64(vh)/oldZ, int(float64(vw)/z), int(float64(vh)/z))
-		_, _ = b.cdp.Call(session, "Runtime.evaluate", map[string]any{"expression": expr})
-	}
-	b.hub.BroadcastJSON(protocol.ScaleEvent{Type: "zoom", Scale: z})
-}
-
-// finishLongpress runs after the long-press mouse-up. Plain press (sel=true):
-// double-click-select the word underneath. After a drag: whatever the drag
-// selected. Either way, ship the selection to the client for native copy.
-func (b *Controller) finishLongpress(c *transport.Client, t *Tab, session string, x, y float64, selectWord bool) {
-	if selectWord {
-		b.mouse(session, "mousePressed", x, y, 2)
-		b.mouse(session, "mouseReleased", x, y, 2)
-	}
-	text := ""
-	if v, err := b.cdp.EvaluateString(session, "String(window.getSelection())"); err == nil {
-		text = v
-	}
-	// A drag that selected nothing was a drag, not a copy attempt.
-	if !selectWord && text == "" {
-		return
-	}
-	c.SendJSON(protocol.TextEvent{Type: "copytext", Text: text})
 }
 
 func (b *Controller) handleFind(c *transport.Client, t *Tab, session string, m *protocol.FindCommand) {

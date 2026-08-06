@@ -40,32 +40,6 @@ func NormalizeNavURL(input string) string {
 	return "https://www.google.com/search?q=" + url.QueryEscape(u)
 }
 
-// editableExpr reports whether focus sits in a text-entry element, plus the
-// keyboard kind and the element's bounding box in viewport fractions (divided
-// by innerWidth/Height in-page, so zoom math never leaks to the server).
-const editableExpr = `(function(){
-  var e = document.activeElement;
-  var on = false, kind = 'text';
-  if (e) {
-    var t = e.tagName;
-    if (t === 'TEXTAREA') { on = true; kind = 'textarea'; }
-    else if (t === 'SELECT') { on = true; kind = 'select'; }
-    else if (e.isContentEditable) { on = true; }
-    else if (t === 'INPUT') {
-      var ty = (e.type || 'text').toLowerCase();
-      var skip = {button:1,checkbox:1,radio:1,submit:1,reset:1,file:1,image:1,range:1,color:1,hidden:1,date:1,time:1};
-      if (!skip[ty]) {
-        on = true;
-        kind = ({password:'password',email:'email',number:'number',tel:'number',url:'url',search:'search'})[ty] || 'text';
-      }
-    }
-  }
-  if (!on) return {on:false};
-  var r = e.getBoundingClientRect();
-  var w = window.innerWidth || 1, h = window.innerHeight || 1;
-  return {on:true, kind:kind, rect:[r.left/w, r.top/h, r.width/w, r.height/h]};
-})()`
-
 // ClientConnected implements transport.Handler: greet, sync state, and automatically
 // subscribe the client to the only visual lane (H.264).
 func (b *Controller) ClientConnected(c *transport.Client) {
@@ -100,6 +74,10 @@ func (b *Controller) ClientConnected(c *transport.Client) {
 // and only enqueues immutable typed commands. The controller goroutine is the
 // sole ordered executor (press before release, key order, tab commands).
 func (b *Controller) HandleMessage(c *transport.Client, command protocol.Command) {
+	if touch, ok := command.(*protocol.TouchCommand); ok {
+		b.touch.enqueue(c, touch, telemetry.MonoNS())
+		return
+	}
 	select {
 	case b.commands <- controllerCommand{client: c, command: command, receivedNS: telemetry.MonoNS()}:
 	case <-c.Closed():
@@ -179,16 +157,7 @@ func (b *Controller) handleCommand(c *transport.Client, command protocol.Command
 	}
 	b.mu.Lock()
 	s := t.Session
-	z := t.Zoom
-	vw, vh := b.viewW, b.viewH
 	b.mu.Unlock()
-	if z < 1 {
-		z = 1
-	}
-	// Input coordinates arrive as viewport fractions; the page works in CSS
-	// pixels of the (possibly zoomed) emulated viewport.
-	cssW, cssH := float64(vw)/z, float64(vh)/z
-
 	switch m := command.(type) {
 	case *protocol.URLCommand:
 		if kind != "nav" {
@@ -229,33 +198,6 @@ func (b *Controller) handleCommand(c *transport.Client, command protocol.Command
 		}
 	case *protocol.VolumeCommand:
 		b.controlPageMedia(c, s, "volume", m.Value)
-	case *protocol.PointCommand:
-		switch kind {
-		case "click":
-			x, y := m.X*cssW, m.Y*cssH
-			b.tap(s, x, y)
-			b.checkEditable(c, s)
-		case "lpdown":
-			b.mouse(s, "mousePressed", m.X*cssW, m.Y*cssH, 1)
-		case "lpmove":
-			_ = b.cdp.Dispatch(s, "Input.dispatchMouseEvent", map[string]any{
-				"type": "mouseMoved", "x": math.Round(m.X * cssW), "y": math.Round(m.Y * cssH),
-				"button": "left", "buttons": 1,
-			})
-		default:
-			b.handleFeatureMessage(c, t, s, command)
-		}
-	case *protocol.ScrollCommand:
-		if m.Phase != "begin" && m.Phase != "move" && m.Phase != "end" {
-			return
-		}
-		b.noteMotionPhase(m.Phase)
-		if m.Phase == "move" {
-			_ = b.cdp.Dispatch(s, "Input.dispatchMouseEvent", scrollEventParams(m, cssW, cssH))
-		}
-	case *protocol.LongPressUpCommand:
-		b.mouse(s, "mouseReleased", m.X*cssW, m.Y*cssH, 1)
-		b.finishLongpress(c, t, s, m.X*cssW, m.Y*cssH, m.Sel)
 	case *protocol.KeyCommand:
 		if m.Text != "" {
 			// Key messages must stay ordered. cdp.Send launches a goroutine per
@@ -280,6 +222,19 @@ func (b *Controller) handleCommand(c *transport.Client, command protocol.Command
 			}
 			_ = b.cdp.Dispatch(s, "Input.dispatchKeyEvent", params)
 		}
+	case *protocol.CompositionCommand:
+		switch m.Phase {
+		case "update":
+			_ = b.cdp.Dispatch(s, "Input.imeSetComposition", map[string]any{
+				"text": m.Text, "selectionStart": m.SelectionStart, "selectionEnd": m.SelectionEnd,
+			})
+		case "commit":
+			_ = b.cdp.Dispatch(s, "Input.insertText", map[string]any{"text": m.Text})
+		case "cancel":
+			_ = b.cdp.Dispatch(s, "Input.imeSetComposition", map[string]any{
+				"text": "", "selectionStart": 0, "selectionEnd": 0,
+			})
+		}
 	default:
 		b.handleFeatureMessage(c, t, s, command)
 	}
@@ -302,6 +257,7 @@ func (b *Controller) handleMobileLayout(on bool) {
 	if !changed {
 		return
 	}
+	b.touch.cancel(true)
 	for _, session := range sessions {
 		_ = b.cdp.Dispatch(session, "Network.enable", nil)
 		if userAgentParams != nil {
@@ -382,7 +338,7 @@ func (b *Controller) queryPageMedia(c *transport.Client, session string) {
 
 func renderCommand(t string) bool {
 	switch t {
-	case "click", "scroll", "lpdown", "lpmove", "lpup", "key", "paste", "nav", "reload", "back", "fwd", "zoom":
+	case "touch", "key", "paste", "compose", "nav", "reload", "back", "fwd":
 		return true
 	}
 	return false
@@ -410,16 +366,6 @@ func (b *Controller) noteMotionPhase(phase string) {
 	b.perfMu.Unlock()
 }
 
-func scrollEventParams(command *protocol.ScrollCommand, cssW, cssH float64) map[string]any {
-	return map[string]any{
-		"type":   "mouseWheel",
-		"x":      math.Round(math.Max(0, math.Min(1, command.X)) * cssW),
-		"y":      math.Round(math.Max(0, math.Min(1, command.Y)) * cssH),
-		"deltaX": command.DX * cssW,
-		"deltaY": command.DY * cssH,
-	}
-}
-
 func (b *Controller) checkMotionStall(now time.Time) {
 	b.perfMu.Lock()
 	if !b.motionActive || b.motionStallLogged {
@@ -442,7 +388,7 @@ func (b *Controller) checkMotionStall(now time.Time) {
 	telemetry.Emit("motion_au_stall", "capture", "webcodecs", map[string]any{
 		"age_ms": float64(age.Microseconds()) / 1000.0,
 	})
-	log.Printf("capture: no encoded AU for %.1fms during scroll motion (stalls=%d)",
+	log.Printf("capture: no encoded AU for %.1fms during touch motion (stalls=%d)",
 		float64(age.Microseconds())/1000.0, stalls)
 }
 
@@ -507,13 +453,11 @@ func (b *Controller) noteClientMessage(t string) {
 		}
 		return sum / float64(n)
 	}
-	log.Printf("perf input %.1fs: click=%.1f/s scroll=%.1f/s key=%.1f/s nav=%d size=%d lp=%d other=%d | input->image mean=%.1fms max=%.1fms n=%d | motion AU gap mean=%.1fms max=%.1fms n=%d | fresh AU gap mean=%.1fms max=%.1fms n=%d dup=%d | capture raw-gap=%.1f/%.1fms submit-wait=%.1f/%.1fms encode=%.1f/%.1fms | video queue mean=%.1fms max=%.1fms n=%d | audio lat mean=%.1fms max=%.1fms n=%d",
+	log.Printf("perf input %.1fs: touch=%.1f/s key=%.1f/s nav=%d size=%d other=%d | input->image mean=%.1fms max=%.1fms n=%d | motion AU gap mean=%.1fms max=%.1fms n=%d | fresh AU gap mean=%.1fms max=%.1fms n=%d dup=%d | capture raw-gap=%.1f/%.1fms submit-wait=%.1f/%.1fms encode=%.1f/%.1fms | video queue mean=%.1fms max=%.1fms n=%d | audio lat mean=%.1fms max=%.1fms n=%d",
 		dt,
-		float64(counts["click"])/dt,
-		float64(counts["scroll"])/dt,
+		float64(counts["touch"])/dt,
 		float64(counts["key"])/dt,
 		counts["nav"], counts["size"],
-		counts["lpdown"]+counts["lpmove"]+counts["lpup"],
 		otherInputCount(counts),
 		auMeanMS, auMaxMS, auN,
 		motionMeanMS, motionMaxMS, motionN,
@@ -629,8 +573,7 @@ func (b *Controller) noteAudioLatency(d time.Duration) {
 
 func otherInputCount(counts map[string]int) int {
 	known := map[string]bool{
-		"click": true, "scroll": true, "key": true, "nav": true, "size": true, "fullscreen": true,
-		"lpdown": true, "lpmove": true, "lpup": true,
+		"touch": true, "key": true, "compose": true, "nav": true, "size": true, "fullscreen": true,
 	}
 	n := 0
 	for k, v := range counts {
@@ -658,6 +601,7 @@ func (b *Controller) handleSize(m *protocol.SizeCommand) {
 	if !changed {
 		return
 	}
+	b.touch.cancel(true)
 	b.scheduleViewportApply()
 }
 
@@ -753,72 +697,8 @@ func (b *Controller) navigateHistory(session string, back bool) {
 	}
 }
 
-func (b *Controller) mouse(session, typ string, x, y float64, clicks int) {
-	_ = b.cdp.Dispatch(session, "Input.dispatchMouseEvent", map[string]any{
-		"type": typ, "x": math.Round(x), "y": math.Round(y),
-		"button": "left", "clickCount": clicks,
-	})
-}
-
-func (b *Controller) tap(session string, x, y float64) {
-	point := map[string]any{
-		"x": math.Round(x), "y": math.Round(y), "id": 0,
-		"radiusX": 1, "radiusY": 1, "force": 1,
-	}
-	_ = b.cdp.Dispatch(session, "Input.dispatchTouchEvent", map[string]any{
-		"type": "touchStart", "touchPoints": []any{point},
-	})
-	// Chrome synthesizes the compatibility click from this touch sequence.
-	// Sending an additional mouse event would activate controls twice.
-	_ = b.cdp.Dispatch(session, "Input.dispatchTouchEvent", map[string]any{
-		"type": "touchEnd", "touchPoints": []any{},
-	})
-}
-
 func (b *Controller) setTouchMode(session string) {
 	_ = b.cdp.Dispatch(session, "Emulation.setTouchEmulationEnabled", map[string]any{
-		"enabled": true, "maxTouchPoints": 1,
-	})
-}
-
-// checkEditable tells the tapping client whether focus landed in a text field
-// (so it can raise the iOS keyboard). Waits 180ms for focus to settle.
-func (b *Controller) checkEditable(c *transport.Client, session string) {
-	time.AfterFunc(180*time.Millisecond, func() {
-		if !b.isActiveSession(session) {
-			return
-		}
-		res, err := b.cdp.Call(session, "Runtime.evaluate", map[string]any{
-			"expression": editableExpr, "returnByValue": true,
-		})
-		if err != nil {
-			return
-		}
-		var p struct {
-			Result struct {
-				Value struct {
-					On   bool      `json:"on"`
-					Kind string    `json:"kind"`
-					Rect []float64 `json:"rect"`
-				} `json:"value"`
-			} `json:"result"`
-		}
-		if json.Unmarshal(res, &p) != nil {
-			return
-		}
-		if !b.isActiveSession(session) {
-			return
-		}
-		v := p.Result.Value
-		msg := protocol.EditableEvent{Type: "editable", On: v.On}
-		// kind selects the keyboard type; rect (viewport fractions) drives
-		// keyboard avoidance.
-		if v.On {
-			msg.Kind = v.Kind
-			if len(v.Rect) == 4 {
-				msg.Rect = v.Rect
-			}
-		}
-		c.SendJSON(msg)
+		"enabled": true, "maxTouchPoints": maxTouchContacts,
 	})
 }

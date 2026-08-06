@@ -46,9 +46,9 @@ const webauthnShim = `
 })();
 `
 
-// Keep the remote page pinned at its scroll limits. Surf provides its own
-// touch gesture handling, so root-page rubber-banding only looks like the
-// streamed texture itself is being dragged beyond the viewport.
+// Keep the remote page pinned at its scroll limits. Chromium owns touch
+// gestures, but root-page rubber-banding still looks like the streamed texture
+// itself is being dragged beyond the viewport.
 const overscrollShim = `
 (function () {
   function pinRootScroller() {

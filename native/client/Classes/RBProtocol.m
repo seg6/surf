@@ -15,9 +15,6 @@
     m.socketWriteNS = frame.socketWriteNS;
     m.inputReceiveNS = frame.inputReceiveNS;
     m.cdpAcceptedNS = frame.cdpAcceptedNS;
-    m.scrollX = frame.scrollX;
-    m.scrollY = frame.scrollY;
-    m.pageScale = frame.pageScale;
     m.profile = frame.profile;
     return m;
 }
@@ -35,14 +32,11 @@ static unsigned long long RBReadBE64(const unsigned char *p) {
     return ((unsigned long long)RBReadBE32(p) << 32) | RBReadBE32(p + 4);
 }
 
-static double RBReadFixed16(const unsigned char *p) {
-    return ((double)(int32_t)RBReadBE32(p)) / 65536.0;
-}
-
 @implementation RBProtocol
 
 + (RBFrame *)frameFromData:(NSData *)data error:(NSString **)error {
-    if ([data length] < 64) {
+    static const NSUInteger RBFrameHeaderBytes = 84;
+    if ([data length] < RBFrameHeaderBytes) {
         if (error) *error = @"short frame";
         return nil;
     }
@@ -55,14 +49,11 @@ static double RBReadFixed16(const unsigned char *p) {
 
     unsigned short headerLen = RBReadBE16(b + 6);
     unsigned int payloadLen = RBReadBE32(b + 20);
-    if (headerLen < 64 || (NSUInteger)headerLen > [data length]) {
+    if (headerLen != RBFrameHeaderBytes || (NSUInteger)headerLen > [data length]) {
         if (error) *error = @"bad header length";
         return nil;
     }
-    if (payloadLen == 0) {
-        payloadLen = (unsigned int)([data length] - headerLen);
-    }
-    if ((NSUInteger)headerLen + (NSUInteger)payloadLen > [data length]) {
+    if ((NSUInteger)headerLen + (NSUInteger)payloadLen != [data length]) {
         if (error) *error = @"bad payload length";
         return nil;
     }
@@ -79,14 +70,9 @@ static double RBReadFixed16(const unsigned char *p) {
     frame.encodeCompleteNS = RBReadBE64(b + 40);
     frame.socketWriteNS = RBReadBE64(b + 48);
     frame.encoderGeneration = RBReadBE32(b + 56);
-    if (headerLen >= 96) {
-        frame.inputReceiveNS = RBReadBE64(b + 64);
-        frame.cdpAcceptedNS = RBReadBE64(b + 72);
-        frame.scrollX = RBReadFixed16(b + 80);
-        frame.scrollY = RBReadFixed16(b + 84);
-        frame.pageScale = RBReadFixed16(b + 88);
-        frame.profile = b[92];
-    }
+    frame.inputReceiveNS = RBReadBE64(b + 64);
+    frame.cdpAcceptedNS = RBReadBE64(b + 72);
+    frame.profile = b[80];
     frame.payload = [data subdataWithRange:NSMakeRange(headerLen, payloadLen)];
     return frame;
 }

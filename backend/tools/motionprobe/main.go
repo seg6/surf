@@ -27,6 +27,7 @@ func main() {
 	inspectMedia := flag.Bool("inspect-media", false, "print active page media state and exit")
 	expression := flag.String("eval", "", "evaluate JavaScript in the active page and print its value")
 	scroll := flag.Bool("scroll", false, "run a deterministic compositor scroll instead of the block animation")
+	touchFling := flag.Bool("touch-fling", false, "dispatch one touch flick, report post-lift travel, and restore scroll position")
 	flag.Parse()
 
 	socket, err := pageSocket(*profile)
@@ -56,6 +57,12 @@ func main() {
 			fatal(err)
 		}
 		fmt.Println(value)
+		return
+	}
+	if *touchFling {
+		if err := runTouchFlingProbe(conn); err != nil {
+			fatal(err)
+		}
 		return
 	}
 	if *scroll {
@@ -93,6 +100,59 @@ func main() {
 	if err := evaluate(conn, 2, remove); err != nil {
 		fatal(err)
 	}
+}
+
+func runTouchFlingProbe(conn *websocket.Conn) error {
+	before, err := evaluateValue(conn, 1, `String(scrollY)`)
+	if err != nil {
+		return err
+	}
+	point := func(y float64) []map[string]any {
+		return []map[string]any{{"id": 1, "x": 384, "y": y, "radiusX": 8, "radiusY": 8, "force": .5}}
+	}
+	id := 2
+	dispatch := func(kind string, points []map[string]any) error {
+		params := map[string]any{
+			"type": kind, "touchPoints": points,
+			"timestamp": float64(time.Now().UnixNano()) / float64(time.Second),
+		}
+		if err := conn.WriteJSON(map[string]any{
+			"id": id, "method": "Input.dispatchTouchEvent", "params": params,
+		}); err != nil {
+			return err
+		}
+		id++
+		return nil
+	}
+	if err := dispatch("touchStart", point(763)); err != nil {
+		return err
+	}
+	for _, y := range []float64{732, 695, 558, 460, 353, 235} {
+		time.Sleep(16 * time.Millisecond)
+		if err := dispatch("touchMove", point(y)); err != nil {
+			return err
+		}
+	}
+	time.Sleep(12 * time.Millisecond)
+	if err := dispatch("touchEnd", []map[string]any{}); err != nil {
+		return err
+	}
+	immediate, err := evaluateValue(conn, id, `String(scrollY)`)
+	if err != nil {
+		return err
+	}
+	id++
+	time.Sleep(400 * time.Millisecond)
+	later, err := evaluateValue(conn, id, `String(scrollY)`)
+	if err != nil {
+		return err
+	}
+	id++
+	if err := evaluate(conn, id, `scrollTo(0, `+before+`)`); err != nil {
+		return err
+	}
+	fmt.Printf("touch fling scrollY before=%s immediate=%s after400ms=%s\n", before, immediate, later)
+	return nil
 }
 
 func runScrollProbe(conn *websocket.Conn, duration time.Duration) error {

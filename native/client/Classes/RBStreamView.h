@@ -5,6 +5,10 @@
 @class RBFrameMetadata;
 @protocol RBStreamViewDelegate <NSObject>
 - (void)streamView:(RBStreamView *)streamView didPresentMetadata:(RBFrameMetadata *)metadata;
+- (void)streamView:(RBStreamView *)streamView touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event;
+- (void)streamView:(RBStreamView *)streamView touchesMoved:(NSSet *)touches withEvent:(UIEvent *)event;
+- (void)streamView:(RBStreamView *)streamView touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event;
+- (void)streamView:(RBStreamView *)streamView touchesCancelled:(NSSet *)touches withEvent:(UIEvent *)event;
 @end
 
 // Shows the latest decoded H.264 image on a display-link boundary.

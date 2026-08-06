@@ -21,8 +21,8 @@
     static NSSet *types;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        types = [NSSet setWithObjects:@"click", @"scroll", @"lpdown", @"lpmove", @"lpup",
-                 @"key", @"paste", @"nav", @"reload", @"back", @"fwd", @"zoom", nil];
+        types = [NSSet setWithObjects:@"touch", @"key", @"paste", @"compose",
+                 @"nav", @"reload", @"back", @"fwd", nil];
     });
     return [types containsObject:type];
 }

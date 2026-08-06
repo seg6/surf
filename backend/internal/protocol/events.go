@@ -117,11 +117,6 @@ type DownloadsEvent struct {
 	Items []DownloadItem `json:"items"`
 }
 
-type ScaleEvent struct {
-	Type  string  `json:"t"`
-	Scale float64 `json:"scale"`
-}
-
 type DialogEvent struct {
 	Type    string `json:"t"`
 	Kind    string `json:"kind"`
@@ -132,13 +127,6 @@ type DialogEvent struct {
 type FileChooserEvent struct {
 	Type     string `json:"t"`
 	Multiple bool   `json:"multiple"`
-}
-
-type LinkInfoEvent struct {
-	Type string `json:"t"`
-	Href string `json:"href"`
-	Img  string `json:"img"`
-	Text string `json:"text"`
 }
 
 type SecurityEvent struct {
@@ -194,10 +182,8 @@ func (SuggestEvent) isClientEvent()          {}
 func (LibraryEvent) isClientEvent()          {}
 func (HistoryPageEvent) isClientEvent()      {}
 func (DownloadsEvent) isClientEvent()        {}
-func (ScaleEvent) isClientEvent()            {}
 func (DialogEvent) isClientEvent()           {}
 func (FileChooserEvent) isClientEvent()      {}
-func (LinkInfoEvent) isClientEvent()         {}
 func (SecurityEvent) isClientEvent()         {}
 func (ReaderEvent) isClientEvent()           {}
 func (EditableEvent) isClientEvent()         {}

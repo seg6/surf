@@ -75,7 +75,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
                                     RBMediaControllerDelegate,
                                     RBInteractionTrackerDelegate, RBClientUpdaterDelegate,
                                     UIDocumentInteractionControllerDelegate, UIPopoverControllerDelegate,
-                                     UIAlertViewDelegate, UIActionSheetDelegate,
+                                     UIAlertViewDelegate,
                                      RBQRScannerDelegate,
                                     UIImagePickerControllerDelegate, UINavigationControllerDelegate,
                                     MFMailComposeViewControllerDelegate>
@@ -133,17 +133,11 @@ static CGFloat RBEvenExtent(CGFloat value) {
 @property(nonatomic, assign) BOOL canGoForward;
 @property(nonatomic, assign) BOOL awaitingPageFrame;
 @property(nonatomic, assign) unsigned int awaitedSourceSequence;
-// Copy menu
-@property(nonatomic, copy) NSString *pendingCopyText;
-@property(nonatomic, assign) CGPoint copyMenuPoint;
-// Gestures
-@property(nonatomic, assign) CGPoint scrollAnchor;
-@property(nonatomic, assign) CGPoint lastPanPoint;
-@property(nonatomic, assign) CGPoint inertiaAnchor;
-@property(nonatomic, assign) CGPoint inertiaVelocity;
-@property(nonatomic, strong) NSTimer *inertiaTimer;
-@property(nonatomic, assign) CGPoint longPressStart;
-@property(nonatomic, assign) BOOL longPressMoved;
+// Physical page input
+@property(nonatomic, strong) NSMutableDictionary *pageTouchIDs;
+@property(nonatomic, assign) NSUInteger nextTouchID;
+@property(nonatomic, assign) unsigned int presentedSurfaceGeneration;
+@property(nonatomic, strong) UITouch *edgeTouch;
 // Video lane
 @property(nonatomic, strong) RBMediaPipeline *mediaPipeline;
 @property(nonatomic, strong) RBDiagnostics *diagnostics;
@@ -155,6 +149,8 @@ static CGFloat RBEvenExtent(CGFloat value) {
 @property(nonatomic, assign) BOOL keyboardVisible;
 @property(nonatomic, assign) CGFloat keyboardTop;
 @property(nonatomic, assign) CGFloat keyboardShift;
+@property(nonatomic, copy) NSString *previousHiddenText;
+@property(nonatomic, assign) BOOL inputCompositionActive;
 // JS dialogs (M2.1)
 @property(nonatomic, strong) UIAlertView *dialogAlert;
 @property(nonatomic, copy) NSString *dialogKind;
@@ -163,10 +159,6 @@ static CGFloat RBEvenExtent(CGFloat value) {
 @property(nonatomic, assign) BOOL chooserPending;
 @property(nonatomic, strong) UIPopoverController *uploadPopover;
 @property(nonatomic, strong) UIImagePickerController *uploadPicker;
-// Link context menu (M2.4)
-@property(nonatomic, strong) NSDictionary *lastLinkInfo;
-@property(nonatomic, strong) UIActionSheet *linkSheet;
-@property(nonatomic, strong) NSArray *linkSheetActions;
 // Library (chrome rethink) / reader (M1.5)
 @property(nonatomic, strong) RBLibraryController *libraryController;
 @property(nonatomic, assign) BOOL readerPending;
@@ -176,7 +168,6 @@ static CGFloat RBEvenExtent(CGFloat value) {
 // Edge swipes (M2.6): 0 none, -1 left edge (back), 1 right edge (forward)
 @property(nonatomic, assign) int edgeSwipe;
 @property(nonatomic, assign) CGPoint edgeStart;
-@property(nonatomic, assign) BOOL scrollGestureActive;
 - (NSNumber *)activeTabKey;
 - (void)cacheThumbnailForTabKey:(NSNumber *)tabKey;
 - (void)presentLibraryFromButton:(UIButton *)button;
@@ -184,6 +175,10 @@ static CGFloat RBEvenExtent(CGFloat value) {
 @end
 
 @implementation RBRootViewController
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
 
 // ---------------------------------------------------------------- lifecycle
 
@@ -200,6 +195,8 @@ static CGFloat RBEvenExtent(CGFloat value) {
 
     self.streamView = [[RBStreamView alloc] initWithFrame:CGRectZero];
     self.streamView.presentationDelegate = self;
+    self.pageTouchIDs = [NSMutableDictionary dictionary];
+    self.nextTouchID = 1;
     [self.view addSubview:self.streamView];
 
     self.startPageView = [[RBNewTabView alloc] initWithFrame:CGRectZero];
@@ -218,18 +215,6 @@ static CGFloat RBEvenExtent(CGFloat value) {
     UITapGestureRecognizer *tripleTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggleDebug:)];
     tripleTap.numberOfTapsRequired = 3;
     [self.streamView addGestureRecognizer:tripleTap];
-
-    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tapped:)];
-    [tap requireGestureRecognizerToFail:tripleTap];
-    [self.streamView addGestureRecognizer:tap];
-
-    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(panned:)];
-    pan.maximumNumberOfTouches = 1;
-    [self.streamView addGestureRecognizer:pan];
-
-    UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(longPressed:)];
-    longPress.minimumPressDuration = 0.55;
-    [self.streamView addGestureRecognizer:longPress];
 
     self.chromeBar = [[RBChromeBar alloc] initWithFrame:CGRectZero];
     self.chromeBar.delegate = self;
@@ -297,7 +282,10 @@ static CGFloat RBEvenExtent(CGFloat value) {
     self.hiddenInput.autocapitalizationType = UITextAutocapitalizationTypeNone;
     self.hiddenInput.returnKeyType = UIReturnKeyGo;
     self.hiddenInput.text = @" ";
+    self.previousHiddenText = @" ";
     [self.view addSubview:self.hiddenInput];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(hiddenInputDidChange:)
+                                                 name:UITextFieldTextDidChangeNotification object:self.hiddenInput];
 
     self.toastLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     self.toastLabel.backgroundColor = [UIColor colorWithWhite:0.10 alpha:0.86];
@@ -887,6 +875,7 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
 }
 
 - (void)streamView:(RBStreamView *)streamView didPresentMetadata:(RBFrameMetadata *)metadata {
+    self.presentedSurfaceGeneration = metadata.encoderGeneration;
     if (self.awaitingPageFrame && self.awaitedSourceSequence > 0 &&
         metadata.sourceSequence >= self.awaitedSourceSequence) {
         self.awaitingPageFrame = NO;
@@ -973,8 +962,7 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
             [self showKeyboard];
         } else {
             self.editableHasRect = NO;
-            if ([self.hiddenInput isFirstResponder]) [self.hiddenInput resignFirstResponder];
-            [self updateKeyboardAvoidance];
+            [self hidePageKeyboard];
         }
     } else if ([t isEqualToString:@"video-config"]) {
         [self handleVideoConfig:message];
@@ -989,10 +977,6 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
             [self.mediaPipeline stopAudio];
             RBLogEvent(@"media", @"info", @{@"lane": @"audio", @"state": @"stopped"}, @"Audio lane stopped");
         }
-    } else if ([t isEqualToString:@"copytext"]) {
-        NSString *text = [message objectForKey:@"text"] ?: @"";
-        if ([text length]) [self showCopyMenuForText:text];
-        else [self showToast:@"No text selected"];
     } else if ([t isEqualToString:@"found"]) {
         [self.findBar setFound:[[message objectForKey:@"on"] boolValue]];
     } else if ([t isEqualToString:@"download"]) {
@@ -1083,8 +1067,6 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
             [self showToast:(pct >= 0 ? [NSString stringWithFormat:@"%@ — %d%%", name, pct]
                                       : [NSString stringWithFormat:@"%@…", name])];
         }
-    } else if ([t isEqualToString:@"linkinfo"]) {
-        self.lastLinkInfo = message;
     } else if ([t isEqualToString:@"security"]) {
         self.currentSecurity = [message objectForKey:@"state"];
         [self.chromeBar.omnibox setSecurityState:self.currentSecurity];
@@ -1097,209 +1079,105 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
     }
 }
 
-// ----------------------------------------------------------------- gestures
+// ----------------------------------------------------------- physical input
 
-- (CGPoint)fractionForPoint:(CGPoint)p {
-    CGSize s = self.streamView.bounds.size;
-    CGFloat x = MIN(1.0, MAX(0.0, p.x / MAX(1.0, s.width)));
-    CGFloat y = MIN(1.0, MAX(0.0, p.y / MAX(1.0, s.height)));
-    return CGPointMake(x, y);
+- (NSValue *)keyForPageTouch:(UITouch *)touch {
+    return [NSValue valueWithNonretainedObject:touch];
 }
 
-- (void)tapped:(UITapGestureRecognizer *)tap {
-    if (tap.state != UIGestureRecognizerStateEnded) return;
+- (NSDictionary *)wirePointForTouch:(UITouch *)touch identifier:(NSNumber *)identifier {
+    CGSize size = self.streamView.bounds.size;
+    CGPoint point = [touch locationInView:self.streamView];
+    CGFloat width = MAX(1.0, size.width), height = MAX(1.0, size.height);
+    CGFloat radius = 1.0;
+    if ([touch respondsToSelector:@selector(majorRadius)]) radius = [touch majorRadius];
+    return @{@"id": identifier,
+             @"x": [NSNumber numberWithFloat:MIN(1.0, MAX(0.0, point.x / width))],
+             @"y": [NSNumber numberWithFloat:MIN(1.0, MAX(0.0, point.y / height))],
+             @"rx": [NSNumber numberWithFloat:MIN(1.0, radius / width)],
+             @"ry": [NSNumber numberWithFloat:MIN(1.0, radius / height)],
+             @"force": @0.5};
+}
+
+- (unsigned long long)wireTimestampForTouches:(NSSet *)touches {
+    NSTimeInterval latest = 0.0;
+    for (UITouch *touch in touches) latest = MAX(latest, touch.timestamp);
+    if (latest <= 0.0) latest = CACurrentMediaTime();
+    return (unsigned long long)(latest * 1000000000.0);
+}
+
+- (void)sendPageTouchPhase:(NSString *)phase touches:(NSSet *)touches {
+    if (!self.presentedSurfaceGeneration) return;
+    NSMutableArray *points = [NSMutableArray array];
+    for (UITouch *touch in touches) {
+        NSNumber *identifier = [self.pageTouchIDs objectForKey:[self keyForPageTouch:touch]];
+        if (identifier) [points addObject:[self wirePointForTouch:touch identifier:identifier]];
+    }
+    if ([phase isEqualToString:@"cancel"]) [points removeAllObjects];
+    if (![phase isEqualToString:@"cancel"] && ![points count]) return;
+    [self.session sendTouchPhase:phase points:points
+                       timestamp:[self wireTimestampForTouches:touches]
+                         surface:self.presentedSurfaceGeneration];
+}
+
+- (void)streamView:(RBStreamView *)streamView touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event {
     if (self.chromeBar.omnibox.editing) {
         [self.chromeBar.omnibox dismissKeyboard];
         [self.suggestPanel hide];
         return;
     }
-    [self hidePageKeyboard];
-    [self stopInertia];
-    [self hideCopyMenu];
-    CGPoint p = [tap locationInView:self.streamView];
-    [self showTapRippleAt:p];
-    CGPoint f = [self fractionForPoint:p];
-    [self.session sendClickX:f.x y:f.y];
-}
-
-// Tap ripple (M1.3): instant local acknowledgment — perceived latency is the
-// one kind we can fix for free.
-- (void)showTapRippleAt:(CGPoint)p {
-    UIView *ripple = [[UIView alloc] initWithFrame:CGRectMake(p.x - 14.0, p.y - 14.0, 28.0, 28.0)];
-    ripple.backgroundColor = [UIColor colorWithWhite:0.5 alpha:0.35];
-    ripple.layer.cornerRadius = 14.0;
-    ripple.userInteractionEnabled = NO;
-    [self.streamView addSubview:ripple];
-    [UIView animateWithDuration:0.35 animations:^{
-        ripple.transform = CGAffineTransformMakeScale(1.7, 1.7);
-        ripple.alpha = 0.0;
-    } completion:^(BOOL finished) {
-        [ripple removeFromSuperview];
-    }];
-}
-
-- (void)panned:(UIPanGestureRecognizer *)pan {
-    CGPoint p = [pan locationInView:self.streamView];
-    if (pan.state == UIGestureRecognizerStateBegan) {
-        [self hidePageKeyboard];
-        [self stopInertia];
-        // Edge swipes (M2.6): a pan born on a screen edge is history nav.
-        CGFloat w = self.streamView.bounds.size.width;
-        self.edgeSwipe = 0;
-        if (p.x < 24.0) self.edgeSwipe = -1;
-        else if (p.x > w - 24.0) self.edgeSwipe = 1;
-        self.edgeStart = p;
-        self.scrollGestureActive = self.edgeSwipe == 0;
-        if (self.scrollGestureActive) {
-            self.scrollAnchor = [self fractionForPoint:p];
-            self.inertiaAnchor = self.scrollAnchor;
-            self.lastPanPoint = p;
-            self.inertiaVelocity = CGPointZero;
-            [self.streamView beginMotionWindow];
-            [self.session sendScrollPhase:@"begin" x:self.scrollAnchor.x y:self.scrollAnchor.y dx:0.0 dy:0.0];
-        }
-        return;
-    }
-    if (pan.state == UIGestureRecognizerStateChanged) {
-        if (self.edgeSwipe != 0) return; // candidate history swipe: no scrolling
-        if (self.scrollGestureActive) {
-            CGSize size = self.streamView.bounds.size;
-            CGFloat dx = -(p.x - self.lastPanPoint.x) / MAX(1.0, size.width);
-            CGFloat dy = -(p.y - self.lastPanPoint.y) / MAX(1.0, size.height);
-            self.lastPanPoint = p;
-            [self.streamView continueMotionWindow];
-            [self.session sendScrollPhase:@"move" x:self.scrollAnchor.x y:self.scrollAnchor.y dx:dx dy:dy];
-            CGPoint velocity = [pan velocityInView:self.streamView];
-            self.inertiaVelocity = CGPointMake(-velocity.x, -velocity.y);
-        }
-        return;
-    }
-    if (pan.state == UIGestureRecognizerStateEnded || pan.state == UIGestureRecognizerStateCancelled) {
-        if (self.edgeSwipe != 0) {
-            CGFloat travel = p.x - self.edgeStart.x;
-            if (pan.state == UIGestureRecognizerStateEnded) {
-                if (self.edgeSwipe == -1 && travel > 70.0) [self.session sendMessage:@{@"t": @"back"}];
-                else if (self.edgeSwipe == 1 && travel < -70.0) [self.session sendMessage:@{@"t": @"fwd"}];
-            }
-            self.edgeSwipe = 0;
+    if (!self.edgeTouch && [self.pageTouchIDs count] == 0 && [touches count] == 1) {
+        UITouch *candidate = [touches anyObject];
+        CGPoint point = [candidate locationInView:self.streamView];
+        CGFloat width = self.streamView.bounds.size.width;
+        if (point.x < 24.0 || point.x > width - 24.0) {
+            self.edgeTouch = candidate;
+            self.edgeSwipe = point.x < 24.0 ? -1 : 1;
+            self.edgeStart = point;
             return;
         }
-        if (self.scrollGestureActive) {
-            if (pan.state != UIGestureRecognizerStateEnded || ![self startInertiaIfNeeded]) {
-                [self finishScrollMotion];
-            }
+    }
+    BOOL wasEmpty = [self.pageTouchIDs count] == 0;
+    for (UITouch *touch in touches) {
+        if (touch == self.edgeTouch || !self.presentedSurfaceGeneration) continue;
+        NSValue *key = [self keyForPageTouch:touch];
+        if (![self.pageTouchIDs objectForKey:key]) {
+            [self.pageTouchIDs setObject:[NSNumber numberWithUnsignedInteger:self.nextTouchID++] forKey:key];
         }
     }
+    if (wasEmpty && [self.pageTouchIDs count]) [self.streamView beginMotionWindow];
+    [self sendPageTouchPhase:@"start" touches:touches];
 }
 
-- (BOOL)startInertiaIfNeeded {
-    CGFloat speed = sqrtf(self.inertiaVelocity.x * self.inertiaVelocity.x +
-                          self.inertiaVelocity.y * self.inertiaVelocity.y);
-    if (speed < 220.0) return NO;
-    self.inertiaTimer = [NSTimer timerWithTimeInterval:1.0 / 60.0
-                                                target:self
-                                              selector:@selector(inertiaTick:)
-                                              userInfo:nil
-                                               repeats:YES];
-    [[NSRunLoop mainRunLoop] addTimer:self.inertiaTimer forMode:NSRunLoopCommonModes];
-    return YES;
+- (void)streamView:(RBStreamView *)streamView touchesMoved:(NSSet *)touches withEvent:(UIEvent *)event {
+    // Move packets are complete snapshots of the page-owned contacts. Both
+    // socket and server are then free to replace an older queued move without
+    // losing a simultaneous finger that did not change in this UIEvent.
+    NSSet *activeTouches = [event allTouches] ?: touches;
+    [self sendPageTouchPhase:@"move" touches:activeTouches];
+    if ([self.pageTouchIDs count]) [self.streamView continueMotionWindow];
 }
 
-- (void)finishScrollMotion {
-    if (!self.scrollGestureActive) return;
-    [self.session sendScrollPhase:@"end" x:self.inertiaAnchor.x y:self.inertiaAnchor.y dx:0.0 dy:0.0];
+- (void)streamView:(RBStreamView *)streamView touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event {
+    if (self.edgeTouch && [touches containsObject:self.edgeTouch]) {
+        CGPoint point = [self.edgeTouch locationInView:self.streamView];
+        CGFloat travel = point.x - self.edgeStart.x;
+        if (self.edgeSwipe == -1 && travel > 70.0) [self.session sendMessage:@{@"t": @"back"}];
+        else if (self.edgeSwipe == 1 && travel < -70.0) [self.session sendMessage:@{@"t": @"fwd"}];
+        self.edgeTouch = nil;
+        self.edgeSwipe = 0;
+    }
+    [self sendPageTouchPhase:@"end" touches:touches];
+    for (UITouch *touch in touches) [self.pageTouchIDs removeObjectForKey:[self keyForPageTouch:touch]];
+    if (![self.pageTouchIDs count]) [self.streamView endMotionWindow];
+}
+
+- (void)streamView:(RBStreamView *)streamView touchesCancelled:(NSSet *)touches withEvent:(UIEvent *)event {
+    if ([self.pageTouchIDs count]) [self sendPageTouchPhase:@"cancel" touches:touches];
+    [self.pageTouchIDs removeAllObjects];
+    self.edgeTouch = nil;
+    self.edgeSwipe = 0;
     [self.streamView endMotionWindow];
-    self.scrollGestureActive = NO;
-}
-
-- (void)stopInertia {
-    if (!self.inertiaTimer) return;
-    [self.inertiaTimer invalidate];
-    self.inertiaTimer = nil;
-    [self finishScrollMotion];
-}
-
-- (void)inertiaTick:(NSTimer *)timer {
-    CGSize size = self.streamView.bounds.size;
-    CGFloat dt = 1.0 / 60.0;
-    CGFloat dx = self.inertiaVelocity.x * dt / MAX(1.0, size.width);
-    CGFloat dy = self.inertiaVelocity.y * dt / MAX(1.0, size.height);
-    [self.streamView continueMotionWindow];
-    [self.session sendScrollPhase:@"move" x:self.inertiaAnchor.x y:self.inertiaAnchor.y dx:dx dy:dy];
-    self.inertiaVelocity = CGPointMake(self.inertiaVelocity.x * 0.94,
-                                       self.inertiaVelocity.y * 0.94);
-    CGFloat speed = sqrtf(self.inertiaVelocity.x * self.inertiaVelocity.x +
-                          self.inertiaVelocity.y * self.inertiaVelocity.y);
-    if (speed < 45.0) {
-        [self.inertiaTimer invalidate];
-        self.inertiaTimer = nil;
-        [self finishScrollMotion];
-    }
-}
-
-- (void)longPressed:(UILongPressGestureRecognizer *)longPress {
-    CGPoint p = [longPress locationInView:self.streamView];
-    CGPoint f = [self fractionForPoint:p];
-    if (longPress.state == UIGestureRecognizerStateBegan) {
-        [self stopInertia];
-        self.longPressStart = p;
-        self.longPressMoved = NO;
-        // Ask what's under the finger (M2.4); the answer usually lands well
-        // before the finger lifts and decides menu vs. text selection.
-        self.lastLinkInfo = nil;
-        [self.session sendMessage:@{@"t": @"hit", @"x": [NSNumber numberWithFloat:f.x], @"y": [NSNumber numberWithFloat:f.y]}];
-        [self.session sendMessage:@{@"t": @"lpdown", @"x": [NSNumber numberWithFloat:f.x], @"y": [NSNumber numberWithFloat:f.y]}];
-        return;
-    }
-    if (longPress.state == UIGestureRecognizerStateChanged) {
-        if (fabs(p.x - self.longPressStart.x) > 8.0 || fabs(p.y - self.longPressStart.y) > 8.0) self.longPressMoved = YES;
-        if (self.longPressMoved) [self.session sendMessage:@{@"t": @"lpmove", @"x": [NSNumber numberWithFloat:f.x], @"y": [NSNumber numberWithFloat:f.y]}];
-        return;
-    }
-    if (longPress.state == UIGestureRecognizerStateEnded || longPress.state == UIGestureRecognizerStateCancelled || longPress.state == UIGestureRecognizerStateFailed) {
-        // A plain press on a link/image becomes a context menu, not a word
-        // selection — matching what fingers expect from a browser.
-        NSString *href = [self.lastLinkInfo objectForKey:@"href"];
-        NSString *img = [self.lastLinkInfo objectForKey:@"img"];
-        BOOL linky = !self.longPressMoved && ([href length] || [img length]);
-        [self.session sendMessage:@{@"t": @"lpup", @"x": [NSNumber numberWithFloat:f.x], @"y": [NSNumber numberWithFloat:f.y],
-                                    @"sel": [NSNumber numberWithBool:(!self.longPressMoved && !linky)]}];
-        if (linky && longPress.state == UIGestureRecognizerStateEnded) [self presentLinkSheet];
-    }
-}
-
-// ----------------------------------------------------------- copy menu
-
-- (BOOL)canBecomeFirstResponder {
-    return YES;
-}
-
-- (BOOL)canPerformAction:(SEL)action withSender:(id)sender {
-    if (action == @selector(rbCopySelection:)) return [self.pendingCopyText length] > 0;
-    return NO;
-}
-
-- (void)showCopyMenuForText:(NSString *)text {
-    self.pendingCopyText = text;
-    self.copyMenuPoint = self.longPressStart;
-    [self becomeFirstResponder];
-    UIMenuController *menu = [UIMenuController sharedMenuController];
-    menu.menuItems = @[[[UIMenuItem alloc] initWithTitle:@"Copy" action:@selector(rbCopySelection:)]];
-    CGRect target = CGRectMake(self.copyMenuPoint.x - 2.0, self.copyMenuPoint.y - 2.0, 4.0, 4.0);
-    [menu setTargetRect:target inView:self.streamView];
-    [menu setMenuVisible:YES animated:YES];
-}
-
-- (void)hideCopyMenu {
-    if (![self.pendingCopyText length]) return;
-    self.pendingCopyText = nil;
-    [[UIMenuController sharedMenuController] setMenuVisible:NO animated:YES];
-}
-
-- (void)rbCopySelection:(id)sender {
-    [UIPasteboard generalPasteboard].string = self.pendingCopyText ?: @"";
-    self.pendingCopyText = nil;
-    [self showToast:@"Copied"];
 }
 
 // ------------------------------------------------------------- chrome bar
@@ -2002,18 +1880,26 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
 
 - (void)resetHiddenInput {
     self.hiddenInput.text = @" ";
+    self.previousHiddenText = @" ";
     UITextPosition *end = [self.hiddenInput endOfDocument];
     if (end) self.hiddenInput.selectedTextRange = [self.hiddenInput textRangeFromPosition:end toPosition:end];
 }
 
 - (void)showKeyboard {
-    [self resetHiddenInput];
-    [self.hiddenInput becomeFirstResponder];
+    if (![self.hiddenInput isFirstResponder]) {
+        [self resetHiddenInput];
+        [self.hiddenInput becomeFirstResponder];
+    }
     [self updateKeyboardAvoidance];
 }
 
 - (void)hidePageKeyboard {
     if (![self.hiddenInput isFirstResponder]) return;
+    if (self.inputCompositionActive) {
+        [self.session sendMessage:@{@"t": @"compose", @"phase": @"cancel", @"text": @""}];
+        self.inputCompositionActive = NO;
+        [self resetHiddenInput];
+    }
     self.editableHasRect = NO;
     [self.hiddenInput resignFirstResponder];
     [self updateKeyboardAvoidance];
@@ -2028,6 +1914,7 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
     if ([kind isEqualToString:@"password"]) secure = YES;
     else if ([kind isEqualToString:@"email"]) type = UIKeyboardTypeEmailAddress;
     else if ([kind isEqualToString:@"number"]) type = UIKeyboardTypeNumbersAndPunctuation;
+    else if ([kind isEqualToString:@"tel"]) type = UIKeyboardTypePhonePad;
     else if ([kind isEqualToString:@"url"]) type = UIKeyboardTypeURL;
 
     if (self.hiddenInput.keyboardType != type || self.hiddenInput.secureTextEntry != secure) {
@@ -2094,16 +1981,54 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
 }
 
 - (BOOL)textField:(UITextField *)textField shouldChangeCharactersInRange:(NSRange)range replacementString:(NSString *)string {
-    if (textField != self.hiddenInput) return YES;
-    if ([string length] == 0) {
-        [self sendKeyName:@"Backspace" keyCode:8];
-    } else if ([string length] > 1) {
-        [self.session sendMessage:@{@"t": @"paste", @"text": string}];
-    } else {
-        [self.session sendMessage:@{@"t": @"key", @"text": string}];
+    return YES;
+}
+
+- (void)hiddenInputDidChange:(NSNotification *)notification {
+    NSString *current = self.hiddenInput.text ?: @"";
+    UITextRange *marked = self.hiddenInput.markedTextRange;
+    if (marked) {
+        NSInteger markedStart = [self.hiddenInput offsetFromPosition:self.hiddenInput.beginningOfDocument
+                                                          toPosition:marked.start];
+        NSInteger markedLength = [self.hiddenInput offsetFromPosition:marked.start toPosition:marked.end];
+        if (markedStart < 0 || markedLength < 0 || (NSUInteger)(markedStart + markedLength) > [current length]) return;
+        NSString *text = [current substringWithRange:NSMakeRange((NSUInteger)markedStart, (NSUInteger)markedLength)];
+        UITextRange *selection = self.hiddenInput.selectedTextRange;
+        NSInteger start = selection ? [self.hiddenInput offsetFromPosition:marked.start toPosition:selection.start] : markedLength;
+        NSInteger end = selection ? [self.hiddenInput offsetFromPosition:marked.start toPosition:selection.end] : markedLength;
+        start = MAX(0, MIN(markedLength, start));
+        end = MAX(start, MIN(markedLength, end));
+        self.inputCompositionActive = YES;
+        self.previousHiddenText = current;
+        [self.session sendMessage:@{@"t": @"compose", @"phase": @"update", @"text": text,
+                                    @"start": [NSNumber numberWithInteger:start],
+                                    @"end": [NSNumber numberWithInteger:end]}];
+        return;
+    }
+    if (self.inputCompositionActive) {
+        NSString *committed = [current hasPrefix:@" "] ? [current substringFromIndex:1] : current;
+        self.inputCompositionActive = NO;
+        [self.session sendMessage:@{@"t": @"compose", @"phase": [committed length] ? @"commit" : @"cancel",
+                                    @"text": committed ?: @""}];
+        [self resetHiddenInput];
+        return;
+    }
+
+    NSString *previous = self.previousHiddenText ?: @" ";
+    NSUInteger prefix = 0;
+    NSUInteger common = MIN([previous length], [current length]);
+    while (prefix < common && [previous characterAtIndex:prefix] == [current characterAtIndex:prefix]) prefix++;
+    NSUInteger oldTail = [previous length], newTail = [current length];
+    while (oldTail > prefix && newTail > prefix &&
+           [previous characterAtIndex:oldTail - 1] == [current characterAtIndex:newTail - 1]) {
+        oldTail--; newTail--;
+    }
+    if (oldTail > prefix) [self sendKeyName:@"Backspace" keyCode:8];
+    if (newTail > prefix) {
+        NSString *inserted = [current substringWithRange:NSMakeRange(prefix, newTail - prefix)];
+        [self.session sendMessage:@{@"t": @"key", @"text": inserted}];
     }
     [self resetHiddenInput];
-    return NO;
 }
 
 - (void)sendKeyName:(NSString *)name keyCode:(NSInteger)keyCode {
@@ -2266,76 +2191,6 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
         }
         });
     });
-}
-
-// ---------------------------------------------------- link context menu (M2.4)
-
-- (void)presentLinkSheet {
-    NSString *href = [self.lastLinkInfo objectForKey:@"href"];
-    NSString *img = [self.lastLinkInfo objectForKey:@"img"];
-    NSString *text = [self.lastLinkInfo objectForKey:@"text"];
-    NSMutableArray *actions = [NSMutableArray array];
-    UIActionSheet *sheet = [[UIActionSheet alloc] init];
-    sheet.delegate = self;
-    sheet.title = [text length] ? text : ([href length] ? href : img);
-    if ([href length]) {
-        [sheet addButtonWithTitle:@"Open"];
-        [actions addObject:@"open"];
-        [sheet addButtonWithTitle:@"Open in New Tab"];
-        [actions addObject:@"newtab"];
-        [sheet addButtonWithTitle:@"Copy Link"];
-        [actions addObject:@"copy"];
-    }
-    if ([img length]) {
-        [sheet addButtonWithTitle:@"Save Image"];
-        [actions addObject:@"saveimg"];
-    }
-    sheet.cancelButtonIndex = [sheet addButtonWithTitle:@"Cancel"];
-    [actions addObject:@"cancel"];
-    self.linkSheetActions = actions;
-    self.linkSheet = sheet;
-    if (RBIsPad()) {
-        CGRect r = CGRectMake(self.longPressStart.x - 2.0, self.longPressStart.y - 2.0, 4.0, 4.0);
-        [sheet showFromRect:r inView:self.streamView animated:YES];
-    } else {
-        [sheet showInView:self.view];
-    }
-}
-
-- (void)actionSheet:(UIActionSheet *)actionSheet clickedButtonAtIndex:(NSInteger)buttonIndex {
-    if (actionSheet != self.linkSheet) return;
-    self.linkSheet = nil;
-    if (buttonIndex < 0 || buttonIndex >= (NSInteger)[self.linkSheetActions count]) return;
-    NSString *action = [self.linkSheetActions objectAtIndex:(NSUInteger)buttonIndex];
-    NSString *href = [self.lastLinkInfo objectForKey:@"href"];
-    NSString *img = [self.lastLinkInfo objectForKey:@"img"];
-    if ([action isEqualToString:@"open"]) {
-        [self.session sendMessage:@{@"t": @"nav", @"url": href ?: @""}];
-    } else if ([action isEqualToString:@"newtab"]) {
-        [self.session sendMessage:@{@"t": @"opennew", @"url": href ?: @""}];
-    } else if ([action isEqualToString:@"copy"]) {
-        [UIPasteboard generalPasteboard].string = href ?: @"";
-        [self showToast:@"Link copied"];
-    } else if ([action isEqualToString:@"saveimg"]) {
-        [self saveImageFromURL:img];
-    }
-}
-
-- (void)saveImageFromURL:(NSString *)urlString {
-    NSURL *url = [NSURL URLWithString:urlString ?: @""];
-    if (!url) return;
-    [self showToast:@"Saving image…"];
-    NSURLRequest *request = [NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:60.0];
-    [NSURLConnection sendAsynchronousRequest:request queue:[NSOperationQueue mainQueue]
-                           completionHandler:^(NSURLResponse *response, NSData *data, NSError *error) {
-        UIImage *image = [data length] ? [UIImage imageWithData:data] : nil;
-        if (!image) {
-            [self showToast:@"Could not load image"];
-            return;
-        }
-        UIImageWriteToSavedPhotosAlbum(image, nil, NULL, NULL);
-        [self showToast:@"Saved to Photos"];
-    }];
 }
 
 // ---------------------------------------------------------- page error state

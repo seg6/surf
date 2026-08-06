@@ -192,6 +192,7 @@ func (b *Controller) stopVideo(c *transport.Client) {
 
 // ClientDisconnected implements transport.Handler and releases media subscriptions.
 func (b *Controller) ClientDisconnected(c *transport.Client) {
+	b.touch.cancelClient(c)
 	b.mediaMu.Lock()
 	sub := b.videoSubs[c]
 	delete(b.videoSubs, c)

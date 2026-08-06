@@ -18,5 +18,6 @@
 - (void)connect;
 - (void)close;
 - (void)sendJSON:(NSDictionary *)message;
+- (void)sendTouchJSON:(NSDictionary *)message coalescible:(BOOL)coalescible;
 - (void)sendBinary:(NSData *)data;
 @end
