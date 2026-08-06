@@ -40,34 +40,23 @@ func TestMapTouchPointRejectsCoordinatesOutsideSurface(t *testing.T) {
 	}
 }
 
-func TestFinalMovePointsPromotesLiftCoordinatesIntoActiveSnapshot(t *testing.T) {
-	in := &touchInput{
-		viewport: cssVisualViewport{ClientWidth: 400, ClientHeight: 600},
-		active: map[int]protocol.TouchPoint{
-			2: {ID: 2, X: .8, Y: .4, RadiusX: .01, RadiusY: .01, Force: .5},
-			1: {ID: 1, X: .2, Y: .7, RadiusX: .01, RadiusY: .01, Force: .5},
-		},
+func TestBrowserTouchIDsStayDenseAndReuseReleasedIDs(t *testing.T) {
+	in := &touchInput{browserIDs: map[int]int{}}
+	for clientID := 50; clientID < 50+maxTouchContacts; clientID++ {
+		got, ok := in.addBrowserTouchID(clientID)
+		if !ok || got != clientID-50 {
+			t.Fatalf("client ID %d mapped to %d ok=%t", clientID, got, ok)
+		}
 	}
-	points, moved, err := in.finalMovePoints([]protocol.TouchPoint{
-		{ID: 1, X: .2, Y: .3, RadiusX: .01, RadiusY: .01, Force: .5},
-	})
-	if err != nil {
-		t.Fatal(err)
+	if got, ok := in.addBrowserTouchID(50); !ok || got != 0 {
+		t.Fatalf("existing client ID remapped to %d ok=%t", got, ok)
 	}
-	if !moved || len(points) != 2 {
-		t.Fatalf("final move moved=%t points=%#v", moved, points)
+	if _, ok := in.addBrowserTouchID(500); ok {
+		t.Fatal("allocated more browser contacts than Chromium supports")
 	}
-	first := points[0].(map[string]any)
-	second := points[1].(map[string]any)
-	if first["id"] != 1 || first["y"] != 180.0 || second["id"] != 2 || second["y"] != 240.0 {
-		t.Fatalf("final move points=%#v", points)
-	}
-
-	points, moved, err = in.finalMovePoints([]protocol.TouchPoint{
-		{ID: 2, X: .8, Y: .4, RadiusX: .01, RadiusY: .01, Force: .5},
-	})
-	if err != nil || moved || points != nil {
-		t.Fatalf("stationary lift points=%#v moved=%t err=%v", points, moved, err)
+	delete(in.browserIDs, 52)
+	if got, ok := in.addBrowserTouchID(500); !ok || got != 2 {
+		t.Fatalf("reused browser ID=%d ok=%t want 2", got, ok)
 	}
 }
 

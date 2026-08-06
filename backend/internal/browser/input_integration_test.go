@@ -303,7 +303,7 @@ func TestChromiumTouchSequenceCommitsFling(t *testing.T) {
 		t.Fatal(err)
 	}
 	point := func(y float64) map[string]any {
-		return map[string]any{"id": 1, "x": 200, "y": y, "radiusX": 5, "radiusY": 5, "force": .5}
+		return map[string]any{"id": 0, "x": 200, "y": y, "radiusX": 5, "radiusY": 5, "force": .5}
 	}
 	start := time.Now()
 	dispatch := func(typ string, points []any) {
@@ -320,7 +320,7 @@ func TestChromiumTouchSequenceCommitsFling(t *testing.T) {
 		time.Sleep(16 * time.Millisecond)
 		dispatch("touchMove", []any{point(y)})
 	}
-	time.Sleep(12 * time.Millisecond)
+	time.Sleep(touchReleaseSettle)
 	dispatch("touchEnd", []any{})
 	immediate, err := client.EvaluateString(session, `String(window.scrollY)`)
 	if err != nil {

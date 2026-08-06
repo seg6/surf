@@ -28,6 +28,7 @@ func main() {
 	expression := flag.String("eval", "", "evaluate JavaScript in the active page and print its value")
 	scroll := flag.Bool("scroll", false, "run a deterministic compositor scroll instead of the block animation")
 	touchFling := flag.Bool("touch-fling", false, "dispatch one touch flick, report post-lift travel, and restore scroll position")
+	touchID := flag.Int("touch-id", 1, "contact ID used by -touch-fling")
 	flag.Parse()
 
 	socket, err := pageSocket(*profile)
@@ -60,7 +61,7 @@ func main() {
 		return
 	}
 	if *touchFling {
-		if err := runTouchFlingProbe(conn); err != nil {
+		if err := runTouchFlingProbe(conn, *touchID); err != nil {
 			fatal(err)
 		}
 		return
@@ -102,13 +103,13 @@ func main() {
 	}
 }
 
-func runTouchFlingProbe(conn *websocket.Conn) error {
+func runTouchFlingProbe(conn *websocket.Conn, touchID int) error {
 	before, err := evaluateValue(conn, 1, `String(scrollY)`)
 	if err != nil {
 		return err
 	}
 	point := func(y float64) []map[string]any {
-		return []map[string]any{{"id": 1, "x": 384, "y": y, "radiusX": 8, "radiusY": 8, "force": .5}}
+		return []map[string]any{{"id": touchID, "x": 384, "y": y, "radiusX": 8, "radiusY": 8, "force": .5}}
 	}
 	id := 2
 	dispatch := func(kind string, points []map[string]any) error {

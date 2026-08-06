@@ -188,11 +188,11 @@ is synchronized to native fullscreen in both directions.
 ### Physical input and website mode
 
 The iOS `UIEvent` stream is the touch source of truth in both website modes.
-Each physical contact gets one stable ID for its lifetime. Start/end/cancel
-edges are reliable ordered messages; move messages contain the complete active
-contact snapshot and may replace an older queued move. Coordinates and contact
-radii are normalized against the exact encoder generation currently presented
-on the device.
+Each physical contact gets one stable client ID for its lifetime. Start/end/
+cancel edges are reliable ordered messages; move messages contain the complete
+active-contact snapshot and may replace an older queued move. Coordinates and
+contact radii are normalized against the exact encoder generation currently
+presented on the device.
 
 The backend owns the corresponding Chromium touch state on one serialized
 worker. It rejects stale generations, clients, contact IDs, and sequence
@@ -200,14 +200,19 @@ numbers, and sends `touchCancel` across navigation, tab, viewport, website-mode,
 and disconnect boundaries. Before dispatch it maps normalized surface points
 through `Page.getLayoutMetrics().cssVisualViewport`, then sends real
 `Input.dispatchTouchEvent` events. This distinction matters on mobile pages
-whose CSS viewport is wider than the streamed surface.
+whose CSS viewport is wider than the streamed surface. Client contact IDs are
+remapped to dense Chromium-local IDs `0` through `4` for the active gesture;
+this preserves stable multi-touch identity without allowing lifetime IDs to
+degrade Chromium's velocity tracking after extended use.
 
 Touch dispatch is ordered but nonblocking, so an expensive website event
-handler cannot stall later move or release delivery. On lift, the backend
-promotes UIKit's final contact position to a complete final move snapshot, then
-briefly separates that move from the all-contact release. That boundary lets
-Chromium commit the gesture's final velocity and continue compositor-driven
-fling after the finger leaves the screen.
+handler cannot stall later move or release delivery. Chromium events are
+timestamped when the backend dispatches them while the client clock validates
+input ordering. On lift, the backend briefly separates the last real UIKit
+move from the empty all-contact release; it does not invent another motion
+sample from `touchesEnded`. Chromium can therefore commit the gesture's final
+velocity and continue compositor-driven fling after the finger leaves the
+screen.
 
 **Mobile Websites** changes Chromium's mobile metrics and browser identity; it
 does not change an iPad into a mouse. Physical input remains touch in both

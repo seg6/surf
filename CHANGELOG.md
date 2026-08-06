@@ -2,6 +2,19 @@
 
 This file records the user-visible changes in every Surf release.
 
+## 0.12.1 - 2026-08-06
+
+- Fixed physical scrolling progressively losing fling and inertia until the
+  iOS client was restarted, especially around Mobile Websites reloads.
+- Remapped lifetime UIKit contact identifiers to dense Chromium-local IDs for
+  each active gesture, preserving stable multi-touch identity without exposing
+  Chromium to ever-growing IDs that degrade its velocity tracking.
+- Stamped injected touch events at backend dispatch time and ended gestures
+  directly from the last real UIKit move, preventing transport or renderer
+  delay from turning a fast physical flick into a drag that ends at rest.
+- Added real-Chromium fling coverage and a contact-ID sweep to the motion probe
+  for reproducing velocity regressions independently of the native client.
+
 ## 0.12.0 - 2026-08-06
 
 - Replaced synthesized click, scroll, long-press, and zoom commands with raw

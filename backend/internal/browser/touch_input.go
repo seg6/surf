@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"sort"
 	"sync"
 	"time"
 
@@ -19,7 +18,7 @@ const (
 	maxTouchContacts = 5
 	touchQueueLimit  = 64
 	// A renderer can consume several asynchronously-written CDP commands in
-	// one task. Keep the final move and release in separate turns so mobile
+	// one task. Keep the last UIKit move and release in separate turns so mobile
 	// gesture recognition can commit velocity before touchEnd clears it.
 	touchReleaseSettle = 12 * time.Millisecond
 )
@@ -71,45 +70,6 @@ func mapTouchPoint(point protocol.TouchPoint, viewport cssVisualViewport) (map[s
 	}, nil
 }
 
-func touchPositionChanged(before, after protocol.TouchPoint, viewport cssVisualViewport) bool {
-	return math.Abs(before.X-after.X)*viewport.ClientWidth >= 0.5 ||
-		math.Abs(before.Y-after.Y)*viewport.ClientHeight >= 0.5
-}
-
-// finalMovePoints turns UIKit's lift coordinates into a complete active-touch
-// snapshot. UITouch can advance between the last touchesMoved callback and
-// touchesEnded; CDP does not use touchEnd coordinates as a motion sample.
-func (in *touchInput) finalMovePoints(ended []protocol.TouchPoint) ([]any, bool, error) {
-	snapshot := make(map[int]protocol.TouchPoint, len(in.active))
-	for id, point := range in.active {
-		snapshot[id] = point
-	}
-	moved := false
-	for _, point := range ended {
-		if before, ok := snapshot[point.ID]; ok && touchPositionChanged(before, point, in.viewport) {
-			moved = true
-		}
-		snapshot[point.ID] = point
-	}
-	if !moved {
-		return nil, false, nil
-	}
-	ids := make([]int, 0, len(snapshot))
-	for id := range snapshot {
-		ids = append(ids, id)
-	}
-	sort.Ints(ids)
-	points := make([]any, 0, len(ids))
-	for _, id := range ids {
-		mapped, err := mapTouchPoint(snapshot[id], in.viewport)
-		if err != nil {
-			return nil, false, err
-		}
-		points = append(points, mapped)
-	}
-	return points, true, nil
-}
-
 type touchWork struct {
 	client     *transport.Client
 	command    *protocol.TouchCommand
@@ -137,17 +97,46 @@ type touchInput struct {
 	surface      uint32
 	lastSeq      uint64
 	active       map[int]protocol.TouchPoint
+	browserIDs   map[int]int
 	viewport     cssVisualViewport
-	clockOffset  int64
 	lastEventNS  int64
 	lastClientNS uint64
 	lastMoveSent time.Time
 }
 
 func newTouchInput(b *Controller) *touchInput {
-	in := &touchInput{b: b, wake: make(chan struct{}, 1), stop: make(chan struct{}), active: map[int]protocol.TouchPoint{}}
+	in := &touchInput{
+		b: b, wake: make(chan struct{}, 1), stop: make(chan struct{}),
+		active: map[int]protocol.TouchPoint{}, browserIDs: map[int]int{},
+	}
 	go in.run()
 	return in
+}
+
+// addBrowserTouchID keeps Chromium's contact identifiers dense and local to
+// the active gesture. The native client assigns lifetime-increasing IDs; if
+// forwarded unchanged, Chromium's fling velocity degrades sharply once they
+// grow beyond a few dozen even though dragging continues to work.
+func (in *touchInput) addBrowserTouchID(clientID int) (int, bool) {
+	if id, ok := in.browserIDs[clientID]; ok {
+		return id, true
+	}
+	if in.browserIDs == nil {
+		in.browserIDs = map[int]int{}
+	}
+	used := [maxTouchContacts]bool{}
+	for _, id := range in.browserIDs {
+		if id >= 0 && id < len(used) {
+			used[id] = true
+		}
+	}
+	for id, taken := range used {
+		if !taken {
+			in.browserIDs[clientID] = id
+			return id, true
+		}
+	}
+	return 0, false
 }
 
 func (in *touchInput) enqueue(client *transport.Client, command *protocol.TouchCommand, receivedNS uint64) {
@@ -323,8 +312,8 @@ func (in *touchInput) process(work touchWork) {
 		in.owner, in.session, in.surface = work.client, session, surface
 		in.viewport = viewport
 		in.active = map[int]protocol.TouchPoint{}
+		in.browserIDs = map[int]int{}
 		in.lastSeq = 0
-		in.clockOffset = time.Now().UnixNano() - int64(command.TimestampNS)
 		in.lastEventNS = 0
 		in.lastMoveSent = time.Time{}
 		in.b.noteMotionPhase("begin")
@@ -357,6 +346,12 @@ func (in *touchInput) process(work touchWork) {
 			in.cancelActive()
 			return
 		}
+		if command.Phase == "start" {
+			if _, ok := in.addBrowserTouchID(point.ID); !ok {
+				in.cancelActive()
+				return
+			}
+		}
 	}
 	if command.Phase == "move" && len(seen) != len(in.active) {
 		in.cancelActive()
@@ -364,53 +359,43 @@ func (in *touchInput) process(work touchWork) {
 	}
 	points := make([]any, 0, len(command.Points))
 	for _, point := range command.Points {
-		mapped, err := mapTouchPoint(point, in.viewport)
+		browserID, ok := in.browserIDs[point.ID]
+		if !ok {
+			in.cancelActive()
+			return
+		}
+		browserPoint := point
+		browserPoint.ID = browserID
+		mapped, err := mapTouchPoint(browserPoint, in.viewport)
 		if err != nil {
 			in.cancelActive()
 			return
 		}
 		points = append(points, mapped)
 	}
-	eventNS := in.clockOffset + int64(command.TimestampNS)
-	nowNS := time.Now().UnixNano()
-	if eventNS > nowNS {
-		eventNS = nowNS
-	}
-	if eventNS <= in.lastEventNS {
-		eventNS = in.lastEventNS + 1
-	}
 	if command.Phase == "end" {
-		finalPoints, moved, err := in.finalMovePoints(command.Points)
-		if err != nil {
-			in.cancelActive()
-			return
-		}
-		if moved {
-			if err := in.b.cdp.Dispatch(session, "Input.dispatchTouchEvent", map[string]any{
-				"type": "touchMove", "touchPoints": finalPoints,
-				"timestamp": float64(eventNS) / float64(time.Second),
-			}); err != nil {
-				log.Printf("touch: dispatch final move: %v", err)
-				in.b.noteMotionPhase("end")
-				in.reset()
-				return
-			}
-			in.lastMoveSent = time.Now()
-		}
 		if !in.lastMoveSent.IsZero() {
 			if remaining := touchReleaseSettle - time.Since(in.lastMoveSent); remaining > 0 {
 				time.Sleep(remaining)
 			}
 		}
-		// Chromium's final release is an empty active-contact snapshot. Keep
-		// ended points only for partial multi-touch lifts, which Chromium uses
-		// to identify the changed contact while others remain active.
+		// UIKit's ended coordinates are not another motion sample. Inventing a
+		// terminal touchMove from them makes Chromium resolve a fast physical
+		// flick as a drag ending at rest. The release is an empty active-contact
+		// snapshot; keep ended points only for partial multi-touch lifts.
 		if len(command.Points) == len(in.active) {
 			points = []any{}
 		}
-		if moved {
-			eventNS++
-		}
+	}
+	// Chromium's gesture velocity tracker compares injected event time with
+	// renderer time. A physically correct UIKit timestamp is already old by
+	// the time it crosses the network, waits behind rendering, and reaches
+	// CDP; carrying that age into Chromium intermittently makes a fast lift
+	// look stale and suppresses its fling. Stamp immediately before dispatch.
+	// The client clock remains authoritative for sequence validation above.
+	eventNS := time.Now().UnixNano()
+	if eventNS <= in.lastEventNS {
+		eventNS = in.lastEventNS + 1
 	}
 	params := map[string]any{
 		"type": "touch" + stringsTitle(command.Phase), "touchPoints": points,
@@ -434,6 +419,7 @@ func (in *touchInput) process(work touchWork) {
 	for _, point := range command.Points {
 		if command.Phase == "end" {
 			delete(in.active, point.ID)
+			delete(in.browserIDs, point.ID)
 		} else if command.Phase != "cancel" {
 			in.active[point.ID] = point
 		}
@@ -493,8 +479,8 @@ func (in *touchInput) reset() {
 	in.surface = 0
 	in.lastSeq = 0
 	in.active = map[int]protocol.TouchPoint{}
+	in.browserIDs = map[int]int{}
 	in.viewport = cssVisualViewport{}
-	in.clockOffset = 0
 	in.lastEventNS = 0
 	in.lastClientNS = 0
 	in.lastMoveSent = time.Time{}
