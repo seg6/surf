@@ -1,12 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	_ "embed"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -27,13 +25,13 @@ import (
 	"sync"
 	"time"
 
-	"fyne.io/systray"
 	"surf-backend/internal/app"
 	"surf-backend/internal/atomicfile"
 	"surf-backend/internal/config"
 	"surf-backend/internal/control"
 	"surf-backend/internal/process"
 	"surf-backend/internal/statefile"
+	"surf-backend/internal/tray"
 	"surf-backend/internal/updater"
 	"surf-backend/internal/web"
 )
@@ -69,8 +67,9 @@ type desktopApp struct {
 	killProcess    func(int)
 	matchesProcess func(int, string) bool
 
-	statusItem *systray.MenuItem
-	updateItem *systray.MenuItem
+	tray       *tray.App
+	statusItem *tray.Item
+	updateItem *tray.Item
 
 	updateRelease *updater.Release
 	updateState   string
@@ -186,8 +185,11 @@ func runTray() error {
 		return err
 	}
 	defer os.Remove(filepath.Join(home, "desktop-instance.json"))
-	systray.Run(app.onReady, app.onExit)
-	return nil
+	trayApp := tray.New()
+	app.tray = trayApp
+	app.onReady()
+	defer app.onExit()
+	return trayApp.Run(trayIcon(), "Surf remote browser backend")
 }
 
 func doctor() error {
@@ -261,17 +263,20 @@ func newDesktopApp() (*desktopApp, error) {
 }
 
 func (a *desktopApp) onReady() {
-	icon := trayIcon()
-	systray.SetIcon(icon)
-	systray.SetTooltip("Surf remote browser backend")
-
-	a.statusItem = systray.AddMenuItem("Starting Surf…", "Backend status")
-	a.statusItem.Disable()
-	settings := systray.AddMenuItem("Settings…", "Open Surf settings and status")
-	restart := systray.AddMenuItem("Restart Backend", "Restart the managed backend process")
-	a.updateItem = systray.AddMenuItem("Check for Updates…", "Check GitHub Releases for a newer Surf")
-	systray.AddSeparator()
-	quit := systray.AddMenuItem("Quit Surf", "Stop the backend and quit")
+	a.statusItem = a.tray.AddItem("Starting Surf…", nil)
+	a.statusItem.SetDisabled(true)
+	a.tray.AddItem("Settings…", func() { a.openManagement("") })
+	a.tray.AddItem("Restart Backend", func() {
+		a.setStatus("Restarting Surf…")
+		a.stopBackend()
+		_ = a.startBackend()
+	})
+	a.updateItem = a.tray.AddItem("Check for Updates…", func() {
+		a.startUpdateCheck()
+		a.openManagement("")
+	})
+	a.tray.AddSeparator()
+	a.tray.AddItem("Quit Surf", a.tray.Quit)
 
 	go func() {
 		if err := a.takeControlOfExistingBackend(); err != nil {
@@ -285,24 +290,7 @@ func (a *desktopApp) onReady() {
 	if cfg, err := loadDesktopConfig(a.home); err == nil && !cfg.StartupChoiceMade {
 		go a.openManagement("")
 	}
-	go menuLoop(settings, func() { a.openManagement("") })
-	go menuLoop(restart, func() {
-		a.setStatus("Restarting Surf…")
-		a.stopBackend()
-		_ = a.startBackend()
-	})
-	go menuLoop(a.updateItem, func() {
-		a.startUpdateCheck()
-		a.openManagement("")
-	})
-	go menuLoop(quit, systray.Quit)
 	go a.automaticUpdateChecks()
-}
-
-func menuLoop(item *systray.MenuItem, action func()) {
-	for range item.ClickedCh {
-		action()
-	}
 }
 
 func (a *desktopApp) onExit() {
@@ -792,7 +780,7 @@ func (a *desktopApp) applyDesktopUpdate(release updater.Release) {
 			_ = a.startBackend()
 			return
 		}
-		systray.Quit()
+		a.quitTray()
 		return
 	}
 	if runtime.GOOS == "linux" && os.Getenv("APPIMAGE") != "" && release.Package.URL != "" {
@@ -815,7 +803,7 @@ func (a *desktopApp) applyDesktopUpdate(release updater.Release) {
 			a.setUpdateFailure(err)
 			return
 		}
-		systray.Quit()
+		a.quitTray()
 		return
 	}
 	staged, err := stageUpdate(ctx, release, a.home)
@@ -845,18 +833,17 @@ func (a *desktopApp) applyDesktopUpdate(release updater.Release) {
 		_ = a.startBackend()
 		return
 	}
-	systray.Quit()
+	a.quitTray()
+}
+
+func (a *desktopApp) quitTray() {
+	if a.tray != nil {
+		a.tray.Quit()
+	}
 }
 
 func windowsInstallerArguments() []string {
-	return []string{
-		"/VERYSILENT",
-		"/SUPPRESSMSGBOXES",
-		"/SP-",
-		"/NORESTART",
-		"/FORCECLOSEAPPLICATIONS",
-		"/NORESTARTAPPLICATIONS",
-	}
+	return []string{"/S"}
 }
 
 func (a *desktopApp) setUpdateFailure(err error) {
@@ -1180,17 +1167,5 @@ var surfIconPNG []byte
 var trayIconPNG []byte
 
 func trayIcon() []byte {
-	if runtime.GOOS != "windows" {
-		return trayIconPNG
-	}
-	// Windows requires an ICO container and accepts embedded PNG image entries.
-	var icon bytes.Buffer
-	_ = binary.Write(&icon, binary.LittleEndian, []uint16{0, 1, 1})
-	icon.Write([]byte{64, 64, 0, 0})
-	_ = binary.Write(&icon, binary.LittleEndian, uint16(1))
-	_ = binary.Write(&icon, binary.LittleEndian, uint16(32))
-	_ = binary.Write(&icon, binary.LittleEndian, uint32(len(trayIconPNG)))
-	_ = binary.Write(&icon, binary.LittleEndian, uint32(22))
-	icon.Write(trayIconPNG)
-	return icon.Bytes()
+	return trayIconPNG
 }

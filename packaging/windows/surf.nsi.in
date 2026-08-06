@@ -1,0 +1,57 @@
+Unicode True
+Name "Surf"
+OutFile "@OUTPUT_DIR@/surf-@VERSION@-windows-amd64-setup.exe"
+InstallDir "$LOCALAPPDATA\Programs\Surf"
+RequestExecutionLevel user
+SetCompressor /SOLID lzma
+SetOverwrite on
+
+!define SurfVersion "@VERSION@"
+!define SurfSource "@SOURCE@"
+
+Section "Surf" SEC_SURF
+  SetShellVarContext current
+  nsExec::ExecToStack '"$SYSDIR\taskkill.exe" /IM surf.exe /T /F'
+  Pop $0
+  Pop $1
+  Sleep 500
+
+  SetOutPath "$INSTDIR"
+  File "${SurfSource}/surf.exe"
+  File "${SurfSource}/README.md"
+  File "${SurfSource}/CHANGELOG.md"
+  WriteUninstaller "$INSTDIR\Uninstall.exe"
+
+  CreateDirectory "$SMPROGRAMS\Surf"
+  CreateShortcut "$SMPROGRAMS\Surf\Surf.lnk" "$INSTDIR\surf.exe"
+  CreateShortcut "$SMPROGRAMS\Surf\Uninstall Surf.lnk" "$INSTDIR\Uninstall.exe"
+
+  WriteRegStr HKCU "Software\Surf" "InstallDir" "$INSTDIR"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Surf" "DisplayName" "Surf"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Surf" "DisplayVersion" "${SurfVersion}"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Surf" "UninstallString" '"$INSTDIR\Uninstall.exe"'
+
+  ExecShell "open" "$INSTDIR\surf.exe"
+SectionEnd
+
+Section "Uninstall"
+  SetShellVarContext current
+  nsExec::ExecToStack '"$SYSDIR\taskkill.exe" /IM surf.exe /T /F'
+  Pop $0
+  Pop $1
+  Sleep 500
+
+  Delete "$INSTDIR\surf.exe"
+  Delete "$INSTDIR\README.md"
+  Delete "$INSTDIR\CHANGELOG.md"
+  Delete "$INSTDIR\Uninstall.exe"
+  RMDir "$INSTDIR"
+
+  Delete "$SMPROGRAMS\Surf\Surf.lnk"
+  Delete "$SMPROGRAMS\Surf\Uninstall Surf.lnk"
+  RMDir "$SMPROGRAMS\Surf"
+
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Surf"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Surf"
+  DeleteRegKey HKCU "Software\Surf"
+SectionEnd

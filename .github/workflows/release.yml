@@ -5,219 +5,242 @@ on:
     tags:
       - v*
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Signed release tag to build and publish
+        required: true
+        type: string
 
 permissions:
-  actions: read
   contents: write
 
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+# One Linux runner builds the universal native client and every cgo-free desktop
+# target from the same signed tag, verifies the complete package set, and
+# publishes it without intermediate Actions artifacts.
 jobs:
-  native:
-    name: Reuse native package
+  release:
+    name: Build and publish ${{ inputs.tag || github.ref_name }}
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
-      - name: Download matching native CI artifact
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+      - name: Fetch and verify signed release source
         shell: bash
         run: |
           set -euo pipefail
-          deadline=$((SECONDS + 900))
-          while (( SECONDS < deadline )); do
-            run_json="$(gh run list \
-              --workflow native.yml \
-              --commit "$GITHUB_SHA" \
-              --event push \
-              --limit 1 \
-              --json databaseId,status,conclusion,url)"
-            run_id="$(jq -r '.[0].databaseId // empty' <<< "$run_json")"
-            status="$(jq -r '.[0].status // empty' <<< "$run_json")"
-            conclusion="$(jq -r '.[0].conclusion // empty' <<< "$run_json")"
-            run_url="$(jq -r '.[0].url // empty' <<< "$run_json")"
 
-            if [ -z "$run_id" ]; then
-              echo "Waiting for native CI on $GITHUB_SHA..."
-            elif [ "$status" != "completed" ]; then
-              echo "Waiting for native CI run $run_id ($status)..."
-            elif [ "$conclusion" = "success" ]; then
-              echo "Reusing native package from $run_url"
-              gh run download "$run_id" --name surf-native-deb --dir dist/native
-              test -n "$(find dist/native -name '*.deb' -type f -print -quit)"
-              break
-            else
-              echo "Native CI failed with conclusion '$conclusion': $run_url" >&2
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || {
+            echo "invalid release tag: $RELEASE_TAG" >&2
+            exit 1
+          }
+          for command in curl file gh git jq make sha256sum tar unzip; do
+            command -v "$command" >/dev/null || {
+              echo "required command is unavailable: $command" >&2
               exit 1
-            fi
-            sleep 10
+            }
           done
-          test -n "$(find dist/native -name '*.deb' -type f -print -quit 2>/dev/null)" || {
-            echo "Timed out waiting for successful native CI on $GITHUB_SHA" >&2
+
+          tag_ref="$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG")"
+          tag_object_type="$(jq -r '.object.type' <<< "$tag_ref")"
+          tag_object_sha="$(jq -r '.object.sha' <<< "$tag_ref")"
+          test "$tag_object_type" = "tag" || {
+            echo "$RELEASE_TAG is not an annotated tag" >&2
             exit 1
           }
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: surf-native-deb
-          path: dist/native/*.deb
-          if-no-files-found: error
+          tag_json="$(gh api "repos/$GH_REPO/git/tags/$tag_object_sha")"
+          tag_name="$(jq -r '.tag' <<< "$tag_json")"
+          tag_target_type="$(jq -r '.object.type' <<< "$tag_json")"
+          tag_commit="$(jq -r '.object.sha' <<< "$tag_json")"
+          tag_verified="$(jq -r '.verification.verified' <<< "$tag_json")"
+          tag_verification_reason="$(jq -r '.verification.reason' <<< "$tag_json")"
+          test "$tag_name" = "$RELEASE_TAG"
+          test "$tag_target_type" = "commit" || {
+            echo "$RELEASE_TAG does not point directly to a commit" >&2
+            exit 1
+          }
+          test "$tag_verified" = "true" || {
+            echo "$RELEASE_TAG signature is not verified: $tag_verification_reason" >&2
+            exit 1
+          }
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            test "$tag_commit" = "$GITHUB_SHA" || {
+              echo "$RELEASE_TAG points to $tag_commit but the workflow received $GITHUB_SHA" >&2
+              exit 1
+            }
+          fi
 
-  packages:
-    name: Surf ${{ matrix.goos }}/${{ matrix.goarch }}
-    needs: native
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - runner: ubuntu-latest
-            goos: linux
-            goarch: amd64
-          - runner: ubuntu-24.04-arm
-            goos: linux
-            goarch: arm64
-          - runner: windows-latest
-            goos: windows
-            goarch: amd64
-          - runner: macos-15-intel
-            goos: darwin
-            goarch: amd64
-          - runner: macos-15
-            goos: darwin
-            goarch: arm64
-    steps:
-      - uses: actions/checkout@v7
+          git init .
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          gh auth setup-git
+          git fetch --force --depth=1 origin \
+            "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          git checkout --detach "$tag_commit"
+          test "$(git rev-parse HEAD)" = "$tag_commit"
 
-      - name: Free Intel macOS package space
-        if: matrix.goos == 'darwin' && matrix.goarch == 'amd64'
-        shell: bash
-        run: |
-          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes
-          sudo rm -rf /usr/local/share/dotnet
-          rm -rf "$HOME/Library/Android" "$HOME/.gradle" "$HOME/.nuget"
-
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
-
-      - uses: actions/download-artifact@v8
-        with:
-          name: surf-native-deb
-          path: dist/native
-
-      - name: Prepare Linux AppImage tooling
-        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
-        shell: bash
-        run: |
-          curl -fL https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -o "$RUNNER_TEMP/appimagetool"
-          chmod +x "$RUNNER_TEMP/appimagetool"
-          echo "APPIMAGETOOL=$RUNNER_TEMP/appimagetool" >> "$GITHUB_ENV"
-
-      - name: Prepare Windows installer tooling
-        if: matrix.goos == 'windows'
-        shell: pwsh
-        run: choco install innosetup --no-progress -y
-
-      - name: Build Surf package
-        shell: bash
-        run: |
-          client_deb="$(find dist/native -name '*.deb' -type f -print -quit)"
-          test -n "$client_deb"
-          make surf-dist SURF_GOOS=${{ matrix.goos }} SURF_GOARCH=${{ matrix.goarch }} CLIENT_DEB="$client_deb"
-
-      - name: Verify package
-        shell: bash
-        run: |
-          test -n "$(find dist -type f \( -name surf -o -name surf.exe \) -print -quit)"
-          test -z "$(find dist -type f \( -name surf-desktop -o -name surf-backend -o -name surf-desktop.exe -o -name surf-backend.exe \) -print -quit)"
-          case "${{ matrix.goos }}" in
-            linux)
-              if [ "${{ matrix.goarch }}" = "amd64" ]; then
-                test -n "$(find dist -name '*.AppImage' -type f -print -quit)"
-              fi
-              ;;
-            windows) test -n "$(find dist -name '*-setup.exe' -type f -print -quit)" ;;
-            darwin)
-              test -n "$(find dist -name '*.dmg' -type f -print -quit)"
-              codesign --verify --deep --strict dist/Surf.app
-              test "$(otool -l dist/Surf.app/Contents/MacOS/surf |
-                awk '!found && $1 == "minos" { minos = $2; found = 1 }
-                     END { if (found) print minos }')" = "12.0"
-              ;;
-          esac
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: surf-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: |
-            dist/surf-*.tar.gz
-            dist/surf-*.zip
-            dist/surf-*.AppImage
-            dist/surf-*.dmg
-            dist/surf-*-setup.exe
-          if-no-files-found: error
-
-  release:
-    name: Build release
-    runs-on: ubuntu-latest
-    needs: [native, packages]
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Release metadata
-        id: meta
-        shell: bash
-        run: |
           version="$(tr -d '[:space:]' < VERSION)"
           protocol_version="$(tr -d '[:space:]' < PROTOCOL_VERSION)"
-          if [ -z "$version" ]; then
-            echo "VERSION is required" >&2
+          test "$RELEASE_TAG" = "v$version" || {
+            echo "$RELEASE_TAG does not match VERSION $version" >&2
             exit 1
-          fi
-          if [ -z "$protocol_version" ]; then
-            echo "PROTOCOL_VERSION is required" >&2
-            exit 1
-          fi
-          tag="v$version"
-          if [ "${GITHUB_REF_TYPE:-}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "$tag" ]; then
-            echo "git tag ${GITHUB_REF_NAME} does not match VERSION $version" >&2
-            exit 1
-          fi
-          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "protocol_version=${protocol_version}" >> "$GITHUB_OUTPUT"
+          }
+          test -n "$protocol_version"
+          git diff --exit-code
+          echo "Verified $RELEASE_TAG at $tag_commit"
 
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
-
-      - name: Verify generated native metadata
+      - name: Build and verify universal native package
+        shell: bash
         run: |
-          VERSION="$(tr -d '[:space:]' < VERSION)" \
-          PROTOCOL_VERSION="$(tr -d '[:space:]' < PROTOCOL_VERSION)" \
+          set -euo pipefail
+
+          version="$(tr -d '[:space:]' < VERSION)"
+          protocol_version="$(tr -d '[:space:]' < PROTOCOL_VERSION)"
+          VERSION="$version" PROTOCOL_VERSION="$protocol_version" \
             native/client/render-versioned-files.sh
-          git diff --exit-code -- native/client/control native/client/Resources/Info.plist
+          git diff --exit-code -- \
+            native/client/control native/client/Resources/Info.plist
 
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: surf-*
-          path: dist/packages
-          merge-multiple: true
+          make native-sdk
+          docker build -t surf-buildenv native/buildenv
+          make native-package
 
-      - name: Generate update manifest
+          mkdir -p dist/native
+          mapfile -t client_debs < <(find native/client/packages \
+            -name "space.seg6.surf_${version}-*_iphoneos-arm.deb" -type f -print)
+          test "${#client_debs[@]}" -eq 1 || {
+            echo "expected exactly one native client package" >&2
+            exit 1
+          }
+          test -s "${client_debs[0]}"
+          install -m 0644 "${client_debs[0]}" dist/native/
+
+      - name: Prepare cross-platform packaging tools
         shell: bash
         run: |
-          client_deb="$(find dist/packages -name '*.deb' -type f -print -quit)"
-          test -n "$client_deb"
-          cd backend
-          go run ./tools/updatemanifest ../dist/packages "../$client_deb" \
-            "${{ steps.meta.outputs.version }}" "${{ steps.meta.outputs.protocol_version }}" ../update.json
+          set -euo pipefail
 
-      - name: Prepare release notes from changelog
+          required_go="$(awk '$1 == "go" { print $2; exit }' backend/go.mod)"
+          test -n "$required_go"
+          if ! command -v go >/dev/null 2>&1 || \
+              [ "$(go env GOVERSION 2>/dev/null || true)" != "go$required_go" ]; then
+            go_filename="go${required_go}.linux-amd64.tar.gz"
+            go_archive="$RUNNER_TEMP/$go_filename"
+            go_checksum="$(curl -fsSL 'https://go.dev/dl/?mode=json&include=all' |
+              jq -r --arg filename "$go_filename" '
+                .[] | .files[] | select(.filename == $filename) | .sha256
+              ')"
+            [[ "$go_checksum" =~ ^[0-9a-f]{64}$ ]] || {
+              echo "could not resolve checksum for $go_filename" >&2
+              exit 1
+            }
+            curl -fL "https://go.dev/dl/$go_filename" -o "$go_archive"
+            printf '%s  %s\n' "$go_checksum" "$go_archive" | sha256sum -c -
+            mkdir -p "$RUNNER_TEMP/surf-go"
+            tar -xzf "$go_archive" -C "$RUNNER_TEMP/surf-go" \
+              --strip-components=1
+            export PATH="$RUNNER_TEMP/surf-go/bin:$PATH"
+            echo "$RUNNER_TEMP/surf-go/bin" >> "$GITHUB_PATH"
+          fi
+          test "$(go env GOVERSION)" = "go$required_go"
+
+          appimagetool="$RUNNER_TEMP/appimagetool"
+          curl -fL \
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage \
+            -o "$appimagetool"
+          chmod +x "$appimagetool"
+          echo "APPIMAGETOOL=$appimagetool" >> "$GITHUB_ENV"
+
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends nsis
+          command -v makensis
+          go version
+          makensis -VERSION
+
+      - name: Build and verify every desktop package
         shell: bash
         run: |
-          version="${{ steps.meta.outputs.version }}"
+          set -euo pipefail
+
+          version="$(tr -d '[:space:]' < VERSION)"
+          client_deb="$(find dist/native -name '*.deb' -type f -print -quit)"
+          make surf-release-dist CLIENT_DEB="$client_deb"
+
+          expected_assets=(
+            "surf-${version}-linux-amd64.tar.gz"
+            "surf-${version}-linux-amd64.AppImage"
+            "surf-${version}-linux-arm64.tar.gz"
+            "surf-${version}-windows-amd64.zip"
+            "surf-${version}-windows-amd64-setup.exe"
+            "surf-${version}-darwin-amd64.tar.gz"
+            "surf-${version}-darwin-arm64.tar.gz"
+          )
+          for asset in "${expected_assets[@]}"; do
+            test -s "dist/$asset" || {
+              echo "missing release asset: $asset" >&2
+              exit 1
+            }
+          done
+          test "$(find dist -maxdepth 1 -type f -name "surf-${version}-*" | wc -l)" -eq \
+            "${#expected_assets[@]}"
+
+          mkdir -p dist/packages
+          find dist/packages -maxdepth 1 -type f -delete
+          for asset in "${expected_assets[@]}"; do
+            install -m 0644 "dist/$asset" dist/packages/
+          done
+          test "$(find dist/packages -maxdepth 1 -type f | wc -l)" -eq \
+            "${#expected_assets[@]}"
+
+          file dist/surf-${version}-linux-amd64/surf | grep -q 'x86-64'
+          file dist/surf-${version}-linux-arm64/surf | grep -q 'ARM aarch64'
+          file dist/surf-${version}-windows-amd64/surf.exe | grep -q 'PE32+.*x86-64'
+          dist/surf-${version}-linux-amd64/surf version
+          unzip -t "dist/surf-${version}-windows-amd64.zip"
+
+          for arch in amd64 arm64; do
+            binary="$RUNNER_TEMP/surf-darwin-$arch"
+            tar -xOzf "dist/surf-${version}-darwin-$arch.tar.gz" \
+              Surf.app/Contents/MacOS/surf > "$binary"
+            (cd backend && go run ./tools/machoverify "$binary" "$arch" 12.0)
+            tar -tzf "dist/surf-${version}-darwin-$arch.tar.gz" | \
+              grep -qx 'Surf.app/Contents/Resources/Surf.icns'
+          done
+
+          sha256sum dist/packages/*
+
+      - name: Generate and verify release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(tr -d '[:space:]' < VERSION)"
+          protocol_version="$(tr -d '[:space:]' < PROTOCOL_VERSION)"
+          client_deb="$(find dist/native -name '*.deb' -type f -print -quit)"
+
+          VERSION="$version" PROTOCOL_VERSION="$protocol_version" \
+            native/client/render-versioned-files.sh
+          git diff --exit-code -- \
+            native/client/control native/client/Resources/Info.plist
+
+          (
+            cd backend
+            go run ./tools/updatemanifest ../dist/packages \
+              "../$client_deb" "$version" "$protocol_version" ../update.json
+          )
+          jq -e \
+            --arg version "$version" \
+            --arg protocol "$protocol_version" \
+            '.version == $version and .protocol == $protocol and
+             (.assets | length) == 5 and (.packages | length) == 2' \
+            update.json >/dev/null
+
           awk -v heading="## ${version} - " '
             index($0, heading) == 1 { found = 1 }
             found && /^## / && index($0, heading) != 1 { exit }
@@ -227,18 +250,73 @@ jobs:
           test -s release-notes.md
           printf '\nNative iOS and unified Linux, Windows, and macOS packages are attached. Launch `surf` for the desktop app or run `surf daemon` under a service manager for a headless backend.\n' >> release-notes.md
 
-      - uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ steps.meta.outputs.tag }}
-          target_commitish: ${{ github.sha }}
-          name: Surf ${{ steps.meta.outputs.tag }}
-          body_path: release-notes.md
-          files: |
+          sha256sum dist/native/*.deb update.json
+
+      - name: Publish verified release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(tr -d '[:space:]' < VERSION)"
+          native_asset="$(basename "$(find dist/native -name '*.deb' -type f -print -quit)")"
+          if release_json="$(gh release view "$RELEASE_TAG" \
+              --json isDraft,url 2>/dev/null)"; then
+            test "$(jq -r '.isDraft' <<< "$release_json")" = "true" || {
+              echo "$RELEASE_TAG is already published; refusing to replace it" >&2
+              exit 1
+            }
+            gh release edit "$RELEASE_TAG" \
+              --title "Surf $RELEASE_TAG" --notes-file release-notes.md
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft \
+              --title "Surf $RELEASE_TAG" --notes-file release-notes.md
+          fi
+
+          assets=(
             CHANGELOG.md
-            dist/packages/surf-*.tar.gz
-            dist/packages/surf-*.zip
-            dist/packages/surf-*.AppImage
-            dist/packages/surf-*.dmg
-            dist/packages/surf-*-setup.exe
-            dist/packages/*.deb
             update.json
+            "dist/native/$native_asset"
+            "dist/packages/surf-${version}-linux-amd64.tar.gz"
+            "dist/packages/surf-${version}-linux-amd64.AppImage"
+            "dist/packages/surf-${version}-linux-arm64.tar.gz"
+            "dist/packages/surf-${version}-windows-amd64.zip"
+            "dist/packages/surf-${version}-windows-amd64-setup.exe"
+            "dist/packages/surf-${version}-darwin-amd64.tar.gz"
+            "dist/packages/surf-${version}-darwin-arm64.tar.gz"
+          )
+          expected_names=(
+            CHANGELOG.md
+            update.json
+            "$native_asset"
+            "surf-${version}-linux-amd64.tar.gz"
+            "surf-${version}-linux-amd64.AppImage"
+            "surf-${version}-linux-arm64.tar.gz"
+            "surf-${version}-windows-amd64.zip"
+            "surf-${version}-windows-amd64-setup.exe"
+            "surf-${version}-darwin-amd64.tar.gz"
+            "surf-${version}-darwin-arm64.tar.gz"
+          )
+          test "${#assets[@]}" -eq 10
+          test "${#expected_names[@]}" -eq "${#assets[@]}"
+          gh release upload "$RELEASE_TAG" --clobber "${assets[@]}"
+
+          draft="$(gh release view "$RELEASE_TAG" --json assets,isDraft,url)"
+          test "$(jq -r '.isDraft' <<< "$draft")" = "true"
+          expected_names_json="$(printf '%s\n' "${expected_names[@]}" | \
+            jq -Rsc 'split("\n") | map(select(length > 0)) | sort')"
+          actual_names_json="$(jq -c '[.assets[].name] | sort' <<< "$draft")"
+          test "$actual_names_json" = "$expected_names_json" || {
+            echo "draft release assets differ from the verified package set" >&2
+            jq -r '.assets[].name' <<< "$draft" >&2
+            exit 1
+          }
+
+          gh release edit "$RELEASE_TAG" --draft=false --latest
+
+          published="$(gh release view "$RELEASE_TAG" \
+            --json assets,isDraft,isPrerelease,url)"
+          test "$(jq -r '.isDraft' <<< "$published")" = "false"
+          test "$(jq -r '.isPrerelease' <<< "$published")" = "false"
+          test "$(jq -c '[.assets[].name] | sort' <<< "$published")" = \
+            "$expected_names_json"
+          jq -r '.url, (.assets[].name)' <<< "$published"

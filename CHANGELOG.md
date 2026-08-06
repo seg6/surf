@@ -2,6 +2,17 @@
 
 This file records the user-visible changes in every Surf release.
 
+## Unreleased
+
+- Replaced the CGO-based desktop tray with pinned pure-Go platform bindings,
+  allowing Linux, Windows, and both macOS architectures to cross-compile from
+  one Linux host.
+- Collapsed native iOS and all desktop release packaging into one signed-tag
+  workflow, one Ubuntu job, and one verified source checkout without
+  intermediate Actions artifacts.
+- Replaced platform-only DMG and Inno Setup packaging with Linux-built macOS app
+  archives, generated ICNS metadata, and an NSIS Windows installer.
+
 ## 0.12.1 - 2026-08-06
 
 - Fixed physical scrolling progressively losing fling and inertia until the

@@ -1,4 +1,4 @@
-.PHONY: test surf-binary surf-dist native-sdk native-package
+.PHONY: test surf-binary surf-dist surf-release-dist native-sdk native-package
 
 VERSION := $(shell tr -d '[:space:]' < VERSION)
 PROTOCOL_VERSION := $(shell tr -d '[:space:]' < PROTOCOL_VERSION)
@@ -6,15 +6,7 @@ SURF_GOOS ?= $(shell go env GOOS)
 SURF_GOARCH ?= $(shell go env GOARCH)
 CLIENT_DEB ?=
 SURF_DIST := surf-$(VERSION)-$(SURF_GOOS)-$(SURF_GOARCH)
-SURF_CGO_ENV := CGO_ENABLED=1
-ifeq ($(SURF_GOOS),darwin)
-# Go 1.26 supports macOS 12 and newer. Pin both cgo compilation and external
-# linking so builds made with a newer SDK do not accidentally require the
-# build host's macOS version.
-SURF_MACOS_MIN ?= 12.0
-SURF_CGO_ENV += CGO_CFLAGS="-O2 -g -mmacosx-version-min=$(SURF_MACOS_MIN)"
-SURF_CGO_ENV += CGO_LDFLAGS="-O2 -g -mmacosx-version-min=$(SURF_MACOS_MIN)"
-endif
+SURF_CGO_ENV := CGO_ENABLED=0
 ifeq ($(SURF_GOOS),windows)
 SURF_EXE := surf.exe
 SURF_ARCHIVE := $(SURF_DIST).zip
@@ -26,8 +18,8 @@ endif
 test:
 	cd backend && go test ./...
 
-# The tray dependency uses native desktop APIs. Build on the target OS; CI uses
-# native Linux, Windows, and macOS runners.
+# Surf's tray implementation binds native desktop APIs without cgo, so every
+# supported target cross-compiles from the same Go toolchain.
 surf-binary:
 	if [ -n "$(CLIENT_DEB)" ]; then \
 		test -f "$(CLIENT_DEB)"; \
@@ -52,18 +44,8 @@ surf-dist: surf-binary
 		cp "backend/$(SURF_EXE)" "dist/Surf.app/Contents/MacOS/surf"; \
 		mkdir -p "dist/Surf.app/Contents/Resources"; \
 		cp CHANGELOG.md "dist/Surf.app/Contents/Resources/CHANGELOG.md"; \
-		rm -rf "dist/Surf.iconset"; mkdir -p "dist/Surf.iconset"; \
-		for size in 16 32 128 256 512; do \
-			sips -z $$size $$size backend/cmd/surf/surf-icon.png --out "dist/Surf.iconset/icon_$${size}x$${size}.png" >/dev/null; \
-			double=$$((size * 2)); sips -z $$double $$double backend/cmd/surf/surf-icon.png --out "dist/Surf.iconset/icon_$${size}x$${size}@2x.png" >/dev/null; \
-		done; \
-		iconutil -c icns "dist/Surf.iconset" -o "dist/Surf.app/Contents/Resources/Surf.icns"; \
-		rm -rf "dist/Surf.iconset"; \
+		(cd backend && go run ./tools/icns cmd/surf/surf-icon.png ../dist/Surf.app/Contents/Resources/Surf.icns); \
 		sed "s/@VERSION@/$(VERSION)/g" packaging/desktop/Info.plist > "dist/Surf.app/Contents/Info.plist"; \
-		codesign --force --sign - --timestamp=none "dist/Surf.app"; \
-		codesign --verify --deep --strict "dist/Surf.app"; \
-		if [ -n "$${CI:-}" ]; then (cd backend && go clean -cache -modcache); fi; \
-		hdiutil create -volname Surf -srcfolder "dist/Surf.app" -ov -format UDZO "dist/surf-$(VERSION)-darwin-$(SURF_GOARCH).dmg" >/dev/null; \
 		tar -C dist -czf "dist/$(SURF_ARCHIVE)" "Surf.app"; \
 	else \
 		mkdir -p "dist/$(SURF_DIST)"; \
@@ -74,11 +56,11 @@ surf-dist: surf-binary
 		if [ "$(SURF_GOOS)" = "windows" ]; then \
 			rm -f "dist/$(SURF_ARCHIVE)"; \
 			(cd backend && go run ./tools/zipdir "../dist/$(SURF_DIST)" "../dist/$(SURF_ARCHIVE)"); \
-			if command -v iscc >/dev/null 2>&1; then \
+			if command -v makensis >/dev/null 2>&1; then \
 				sed -e "s|@VERSION@|$(VERSION)|g" -e "s|@SOURCE@|$(CURDIR)/dist/$(SURF_DIST)|g" \
-					-e "s|@OUTPUT_DIR@|$(CURDIR)/dist|g" packaging/windows/surf.iss.in > dist/surf.iss; \
-				iscc dist/surf.iss; \
-				rm dist/surf.iss; \
+					-e "s|@OUTPUT_DIR@|$(CURDIR)/dist|g" packaging/windows/surf.nsi.in > dist/surf.nsi; \
+				makensis -V2 dist/surf.nsi; \
+				rm dist/surf.nsi; \
 			fi; \
 		else \
 			tar -C dist -czf "dist/$(SURF_ARCHIVE)" "$(SURF_DIST)"; \
@@ -94,6 +76,14 @@ surf-dist: surf-binary
 			fi; \
 		fi; \
 	fi
+
+surf-release-dist:
+	test -n "$(CLIENT_DEB)"
+	$(MAKE) surf-dist SURF_GOOS=linux SURF_GOARCH=amd64 CLIENT_DEB="$(CLIENT_DEB)"
+	$(MAKE) surf-dist SURF_GOOS=linux SURF_GOARCH=arm64 CLIENT_DEB="$(CLIENT_DEB)"
+	$(MAKE) surf-dist SURF_GOOS=windows SURF_GOARCH=amd64 CLIENT_DEB="$(CLIENT_DEB)"
+	$(MAKE) surf-dist SURF_GOOS=darwin SURF_GOARCH=amd64 CLIENT_DEB="$(CLIENT_DEB)"
+	$(MAKE) surf-dist SURF_GOOS=darwin SURF_GOARCH=arm64 CLIENT_DEB="$(CLIENT_DEB)"
 
 native-sdk:
 	native/buildenv/fetch-sdk.sh

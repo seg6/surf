@@ -196,6 +196,19 @@ make surf-binary
 make surf-dist
 ```
 
+Surf's desktop tray is cgo-free. A Linux x86-64 host can cross-build every
+supported desktop archive from one Go toolchain; the release target also uses
+`appimagetool` for the Linux AppImage and `makensis` from NSIS for the Windows
+installer. Put `makensis` on `PATH` and pass the AppImage tool explicitly:
+
+```sh
+APPIMAGETOOL=/path/to/appimagetool make surf-release-dist \
+  CLIENT_DEB=path/to/space.seg6.surf_VERSION_iphoneos-arm.deb
+```
+
+The macOS archives contain Intel or Apple Silicon `Surf.app` bundles and do not
+require Xcode, an Apple SDK, code signing, or a macOS build host.
+
 Building the universal iOS package uses a reproducible Linux/WSL2/Docker
 environment. See [Native Build](docs/native-build.md) for the SDK and packaging
 steps.

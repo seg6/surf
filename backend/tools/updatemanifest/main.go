@@ -14,7 +14,7 @@ import (
 )
 
 var surfArchive = regexp.MustCompile(`^surf-.+-(linux|windows|darwin)-(amd64|arm64)\.(tar\.gz|zip)$`)
-var surfPackage = regexp.MustCompile(`^surf-.+-(linux|windows|darwin)-(amd64|arm64)(?:-setup)?\.(AppImage|dmg|exe)$`)
+var surfPackage = regexp.MustCompile(`^surf-.+-(linux|windows)-(amd64|arm64)(?:-setup)?\.(AppImage|exe)$`)
 
 var requiredArchives = []string{
 	"linux-amd64",
@@ -27,8 +27,6 @@ var requiredArchives = []string{
 var requiredPackages = []string{
 	"linux-amd64",
 	"windows-amd64",
-	"darwin-amd64",
-	"darwin-arm64",
 }
 
 func main() {

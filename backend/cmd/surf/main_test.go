@@ -51,14 +51,7 @@ func TestDesktopConfigRoundTrip(t *testing.T) {
 }
 
 func TestWindowsInstallerArgumentsForceTakeoverAndRelaunch(t *testing.T) {
-	want := []string{
-		"/VERYSILENT",
-		"/SUPPRESSMSGBOXES",
-		"/SP-",
-		"/NORESTART",
-		"/FORCECLOSEAPPLICATIONS",
-		"/NORESTARTAPPLICATIONS",
-	}
+	want := []string{"/S"}
 	if got := windowsInstallerArguments(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("windows installer arguments = %q, want %q", got, want)
 	}
@@ -215,14 +208,8 @@ func TestTrayIconHasNativeFormat(t *testing.T) {
 	if len(icon) < 30 {
 		t.Fatalf("icon too short: %d", len(icon))
 	}
-	if runtime.GOOS != "windows" {
-		if !bytes.Equal(icon[:4], []byte{0x89, 'P', 'N', 'G'}) {
-			t.Fatalf("bad PNG header: %x", icon[:min(8, len(icon))])
-		}
-		return
-	}
-	if !bytes.Equal(icon[:4], []byte{0, 0, 1, 0}) {
-		t.Fatalf("bad ICO header: %x", icon[:min(8, len(icon))])
+	if !bytes.Equal(icon[:4], []byte{0x89, 'P', 'N', 'G'}) {
+		t.Fatalf("bad PNG header: %x", icon[:min(8, len(icon))])
 	}
 }
 

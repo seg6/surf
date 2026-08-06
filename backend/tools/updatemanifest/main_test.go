@@ -37,7 +37,16 @@ func TestRequirePlatformsRejectsUnexpectedPlatform(t *testing.T) {
 	}
 	assets["linux-riscv64"] = updater.Asset{}
 	err := requirePlatforms("Surf desktop packages", assets, requiredPackages)
-	if err == nil || !strings.Contains(err.Error(), "want exactly 4") {
+	if err == nil || !strings.Contains(err.Error(), "want exactly 2") {
 		t.Fatalf("requirePlatforms() error = %v, want exact-count failure", err)
+	}
+}
+
+func TestDarwinArchiveDoesNotRequirePlatformSpecificInstaller(t *testing.T) {
+	if !surfArchive.MatchString("surf-1.2.3-darwin-arm64.tar.gz") {
+		t.Fatal("Darwin application archive was not recognized")
+	}
+	if surfPackage.MatchString("surf-1.2.3-darwin-arm64.dmg") {
+		t.Fatal("Darwin DMG was recognized as a required installer")
 	}
 }
