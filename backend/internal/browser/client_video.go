@@ -104,9 +104,9 @@ func (b *Controller) onVideoFrame(frame media.VideoFrame) {
 
 func encoderCodec(width, height int) string {
 	// Level selection is decoder compatibility metadata, not a frame-rate
-	// limit. Prefer Level 3.1 for the original iPad whenever the coded size at
-	// Surf's stable 30 FPS target fits its macroblock rate.
-	const assumedSourceFPS = 30
+	// limit. Prefer Level 3.1 whenever the coded size at Surf's 60 FPS target
+	// fits its macroblock rate.
+	const assumedSourceFPS = 60
 	if ((width+15)/16)*((height+15)/16)*assumedSourceFPS > 108000 {
 		return "avc1.42E029" // constrained baseline, level 4.1
 	}

@@ -135,7 +135,7 @@ func load() (*Config, error) {
 		ContentBlocker:  envBool("SURF_CONTENT_BLOCKER", true),
 		AdaptiveVideo:   envBool("SURF_ADAPTIVE_VIDEO", false),
 		StreamScale:     envStr("STREAM_SCALE", ""),
-		StreamBitrateK:  envInt("STREAM_BITRATE", 24000),
+		StreamBitrateK:  envInt("STREAM_BITRATE", 48000),
 		StreamQuantizer: envInt("STREAM_QUANTIZER", 12),
 	}
 	return cfg, nil

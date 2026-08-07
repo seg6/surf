@@ -23,15 +23,11 @@ let videoLatestFrameRawGapMS = 0;
 let videoPendingFrames = [];
 let videoPumpWake = null;
 
-// Oversample Chromium's compositor at 60 Hz, then admit the newest fresh image
-// to a source-driven 30 FPS pump. Asking the source for only 30 Hz made normal
-// compositor jitter visible verbatim on the iPad. The latest-only handoff
-// absorbs that jitter without ever building a queue of old pictures.
-// Keep source capture at the presentation ceiling. GPU-backed tab frames must
-// cross the compositor/codec boundary; oversampling that boundary at 60 Hz
-// doubles work without increasing the native client's 30 FPS output.
-const captureFrameRate = 30;
-const outputFrameRate = 30;
+// Capture and admit the newest fresh image at the iPad display ceiling. The
+// latest-only handoff absorbs compositor jitter without ever building a queue
+// of old pictures or making up a late tick with a burst.
+const captureFrameRate = 60;
+const outputFrameRate = 60;
 function stopVideoEncoder() {
   videoGeneration++;
   videoPumpWake = null;
@@ -228,8 +224,7 @@ async function startVideoEncoder(track) {
     width: {exact: captureSize.width},
     height: {exact: captureSize.height},
   };
-  // Capture faster than the output clock so a compositor frame is normally
-  // waiting when the next 30 Hz encode tick arrives.
+  // Keep the tab-capture source synchronized with the output clock.
   const capabilities = typeof track.getCapabilities === "function" ?
     track.getCapabilities() : {};
   const availableRate = capabilities && capabilities.frameRate ?
@@ -351,15 +346,12 @@ async function startVideoEncoder(track) {
     quantizer: rateControl === "quantizer" ? quantizer : -1,
   });
 
-  // Keep exactly one latest raw image and at most one H.264 encode in flight.
-  // The source is deliberately allowed to run faster than the 30 FPS output
-  // ceiling, but a late tick is never made up with a burst. Static pages do
-  // not consume encoder CPU: an unchanged image is encoded only when an
-  // explicit keyframe request needs to bootstrap or repair a decoder.
-  const intervalMS = 1000 / outputFrameRate;
-  let lastSubmitAt = -intervalMS;
+  // The constrained tab track is the 60 Hz clock. Keep exactly one latest raw
+  // image and at most one H.264 encode in flight instead of adding a second
+  // timer whose wake-up slop lowers the effective rate. Static pages do not
+  // consume encoder CPU: an unchanged image is encoded only when an explicit
+  // keyframe request needs to bootstrap or repair a decoder.
   let lastEncodedSourceSequence = 0;
-  let encodeTimer = null;
   const scheduleVideoEncode = () => {
     if (generation !== videoGeneration || encoder.state !== "configured" ||
         !videoLatestFrame) {
@@ -377,16 +369,6 @@ async function startVideoEncoder(track) {
       return;
     }
     const now = performance.now();
-    const waitMS = intervalMS - (now - lastSubmitAt);
-    if (waitMS > 0.5) {
-      if (encodeTimer === null) {
-        encodeTimer = setTimeout(() => {
-          encodeTimer = null;
-          scheduleVideoEncode();
-        }, waitMS);
-      }
-      return;
-    }
     let frame;
     try {
       frame = videoLatestFrame.clone();
@@ -433,7 +415,6 @@ async function startVideoEncoder(track) {
       return;
     }
     frame.close();
-    lastSubmitAt = now;
     if (fresh) {
       lastEncodedSourceSequence = sourceSequence;
     }
@@ -482,9 +463,6 @@ async function startVideoEncoder(track) {
       sendVideoJSON({type: "video-error", error: String(error)});
     }
   } finally {
-    if (encodeTimer !== null) {
-      clearTimeout(encodeTimer);
-    }
     if (videoPumpWake === scheduleVideoEncode) {
       videoPumpWake = null;
     }

@@ -47,8 +47,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.ChromeNoSandbox {
 		t.Fatal("ChromeNoSandbox=true")
 	}
-	if cfg.StreamBitrateK != 24000 {
-		t.Fatalf("StreamBitrateK=%d, want 24000", cfg.StreamBitrateK)
+	if cfg.StreamBitrateK != 48000 {
+		t.Fatalf("StreamBitrateK=%d, want 48000", cfg.StreamBitrateK)
 	}
 	if cfg.StreamQuantizer != 12 {
 		t.Fatalf("StreamQuantizer=%d, want 12", cfg.StreamQuantizer)

@@ -4,6 +4,9 @@ This file records the user-visible changes in every Surf release.
 
 ## Unreleased
 
+- Raised live capture and iOS presentation to 60 FPS, removed a redundant
+  JavaScript pacing timer, added a bounded two-frame presentation buffer, and
+  doubled the fallback H.264 target to 48 Mbit/s to keep moving text sharp.
 - Added content-addressed reuse for the pinned native toolchain image, a
   trusted-main Go cross-build cache, and containerized NSIS packaging to reduce
   warm release builds without changing their signed-tag source of truth.

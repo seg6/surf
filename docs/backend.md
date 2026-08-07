@@ -85,7 +85,7 @@ Surf reads configuration from environment variables:
 | `DOWNLOADS` | `$SURF_HOME/downloads` | Browser downloads |
 | `UPLOADS` | `$SURF_HOME/uploads` | Temporary client uploads |
 | `VW`, `VH` | `768`, `934` | Initial viewport before the client reports its exact size |
-| `STREAM_BITRATE` | `24000` | H.264 fallback target in kbit/s |
+| `STREAM_BITRATE` | `48000` | H.264 fallback target in kbit/s |
 | `STREAM_QUANTIZER` | `12` | H.264 constant-quality QP (0–51; lower is sharper) |
 | `STREAM_SCALE` | empty | Optional maximum stream size |
 | `SURF_CHROME_GPU` | `1` | Enable Chromium GPU support |

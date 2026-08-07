@@ -101,7 +101,7 @@ icons; iOS 7–14 use the flatter system-era palette without copied Apple art.
 Phone tab previews are snapshots of the last decoded frame. They are captured
 only when Pages opens or the active phone tab is left, retained in a 12-entry
 LRU cache, and purged on memory warnings. This keeps preview work off the normal
-30 FPS presentation path.
+60 FPS presentation path.
 
 Packages from version 0.6.0 onward install the small root-owned
 `/usr/libexec/surf-update-v2` helper. When a release backend reports an incompatible

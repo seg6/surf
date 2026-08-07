@@ -12,11 +12,12 @@
 
 enum {
     kRBUniqueRateSamples = 64,
-    kRBTargetPresentationFPS = 30
+    kRBTargetPresentationFPS = 60
 };
 
 @interface RBStreamView () {
     CVPixelBufferRef _pendingBuffer;
+    CVPixelBufferRef _queuedBuffer;
     CVPixelBufferRef _currentBuffer;
     CVOpenGLESTextureCacheRef _textureCache;
     GLuint _framebuffer;
@@ -31,6 +32,7 @@ enum {
 @property(nonatomic, strong) EAGLContext *glContext;
 @property(nonatomic, strong) CADisplayLink *videoDisplayLink;
 @property(nonatomic, strong) RBFrameMetadata *pendingMetadata;
+@property(nonatomic, strong) RBFrameMetadata *queuedMetadata;
 @property(nonatomic, assign) NSUInteger presentedFrames;
 @property(nonatomic, assign) NSUInteger overwrittenVideoFrames;
 @property(nonatomic, assign) CFTimeInterval lastPresentationAt;
@@ -168,8 +170,10 @@ static GLuint RBCompileShader(GLenum type, const char *source) {
         [self.videoDisplayLink invalidate];
         self.videoDisplayLink = nil;
         if (_pendingBuffer) { CVPixelBufferRelease(_pendingBuffer); _pendingBuffer = NULL; }
+        if (_queuedBuffer) { CVPixelBufferRelease(_queuedBuffer); _queuedBuffer = NULL; }
         if (_currentBuffer) { CVPixelBufferRelease(_currentBuffer); _currentBuffer = NULL; }
         self.pendingMetadata = nil;
+        self.queuedMetadata = nil;
         self.lastPresentationAt = 0.0;
         self.lastUniquePresentationAt = 0.0;
         self.lastPresentedSourceSequence = 0;
@@ -206,12 +210,23 @@ static GLuint RBCompileShader(GLenum type, const char *source) {
 - (void)displayVideoPixelBuffer:(CVPixelBufferRef)pixelBuffer metadata:(RBFrameMetadata *)metadata {
     if (!pixelBuffer) return;
     CVPixelBufferRetain(pixelBuffer);
-    if (_pendingBuffer) {
-        self.overwrittenVideoFrames++;
-        CVPixelBufferRelease(_pendingBuffer);
+    if (!_pendingBuffer) {
+        _pendingBuffer = pixelBuffer;
+        self.pendingMetadata = metadata;
+        return;
     }
-    _pendingBuffer = pixelBuffer;
-    self.pendingMetadata = metadata;
+    if (!_queuedBuffer) {
+        _queuedBuffer = pixelBuffer;
+        self.queuedMetadata = metadata;
+        return;
+    }
+    // Preserve the next frame already waiting for the display link and keep
+    // only the newest second frame. This absorbs callback/display phase jitter
+    // without allowing latency to grow beyond two refresh intervals.
+    self.overwrittenVideoFrames++;
+    CVPixelBufferRelease(_queuedBuffer);
+    _queuedBuffer = pixelBuffer;
+    self.queuedMetadata = metadata;
 }
 
 static unsigned char RBClampByte(int value) {
@@ -365,14 +380,13 @@ static unsigned char RBClampByte(int value) {
 - (void)displayVideoTick:(CADisplayLink *)displayLink {
     BOOL newFrame = _pendingBuffer != NULL;
     if (!self.videoActive || !newFrame) return;
-    RBFrameMetadata *metadata = nil;
-    if (newFrame) {
-        if (_currentBuffer) CVPixelBufferRelease(_currentBuffer);
-        _currentBuffer = _pendingBuffer;
-        _pendingBuffer = NULL;
-        metadata = self.pendingMetadata;
-        self.pendingMetadata = nil;
-    }
+    if (_currentBuffer) CVPixelBufferRelease(_currentBuffer);
+    _currentBuffer = _pendingBuffer;
+    RBFrameMetadata *metadata = self.pendingMetadata;
+    _pendingBuffer = _queuedBuffer;
+    self.pendingMetadata = self.queuedMetadata;
+    _queuedBuffer = NULL;
+    self.queuedMetadata = nil;
     if (![self drawPixelBuffer:_currentBuffer]) return;
     CFTimeInterval now = CACurrentMediaTime();
     BOOL inMotionWindow = self.motionTracking || now <= self.motionUntil;
@@ -410,8 +424,8 @@ static unsigned char RBClampByte(int value) {
         if (_uniquePresentationTimes[index] < cutoff) break;
         recent++;
     }
-    // The stream is intentionally capped at 30 FPS. A rolling one-second
-    // window can contain both boundary samples and briefly count 31 frames;
+    // The stream is intentionally capped at 60 FPS. A rolling one-second
+    // window can contain both boundary samples and briefly count 61 frames;
     // do not present that sampling artifact as throughput above the cap.
     return MIN((double)kRBTargetPresentationFPS, (double)recent);
 }
@@ -425,6 +439,7 @@ static unsigned char RBClampByte(int value) {
 - (void)dealloc {
     [self.videoDisplayLink invalidate];
     if (_pendingBuffer) CVPixelBufferRelease(_pendingBuffer);
+    if (_queuedBuffer) CVPixelBufferRelease(_queuedBuffer);
     if (_currentBuffer) CVPixelBufferRelease(_currentBuffer);
     if (_textureCache) CFRelease(_textureCache);
     if (_program) glDeleteProgram(_program);

@@ -11,7 +11,8 @@
 - (void)streamView:(RBStreamView *)streamView touchesCancelled:(NSSet *)touches withEvent:(UIEvent *)event;
 @end
 
-// Shows the latest decoded H.264 image on a display-link boundary.
+// Shows decoded H.264 images on display-link boundaries through a bounded
+// two-frame jitter buffer.
 @interface RBStreamView : UIView
 @property(nonatomic, weak) id<RBStreamViewDelegate> presentationDelegate;
 @property(nonatomic, assign) BOOL videoActive;

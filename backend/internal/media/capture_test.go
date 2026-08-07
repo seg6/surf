@@ -123,7 +123,7 @@ func TestBrowserTabCaptureIntegration(t *testing.T) {
 	}
 }
 
-func TestVideoCaptureOversamplesAndPacesFreshFramesWithoutBursts(t *testing.T) {
+func TestVideoCaptureUsesSourceClockWithoutQueuesOrTimers(t *testing.T) {
 	source, err := NewCapture(t.TempDir())
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -149,8 +149,8 @@ func TestVideoCaptureOversamplesAndPacesFreshFramesWithoutBursts(t *testing.T) {
 		"height: constraints.height",
 		"width: videoConfig.height",
 		"height: videoConfig.width",
-		"const captureFrameRate = 30",
-		"const outputFrameRate = 30",
+		"const captureFrameRate = 60",
+		"const outputFrameRate = 60",
 		"maxWidth: Math.max(videoConfig.width, videoConfig.height)",
 		"maxHeight: Math.max(videoConfig.width, videoConfig.height)",
 		`bitrateMode: "quantizer"`,
@@ -164,8 +164,6 @@ func TestVideoCaptureOversamplesAndPacesFreshFramesWithoutBursts(t *testing.T) {
 		"if (!fresh && !videoNeedsKeyframe)",
 		"videoPendingFrames.length > 0",
 		"encoder.encodeQueueSize > 0",
-		"intervalMS - (now - lastSubmitAt)",
-		"setTimeout(() =>",
 		"videoPumpWake = scheduleVideoEncode",
 		`event.data === "restart"`,
 		`sendJSON({type: "inactive"})`,
@@ -175,6 +173,9 @@ func TestVideoCaptureOversamplesAndPacesFreshFramesWithoutBursts(t *testing.T) {
 		}
 	}
 	for _, forbidden := range []string{
+		"intervalMS",
+		"lastSubmitAt",
+		"setTimeout(() =>",
 		"nextTick += intervalMS",
 		"encoder.encodeQueueSize > 1",
 	} {

@@ -134,7 +134,7 @@ static const NSUInteger kRBChartSamples = 60;
 
         self.fpsChart = [[RBDiagnosticsChart alloc] initWithFrame:CGRectZero];
         self.fpsChart.lineColor = [UIColor colorWithRed:0.30 green:0.82 blue:0.52 alpha:1.0];
-        self.fpsChart.target = 30.0;
+        self.fpsChart.target = 60.0;
         self.latencyChart = [[RBDiagnosticsChart alloc] initWithFrame:CGRectZero];
         self.latencyChart.lineColor = [UIColor colorWithRed:0.98 green:0.69 blue:0.25 alpha:1.0];
         self.latencyChart.target = 100.0;
