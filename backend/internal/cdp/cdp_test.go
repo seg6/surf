@@ -16,7 +16,7 @@ func hasArg(args []string, want string) bool {
 }
 
 func TestLaunchArgsSandboxDefault(t *testing.T) {
-	args := LaunchConfig{Profile: "/tmp/profile", W: 1024, H: 768, EnableGPU: true}.Args()
+	args := LaunchConfig{Profile: "/tmp/profile", W: 1024, H: 768}.Args()
 	if hasArg(args, "--no-sandbox") {
 		t.Fatal("--no-sandbox present when NoSandbox=false")
 	}
@@ -28,6 +28,16 @@ func TestLaunchArgsSandboxDefault(t *testing.T) {
 	}
 	if !hasArg(args, "--enable-gpu") || hasArg(args, "--disable-gpu") {
 		t.Fatalf("GPU auto path not enabled: %v", args)
+	}
+	if hasArg(args, "--disable-dev-shm-usage") {
+		t.Fatalf("shared memory redirected through /tmp: %v", args)
+	}
+	for _, obsolete := range []string{
+		"--ignore-gpu-blocklist", "--use-gl=angle", "--use-angle=gl-egl",
+	} {
+		if hasArg(args, obsolete) {
+			t.Fatalf("obsolete graphics bridge arg %q present: %v", obsolete, args)
+		}
 	}
 	if hasArg(args, "--disable-smooth-scrolling") {
 		t.Fatalf("obsolete scroll override present: %v", args)
@@ -48,40 +58,6 @@ func TestLaunchArgsNoSandbox(t *testing.T) {
 	args := LaunchConfig{Profile: "/tmp/profile", W: 1024, H: 768, NoSandbox: true}.Args()
 	if !hasArg(args, "--no-sandbox") {
 		t.Fatal("--no-sandbox missing when NoSandbox=true")
-	}
-}
-
-func TestLaunchArgsX11(t *testing.T) {
-	args := LaunchConfig{Profile: "/tmp/profile", W: 1024, H: 768, EnableGPU: true, X11: true}.Args()
-	if hasArg(args, "--headless=new") || !hasArg(args, "--ozone-platform=x11") {
-		t.Fatalf("X11 launch args=%v", args)
-	}
-}
-
-func TestLaunchArgsVirGL(t *testing.T) {
-	args := LaunchConfig{Profile: "/tmp/profile", W: 1024, H: 768, EnableGPU: true, VirGL: true}.Args()
-	for _, want := range []string{
-		"--headless=new", "--ignore-gpu-blocklist", "--use-gl=angle",
-		"--use-angle=gl-egl",
-	} {
-		if !hasArg(args, want) {
-			t.Fatalf("VirGL launch args missing %q: %v", want, args)
-		}
-	}
-}
-
-func TestLaunchEnvironmentVirGL(t *testing.T) {
-	env := LaunchConfig{VirGL: true, Env: []string{"SURF_TEST=1"}}.Environment()
-	for _, want := range []string{
-		"SURF_TEST=1", "GALLIUM_DRIVER=virpipe", "LIBGL_ALWAYS_SOFTWARE=true",
-		"MESA_GL_VERSION_OVERRIDE=4.1COMPAT", "MESA_GLSL_VERSION_OVERRIDE=410",
-	} {
-		if !hasArg(env, want) {
-			t.Fatalf("VirGL launch environment missing %q: %v", want, env)
-		}
-	}
-	if got := (LaunchConfig{}).Environment(); len(got) != 0 {
-		t.Fatalf("normal launch environment = %v, want empty", got)
 	}
 }
 

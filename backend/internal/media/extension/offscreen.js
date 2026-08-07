@@ -257,10 +257,6 @@ async function startVideoEncoder(track) {
     height: videoConfig.height,
     framerate: outputFrameRate,
     latencyMode: "realtime",
-    // Linux VirGL accelerates Chromium compositing but does not expose a
-    // hardware video codec. Prefer the direct software AVC implementation so
-    // WebCodecs does not route encode work back through the VirGL bridge.
-    hardwareAcceleration: "prefer-software",
     contentHint: "detail",
     avc: {format: "annexb"},
   };
@@ -272,22 +268,42 @@ async function startVideoEncoder(track) {
   const requestedQuantizer = Number(videoConfig.quantizer);
   const quantizer = Number.isInteger(requestedQuantizer) ?
     Math.max(0, Math.min(51, requestedQuantizer)) : 12;
-  let rateControl = "quantizer";
-  let support = await VideoEncoder.isConfigSupported({
-    ...baseConfig,
-    bitrateMode: "quantizer",
-  });
-  if (!support.supported) {
-    rateControl = "variable";
-    support = await VideoEncoder.isConfigSupported({
-      ...baseConfig,
-      bitrate: videoConfig.bitrateK * 1000,
-      bitrateMode: "variable",
-    });
+  // Prefer a real platform codec before considering Chromium's neutral
+  // selection. Within each acceleration preference, retain constant-quality
+  // AVC when the implementation supports it and otherwise use the generous
+  // VBR fallback. This keeps software-only thin clients working without
+  // forcing hardware-capable hosts through a software encoder.
+  let selection = null;
+  for (const hardwareAcceleration of
+       ["prefer-hardware", "no-preference"]) {
+    for (const rateControl of ["quantizer", "variable"]) {
+      const candidate = {
+        ...baseConfig,
+        hardwareAcceleration,
+        bitrateMode: rateControl,
+      };
+      if (rateControl === "variable") {
+        candidate.bitrate = videoConfig.bitrateK * 1000;
+      }
+      let support;
+      try {
+        support = await VideoEncoder.isConfigSupported(candidate);
+      } catch (_) {
+        continue;
+      }
+      if (support.supported) {
+        selection = {support, hardwareAcceleration, rateControl};
+        break;
+      }
+    }
+    if (selection) {
+      break;
+    }
   }
-  if (!support.supported || generation !== videoGeneration) {
+  if (!selection || generation !== videoGeneration) {
     throw new Error("requested H.264 encoder configuration is unsupported");
   }
+  const {support, hardwareAcceleration, rateControl} = selection;
   const encoder = new VideoEncoder({
     output: (chunk, metadata) => {
       if (generation === videoGeneration &&
@@ -342,6 +358,7 @@ async function startVideoEncoder(track) {
     sourceHeight: settings.height || 0,
     sourceFPS: settings.frameRate || 0,
     sourceCapabilityFPS: availableRate || 0,
+    encoderPreference: hardwareAcceleration,
     rateControl,
     quantizer: rateControl === "quantizer" ? quantizer : -1,
   });

@@ -49,7 +49,6 @@ func TestWidevineBrowserIntegration(t *testing.T) {
 		StartURL:       origin.URL,
 		ViewW:          800,
 		ViewH:          600,
-		ChromeGPU:      true,
 		StreamBitrateK: 12000,
 	}, transport.New())
 	if err != nil {

@@ -2,6 +2,12 @@
 
 This file records the user-visible changes in every Surf release.
 
+## Unreleased
+
+- Removed the obsolete VirGL, X11, GPU-disable, and `/tmp` shared-memory
+  launch paths; Surf now runs one native-GPU headless Chromium configuration
+  and prefers hardware H.264 with a neutral codec fallback.
+
 ## 0.12.3 - 2026-08-07
 
 - Raised live capture and iOS presentation to 60 FPS, removed a redundant

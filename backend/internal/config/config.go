@@ -50,9 +50,6 @@ type Config struct {
 	UploadsDir    string
 
 	ChromeNoSandbox    bool
-	ChromeGPU          bool
-	ChromeX11          bool
-	ChromeVirGL        bool
 	ContentBlocker     bool
 	ContentBlockerPath string
 	AdaptiveVideo      bool
@@ -129,9 +126,6 @@ func load() (*Config, error) {
 		DownloadsDir:    envStr("DOWNLOADS", filepath.Join(home, "downloads")),
 		UploadsDir:      envStr("UPLOADS", filepath.Join(home, "uploads")),
 		ChromeNoSandbox: envBool("CHROME_NO_SANDBOX", os.Geteuid() == 0),
-		ChromeGPU:       envBool("SURF_CHROME_GPU", true),
-		ChromeX11:       envBool("SURF_CHROME_X11", false),
-		ChromeVirGL:     envBool("SURF_CHROME_VIRGL", false),
 		ContentBlocker:  envBool("SURF_CONTENT_BLOCKER", true),
 		AdaptiveVideo:   envBool("SURF_ADAPTIVE_VIDEO", false),
 		StreamScale:     envStr("STREAM_SCALE", ""),

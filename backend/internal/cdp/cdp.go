@@ -74,29 +74,9 @@ type LaunchConfig struct {
 	ChromePath     string
 	Profile        string
 	W, H           int
-	Env            []string
 	NoSandbox      bool
-	EnableGPU      bool
-	X11            bool
-	VirGL          bool
 	ExtensionPaths []string
 	ExtraArgs      []string
-}
-
-// Environment returns browser-only variables needed by optional graphics
-// bridges. VirGL uses Mesa's software loader to select virpipe; rendering is
-// still executed remotely by the Android VirGL server on ANGLE/Vulkan/Mali.
-func (cfg LaunchConfig) Environment() []string {
-	env := append([]string(nil), cfg.Env...)
-	if cfg.VirGL {
-		env = append(env,
-			"GALLIUM_DRIVER=virpipe",
-			"LIBGL_ALWAYS_SOFTWARE=true",
-			"MESA_GL_VERSION_OVERRIDE=4.1COMPAT",
-			"MESA_GLSL_VERSION_OVERRIDE=410",
-		)
-	}
-	return env
 }
 
 // Args builds the managed Chrome headless-new launch flags.
@@ -104,7 +84,6 @@ func (cfg LaunchConfig) Args() []string {
 	args := []string{
 		"--remote-debugging-port=0",
 		"--user-data-dir=" + cfg.Profile,
-		"--disable-dev-shm-usage",
 		"--disable-blink-features=AutomationControlled",
 		"--disable-popup-blocking", "--no-first-run", "--no-default-browser-check",
 		"--disable-session-crashed-bubble", "--hide-crash-restore-bubble", "--noerrdialogs",
@@ -127,27 +106,9 @@ func (cfg LaunchConfig) Args() []string {
 		"--disable-features=Translate,MediaRouter,AcceptCHFrame,OptimizationHints",
 		fmt.Sprintf("--window-size=%d,%d", cfg.W, cfg.H),
 	}
-	args = append(args, "--test-type")
-	if cfg.X11 {
-		args = append(args, "--ozone-platform=x11")
-	} else {
-		args = append(args, "--headless=new")
-	}
-	if cfg.VirGL {
-		args = append(args,
-			"--ignore-gpu-blocklist",
-			"--use-gl=angle",
-			"--use-angle=gl-egl",
-		)
-	}
-	if cfg.EnableGPU {
-		// Modern headless otherwise forces SwiftShader for reproducibility.
-		// This merely permits native driver selection; Chromium can still
-		// fall back safely when the platform has no usable GPU.
-		args = append(args, "--enable-gpu")
-	} else {
-		args = append(args, "--disable-gpu")
-	}
+	// Permit native driver selection in modern headless Chrome. Hosts without
+	// a usable GPU retain Chromium's built-in software fallback.
+	args = append(args, "--test-type", "--headless=new", "--enable-gpu")
 	if cfg.NoSandbox {
 		args = append(args, "--no-sandbox")
 	}
@@ -174,7 +135,6 @@ func Launch(cfg LaunchConfig) (*Client, *os.Process, error) {
 	// instance to an older Chromium that happens to use the same profile.
 	previousEndpoint := readActivePortState(cfg.Profile)
 	started, err := process.Start(cfg.ChromePath, cfg.Args(), process.Options{
-		Env:    append(os.Environ(), cfg.Environment()...),
 		Stderr: true,
 	})
 	if err != nil {

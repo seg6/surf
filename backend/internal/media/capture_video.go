@@ -271,22 +271,23 @@ func (s *Capture) handleVideoFrame(message []byte) {
 
 func (s *Capture) handleVideoMessage(data []byte) {
 	var message struct {
-		Type          string  `json:"type"`
-		Error         string  `json:"error"`
-		SourceWidth   int     `json:"sourceWidth"`
-		SourceHeight  int     `json:"sourceHeight"`
-		SourceFPS     float64 `json:"sourceFPS"`
-		CapabilityFPS float64 `json:"sourceCapabilityFPS"`
-		CodedWidth    int     `json:"codedWidth"`
-		CodedHeight   int     `json:"codedHeight"`
-		DisplayWidth  int     `json:"displayWidth"`
-		DisplayHeight int     `json:"displayHeight"`
-		VisibleWidth  int     `json:"visibleWidth"`
-		VisibleHeight int     `json:"visibleHeight"`
-		Rotation      float64 `json:"rotation"`
-		Constraint    string  `json:"constraint"`
-		RateControl   string  `json:"rateControl"`
-		Quantizer     int     `json:"quantizer"`
+		Type              string  `json:"type"`
+		Error             string  `json:"error"`
+		SourceWidth       int     `json:"sourceWidth"`
+		SourceHeight      int     `json:"sourceHeight"`
+		SourceFPS         float64 `json:"sourceFPS"`
+		CapabilityFPS     float64 `json:"sourceCapabilityFPS"`
+		CodedWidth        int     `json:"codedWidth"`
+		CodedHeight       int     `json:"codedHeight"`
+		DisplayWidth      int     `json:"displayWidth"`
+		DisplayHeight     int     `json:"displayHeight"`
+		VisibleWidth      int     `json:"visibleWidth"`
+		VisibleHeight     int     `json:"visibleHeight"`
+		Rotation          float64 `json:"rotation"`
+		Constraint        string  `json:"constraint"`
+		EncoderPreference string  `json:"encoderPreference"`
+		RateControl       string  `json:"rateControl"`
+		Quantizer         int     `json:"quantizer"`
 	}
 	if json.Unmarshal(data, &message) != nil {
 		return
@@ -303,10 +304,10 @@ func (s *Capture) handleVideoMessage(data []byte) {
 			default:
 			}
 		}
-		log.Printf("video: tabCapture source %dx%d@%.1ffps capability=%.1ffps quality=%s qp=%d",
+		log.Printf("video: tabCapture source %dx%d@%.1ffps capability=%.1ffps encoder-preference=%s quality=%s qp=%d",
 			message.SourceWidth, message.SourceHeight,
 			message.SourceFPS, message.CapabilityFPS,
-			message.RateControl, message.Quantizer)
+			message.EncoderPreference, message.RateControl, message.Quantizer)
 	case "video-error":
 		if message.Error == "" {
 			message.Error = "unknown tab capture error"
