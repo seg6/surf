@@ -2,7 +2,7 @@
 
 This file records the user-visible changes in every Surf release.
 
-## Unreleased
+## 0.12.4 - 2026-08-07
 
 - Removed the obsolete VirGL, X11, GPU-disable, and `/tmp` shared-memory
   launch paths; Surf now runs one native-GPU headless Chromium configuration
