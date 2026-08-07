@@ -2,7 +2,7 @@
 
 This file records the user-visible changes in every Surf release.
 
-## Unreleased
+## 0.12.3 - 2026-08-07
 
 - Raised live capture and iOS presentation to 60 FPS, removed a redundant
   JavaScript pacing timer, added a bounded two-frame presentation buffer, and
