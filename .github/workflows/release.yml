@@ -2,6 +2,8 @@ name: Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - v*
   workflow_dispatch:
@@ -13,39 +15,70 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 concurrency:
-  group: release-${{ inputs.tag || github.ref_name }}
+  # A trusted main build warms the cache before its signed tag consumes it.
+  group: surf-release-build
   cancel-in-progress: false
 
-# One Linux runner builds the universal native client and every cgo-free desktop
-# target from the same signed tag, verifies the complete package set, and
-# publishes it without intermediate Actions artifacts.
+# One Linux runner warms cross-build state on trusted main commits. Signed tags
+# then build the universal native client and every cgo-free desktop target from
+# the same verified source and publish without intermediate Actions artifacts.
 jobs:
   release:
-    name: Build and publish ${{ inputs.tag || github.ref_name }}
+    name: Release build ${{ inputs.tag || github.ref_name }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      CACHE_ONLY: ${{ github.event_name == 'push' && github.ref_type == 'branch' }}
+      GOCACHE: ${{ github.workspace }}/.cache/go-build
+      GOMODCACHE: ${{ github.workspace }}/.cache/go-mod
     steps:
-      - name: Fetch and verify signed release source
+      - name: Fetch and verify build source
+        id: source
         shell: bash
         run: |
           set -euo pipefail
 
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || {
-            echo "invalid release tag: $RELEASE_TAG" >&2
-            exit 1
-          }
           for command in curl file gh git jq make sha256sum tar unzip; do
             command -v "$command" >/dev/null || {
               echo "required command is unavailable: $command" >&2
               exit 1
             }
           done
+
+          git init .
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          gh auth setup-git
+
+          if [ "$CACHE_ONLY" = "true" ]; then
+            test "$GITHUB_EVENT_NAME" = "push"
+            test "$GITHUB_REF_TYPE" = "branch"
+            test "$GITHUB_REF_NAME" = "main"
+            commit_json="$(gh api "repos/$GH_REPO/commits/$GITHUB_SHA")"
+            test "$(jq -r '.sha' <<< "$commit_json")" = "$GITHUB_SHA"
+            test "$(jq -r '.commit.verification.verified' <<< "$commit_json")" = "true" || {
+              echo "main cache source commit is not signature-verified" >&2
+              exit 1
+            }
+            git fetch --force --depth=1 origin \
+              "refs/heads/main:refs/remotes/origin/main"
+            git checkout --detach "$GITHUB_SHA"
+            test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+            git diff --exit-code
+            echo "commit=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+            echo "Verified trusted cache source at $GITHUB_SHA"
+            exit 0
+          fi
+
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || {
+            echo "invalid release tag: $RELEASE_TAG" >&2
+            exit 1
+          }
 
           tag_ref="$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG")"
           tag_object_type="$(jq -r '.object.type' <<< "$tag_ref")"
@@ -77,9 +110,6 @@ jobs:
             }
           fi
 
-          git init .
-          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
-          gh auth setup-git
           git fetch --force --depth=1 origin \
             "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
           git checkout --detach "$tag_commit"
@@ -93,9 +123,74 @@ jobs:
           }
           test -n "$protocol_version"
           git diff --exit-code
+          echo "commit=$tag_commit" >> "$GITHUB_OUTPUT"
           echo "Verified $RELEASE_TAG at $tag_commit"
 
+      - name: Resolve Go cache key
+        id: go-cache-key
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required_go="$(awk '$1 == "go" { print $2; exit }' backend/go.mod)"
+          go_sum_hash="$(sha256sum backend/go.sum | cut -d ' ' -f 1)"
+          [[ "$required_go" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$go_sum_hash" =~ ^[0-9a-f]{64}$ ]]
+          prefix="surf-go-${RUNNER_OS,,}-go${required_go}-${go_sum_hash}-"
+          echo "key=${prefix}${{ steps.source.outputs.commit }}" >> "$GITHUB_OUTPUT"
+          echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Go cross-build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ${{ env.GOCACHE }}
+            ${{ env.GOMODCACHE }}
+          key: ${{ steps.go-cache-key.outputs.key }}
+          restore-keys: |
+            ${{ steps.go-cache-key.outputs.prefix }}
+
+      - name: Prepare pinned native build environment
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          buildenv_key="$(
+            sha256sum native/buildenv/Dockerfile native/buildenv/build.sh |
+              sha256sum | cut -d ' ' -f 1
+          )"
+          [[ "$buildenv_key" =~ ^[0-9a-f]{64}$ ]]
+          buildenv_registry="ghcr.io/${GITHUB_REPOSITORY,,}-buildenv"
+          buildenv_image="$buildenv_registry:$buildenv_key"
+
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io \
+            --username "$GITHUB_ACTOR" --password-stdin
+          cache_image_available=false
+          if docker pull "$buildenv_image"; then
+            cache_image_available=true
+          fi
+          cache_from=()
+          if [ "$cache_image_available" = "true" ]; then
+            cache_from=(--cache-from "$buildenv_image")
+          fi
+          DOCKER_BUILDKIT=1 docker build \
+            "${cache_from[@]}" \
+            --build-arg BUILDKIT_INLINE_CACHE=1 \
+            --build-arg "SURF_BUILDENV_ID=$buildenv_key" \
+            --tag surf-buildenv \
+            --tag "$buildenv_image" \
+            native/buildenv
+          test "$(docker image inspect surf-buildenv --format \
+            '{{ index .Config.Labels "space.seg6.surf.buildenv-id" }}')" = \
+            "$buildenv_key"
+          docker run --rm --entrypoint makensis surf-buildenv -VERSION
+          if [ "$cache_image_available" = "false" ]; then
+            docker push "$buildenv_image"
+          fi
+          docker logout ghcr.io
+
       - name: Build and verify universal native package
+        if: env.CACHE_ONLY != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -108,7 +203,6 @@ jobs:
             native/client/control native/client/Resources/Info.plist
 
           make native-sdk
-          docker build -t surf-buildenv native/buildenv
           make native-package
 
           mkdir -p dist/native
@@ -121,7 +215,7 @@ jobs:
           test -s "${client_debs[0]}"
           install -m 0644 "${client_debs[0]}" dist/native/
 
-      - name: Prepare cross-platform packaging tools
+      - name: Prepare Go toolchain
         shell: bash
         run: |
           set -euo pipefail
@@ -149,6 +243,26 @@ jobs:
             echo "$RUNNER_TEMP/surf-go/bin" >> "$GITHUB_PATH"
           fi
           test "$(go env GOVERSION)" = "go$required_go"
+          go version
+
+      - name: Warm cross-platform Go cache
+        if: env.CACHE_ONLY == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          make surf-binary SURF_GOOS=linux SURF_GOARCH=amd64
+          make surf-binary SURF_GOOS=linux SURF_GOARCH=arm64
+          make surf-binary SURF_GOOS=windows SURF_GOARCH=amd64
+          make surf-binary SURF_GOOS=darwin SURF_GOARCH=amd64
+          make surf-binary SURF_GOOS=darwin SURF_GOARCH=arm64
+          echo "Warmed $(go env GOCACHE) and $(go env GOMODCACHE)"
+
+      - name: Prepare cross-platform packaging tools
+        if: env.CACHE_ONLY != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
 
           appimagetool="$RUNNER_TEMP/appimagetool"
           curl -fL \
@@ -157,13 +271,14 @@ jobs:
           chmod +x "$appimagetool"
           echo "APPIMAGETOOL=$appimagetool" >> "$GITHUB_ENV"
 
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends nsis
-          command -v makensis
-          go version
-          makensis -VERSION
+          makensis="$GITHUB_WORKSPACE/packaging/windows/makensis-container.sh"
+          test -x "$makensis"
+          echo "MAKENSIS=$makensis" >> "$GITHUB_ENV"
+          echo "SURF_BUILDENV_IMAGE=surf-buildenv" >> "$GITHUB_ENV"
+          "$makensis" -VERSION
 
       - name: Build and verify every desktop package
+        if: env.CACHE_ONLY != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -216,6 +331,7 @@ jobs:
           sha256sum dist/packages/*
 
       - name: Generate and verify release metadata
+        if: env.CACHE_ONLY != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -253,6 +369,7 @@ jobs:
           sha256sum dist/native/*.deb update.json
 
       - name: Publish verified release
+        if: env.CACHE_ONLY != 'true'
         shell: bash
         run: |
           set -euo pipefail

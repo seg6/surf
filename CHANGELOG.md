@@ -2,6 +2,12 @@
 
 This file records the user-visible changes in every Surf release.
 
+## Unreleased
+
+- Added content-addressed reuse for the pinned native toolchain image, a
+  trusted-main Go cross-build cache, and containerized NSIS packaging to reduce
+  warm release builds without changing their signed-tag source of truth.
+
 ## 0.12.2 - 2026-08-06
 
 - Replaced the CGO-based desktop tray with pinned pure-Go platform bindings,

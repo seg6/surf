@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818
 
 ARG THEOS_REPO=https://github.com/theos/theos.git
 ARG THEOS_REF=16362d3aa83a0acd56df4493d575d34306d42478
@@ -13,7 +13,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       autoconf automake bash ca-certificates curl dpkg-dev fakeroot file g++ git \
-      libtinfo6 libtool libxml2 make perl pkg-config rsync sudo xz-utils zip \
+      libtinfo6 libtool libxml2 make nsis perl pkg-config rsync sudo xz-utils zip \
     && rm -rf /var/lib/apt/lists/*
 
 # The pinned iOS toolchain's plistutil is linked against libplist ABI 4,
@@ -50,6 +50,10 @@ RUN set -eux; \
 
 COPY build.sh /usr/local/bin/surf-build
 RUN chmod +x /usr/local/bin/surf-build
+
+ARG SURF_BUILDENV_ID=local
+LABEL org.opencontainers.image.source="https://github.com/seg6/surf" \
+      space.seg6.surf.buildenv-id="$SURF_BUILDENV_ID"
 
 WORKDIR /src
 ENTRYPOINT ["surf-build"]

@@ -5,6 +5,7 @@ PROTOCOL_VERSION := $(shell tr -d '[:space:]' < PROTOCOL_VERSION)
 SURF_GOOS ?= $(shell go env GOOS)
 SURF_GOARCH ?= $(shell go env GOARCH)
 CLIENT_DEB ?=
+MAKENSIS ?= makensis
 SURF_DIST := surf-$(VERSION)-$(SURF_GOOS)-$(SURF_GOARCH)
 SURF_CGO_ENV := CGO_ENABLED=0
 ifeq ($(SURF_GOOS),windows)
@@ -56,10 +57,10 @@ surf-dist: surf-binary
 		if [ "$(SURF_GOOS)" = "windows" ]; then \
 			rm -f "dist/$(SURF_ARCHIVE)"; \
 			(cd backend && go run ./tools/zipdir "../dist/$(SURF_DIST)" "../dist/$(SURF_ARCHIVE)"); \
-			if command -v makensis >/dev/null 2>&1; then \
+			if command -v "$(MAKENSIS)" >/dev/null 2>&1; then \
 				sed -e "s|@VERSION@|$(VERSION)|g" -e "s|@SOURCE@|$(CURDIR)/dist/$(SURF_DIST)|g" \
 					-e "s|@OUTPUT_DIR@|$(CURDIR)/dist|g" packaging/windows/surf.nsi.in > dist/surf.nsi; \
-				makensis -V2 dist/surf.nsi; \
+				"$(MAKENSIS)" -V2 dist/surf.nsi; \
 				rm dist/surf.nsi; \
 			fi; \
 		else \
