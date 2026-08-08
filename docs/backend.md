@@ -85,7 +85,7 @@ Surf reads configuration from environment variables:
 | `DOWNLOADS` | `$SURF_HOME/downloads` | Browser downloads |
 | `UPLOADS` | `$SURF_HOME/uploads` | Temporary client uploads |
 | `VW`, `VH` | `768`, `934` | Initial viewport before the client reports its exact size |
-| `STREAM_BITRATE` | `48000` | H.264 fallback target in kbit/s |
+| `STREAM_BITRATE` | `48000` | H.264 variable-rate target in kbit/s |
 | `STREAM_QUANTIZER` | `12` | H.264 constant-quality QP (0–51; lower is sharper) |
 | `STREAM_SCALE` | empty | Optional maximum stream size |
 | `SURF_CONTENT_BLOCKER` | `1` | Manage uBlock Origin Lite |
@@ -172,6 +172,14 @@ content-blocking extensions are loaded through CDP so branded browsers do not
 depend on the ignored `--load-extension` switch. Active-tab `tabCapture`
 supplies both video and audio; no FFmpeg, PulseAudio, desktop capture, or
 virtual audio device is required.
+
+Surf strictly selects Chromium's software AVC encoder on every host. This does
+not disable GPU rendering or compositing inside Chromium; it only keeps the
+transmitted H.264 stream independent of platform encoders whose reference-frame
+and buffering choices may exceed older clients' real-time decode budget. Surf
+first requests constant-quality encoding with `STREAM_QUANTIZER`, then uses the
+`STREAM_BITRATE` variable-rate configuration when the software encoder does not
+support quantizer mode.
 
 The native client reports the exact even-sized stream surface left by its
 current chrome; the backend does not choose from hard-coded device profiles.

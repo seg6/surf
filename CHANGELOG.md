@@ -2,6 +2,13 @@
 
 This file records the user-visible changes in every Surf release.
 
+## 0.12.5 - 2026-08-08
+
+- Made Chromium's software AVC encoder Surf's strict cross-platform default,
+  preventing platform hardware encoders from producing streams that legacy
+  clients cannot decode steadily at 60 FPS while retaining GPU-accelerated
+  page rendering and compositing.
+
 ## 0.12.4 - 2026-08-07
 
 - Removed the obsolete VirGL, X11, GPU-disable, and `/tmp` shared-memory

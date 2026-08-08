@@ -268,14 +268,13 @@ async function startVideoEncoder(track) {
   const requestedQuantizer = Number(videoConfig.quantizer);
   const quantizer = Number.isInteger(requestedQuantizer) ?
     Math.max(0, Math.min(51, requestedQuantizer)) : 12;
-  // Prefer a real platform codec before considering Chromium's neutral
-  // selection. Within each acceleration preference, retain constant-quality
-  // AVC when the implementation supports it and otherwise use the generous
-  // VBR fallback. This keeps software-only thin clients working without
-  // forcing hardware-capable hosts through a software encoder.
+  // Chromium's software AVC implementation produces a substantially simpler
+  // stream than modern platform encoders, allowing Surf's legacy hardware
+  // decoders to sustain 60 FPS. Keep the choice global and strict: GPU page
+  // rendering remains enabled, but H.264 encoding never falls back to a
+  // platform codec with different reference and buffering behavior.
   let selection = null;
-  for (const hardwareAcceleration of
-       ["prefer-hardware", "no-preference"]) {
+  for (const hardwareAcceleration of ["prefer-software"]) {
     for (const rateControl of ["quantizer", "variable"]) {
       const candidate = {
         ...baseConfig,

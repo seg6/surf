@@ -155,7 +155,7 @@ func TestVideoCaptureUsesSourceClockWithoutQueuesOrTimers(t *testing.T) {
 		"maxHeight: Math.max(videoConfig.width, videoConfig.height)",
 		`["quantizer", "variable"]`,
 		"bitrateMode: rateControl",
-		`["prefer-hardware", "no-preference"]`,
+		`["prefer-software"]`,
 		"encoderPreference: hardwareAcceleration",
 		"encodeOptions.avc = {quantizer}",
 		"frameTimestamp - videoLastKeyTimestamp >= 2000000",
