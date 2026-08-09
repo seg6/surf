@@ -258,7 +258,8 @@ func TestManagementHomeIsSinglePageUtility(t *testing.T) {
 	app.managementHandler().ServeHTTP(response, request)
 	body := response.Body.String()
 	for _, required := range []string{`id="settings-form"`, `id="lan-address"`, `id="device-list"`, `id="add-device"`,
-		`id="clipboard-sync"`, `id="clipboard-text"`, `id="send-clipboard"`, `id="logs"`, `id="log-live"`} {
+		`id="clipboard-sync"`, `id="clipboard-text"`, `id="send-clipboard"`, `id="logs"`, `id="log-live"`,
+		`padding: 7px 30px 7px 9px`, `calc(100% - 14px)`, `word-break: break-word`} {
 		if !strings.Contains(body, required) {
 			t.Errorf("management page is missing %s", required)
 		}
