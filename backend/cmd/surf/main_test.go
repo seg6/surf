@@ -259,7 +259,8 @@ func TestManagementHomeIsSinglePageUtility(t *testing.T) {
 	body := response.Body.String()
 	for _, required := range []string{`id="settings-form"`, `id="lan-address"`, `id="device-list"`, `id="add-device"`,
 		`id="clipboard-sync"`, `id="clipboard-text"`, `id="send-clipboard"`, `id="logs"`, `id="log-live"`,
-		`id="clear-logs"`, `.toggle-row input { position: absolute; width: 1px; height: 1px;`,
+		`id="copy-logs"`, `Copy JSON`, `JSON.stringify(records, null, 2)`, `id="clear-logs"`,
+		`.toggle-row input { position: absolute; width: 1px; height: 1px;`,
 		`padding: 7px 30px 7px 9px`, `calc(100% - 14px)`, `white-space: pre`,
 		`overflow-wrap: normal`, `grid-template-columns: 31ch 6ch 18ch`, `.log-level-error`} {
 		if !strings.Contains(body, required) {

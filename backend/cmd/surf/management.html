@@ -178,6 +178,7 @@
     .log-toolbar { display: grid; grid-template-columns: minmax(140px, 170px) minmax(160px, 1fr) auto auto; align-items: center; gap: 8px; margin-bottom: 10px; min-width: 0; max-width: 100%; }
     .log-toolbar input { padding: 7px 9px; }
     .log-toolbar input, .log-toolbar select { width: 100%; min-width: 0; max-width: 100%; }
+    .log-actions { display: inline-flex; align-items: center; gap: 6px; }
     .live-state {
       display: inline-flex; align-items: center; gap: 7px; min-width: 76px; justify-content: flex-end;
       color: var(--muted); font-size: 11px;
@@ -363,7 +364,10 @@
           <div class="log-toolbar">
             <select id="log-source" aria-label="Log source"><option value="server">Server</option><option value="desktop">Desktop</option></select>
             <input id="log-search" type="search" placeholder="Filter logs" aria-label="Filter logs">
-            <button class="button secondary small danger" id="clear-logs" type="button">Clear</button>
+            <span class="log-actions">
+              <button class="button secondary small" id="copy-logs" type="button">Copy JSON</button>
+              <button class="button secondary small danger" id="clear-logs" type="button">Clear</button>
+            </span>
             <span class="live-state" id="log-live" role="status"><span class="dot"></span><span id="log-live-text">Paused</span></span>
           </div>
           <pre id="log-output">Open Logs to start the live stream.</pre>
@@ -386,13 +390,13 @@
       if (!response.ok) throw new Error((await response.text()).trim() || `HTTP ${response.status}`);
       return response;
     }
-    async function copy(value) {
+    async function copy(value, message = 'Copied to clipboard') {
       try { await navigator.clipboard.writeText(value); }
       catch {
         const area = document.createElement('textarea'); area.value = value; document.body.appendChild(area);
         area.select(); document.execCommand('copy'); area.remove();
       }
-      toast('Copied to clipboard');
+      toast(message);
     }
     async function loadConfig() {
       config = await (await request('/api/config')).json();
@@ -697,10 +701,8 @@
       const output = $('log-output');
       const nearBottom = output.scrollHeight - output.scrollTop - output.clientHeight < 48;
       const horizontalPosition = output.scrollLeft;
-      const query = $('log-search').value.toLowerCase();
-      const records = query
-        ? logRecords.filter(record => JSON.stringify(record).toLowerCase().includes(query))
-        : logRecords;
+      const records = filteredLogRecords();
+      const query = $('log-search').value.trim();
       output.replaceChildren();
       if (records.length) {
         const fragment = document.createDocumentFragment();
@@ -711,6 +713,12 @@
       }
       output.scrollLeft = horizontalPosition;
       if (forceBottom || nearBottom) output.scrollTop = output.scrollHeight;
+    }
+    function filteredLogRecords() {
+      const query = $('log-search').value.trim().toLowerCase();
+      return query
+        ? logRecords.filter(record => JSON.stringify(record).toLowerCase().includes(query))
+        : logRecords;
     }
     function setLogLive(state, text) {
       $('log-live').classList.toggle('live', state === 'live');
@@ -749,6 +757,14 @@
     }
     $('log-source').addEventListener('change', startLogStream);
     $('log-search').addEventListener('input', renderLogs);
+    $('copy-logs').addEventListener('click', async () => {
+      const records = filteredLogRecords();
+      if (!records.length) { toast('No log records to copy'); return; }
+      const selected = selectedLogSource();
+      const label = selected?.label || $('log-source').selectedOptions[0]?.textContent || 'log';
+      const filtered = $('log-search').value.trim() ? ' filtered' : '';
+      await copy(JSON.stringify(records, null, 2), `Copied ${records.length}${filtered} ${label} log record${records.length === 1 ? '' : 's'} as JSON`);
+    });
     $('clear-logs').addEventListener('click', async () => {
       const selected = selectedLogSource();
       if (!selected || !confirm(`Clear ${selected.label} logs?`)) return;
