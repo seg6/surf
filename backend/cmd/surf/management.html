@@ -175,7 +175,7 @@
     details > summary::after { content: "Show"; color: var(--muted); font-size: 11px; font-weight: 400; }
     details[open] > summary::after { content: "Hide"; }
     .log-body { border-top: 1px solid var(--line); padding: 14px; min-width: 0; max-width: 100%; overflow: hidden; }
-    .log-toolbar { display: grid; grid-template-columns: 170px minmax(160px, 1fr) auto; align-items: center; gap: 8px; margin-bottom: 10px; min-width: 0; max-width: 100%; }
+    .log-toolbar { display: grid; grid-template-columns: minmax(140px, 170px) minmax(160px, 1fr) auto auto; align-items: center; gap: 8px; margin-bottom: 10px; min-width: 0; max-width: 100%; }
     .log-toolbar input { padding: 7px 9px; }
     .log-toolbar input, .log-toolbar select { width: 100%; min-width: 0; max-width: 100%; }
     .live-state {
@@ -219,7 +219,7 @@
       .device > .hero-actions .button { flex: 1; }
       .clipboard-actions { align-items: stretch; flex-direction: column; }
       .clipboard-actions .button { width: 100%; }
-      .log-toolbar { grid-template-columns: 1fr auto; }
+      .log-toolbar { grid-template-columns: minmax(0, 1fr) auto auto; }
       .log-toolbar select { grid-column: 1 / -1; }
     }
     @media (prefers-reduced-motion: reduce) { .live-state.live .dot { animation: none; } }
@@ -348,6 +348,7 @@
           <div class="log-toolbar">
             <select id="log-source" aria-label="Log source"><option value="server">Server</option><option value="desktop">Desktop</option></select>
             <input id="log-search" type="search" placeholder="Filter logs" aria-label="Filter logs">
+            <button class="button secondary small danger" id="clear-logs" type="button">Clear</button>
             <span class="live-state" id="log-live" role="status"><span class="dot"></span><span id="log-live-text">Paused</span></span>
           </div>
           <pre id="log-output">Open Logs to start the live stream.</pre>
@@ -629,7 +630,7 @@
       await loadCandidates(); $('add-device').focus();
     });
 
-    let logSources = [], rawLogText = '', logStream = null;
+    let logSources = [], logRecords = [], logStream = null;
     async function loadLogSources() {
       const payload = await (await request('/api/backend/api/v1/admin/logs/sources')).json();
       logSources = [
@@ -646,13 +647,28 @@
       if ([...$('log-source').options].some(option => option.value === selected)) $('log-source').value = selected;
       else $('log-source').value = 'server';
     }
+    function selectedLogSource() {
+      return logSources.find(source => source.id === $('log-source').value) || logSources[0];
+    }
+    function logRecordText(record) {
+      const timestamp = String(record?.ts || '');
+      const level = String(record?.level || 'info').toUpperCase().padEnd(5);
+      const component = String(record?.component || 'app');
+      const message = String(record?.message || '');
+      const fields = Object.entries(record?.fields || {}).sort(([a], [b]) => a.localeCompare(b))
+        .filter(([key]) => !message.includes(`${key}=`))
+        .map(([key, value]) => `${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`)
+        .join(' ');
+      return `${timestamp} ${level} ${component}  ${message}${fields ? `  ${fields}` : ''}`;
+    }
     function renderLogs(forceBottom = false) {
       const output = $('log-output');
       const nearBottom = output.scrollHeight - output.scrollTop - output.clientHeight < 48;
       const query = $('log-search').value.toLowerCase();
-      const visible = query
-        ? rawLogText.split('\n').filter(line => line.toLowerCase().includes(query)).join('\n')
-        : rawLogText;
+      const records = query
+        ? logRecords.filter(record => JSON.stringify(record).toLowerCase().includes(query))
+        : logRecords;
+      const visible = records.map(logRecordText).join('\n');
       output.textContent = visible || (query ? 'No matching log lines.' : 'Waiting for log output…');
       if (forceBottom || nearBottom) output.scrollTop = output.scrollHeight;
     }
@@ -670,10 +686,10 @@
       if (!$('logs').open) return;
       try {
         await loadLogSources();
-        const selected = logSources.find(source => source.id === $('log-source').value) || logSources[0];
+        const selected = selectedLogSource();
         const params = new URLSearchParams({source:selected.source || selected.id});
         if (selected.deviceID) params.set('deviceID', selected.deviceID);
-        rawLogText = '';
+        logRecords = [];
         renderLogs(true);
         setLogLive('connecting', 'Connecting');
         const stream = new EventSource(`/api/backend/api/v1/admin/logs/stream?${params}`);
@@ -682,7 +698,7 @@
         stream.onmessage = event => {
           if (logStream !== stream) return;
           const update = JSON.parse(event.data);
-          rawLogText = update.reset ? update.text : rawLogText + update.text;
+          logRecords = update.reset ? (update.records || []) : logRecords.concat(update.records || []);
           renderLogs();
         };
         stream.onerror = () => { if (logStream === stream) setLogLive('connecting', 'Reconnecting'); };
@@ -693,6 +709,23 @@
     }
     $('log-source').addEventListener('change', startLogStream);
     $('log-search').addEventListener('input', renderLogs);
+    $('clear-logs').addEventListener('click', async () => {
+      const selected = selectedLogSource();
+      if (!selected || !confirm(`Clear ${selected.label} logs?`)) return;
+      const button = $('clear-logs');
+      button.disabled = true;
+      try {
+        const params = new URLSearchParams({source:selected.source || selected.id});
+        if (selected.deviceID) params.set('deviceID', selected.deviceID);
+        const result = await (await request(`/api/backend/api/v1/admin/logs?${params}`, {
+          method:'DELETE', headers:{'X-Surf-Desktop':'1'}
+        })).json();
+        logRecords = [];
+        renderLogs(true);
+        toast(result.pending ? 'Saved logs cleared; device will clear when it reconnects' : 'Logs cleared');
+      } catch (error) { toast(error.message); }
+      finally { button.disabled = false; }
+    });
     $('logs').addEventListener('toggle', () => { if ($('logs').open) startLogStream(); else stopLogStream(); });
 
     (async () => {

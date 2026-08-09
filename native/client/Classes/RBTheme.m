@@ -220,21 +220,6 @@
             CGContextSetBlendMode(ctx, kCGBlendModeNormal);
             break;
         }
-        case RBIconKeyboard: {
-            CGFloat top = s * 0.26, bottom = s * 0.74;
-            CGContextSetLineWidth(ctx, MAX(1.5, lw * 0.65));
-            CGContextStrokeRect(ctx, CGRectMake(pad * 0.7, top, s - pad * 1.4, bottom - top));
-            CGFloat kw = s * 0.075;
-            for (int row = 0; row < 2; row++) {
-                for (int col = 0; col < 4; col++) {
-                    CGFloat kx = pad * 0.7 + s * 0.09 + col * s * 0.165 + (row ? s * 0.05 : 0.0);
-                    CGFloat ky = top + s * 0.09 + row * s * 0.14;
-                    CGContextFillRect(ctx, CGRectMake(kx, ky, kw, kw));
-                }
-            }
-            CGContextFillRect(ctx, CGRectMake(s * 0.30, bottom - s * 0.15, s * 0.40, kw));
-            break;
-        }
         case RBIconPlus: {
             CGContextMoveToPoint(ctx, mid, pad);
             CGContextAddLineToPoint(ctx, mid, s - pad);

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"surf-backend/internal/logs"
 	"surf-backend/internal/media"
 	"surf-backend/internal/protocol"
 	"surf-backend/internal/telemetry"
@@ -453,20 +454,22 @@ func (b *Controller) noteClientMessage(t string) {
 		}
 		return sum / float64(n)
 	}
-	log.Printf("perf input %.1fs: touch=%.1f/s key=%.1f/s nav=%d size=%d other=%d | input->image mean=%.1fms max=%.1fms n=%d | motion AU gap mean=%.1fms max=%.1fms n=%d | fresh AU gap mean=%.1fms max=%.1fms n=%d dup=%d | capture raw-gap=%.1f/%.1fms submit-wait=%.1f/%.1fms encode=%.1f/%.1fms | video queue mean=%.1fms max=%.1fms n=%d | audio lat mean=%.1fms max=%.1fms n=%d",
-		dt,
-		float64(counts["touch"])/dt,
-		float64(counts["key"])/dt,
-		counts["nav"], counts["size"],
-		otherInputCount(counts),
-		auMeanMS, auMaxMS, auN,
-		motionMeanMS, motionMaxMS, motionN,
-		sourceMeanMS, sourceMaxMS, sourceN, duplicateAUs,
-		mean(rawSumMS, rawN), rawMaxMS,
-		mean(submitSumMS, submitN), submitMaxMS,
-		mean(encodeSumMS, encodeN), encodeMaxMS,
-		latMeanMS, latMaxMS, latN,
-		aLatMeanMS, aLatMaxMS, aLatN)
+	logs.Info("performance", "Input and media performance sample", map[string]any{
+		"interval_seconds":    dt,
+		"touch_per_second":    float64(counts["touch"]) / dt,
+		"key_per_second":      float64(counts["key"]) / dt,
+		"navigation_commands": counts["nav"], "size_commands": counts["size"],
+		"other_commands":         otherInputCount(counts),
+		"input_to_image_mean_ms": auMeanMS, "input_to_image_max_ms": auMaxMS, "input_to_image_samples": auN,
+		"motion_au_gap_mean_ms": motionMeanMS, "motion_au_gap_max_ms": motionMaxMS, "motion_au_gap_samples": motionN,
+		"fresh_au_gap_mean_ms": sourceMeanMS, "fresh_au_gap_max_ms": sourceMaxMS, "fresh_au_gap_samples": sourceN,
+		"duplicate_aus":           duplicateAUs,
+		"capture_raw_gap_mean_ms": mean(rawSumMS, rawN), "capture_raw_gap_max_ms": rawMaxMS,
+		"submit_wait_mean_ms": mean(submitSumMS, submitN), "submit_wait_max_ms": submitMaxMS,
+		"encode_mean_ms": mean(encodeSumMS, encodeN), "encode_max_ms": encodeMaxMS,
+		"video_queue_mean_ms": latMeanMS, "video_queue_max_ms": latMaxMS, "video_queue_samples": latN,
+		"audio_latency_mean_ms": aLatMeanMS, "audio_latency_max_ms": aLatMaxMS, "audio_latency_samples": aLatN,
+	})
 }
 
 func (b *Controller) noteCaptureStages(frame media.VideoFrame) {

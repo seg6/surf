@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -21,6 +22,7 @@ import (
 	"surf-backend/internal/auth"
 	"surf-backend/internal/clipboard"
 	"surf-backend/internal/control"
+	"surf-backend/internal/logstore"
 	"surf-backend/internal/web"
 
 	qrcode "github.com/skip2/go-qrcode"
@@ -261,6 +263,30 @@ type logSource struct {
 	path  string
 }
 
+func renderLogRecords(data []byte) (string, error) {
+	records, err := logstore.DecodeRecords(data)
+	if err != nil {
+		return "", err
+	}
+	var output strings.Builder
+	for _, record := range records {
+		fmt.Fprintf(&output, "%s %-5s %s  %s", record.Timestamp, strings.ToUpper(record.Level), record.Component, record.Message)
+		keys := make([]string, 0, len(record.Fields))
+		for key := range record.Fields {
+			if !strings.Contains(record.Message, key+"=") {
+				keys = append(keys, key)
+			}
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			value, _ := json.Marshal(record.Fields[key])
+			fmt.Fprintf(&output, "  %s=%s", key, value)
+		}
+		output.WriteByte('\n')
+	}
+	return output.String(), nil
+}
+
 func runLogsCommand(args []string) error {
 	source, deviceID, follow := "all", "", false
 	for len(args) > 0 {
@@ -339,15 +365,24 @@ func runLogsCommand(args []string) error {
 			text := string(data)
 			if initial {
 				if text != "" {
-					fmt.Printf("== %s ==\n%s", item.label, text)
-					if !strings.HasSuffix(text, "\n") {
-						fmt.Println()
+					rendered, renderErr := renderLogRecords(data)
+					if renderErr != nil {
+						return renderErr
 					}
+					fmt.Printf("== %s ==\n%s", item.label, rendered)
 				}
 			} else if old := previous[item.path]; strings.HasPrefix(text, old) {
-				fmt.Print(strings.TrimPrefix(text, old))
+				rendered, renderErr := renderLogRecords([]byte(strings.TrimPrefix(text, old)))
+				if renderErr != nil {
+					return renderErr
+				}
+				fmt.Print(rendered)
 			} else if text != old {
-				fmt.Printf("\n== %s (rotated) ==\n%s", item.label, text)
+				rendered, renderErr := renderLogRecords(data)
+				if renderErr != nil {
+					return renderErr
+				}
+				fmt.Printf("\n== %s (rotated) ==\n%s", item.label, rendered)
 			}
 			previous[item.path] = text
 		}

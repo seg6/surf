@@ -54,6 +54,7 @@ func TestDecodeEveryNativeCommand(t *testing.T) {
 		`{"t":"clipboard-result","id":"request","ok":true}`,
 		`{"t":"clipboard-change","text":"device clipboard"}`,
 		`{"t":"log-record","record":{"ts":"now","level":"info","component":"app","message":"ready","fields":{}}}`,
+		`{"t":"log-cleared"}`,
 	}
 	for _, data := range cases {
 		command, err := DecodeCommand([]byte(data))

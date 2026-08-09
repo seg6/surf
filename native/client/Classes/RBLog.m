@@ -15,59 +15,6 @@ static NSFileHandle *RBLogHandle;
 static unsigned long long RBLogSize;
 static void (^RBLogRecordHandler)(NSDictionary *record);
 
-static NSString *RBMigratedLevelForMessage(NSString *message) {
-    NSString *lower = [message lowercaseString], *level = @"info";
-    if ([lower rangeOfString:@"error"].location != NSNotFound ||
-        [lower rangeOfString:@"failed"].location != NSNotFound ||
-        [lower rangeOfString:@"rejected"].location != NSNotFound ||
-        [lower rangeOfString:@"fatal"].location != NSNotFound) level = @"error";
-    else if ([lower rangeOfString:@"warning"].location != NSNotFound ||
-             [lower rangeOfString:@"timeout"].location != NSNotFound ||
-             [lower rangeOfString:@"stalled"].location != NSNotFound ||
-             [lower rangeOfString:@"drop"].location != NSNotFound) level = @"warn";
-    return level;
-}
-
-static NSString *RBMigratedComponentForMessage(NSString *message) {
-    NSRange colon = [message rangeOfString:@":"];
-    if (colon.location != NSNotFound && colon.location > 0 && colon.location <= 24) {
-        return [[message substringToIndex:colon.location] lowercaseString];
-    }
-    NSArray *words = [message componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-    NSString *first = [words count] ? [words objectAtIndex:0] : nil;
-    return [first length] && [first length] <= 18 ? [first lowercaseString] : @"app";
-}
-
-static id RBMigratedTypedFieldValue(NSString *value) {
-    if ([value isEqualToString:@"true"] || [value isEqualToString:@"yes"]) return @YES;
-    if ([value isEqualToString:@"false"] || [value isEqualToString:@"no"]) return @NO;
-    NSScanner *integerScanner = [NSScanner scannerWithString:value];
-    long long integer = 0;
-    if ([integerScanner scanLongLong:&integer] && [integerScanner isAtEnd]) return @(integer);
-    NSScanner *doubleScanner = [NSScanner scannerWithString:value];
-    double number = 0;
-    if ([doubleScanner scanDouble:&number] && [doubleScanner isAtEnd]) return @(number);
-    return value;
-}
-
-static NSDictionary *RBMigratedFieldsForMessage(NSString *message) {
-    NSMutableDictionary *fields = [NSMutableDictionary dictionary];
-    NSCharacterSet *validKey = [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"];
-    NSCharacterSet *trailing = [NSCharacterSet characterSetWithCharactersInString:@",;)"];
-    for (NSString *token in [message componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]) {
-        NSRange equals = [token rangeOfString:@"="];
-        if (equals.location == NSNotFound || equals.location == 0 || equals.location + 1 >= [token length]) continue;
-        NSString *key = [[token substringToIndex:equals.location] lowercaseString];
-        if ([key rangeOfCharacterFromSet:[validKey invertedSet]].location != NSNotFound) continue;
-        NSString *value = [token substringFromIndex:equals.location + 1];
-        while ([value length] && [trailing characterIsMember:[value characterAtIndex:[value length] - 1]]) {
-            value = [value substringToIndex:[value length] - 1];
-        }
-        if ([value length]) [fields setObject:RBMigratedTypedFieldValue(value) forKey:key];
-    }
-    return fields;
-}
-
 static NSData *RBJSONLine(NSDictionary *record) {
     NSData *json = [NSJSONSerialization dataWithJSONObject:record options:0 error:nil];
     if (!json) return nil;
@@ -76,54 +23,30 @@ static NSData *RBJSONLine(NSDictionary *record) {
     return line;
 }
 
-static void RBMigrateLegacyLog(NSFileManager *fm) {
-    NSData *existing = [NSData dataWithContentsOfFile:RBLogFile];
-    if (![existing length]) return;
-    NSString *text = [[NSString alloc] initWithData:existing encoding:NSUTF8StringEncoding];
-    if (![text length]) return;
-    NSMutableData *migrated = [NSMutableData data];
-    BOOL changed = NO;
+static BOOL RBStructuredLogData(NSData *data) {
+    if (![data length]) return YES;
+    NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if (!text) return NO;
     for (NSString *line in [text componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]]) {
         if (![line length]) continue;
         NSData *lineData = [line dataUsingEncoding:NSUTF8StringEncoding];
-        id decoded = [NSJSONSerialization JSONObjectWithData:lineData options:0 error:nil];
-        if ([decoded isKindOfClass:[NSDictionary class]]) {
-            [migrated appendData:lineData];
-            [migrated appendBytes:"\n" length:1];
-            continue;
-        }
-        changed = YES;
-        NSString *timestamp = nil, *message = line;
-        if ([line length] >= 24 && [line characterAtIndex:4] == '-' && [line characterAtIndex:10] == ' ') {
-            timestamp = [line substringToIndex:23];
-            message = [line substringFromIndex:24];
-        }
-        if (![timestamp length]) timestamp = [RBLogDateFormatter stringFromDate:[NSDate date]];
-        NSMutableDictionary *fields = [NSMutableDictionary dictionaryWithDictionary:RBMigratedFieldsForMessage(message)];
-        [fields setObject:@YES forKey:@"migrated"];
-        [fields setObject:@"legacy-text" forKey:@"format"];
-        NSDictionary *record = @{ @"ts": timestamp,
-                                  @"level": RBMigratedLevelForMessage(message),
-                                  @"component": RBMigratedComponentForMessage(message),
-                                  @"message": message,
-                                  @"fields": fields };
-        NSData *recordLine = RBJSONLine(record);
-        if (recordLine) [migrated appendData:recordLine];
+        NSDictionary *record = [NSJSONSerialization JSONObjectWithData:lineData options:0 error:nil];
+        if (![record isKindOfClass:[NSDictionary class]] || ![[record objectForKey:@"ts"] isKindOfClass:[NSString class]] ||
+            ![[record objectForKey:@"level"] isKindOfClass:[NSString class]] ||
+            ![[record objectForKey:@"component"] isKindOfClass:[NSString class]] ||
+            ![[record objectForKey:@"message"] isKindOfClass:[NSString class]] ||
+            ![[record objectForKey:@"fields"] isKindOfClass:[NSDictionary class]]) return NO;
     }
-    if (!changed) return;
-    NSString *temporary = [RBLogFile stringByAppendingString:@".migrating"];
-    if ([migrated writeToFile:temporary atomically:YES]) {
-        [fm removeItemAtPath:RBLogFile error:nil];
-        [fm moveItemAtPath:temporary toPath:RBLogFile error:nil];
-    } else {
-        [fm removeItemAtPath:temporary error:nil];
-    }
+    return YES;
 }
 
 static void RBOpenLog(void) {
     NSFileManager *fm = [NSFileManager defaultManager];
     [fm createDirectoryAtPath:RBLogDirectory withIntermediateDirectories:YES attributes:nil error:nil];
-    RBMigrateLegacyLog(fm);
+    for (NSString *path in @[[RBLogFile stringByAppendingString:@".1"], RBLogFile]) {
+        NSData *existing = [NSData dataWithContentsOfFile:path];
+        if ([existing length] && !RBStructuredLogData(existing)) [fm removeItemAtPath:path error:nil];
+    }
     NSDictionary *attrs = [fm attributesOfItemAtPath:RBLogFile error:nil];
     RBLogSize = [[attrs objectForKey:NSFileSize] unsignedLongLongValue];
     if (RBLogSize > 1024 * 1024) {
@@ -145,7 +68,9 @@ static void RBInitializeLog(void) {
         RBLogQueue = dispatch_queue_create("surf.log", DISPATCH_QUEUE_SERIAL);
         dispatch_async(RBLogQueue, ^{
             RBLogDateFormatter = [[NSDateFormatter alloc] init];
-            [RBLogDateFormatter setDateFormat:@"yyyy-MM-dd HH:mm:ss.SSS"];
+            [RBLogDateFormatter setLocale:[[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"]];
+            [RBLogDateFormatter setTimeZone:[NSTimeZone timeZoneForSecondsFromGMT:0]];
+            [RBLogDateFormatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"];
             RBOpenLog();
         });
     });
@@ -156,13 +81,20 @@ NSString *RBCurrentLogPath(void) {
 }
 
 void RBClearLog(void) {
+    RBClearLogWithCompletion(nil);
+}
+
+void RBClearLogWithCompletion(void (^completion)(void)) {
     RBInitializeLog();
     dispatch_async(RBLogQueue, ^{
         [RBLogHandle closeFile];
         RBLogHandle = nil;
-        [[NSFileManager defaultManager] removeItemAtPath:RBLogFile error:nil];
+        NSFileManager *fm = [NSFileManager defaultManager];
+        [fm removeItemAtPath:RBLogFile error:nil];
+        [fm removeItemAtPath:[RBLogFile stringByAppendingString:@".1"] error:nil];
         RBLogSize = 0;
         RBOpenLog();
+        if (completion) dispatch_async(dispatch_get_main_queue(), completion);
     });
 }
 

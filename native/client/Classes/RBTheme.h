@@ -8,7 +8,6 @@ typedef enum {
     RBIconStar,
     RBIconStarFill,
     RBIconGear,
-    RBIconKeyboard,
     RBIconPlus,
     RBIconClose,
     RBIconExpand,

@@ -254,9 +254,9 @@ func newDesktopApp() (*desktopApp, error) {
 		_ = logFile.Close()
 		return nil, err
 	}
-	fmt.Fprintln(logFile, "surf: management UI", app.manageURL)
+	app.logf("management UI %s", app.manageURL)
 	if recoveredConfig != "" {
-		fmt.Fprintln(logFile, "surf: recovered invalid desktop settings; backup:", recoveredConfig)
+		app.logf("recovered invalid desktop settings; backup=%s", recoveredConfig)
 	}
 	return app, nil
 }
@@ -563,14 +563,22 @@ func (a *desktopApp) backendHealthy() {
 
 func (a *desktopApp) logf(format string, args ...any) {
 	if a.logFile != nil {
-		_, _ = fmt.Fprintf(a.logFile, format, args...)
+		message := strings.TrimSpace(fmt.Sprintf(format, args...))
+		level := "info"
+		lower := strings.ToLower(message)
+		if strings.Contains(lower, "error") || strings.Contains(lower, "failed") || strings.Contains(lower, "invalid") {
+			level = "error"
+		} else if strings.Contains(lower, "unresponsive") || strings.Contains(lower, "forcing") || strings.Contains(lower, "retry") {
+			level = "warn"
+		}
+		_ = a.logFile.Event(level, "desktop", strings.TrimPrefix(message, "surf: "), nil)
 	}
 }
 
 func (a *desktopApp) monitorHealth() {
 	client, err := a.backendHTTPClient(time.Second)
 	if err != nil {
-		fmt.Fprintln(a.logFile, "surf: TLS identity:", err)
+		a.logf("TLS identity: %v", err)
 		return
 	}
 	ticker := time.NewTicker(2 * time.Second)
@@ -635,7 +643,7 @@ func (a *desktopApp) startManagementServer() error {
 	}
 	go func() {
 		if err := a.manageHTTP.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			fmt.Fprintln(a.logFile, "surf: management server:", err)
+			a.logf("management server: %v", err)
 		}
 	}()
 	return nil
@@ -644,7 +652,7 @@ func (a *desktopApp) startManagementServer() error {
 func (a *desktopApp) openManagement(path string) {
 	if err := openExternal(a.manageURL + path); err != nil {
 		a.setStatus("Could not open browser")
-		fmt.Fprintln(a.logFile, "surf: open browser:", err)
+		a.logf("open browser: %v", err)
 	}
 }
 
@@ -982,7 +990,7 @@ func (a *desktopApp) managementRestart(w http.ResponseWriter, r *http.Request) {
 		a.setStatus("Restarting Surf…")
 		a.stopBackend()
 		if err := a.startBackend(); err != nil {
-			fmt.Fprintln(a.logFile, "surf: restart:", err)
+			a.logf("restart: %v", err)
 		}
 	}()
 }
@@ -1036,7 +1044,7 @@ func (a *desktopApp) managementSettings(w http.ResponseWriter, r *http.Request) 
 		a.setStatus("Restarting Surf…")
 		a.stopBackend()
 		if err := a.startBackend(); err != nil {
-			fmt.Fprintln(a.logFile, "surf: restart after settings:", err)
+			a.logf("restart after settings: %v", err)
 		}
 	}()
 }

@@ -11,22 +11,27 @@ import (
 func TestWriterRotatesAndMirrors(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "server.log")
 	var mirror bytes.Buffer
-	w, err := Open(path, 8, &mirror)
+	w, err := Open(path, 320, &mirror)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = w.Write([]byte("first\n"))
-	_, _ = w.Write([]byte("second\n"))
+	_, _ = w.Write([]byte("runtime: first value=1\n"))
+	_, _ = w.Write([]byte("runtime: second value=2\n"))
+	_, _ = w.Write([]byte("runtime: third value=3\n"))
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := os.ReadFile(path + ".1"); string(got) != "first\n" {
-		t.Fatalf("predecessor=%q", got)
+	older, _ := os.ReadFile(path + ".1")
+	current, _ := os.ReadFile(path)
+	olderRecords, olderErr := DecodeRecords(older)
+	currentRecords, currentErr := DecodeRecords(current)
+	if olderErr != nil || currentErr != nil || len(olderRecords) == 0 || len(currentRecords) == 0 {
+		t.Fatalf("records older=%q (%v) current=%q (%v)", older, olderErr, current, currentErr)
 	}
-	if got, _ := os.ReadFile(path); string(got) != "second\n" {
-		t.Fatalf("current=%q", got)
+	if currentRecords[len(currentRecords)-1].Message != "third value=3" {
+		t.Fatalf("current=%+v", currentRecords)
 	}
-	if mirror.String() != "first\nsecond\n" {
+	if mirror.String() != "runtime: first value=1\nruntime: second value=2\nruntime: third value=3\n" {
 		t.Fatalf("mirror=%q", mirror.String())
 	}
 }
@@ -55,19 +60,67 @@ func TestDeviceSnapshotIsValidatedAndReplaced(t *testing.T) {
 
 func TestWriterBoundsSingleOversizedRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "server.log")
-	w, err := Open(path, 8, nil)
+	w, err := Open(path, 256, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := []byte("0123456789abcdef")
+	input := bytes.Repeat([]byte("x"), 512)
 	if n, err := w.Write(input); err != nil || n != len(input) {
 		t.Fatalf("write = %d, %v", n, err)
 	}
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := os.ReadFile(path); string(got) != "89abcdef" {
-		t.Fatalf("bounded record = %q", got)
+	got, _ := os.ReadFile(path)
+	records, err := DecodeRecords(got)
+	if err != nil || len(records) != 1 || records[0].Component != "logging" {
+		t.Fatalf("bounded record = %q (%v)", got, err)
+	}
+}
+
+func TestWriterClearKeepsStructuredStreamWritable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.log")
+	w, err := Open(path, 1024, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = w.Write([]byte("runtime: before\n"))
+	if err := w.Clear(); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = w.Write([]byte("runtime: after\n"))
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	records, err := DecodeRecords(data)
+	if err != nil || len(records) != 1 || records[0].Message != "after" {
+		t.Fatalf("records=%+v err=%v", records, err)
+	}
+}
+
+func TestExternalClearResetsOpenDesktopWriter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "desktop.log")
+	w, err := Open(path, 1024, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Event("info", "desktop", "before", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := ClearPath(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Event("info", "desktop", "after", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	records, err := DecodeRecords(data)
+	if err != nil || len(records) != 1 || records[0].Message != "after" {
+		t.Fatalf("records=%+v err=%v", records, err)
 	}
 }
 

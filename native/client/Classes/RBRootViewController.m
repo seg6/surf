@@ -105,6 +105,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
 @property(nonatomic, strong) UILabel *connectionPill;
 @property(nonatomic, strong) RBDiagnosticsOverlay *diagnosticsOverlay;
 @property(nonatomic, strong) UITextField *hiddenInput;
+@property(nonatomic, strong) UIBarButtonItem *pagePasteButton;
 // Controllers
 @property(nonatomic, strong) RBSession *session;
 @property(nonatomic, strong) RBSettingsController *settingsController;
@@ -299,6 +300,15 @@ static CGFloat RBEvenExtent(CGFloat value) {
     self.hiddenInput.returnKeyType = UIReturnKeyGo;
     self.hiddenInput.text = @" ";
     self.previousHiddenText = @" ";
+    UIToolbar *inputBar = [[UIToolbar alloc] initWithFrame:CGRectMake(0.0, 0.0, self.view.bounds.size.width, 38.0)];
+    inputBar.barStyle = UIBarStyleBlack;
+    inputBar.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    UIBarButtonItem *space = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
+                                                                          target:nil action:nil];
+    self.pagePasteButton = [[UIBarButtonItem alloc] initWithTitle:@"Paste" style:UIBarButtonItemStyleDone
+                                                          target:self action:@selector(pasteToPage)];
+    inputBar.items = @[space, self.pagePasteButton];
+    self.hiddenInput.inputAccessoryView = inputBar;
     [self.view addSubview:self.hiddenInput];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(hiddenInputDidChange:)
                                                  name:UITextFieldTextDidChangeNotification object:self.hiddenInput];
@@ -1094,6 +1104,13 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
         [self.libraryController consumeHistoryReply:message];
     } else if ([t isEqualToString:@"log-request"]) {
         [self.session uploadNativeLogNow];
+    } else if ([t isEqualToString:@"log-clear"]) {
+        __weak RBRootViewController *weakSelf = self;
+        RBClearLogWithCompletion(^{
+            RBRootViewController *controller = weakSelf;
+            if (!controller || controller.session.state != RBSessionStateOpen) return;
+            [controller.session sendMessage:@{@"t": @"log-cleared"}];
+        });
     } else if ([t isEqualToString:@"clipboard-sync"]) {
         BOOL enabled = [[message objectForKey:@"enabled"] boolValue];
         BOOL known = [[message objectForKey:@"known"] boolValue];
@@ -1371,7 +1388,6 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
         [self activityForAction:@"reader" title:@"Reader" icon:RBIconBook],
         [self activityForAction:@"find" title:@"Find on Page" icon:RBIconSearch],
         [self activityForAction:@"media" title:@"Media Controls" icon:RBIconMore],
-        [self activityForAction:@"paste" title:@"Paste to Page" icon:RBIconKeyboard],
         [self activityForAction:@"fullscreen" title:(self.fullscreen ? @"Exit Fullscreen" : @"Fullscreen")
                             icon:(self.fullscreen ? RBIconShrink : RBIconExpand)],
         [self activityForAction:@"settings" title:@"Surf Settings" icon:RBIconGear],
@@ -1407,8 +1423,6 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
         [self.view setNeedsLayout];
         [self.view layoutIfNeeded];
         [self.findBar focusField];
-    } else if ([action isEqualToString:@"paste"]) {
-        [self pasteToPage];
     } else if ([action isEqualToString:@"bookmark"]) {
         [self.session sendMessage:@{@"t": @"bookmark"}];
     } else if ([action isEqualToString:@"copyurl"]) {
@@ -1496,7 +1510,7 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
 // Settings (gear): straight to settings — there is no menu.
 - (void)pasteToPage {
     NSString *text = [UIPasteboard generalPasteboard].string;
-    if (![text length]) {
+    if (![text length] || !RBValidClipboardText(text)) {
         [self showToast:@"Clipboard is empty"];
         return;
     }
@@ -1949,6 +1963,8 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
 }
 
 - (void)showKeyboard {
+    NSString *clipboard = [UIPasteboard generalPasteboard].string;
+    self.pagePasteButton.enabled = [clipboard length] && RBValidClipboardText(clipboard);
     if (![self.hiddenInput isFirstResponder]) {
         [self resetHiddenInput];
         [self.hiddenInput becomeFirstResponder];

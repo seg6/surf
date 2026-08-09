@@ -51,9 +51,12 @@ func ServeContext(parent context.Context, ready chan<- control.Descriptor) error
 		return fmt.Errorf("open server log: %w", err)
 	}
 	previousLog := log.Writer()
+	previousFlags := log.Flags()
 	log.SetOutput(serverLog)
+	log.SetFlags(0)
 	defer func() {
 		log.SetOutput(previousLog)
+		log.SetFlags(previousFlags)
 		_ = serverLog.Close()
 	}()
 	instance, acquired, err := process.AcquireInstanceLock(
@@ -109,6 +112,7 @@ func ServeContext(parent context.Context, ready chan<- control.Descriptor) error
 	}
 	clearBrowserStartupFailures(cfg.SurfHome)
 	srv := web.New(cfg, a, ident, hub)
+	srv.SetServerLog(serverLog)
 	srv.StartClipboardSync(ctx)
 	srv.SetShutdown(cancel)
 	srv.SetHealthCheck(b.Health)

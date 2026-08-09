@@ -457,10 +457,11 @@ func TestAdminLogStreamAppendsWithoutSourceHeadings(t *testing.T) {
 		t.Fatalf("stream = %d %q", response.StatusCode, response.Header.Get("Content-Type"))
 	}
 	reader := bufio.NewReader(response.Body)
-	readUpdate := func() struct {
-		Text  string `json:"text"`
-		Reset bool   `json:"reset"`
-	} {
+	type logUpdate struct {
+		Records []logstore.Record `json:"records"`
+		Reset   bool              `json:"reset"`
+	}
+	readUpdate := func() logUpdate {
 		for {
 			line, readErr := reader.ReadString('\n')
 			if readErr != nil {
@@ -469,10 +470,7 @@ func TestAdminLogStreamAppendsWithoutSourceHeadings(t *testing.T) {
 			if !strings.HasPrefix(line, "data: ") {
 				continue
 			}
-			var update struct {
-				Text  string `json:"text"`
-				Reset bool   `json:"reset"`
-			}
+			var update logUpdate
 			if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data: "))), &update); err != nil {
 				t.Fatalf("decode stream: %v", err)
 			}
@@ -480,7 +478,7 @@ func TestAdminLogStreamAppendsWithoutSourceHeadings(t *testing.T) {
 		}
 	}
 	initial := readUpdate()
-	if !initial.Reset || initial.Text != string(first) || strings.Contains(initial.Text, "==") {
+	if !initial.Reset || len(initial.Records) != 1 || initial.Records[0].Message != "first" {
 		t.Fatalf("initial update = %+v", initial)
 	}
 	second := json.RawMessage(`{"ts":"two","level":"info","component":"session","message":"second","fields":{}}`)
@@ -488,8 +486,49 @@ func TestAdminLogStreamAppendsWithoutSourceHeadings(t *testing.T) {
 		t.Fatal(err)
 	}
 	update := readUpdate()
-	if update.Reset || !strings.Contains(update.Text, `"message":"second"`) || strings.Contains(update.Text, "==") {
+	if update.Reset || len(update.Records) != 1 || update.Records[0].Message != "second" {
 		t.Fatalf("append update = %+v", update)
+	}
+	clear := httptest.NewRecorder()
+	server.Handler().ServeHTTP(clear, adminRequest(http.MethodDelete,
+		APIRoot+"/admin/logs?source=device&deviceID="+url.QueryEscape(deviceID)))
+	if clear.Code != http.StatusOK {
+		t.Fatalf("clear = %d: %s", clear.Code, clear.Body.String())
+	}
+	reset := readUpdate()
+	if !reset.Reset || len(reset.Records) != 0 {
+		t.Fatalf("clear update = %+v", reset)
+	}
+}
+
+func TestOfflineDeviceLogClearPersistsUntilNativeAcknowledges(t *testing.T) {
+	server, manager := newTestServer(t)
+	cookie := pairedCookie(t, manager)
+	deviceID := manager.ListDevices()[0].ID
+	line := []byte("{\"ts\":\"now\",\"level\":\"info\",\"component\":\"session\",\"message\":\"old\",\"fields\":{}}\n")
+	if err := logstore.WriteDeviceSnapshot(server.cfg.SurfHome, deviceID, line); err != nil {
+		t.Fatal(err)
+	}
+	clear := httptest.NewRecorder()
+	server.Handler().ServeHTTP(clear, adminRequest(http.MethodDelete,
+		APIRoot+"/admin/logs?source=device&deviceID="+url.QueryEscape(deviceID)))
+	if clear.Code != http.StatusOK || !strings.Contains(clear.Body.String(), `"pending":true`) ||
+		!logstore.DeviceClearPending(server.cfg.SurfHome, deviceID) {
+		t.Fatalf("clear = %d %s", clear.Code, clear.Body.String())
+	}
+	upload := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPut, APIRoot+"/client/logs", bytes.NewReader(line))
+	request.AddCookie(cookie)
+	server.Handler().ServeHTTP(upload, request)
+	data, err := logstore.ReadDeviceSnapshot(server.cfg.SurfHome, deviceID, logstore.DeviceMaxBytes)
+	if upload.Code != http.StatusNoContent || err != nil || len(data) != 0 {
+		t.Fatalf("pending upload = %d data=%q err=%v", upload.Code, data, err)
+	}
+	if err := logstore.CompleteDeviceClear(server.cfg.SurfHome, deviceID); err != nil {
+		t.Fatal(err)
+	}
+	if logstore.DeviceClearPending(server.cfg.SurfHome, deviceID) {
+		t.Fatal("clear marker remained after acknowledgement")
 	}
 }
 

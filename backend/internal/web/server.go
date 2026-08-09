@@ -50,6 +50,7 @@ type Server struct {
 	clipboard     map[string]*clipboardRequest
 	hostClipboard *clipboard.Controller
 	tunnelSlots   chan struct{}
+	serverLog     *logstore.Writer
 }
 
 type clipboardRequest struct {
@@ -84,10 +85,11 @@ func (s *Server) StartClipboardSync(ctx context.Context) {
 	})
 }
 
-func (s *Server) SetHealthCheck(fn func() error)    { s.health = fn }
-func (s *Server) SetStats(fn func() map[string]any) { s.stats = fn }
-func (s *Server) SetAdminToken(token string)        { s.adminToken = token }
-func (s *Server) SetShutdown(fn func())             { s.shutdown = fn }
+func (s *Server) SetHealthCheck(fn func() error)       { s.health = fn }
+func (s *Server) SetStats(fn func() map[string]any)    { s.stats = fn }
+func (s *Server) SetAdminToken(token string)           { s.adminToken = token }
+func (s *Server) SetShutdown(fn func())                { s.shutdown = fn }
+func (s *Server) SetServerLog(writer *logstore.Writer) { s.serverLog = writer }
 
 func (s *Server) setClientPackage(bundle *clientPackage) {
 	s.client = bundle
@@ -465,6 +467,8 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		}
 		targets := s.hub.SendDeviceJSON(request.DeviceID, protocol.EmptyEvent{Type: "log-request"})
 		writeJSON(w, http.StatusOK, map[string]any{"devices": targets})
+	case p == APIRoot+"/admin/logs" && r.Method == http.MethodDelete:
+		s.handleAdminLogClear(w, r)
 	case p == APIRoot+"/admin/clipboard" && r.Method == http.MethodGet:
 		s.handleAdminClipboardState(w, r)
 	case p == APIRoot+"/admin/clipboard" && r.Method == http.MethodPost:
@@ -488,6 +492,9 @@ func (s *Server) handleClientConnected(client *transport.Client) {
 	client.SendJSON(protocol.ClipboardSyncEvent{
 		Type: "clipboard-sync", Enabled: state.Enabled, Known: state.Known, Text: state.Text,
 	})
+	if logstore.DeviceClearPending(s.cfg.SurfHome, client.DeviceID()) {
+		client.SendJSON(protocol.EmptyEvent{Type: "log-clear"})
+	}
 }
 
 func (s *Server) handleAuxCommand(client *transport.Client, command protocol.Command) bool {
@@ -514,8 +521,19 @@ func (s *Server) handleAuxCommand(client *transport.Client, command protocol.Com
 		}
 		return true
 	case *protocol.LogRecordCommand:
+		if logstore.DeviceClearPending(s.cfg.SurfHome, client.DeviceID()) {
+			return true
+		}
 		if err := logstore.AppendDeviceRecord(s.cfg.SurfHome, client.DeviceID(), value.Record); err != nil {
 			log.Printf("native log: rejected live record device=%s: %v", shortID(client.DeviceID()), err)
+		}
+		return true
+	case *protocol.LogClearedCommand:
+		if !logstore.DeviceClearPending(s.cfg.SurfHome, client.DeviceID()) {
+			return true
+		}
+		if err := logstore.CompleteDeviceClear(s.cfg.SurfHome, client.DeviceID()); err != nil {
+			log.Printf("native log: complete clear device=%s: %v", shortID(client.DeviceID()), err)
 		}
 		return true
 	default:
@@ -663,6 +681,11 @@ func (s *Server) handleClientLogs(w http.ResponseWriter, r *http.Request, device
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if logstore.DeviceClearPending(s.cfg.SurfHome, deviceID) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	data, err := io.ReadAll(io.LimitReader(r.Body, logstore.DeviceMaxBytes+1))
 	if err != nil {
 		http.Error(w, "read native log", http.StatusBadRequest)
@@ -685,9 +708,45 @@ func (s *Server) handleAdminLogs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(data)
+}
+
+func (s *Server) handleAdminLogClear(w http.ResponseWriter, r *http.Request) {
+	source := r.URL.Query().Get("source")
+	if source == "" {
+		source = "server"
+	}
+	var err error
+	pending := false
+	switch source {
+	case "server":
+		if s.serverLog != nil {
+			err = s.serverLog.Clear()
+		} else {
+			err = logstore.ClearPath(logstore.ServerPath(s.cfg.SurfHome))
+		}
+	case "desktop":
+		err = logstore.ClearPath(logstore.DesktopPath(s.cfg.SurfHome))
+	case "device":
+		deviceID := r.URL.Query().Get("deviceID")
+		if _, pathErr := logstore.DevicePath(s.cfg.SurfHome, deviceID); pathErr != nil {
+			err = pathErr
+			break
+		}
+		if err = logstore.BeginDeviceClear(s.cfg.SurfHome, deviceID); err == nil {
+			targets := s.hub.SendDeviceJSON(deviceID, protocol.EmptyEvent{Type: "log-clear"})
+			pending = len(targets) == 0
+		}
+	default:
+		err = errors.New("unknown log source")
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"cleared": true, "pending": pending})
 }
 
 func (s *Server) readAdminLogs(r *http.Request) ([]byte, error) {
@@ -732,10 +791,14 @@ func (s *Server) handleAdminLogStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	controller := http.NewResponseController(w)
-	send := func(text []byte, reset bool) bool {
+	send := func(data []byte, reset bool) bool {
+		records, err := logstore.DecodeRecords(data)
+		if err != nil {
+			return false
+		}
 		_ = controller.SetWriteDeadline(time.Now().Add(30 * time.Second))
-		data, _ := json.Marshal(map[string]any{"text": string(text), "reset": reset})
-		if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+		payload, _ := json.Marshal(map[string]any{"records": records, "reset": reset})
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
 			return false
 		}
 		flusher.Flush()

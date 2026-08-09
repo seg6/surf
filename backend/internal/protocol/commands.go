@@ -138,6 +138,7 @@ type LogRecordCommand struct {
 	CommandBase
 	Record json.RawMessage `json:"record"`
 }
+type LogClearedCommand struct{ CommandBase }
 
 // DecodeCommand is the sole JSON ingress. Unknown commands and trailing JSON
 // are rejected before browser state sees them.
@@ -190,6 +191,8 @@ func DecodeCommand(data []byte) (Command, error) {
 		dst = &ClipboardChangeCommand{}
 	case "log-record":
 		dst = &LogRecordCommand{}
+	case "log-cleared":
+		dst = &LogClearedCommand{}
 	case "back", "fwd", "reload", "stop", "video-retry", "reqkeyframe",
 		"hist", "bookmark", "downloads", "reader", "media-playpause", "media-mute", "media-query":
 		dst = &EmptyCommand{}
