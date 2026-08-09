@@ -186,12 +186,27 @@
     .live-state.live { color: var(--green); }
     .live-state.live .dot { background: var(--green); animation: live-pulse 1.8s ease-out infinite; }
     @keyframes live-pulse { 0%, 45% { box-shadow: 0 0 0 0 rgba(85,185,122,.32); } 100% { box-shadow: 0 0 0 5px rgba(85,185,122,0); } }
-    pre {
+    #log-output {
       margin: 0; width: 100%; min-width: 0; max-width: 100%; height: clamp(320px, 52vh, 560px); overflow: auto;
       border: 1px solid var(--line); border-radius: 6px; padding: 12px;
       background: #111316; color: #bdc2ca; font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
-      white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
+      white-space: pre; overflow-wrap: normal; word-break: normal; scrollbar-color: var(--line-strong) #111316;
     }
+    .log-line {
+      display: grid; grid-template-columns: 31ch 6ch 18ch max-content max-content; column-gap: 1ch;
+      width: max-content; min-width: 100%; padding: 0 3px; margin: 0 -3px; border-radius: 2px;
+      font-variant-numeric: tabular-nums; font-variant-ligatures: none;
+    }
+    .log-line:hover { background: rgba(255,255,255,.035); }
+    .log-time { color: #707782; }
+    .log-level { font-weight: 700; }
+    .log-level-info { color: #76a9ed; }
+    .log-level-warn { color: #e5ad62; }
+    .log-level-error, .log-level-fatal { color: #ee7b84; }
+    .log-level-debug, .log-level-trace { color: #8b929c; }
+    .log-component { color: #77bec4; }
+    .log-message { color: #d5d8dd; }
+    .log-fields { color: #8f97a2; }
     .toast {
       position: fixed; right: 24px; bottom: 24px; z-index: 20;
       border: 1px solid var(--line-strong); border-radius: 6px; padding: 9px 12px;
@@ -650,26 +665,51 @@
     function selectedLogSource() {
       return logSources.find(source => source.id === $('log-source').value) || logSources[0];
     }
-    function logRecordText(record) {
+    function logRecordParts(record) {
       const timestamp = String(record?.ts || '');
-      const level = String(record?.level || 'info').toUpperCase().padEnd(5);
+      const level = String(record?.level || 'info').toUpperCase();
       const component = String(record?.component || 'app');
       const message = String(record?.message || '');
       const fields = Object.entries(record?.fields || {}).sort(([a], [b]) => a.localeCompare(b))
         .filter(([key]) => !message.includes(`${key}=`))
         .map(([key, value]) => `${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`)
         .join(' ');
-      return `${timestamp} ${level} ${component}  ${message}${fields ? `  ${fields}` : ''}`;
+      return {timestamp, level, component, message, fields};
+    }
+    function logRecordNode(record) {
+      const parts = logRecordParts(record);
+      const line = document.createElement('span');
+      line.className = 'log-line';
+      const append = (className, text) => {
+        const node = document.createElement('span');
+        node.className = className;
+        node.textContent = text;
+        line.append(node);
+      };
+      append('log-time', parts.timestamp);
+      append(`log-level log-level-${parts.level.toLowerCase()}`, parts.level);
+      append('log-component', parts.component);
+      append('log-message', parts.message);
+      if (parts.fields) append('log-fields', parts.fields);
+      return line;
     }
     function renderLogs(forceBottom = false) {
       const output = $('log-output');
       const nearBottom = output.scrollHeight - output.scrollTop - output.clientHeight < 48;
+      const horizontalPosition = output.scrollLeft;
       const query = $('log-search').value.toLowerCase();
       const records = query
         ? logRecords.filter(record => JSON.stringify(record).toLowerCase().includes(query))
         : logRecords;
-      const visible = records.map(logRecordText).join('\n');
-      output.textContent = visible || (query ? 'No matching log lines.' : 'Waiting for log output…');
+      output.replaceChildren();
+      if (records.length) {
+        const fragment = document.createDocumentFragment();
+        records.forEach(record => fragment.append(logRecordNode(record)));
+        output.append(fragment);
+      } else {
+        output.textContent = query ? 'No matching log lines.' : 'Waiting for log output…';
+      }
+      output.scrollLeft = horizontalPosition;
       if (forceBottom || nearBottom) output.scrollTop = output.scrollHeight;
     }
     function setLogLive(state, text) {

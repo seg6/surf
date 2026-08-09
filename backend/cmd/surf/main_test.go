@@ -259,12 +259,14 @@ func TestManagementHomeIsSinglePageUtility(t *testing.T) {
 	body := response.Body.String()
 	for _, required := range []string{`id="settings-form"`, `id="lan-address"`, `id="device-list"`, `id="add-device"`,
 		`id="clipboard-sync"`, `id="clipboard-text"`, `id="send-clipboard"`, `id="logs"`, `id="log-live"`,
-		`padding: 7px 30px 7px 9px`, `calc(100% - 14px)`, `word-break: break-word`} {
+		`id="clear-logs"`, `padding: 7px 30px 7px 9px`, `calc(100% - 14px)`, `white-space: pre`,
+		`overflow-wrap: normal`, `grid-template-columns: 31ch 6ch 18ch`, `.log-level-error`} {
 		if !strings.Contains(body, required) {
 			t.Errorf("management page is missing %s", required)
 		}
 	}
-	for _, removed := range []string{`class="sidebar"`, `data-view=`, `/diagnostics/`, `All sources`, `id="refresh-logs"`, `== ${source.label} ==`} {
+	for _, removed := range []string{`class="sidebar"`, `data-view=`, `/diagnostics/`, `All sources`, `id="refresh-logs"`,
+		`== ${source.label} ==`, `white-space: pre-wrap`} {
 		if strings.Contains(body, removed) {
 			t.Errorf("management page still contains %s", removed)
 		}
