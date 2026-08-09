@@ -104,10 +104,10 @@
     .note { color: var(--quiet); font-size: 11px; line-height: 1.5; margin-top: 14px; }
     .clipboard-head { align-items: flex-start; }
     .toggle-row {
-      display: flex; align-items: center; gap: 9px; color: var(--ink); font-size: 12px;
+      position: relative; display: flex; align-items: center; gap: 9px; color: var(--ink); font-size: 12px;
       cursor: pointer; white-space: nowrap; user-select: none;
     }
-    .toggle-row input { position: absolute; opacity: 0; pointer-events: none; }
+    .toggle-row input { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
     .switch-track {
       position: relative; display: inline-block; width: 34px; height: 20px;
       border: 1px solid var(--line-strong); border-radius: 999px; background: var(--field);
