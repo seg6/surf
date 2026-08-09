@@ -6,6 +6,7 @@ package process
 import (
 	"io"
 	"os"
+	"time"
 )
 
 // Options configures Start.
@@ -23,16 +24,31 @@ type Options struct {
 	// should be appended directly to the parent's log.
 	StdoutWriter io.Writer
 	StderrWriter io.Writer
+	// Guardian asks platforms without a native parent-death facility to wrap
+	// the child in Surf's private parent watcher. It is currently meaningful
+	// on macOS; Linux and Windows already provide kernel-backed containment.
+	Guardian      bool
+	GuardianGrace time.Duration
 }
 
 // Started is a launched child process plus whichever pipes Options asked
 // for.
 type Started struct {
 	Process *os.Process
+	Pid     int
 	Stdin   io.WriteCloser
 	Stdout  io.ReadCloser
 	Stderr  io.ReadCloser
 	// Done receives the result of exec.Cmd.Wait exactly once. Start always
 	// reaps the child, even when its caller only needs the OS process handle.
 	Done <-chan error
+}
+
+// Kill terminates the complete owned process tree, never only the root PID.
+func (s *Started) Kill() error {
+	if s == nil || s.Process == nil {
+		return nil
+	}
+	Kill(s.Process.Pid)
+	return nil
 }

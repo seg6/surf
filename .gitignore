@@ -8,6 +8,7 @@ native/buildenv/sdk/
 /backend/surf-desktop
 /backend/surf-desktop.exe
 /backend/surf
+/backend/surf.exe
 /backend/.env
 /dist/
 .env

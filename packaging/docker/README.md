@@ -10,7 +10,7 @@ SURF_PUBLIC_ADDRESS=192.168.1.50:18080
 PORT=18080
 ```
 
-Publish the same TCP port; the container runs `surf daemon` in the foreground.
+Publish the same TCP port; the container runs `surf serve` in the foreground.
 Review a client request with `docker compose exec surf surf pair`, and inspect
 the running instance with `docker compose exec surf surf status`. Surf
 terminates TLS itself; there is no password or required reverse proxy.

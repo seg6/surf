@@ -70,3 +70,21 @@ func TestAudioOverflowDropsOldest(t *testing.T) {
 		t.Fatalf("oldest retained: seq bytes %v", first.data[8:12])
 	}
 }
+
+func TestConnectedDeviceTargetingDeduplicatesSockets(t *testing.T) {
+	hub := New()
+	first, second, other := testClient(), testClient(), testClient()
+	first.hub, first.deviceID = hub, "device-a"
+	second.hub, second.deviceID = hub, "device-a"
+	other.hub, other.deviceID = hub, "device-b"
+	hub.clients[first] = struct{}{}
+	hub.clients[second] = struct{}{}
+	hub.clients[other] = struct{}{}
+	if got := hub.ConnectedDevices(); len(got) != 2 || got[0] != "device-a" || got[1] != "device-b" {
+		t.Fatalf("connected=%v", got)
+	}
+	targets := hub.SendDeviceJSON("device-a", protocol.EmptyEvent{Type: "log-request"})
+	if len(targets) != 1 || targets[0] != "device-a" || len(first.control) != 1 || len(second.control) != 1 || len(other.control) != 0 {
+		t.Fatalf("targets=%v queues=%d/%d/%d", targets, len(first.control), len(second.control), len(other.control))
+	}
+}

@@ -166,6 +166,12 @@ type PageFrameEvent struct {
 	SourceSeq uint32 `json:"sourceSeq"`
 }
 
+type ClipboardEvent struct {
+	Type      string `json:"t"`
+	RequestID string `json:"id"`
+	Text      string `json:"text"`
+}
+
 func (HelloEvent) isClientEvent()            {}
 func (TabsEvent) isClientEvent()             {}
 func (VideoConfigEvent) isClientEvent()      {}
@@ -189,3 +195,4 @@ func (ReaderEvent) isClientEvent()           {}
 func (EditableEvent) isClientEvent()         {}
 func (MediaStateEvent) isClientEvent()       {}
 func (PageFrameEvent) isClientEvent()        {}
+func (ClipboardEvent) isClientEvent()        {}

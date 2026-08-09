@@ -11,21 +11,21 @@
 ## Pairing is not started
 
 Open **Paired Devices**, choose **Pair device**, then scan that QR code or
-enter its six-digit code. For a headless daemon, run `surf pair`. Pairing is
+enter its six-digit code. For a headless server, run `surf pair`. Pairing is
 closed before this step, even when Bonjour or manual address entry finds the
 server.
 
 The invitation does not expire on a timer. It closes when one client uses it,
-the owner cancels it, the daemon restarts, or five incorrect codes are entered.
+the owner cancels it, the server restarts, or five incorrect codes are entered.
 A client that has not presented the invitation credential has no access to
 browser data or media.
 
 Manual pairing must show the same six words on both endpoints. If the phrases
 differ, cancel: something is presenting a different server identity.
 
-If a CLI command says the daemon is not running, start `surf daemon` under your
+If a CLI command says the server is not running, start `surf serve` under your
 service manager and run the command with the same `SURF_HOME`. `surf status`
-shows the daemon and control connection selected by the CLI.
+shows the server and control connection selected by the CLI.
 
 ## Pairing shows an SSL error
 
@@ -111,11 +111,11 @@ open SpringBoard's cache.
 
 ## The desktop opens but the backend does not start
 
-Check **Settings > Logs** before removing state. Surf retries transient daemon
+Check **Settings > Logs** before removing state. Surf retries transient server
 failures with bounded backoff and records the actual startup error in
-`$SURF_HOME/desktop.log`.
+`$SURF_HOME/logs/desktop.log`.
 
-A force-closed tray should not leave a daemon, Chromium tree, listener, or
+A force-closed tray should not leave a server, Chromium tree, listener, or
 backend lock behind. Empty `.lock` files are normal and do not hold a lock by
 themselves. Dead runtime descriptors and malformed replaceable state are backed
 up and repaired automatically. Repeated Chromium startup failures preserve the
@@ -137,8 +137,13 @@ browser profile remain in place.
 
 ## Collect logs
 
-Desktop logs are available from the Surf tray Settings page. On iOS, open
-**Settings > Diagnostics > Logs** for color-coded structured events, expandable
-typed fields, live updates, copy, and clear controls. The bounded NDJSON store
-is `/var/mobile/Library/Surf/surf.log`; Surf excludes credentials, tickets,
-query strings, and full URLs, but review exported logs before publishing them.
+The Surf tray Settings page shows the server, desktop, and latest mirrored log
+from each paired device. `surf logs` prints those sources without first copying
+anything off the device; use `surf logs --follow` while reproducing a problem.
+The host copies are bounded under `$SURF_HOME/logs/`.
+
+On iOS, **Settings > Diagnostics > Logs** still provides color-coded structured
+events, expandable typed fields, live updates, copy, and clear controls. Its
+bounded NDJSON store is `/var/mobile/Library/Surf/surf.log`. Surf excludes
+credentials, clipboard contents, tickets, query strings, and full URLs, but
+review exported logs before publishing them.

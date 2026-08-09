@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -43,6 +44,7 @@ type Hub struct {
 	clients  map[*Client]struct{}
 	frameSeq uint32
 	handler  Handler
+	aux      func(*Client, protocol.Command) bool
 	upgrader websocket.Upgrader
 
 	controlFailures atomic.Uint64
@@ -76,10 +78,63 @@ func checkOrigin(r *http.Request) bool {
 
 func (h *Hub) SetHandler(hd Handler) { h.handler = hd }
 
+func (h *Hub) SetAuxHandler(handler func(*Client, protocol.Command) bool) {
+	h.mu.Lock()
+	h.aux = handler
+	h.mu.Unlock()
+}
+
 func (h *Hub) ClientCount() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return len(h.clients)
+}
+
+func (h *Hub) ConnectedDevices() []string {
+	h.mu.Lock()
+	seen := make(map[string]struct{}, len(h.clients))
+	for client := range h.clients {
+		if client.deviceID != "" {
+			seen[client.deviceID] = struct{}{}
+		}
+	}
+	h.mu.Unlock()
+	result := make([]string, 0, len(seen))
+	for deviceID := range seen {
+		result = append(result, deviceID)
+	}
+	sort.Strings(result)
+	return result
+}
+
+// SendDeviceJSON sends one control event to every live socket for deviceID.
+// An empty deviceID broadcasts to all paired devices. The result contains the
+// unique device IDs that had at least one live socket.
+func (h *Hub) SendDeviceJSON(deviceID string, event protocol.Event) []string {
+	data, err := json.Marshal(event)
+	if err != nil {
+		return nil
+	}
+	h.mu.Lock()
+	targets := make([]*Client, 0, len(h.clients))
+	seen := map[string]struct{}{}
+	for client := range h.clients {
+		if client.deviceID == "" || deviceID != "" && client.deviceID != deviceID {
+			continue
+		}
+		targets = append(targets, client)
+		seen[client.deviceID] = struct{}{}
+	}
+	h.mu.Unlock()
+	for _, client := range targets {
+		_ = client.write(websocket.TextMessage, data)
+	}
+	result := make([]string, 0, len(seen))
+	for id := range seen {
+		result = append(result, id)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func (h *Hub) Stats() map[string]uint64 {
@@ -191,6 +246,12 @@ func (h *Hub) ServeHTTPForDevice(w http.ResponseWriter, r *http.Request, deviceI
 		if clock, ok := command.(*protocol.ClockCommand); ok {
 			received := telemetry.MonoNS()
 			c.sendClock(clock.ClientSendNS, received)
+			continue
+		}
+		h.mu.Lock()
+		aux := h.aux
+		h.mu.Unlock()
+		if aux != nil && aux(c, command) {
 			continue
 		}
 		if h.handler != nil {

@@ -29,6 +29,7 @@ import (
 	"surf-backend/internal/atomicfile"
 	"surf-backend/internal/config"
 	"surf-backend/internal/control"
+	"surf-backend/internal/logstore"
 	"surf-backend/internal/process"
 	"surf-backend/internal/statefile"
 	"surf-backend/internal/tray"
@@ -52,8 +53,7 @@ type desktopApp struct {
 	baseURL       string
 	serverName    string
 	publicAddress string
-	logPath       string
-	logFile       *os.File
+	logFile       *logstore.Writer
 	manageURL     string
 	manageHTTP    *http.Server
 
@@ -239,8 +239,7 @@ func newDesktopApp() (*desktopApp, error) {
 	if err := saveDesktopConfig(home, cfg); err != nil {
 		return nil, err
 	}
-	logPath := filepath.Join(home, "desktop.log")
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	logFile, err := logstore.Open(logstore.DesktopPath(home), logstore.DesktopMaxBytes, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -248,7 +247,7 @@ func newDesktopApp() (*desktopApp, error) {
 		home: home, manageChild: true,
 		baseURL:    "https://127.0.0.1:" + strconv.Itoa(cfg.Port),
 		serverName: cfg.ServerName, publicAddress: cfg.PublicAddress,
-		logPath: logPath, logFile: logFile,
+		logFile:     logFile,
 		killProcess: process.Kill, matchesProcess: process.MatchesExecutable,
 	}
 	if err := app.startManagementServer(); err != nil {
@@ -315,9 +314,9 @@ func (a *desktopApp) takeControlOfExistingBackend() error {
 	if err != nil {
 		backup, backupErr := statefile.Quarantine(control.Path(a.home), "invalid")
 		if backupErr != nil {
-			return fmt.Errorf("discard invalid daemon descriptor: %w (original error: %v)", backupErr, err)
+			return fmt.Errorf("discard invalid server control descriptor: %w (original error: %v)", backupErr, err)
 		}
-		a.logf("surf: ignored invalid daemon descriptor; backup: %s (%v)\n", backup, err)
+		a.logf("surf: ignored invalid server control descriptor; backup: %s (%v)\n", backup, err)
 		return nil
 	}
 	client, err := a.backendHTTPClient(time.Second)
@@ -328,7 +327,7 @@ func (a *desktopApp) takeControlOfExistingBackend() error {
 	response, err := client.Get(probeURL)
 	if err != nil {
 		if !process.Running(descriptor.PID) {
-			a.logf("surf: removed stale daemon descriptor for exited pid=%d\n", descriptor.PID)
+			a.logf("surf: removed stale server control descriptor for exited pid=%d\n", descriptor.PID)
 			return control.RemoveOwned(a.home, descriptor.AdminToken)
 		}
 		self, selfErr := os.Executable()
@@ -341,20 +340,30 @@ func (a *desktopApp) takeControlOfExistingBackend() error {
 			kill(descriptor.PID)
 			return control.RemoveOwned(a.home, descriptor.AdminToken)
 		}
-		return fmt.Errorf("verify existing daemon pid=%d: %w", descriptor.PID, err)
+		return fmt.Errorf("verify existing server pid=%d: %w", descriptor.PID, err)
 	}
 	_, _ = io.Copy(io.Discard, response.Body)
 	_ = response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("verify existing daemon pid=%d: status %d", descriptor.PID, response.StatusCode)
+		return fmt.Errorf("verify existing server pid=%d: status %d", descriptor.PID, response.StatusCode)
 	}
 
 	a.logf("surf: taking control from existing backend pid=%d\n", descriptor.PID)
-	kill := a.killProcess
-	if kill == nil {
-		kill = process.Kill
+	shutdown, requestErr := http.NewRequest(http.MethodPost,
+		"https://127.0.0.1"+web.APIRoot+"/admin/shutdown", nil)
+	if requestErr == nil {
+		response, shutdownErr := client.Do(shutdown)
+		if shutdownErr == nil {
+			_, _ = io.Copy(io.Discard, response.Body)
+			_ = response.Body.Close()
+			if response.StatusCode < 200 || response.StatusCode >= 300 {
+				shutdownErr = fmt.Errorf("status %d", response.StatusCode)
+			}
+		}
+		if shutdownErr != nil {
+			a.logf("surf: graceful takeover request failed for pid=%d: %v\n", descriptor.PID, shutdownErr)
+		}
 	}
-	kill(descriptor.PID)
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		request, requestErr := client.Get(probeURL)
@@ -365,7 +374,13 @@ func (a *desktopApp) takeControlOfExistingBackend() error {
 		_ = request.Body.Close()
 		time.Sleep(100 * time.Millisecond)
 	}
-	return fmt.Errorf("existing backend pid=%d did not stop", descriptor.PID)
+	a.logf("surf: backend pid=%d did not stop gracefully; forcing verified tree shutdown\n", descriptor.PID)
+	kill := a.killProcess
+	if kill == nil {
+		kill = process.Kill
+	}
+	kill(descriptor.PID)
+	return control.RemoveOwned(a.home, descriptor.AdminToken)
 }
 
 func (a *desktopApp) startBackend() error {
@@ -396,8 +411,9 @@ func (a *desktopApp) startBackend() error {
 		"SURF_PARENT_GUARD=1",
 	)
 	done := make(chan struct{})
-	cmd, err := process.Start(self, []string{"daemon"}, process.Options{
+	cmd, err := process.Start(self, []string{"serve"}, process.Options{
 		Env: env, Stdin: true, StdoutWriter: a.logFile, StderrWriter: a.logFile,
+		Guardian: true, GuardianGrace: 5 * time.Second,
 	})
 	if err != nil {
 		a.mu.Unlock()
@@ -451,13 +467,31 @@ func (a *desktopApp) stopBackend() {
 	if cmd == nil || cmd.Process == nil {
 		return
 	}
-	if err := cmd.Process.Signal(os.Interrupt); err != nil {
-		_ = cmd.Process.Kill()
+	graceful := false
+	if client, err := a.backendHTTPClient(2 * time.Second); err == nil {
+		request, requestErr := http.NewRequest(http.MethodPost,
+			"https://127.0.0.1"+web.APIRoot+"/admin/shutdown", nil)
+		if requestErr == nil {
+			if response, requestErr := client.Do(request); requestErr == nil {
+				_, _ = io.Copy(io.Discard, response.Body)
+				_ = response.Body.Close()
+				graceful = response.StatusCode >= 200 && response.StatusCode < 300
+			}
+		}
+	}
+	if !graceful {
+		// Closing the private ownership pipe is the portable shutdown signal.
+		// On macOS the guardian forwards EOF to the server and enforces the
+		// grace deadline; on Linux and Windows the server receives it directly.
+		if parentGuard != nil {
+			_ = parentGuard.Close()
+			parentGuard = nil
+		}
 	}
 	select {
 	case <-done:
-	case <-time.After(3 * time.Second):
-		_ = cmd.Process.Kill()
+	case <-time.After(5 * time.Second):
+		process.Kill(cmd.Process.Pid)
 		<-done
 	}
 	if parentGuard != nil {
@@ -631,7 +665,6 @@ func (a *desktopApp) managementHandler() http.Handler {
 		go a.openManagement("")
 	})
 	mux.HandleFunc("/settings", a.managementSettings)
-	mux.HandleFunc("/logs", a.managementLogs)
 	proxy := &httputil.ReverseProxy{
 		Director: func(request *http.Request) {
 			a.mu.Lock()
@@ -1007,19 +1040,6 @@ func (a *desktopApp) managementSettings(w http.ResponseWriter, r *http.Request) 
 	}()
 }
 
-func (a *desktopApp) managementLogs(w http.ResponseWriter, _ *http.Request) {
-	data, err := os.ReadFile(a.logPath)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if len(data) > 1<<20 {
-		data = data[len(data)-(1<<20):]
-	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = w.Write(data)
-}
-
 func (a *desktopApp) backendTransport() http.RoundTripper {
 	a.mu.Lock()
 	home := a.home
@@ -1027,7 +1047,7 @@ func (a *desktopApp) backendTransport() http.RoundTripper {
 	if home == "" {
 		return &errorTransport{err: fmt.Errorf("Surf home is not configured")}
 	}
-	return &daemonControlTransport{home: home}
+	return &serverControlTransport{home: home}
 }
 
 func (a *desktopApp) backendHTTPClient(timeout time.Duration) (*http.Client, error) {
@@ -1042,7 +1062,7 @@ type errorTransport struct{ err error }
 
 func (t *errorTransport) RoundTrip(*http.Request) (*http.Response, error) { return nil, t.err }
 
-type daemonControlTransport struct {
+type serverControlTransport struct {
 	home      string
 	mu        sync.Mutex
 	token     string
@@ -1050,10 +1070,10 @@ type daemonControlTransport struct {
 	transport *http.Transport
 }
 
-func (t *daemonControlTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+func (t *serverControlTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	descriptor, err := control.Load(t.home)
 	if err != nil {
-		return nil, fmt.Errorf("Surf daemon control: %w", err)
+		return nil, fmt.Errorf("Surf server control: %w", err)
 	}
 	t.mu.Lock()
 	if t.transport == nil || t.token != descriptor.AdminToken {

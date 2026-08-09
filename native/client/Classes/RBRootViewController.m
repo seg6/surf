@@ -1076,6 +1076,28 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
         [self handleReaderReply:message];
     } else if ([t isEqualToString:@"history"]) {
         [self.libraryController consumeHistoryReply:message];
+    } else if ([t isEqualToString:@"log-request"]) {
+        [self.session uploadNativeLogNow];
+    } else if ([t isEqualToString:@"clipboard"]) {
+        NSString *requestID = [message objectForKey:@"id"];
+        NSString *text = [message objectForKey:@"text"];
+        BOOL valid = [requestID isKindOfClass:[NSString class]] && [requestID length] &&
+                     [text isKindOfClass:[NSString class]] && [text length] &&
+                     [[text dataUsingEncoding:NSUTF8StringEncoding] length] <= 64 * 1024;
+        if (valid) {
+            [UIPasteboard generalPasteboard].string = text;
+            [self showToast:@"Copied to clipboard"];
+            RBLogEvent(@"clipboard", @"info", @{ @"bytes": @([[text dataUsingEncoding:NSUTF8StringEncoding] length]),
+                                                  @"expires_seconds": @120 }, @"Host text copied to device clipboard");
+            NSString *delivered = [text copy];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(120.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                if ([[UIPasteboard generalPasteboard].string isEqualToString:delivered]) {
+                    [UIPasteboard generalPasteboard].string = @"";
+                    RBLogEvent(@"clipboard", @"info", @{}, @"Expired host-delivered clipboard text");
+                }
+            });
+        }
+        [self.session sendMessage:@{ @"t": @"clipboard-result", @"id": requestID ?: @"", @"ok": @(valid) }];
     }
 }
 
@@ -2251,6 +2273,8 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
                                             otherButtonTitles:@"Open", nil];
     [self.pasteboardAlert show];
 }
+
+- (void)syncNativeLog { [self.session uploadNativeLogNow]; }
 
 // ------------------------------------------------------------------ toasts
 

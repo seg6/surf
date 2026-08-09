@@ -5,7 +5,7 @@ After=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=-%h/.config/surf/env
-ExecStart=%h/.local/bin/surf daemon
+ExecStart=%h/.local/bin/surf serve
 Restart=on-failure
 RestartSec=3
 UMask=0077

@@ -84,16 +84,13 @@ func TestInvalidDesktopConfigIsPreservedAndReset(t *testing.T) {
 func TestDesktopParentGuardExitsOnEOF(t *testing.T) {
 	t.Setenv("SURF_PARENT_GUARD", "1")
 	reader, writer := io.Pipe()
-	exited := make(chan int, 1)
-	watchDesktopParent(reader, func(code int) { exited <- code })
+	exited := make(chan struct{}, 1)
+	watchDesktopParent(reader, func() { exited <- struct{}{} })
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
 	select {
-	case code := <-exited:
-		if code != 0 {
-			t.Fatalf("exit code=%d", code)
-		}
+	case <-exited:
 	case <-time.After(time.Second):
 		t.Fatal("daemon did not react to desktop parent EOF")
 	}
@@ -260,7 +257,7 @@ func TestManagementHomeIsSinglePageUtility(t *testing.T) {
 	request.RemoteAddr = "127.0.0.1:12345"
 	app.managementHandler().ServeHTTP(response, request)
 	body := response.Body.String()
-	for _, required := range []string{`id="settings-form"`, `id="lan-address"`, `id="device-list"`, `id="add-device"`, `id="logs"`} {
+	for _, required := range []string{`id="settings-form"`, `id="lan-address"`, `id="device-list"`, `id="add-device"`, `id="send-clipboard"`, `id="logs"`} {
 		if !strings.Contains(body, required) {
 			t.Errorf("management page is missing %s", required)
 		}
@@ -270,8 +267,8 @@ func TestManagementHomeIsSinglePageUtility(t *testing.T) {
 			t.Errorf("management page still contains %s", removed)
 		}
 	}
-	if strings.Contains(strings.ToLower(body), "password") {
-		t.Error("management page still contains password authentication")
+	if strings.Contains(strings.ToLower(body), "shared password") {
+		t.Error("management page still contains shared-password authentication")
 	}
 }
 
@@ -446,7 +443,16 @@ func TestDesktopTransportUsesRuntimeControlEndpointAndToken(t *testing.T) {
 
 func TestDesktopTakesControlOfAuthenticatedExistingDaemon(t *testing.T) {
 	home := t.TempDir()
-	server, descriptor := testDaemonDescriptor(t, home, func(w http.ResponseWriter, _ *http.Request, _ string) {
+	var server *httptest.Server
+	server, _ = testDaemonDescriptor(t, home, func(w http.ResponseWriter, request *http.Request, _ string) {
+		if request.URL.Path == "/api/v1/admin/shutdown" {
+			w.WriteHeader(http.StatusAccepted)
+			go func() {
+				server.CloseClientConnections()
+				server.Close()
+			}()
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 	})
 	defer server.Close()
@@ -462,8 +468,8 @@ func TestDesktopTakesControlOfAuthenticatedExistingDaemon(t *testing.T) {
 	if err := app.takeControlOfExistingBackend(); err != nil {
 		t.Fatal(err)
 	}
-	if killedPID != descriptor.PID {
-		t.Fatalf("killed pid=%d, want %d", killedPID, descriptor.PID)
+	if killedPID != 0 {
+		t.Fatalf("graceful takeover force-killed pid=%d", killedPID)
 	}
 	if _, err := control.Load(home); !errors.Is(err, control.ErrNotRunning) {
 		t.Fatalf("daemon descriptor remains after takeover: %v", err)
@@ -504,5 +510,19 @@ func TestApplyHomeFlag(t *testing.T) {
 	}
 	if _, err := applyHomeFlag([]string{"--home"}); err == nil {
 		t.Fatal("missing --home path was accepted")
+	}
+}
+
+func TestClipboardCommandNeverAcceptsSecretArgument(t *testing.T) {
+	if _, err := clipboardDevice([]string{"password"}); err == nil {
+		t.Fatal("clipboard secret was accepted as a process argument")
+	}
+	if got, err := clipboardDevice([]string{"--device", "abc"}); err != nil || got != "abc" {
+		t.Fatalf("device=%q err=%v", got, err)
+	}
+	want := " leading password\n"
+	got, err := readClipboardText(strings.NewReader(want), false, nil)
+	if err != nil || got != want {
+		t.Fatalf("clipboard=%q err=%v", got, err)
 	}
 }

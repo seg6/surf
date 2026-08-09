@@ -45,6 +45,8 @@ typedef enum {
 - (void)updateViewportWidth:(NSInteger)width height:(NSInteger)height;
 - (void)updateViewportWidth:(NSInteger)width height:(NSInteger)height force:(BOOL)force;
 - (void)sendMessage:(NSDictionary *)message;
+// Mirrors the bounded native NDJSON log to the authenticated Surf server.
+- (void)uploadNativeLogNow;
 - (void)sendTouchPhase:(NSString *)phase
                 points:(NSArray *)points
              timestamp:(unsigned long long)timestamp

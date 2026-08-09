@@ -98,12 +98,12 @@ devices, detected LAN address, logs, and updates. For a terminal or server
 installation:
 
 ```sh
-./surf daemon
+./surf serve
 ```
 
-The daemon stays in the foreground so systemd, Docker, or another service
+The server stays in the foreground so systemd, Docker, or another service
 manager can supervise it. In another terminal, `surf status`, `surf pair`, and
-`surf devices ...` connect to that one running daemon. Surf listens on port
+`surf devices ...` connect to that one running server. Surf listens on port
 `18080` by default. Windows archives contain `surf.exe`.
 
 ### 2. Install the iOS client
@@ -124,7 +124,7 @@ not appear.
 ### 3. Pair and connect
 
 On the computer, open **Paired Devices** and choose **Pair device**, or run
-`surf pair` beside a headless daemon. Surf creates one single-use invitation.
+`surf pair` beside a headless server. Surf creates one single-use invitation.
 
 On any camera-equipped supported device, scan the QR code. It contains the
 address, pinned identity, and one-time secret. Devices without a camera can
@@ -155,7 +155,7 @@ listener and set both variables:
 ```sh
 SURF_PUBLIC_ADDRESS=surf-roam.example.net:443 \
 SURF_TUNNEL_HOST=surf-roam.example.net \
-./surf daemon
+./surf serve
 ```
 
 The client opens a Cloudflare WebSocket and carries Surf's original pinned TLS

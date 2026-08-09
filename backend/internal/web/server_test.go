@@ -16,12 +16,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 
 	"surf-backend/internal/auth"
 	"surf-backend/internal/config"
 	"surf-backend/internal/identity"
+	"surf-backend/internal/protocol"
 	"surf-backend/internal/transport"
 )
 
@@ -38,7 +42,7 @@ func newTestServer(t *testing.T) (*Server, *auth.Manager) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := &config.Config{ServerName: "Test Surf", ViewW: 768, ViewH: 934}
+	cfg := &config.Config{SurfHome: home, ServerName: "Test Surf", ViewW: 768, ViewH: 934}
 	server := New(cfg, manager, ident, transport.New())
 	server.SetAdminToken(testAdminToken)
 	return server, manager
@@ -216,6 +220,26 @@ func TestPairedDeviceCanRevokeItself(t *testing.T) {
 	}
 }
 
+func TestPairedDeviceMirrorsLogForLocalRetrieval(t *testing.T) {
+	server, manager := newTestServer(t)
+	cookie := pairedCookie(t, manager)
+	line := []byte("{\"ts\":\"now\",\"level\":\"info\",\"component\":\"session\",\"message\":\"connected\",\"fields\":{}}\n")
+	upload := httptest.NewRequest(http.MethodPut, APIRoot+"/client/logs", bytes.NewReader(line))
+	upload.AddCookie(cookie)
+	uploadResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(uploadResponse, upload)
+	if uploadResponse.Code != http.StatusNoContent {
+		t.Fatalf("upload = %d: %s", uploadResponse.Code, uploadResponse.Body.String())
+	}
+	deviceID := manager.ListDevices()[0].ID
+	read := adminRequest(http.MethodGet, APIRoot+"/admin/logs?source=device&deviceID="+deviceID)
+	readResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(readResponse, read)
+	if readResponse.Code != http.StatusOK || !bytes.Equal(readResponse.Body.Bytes(), line) {
+		t.Fatalf("read = %d %q", readResponse.Code, readResponse.Body.Bytes())
+	}
+}
+
 func TestAdminRoutesAreLoopbackOnly(t *testing.T) {
 	server, _ := newTestServer(t)
 	request := httptest.NewRequest(http.MethodGet, APIRoot+"/admin/devices", nil)
@@ -233,6 +257,80 @@ func TestAdminRoutesAreLoopbackOnly(t *testing.T) {
 	server.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("tokenless local admin = %d", response.Code)
+	}
+}
+
+func TestAdminShutdownRequiresLocalToken(t *testing.T) {
+	server, _ := newTestServer(t)
+	called := make(chan struct{}, 1)
+	server.SetShutdown(func() { called <- struct{}{} })
+	request := adminRequest(http.MethodPost, APIRoot+"/admin/shutdown")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("shutdown = %d: %s", response.Code, response.Body.String())
+	}
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown callback was not called")
+	}
+}
+
+func TestAdminClipboardRejectsSecretsWithoutConnectedDevice(t *testing.T) {
+	server, _ := newTestServer(t)
+	empty := httptest.NewRecorder()
+	server.Handler().ServeHTTP(empty, adminJSONRequest(http.MethodPost, APIRoot+"/admin/clipboard", map[string]string{"text": ""}))
+	if empty.Code != http.StatusBadRequest {
+		t.Fatalf("empty clipboard = %d", empty.Code)
+	}
+	offline := httptest.NewRecorder()
+	server.Handler().ServeHTTP(offline, adminJSONRequest(http.MethodPost, APIRoot+"/admin/clipboard", map[string]string{"text": "secret"}))
+	if offline.Code != http.StatusConflict || !strings.Contains(offline.Body.String(), "no matching") {
+		t.Fatalf("offline clipboard = %d: %s", offline.Code, offline.Body.String())
+	}
+}
+
+func TestAdminClipboardDeliversAndWaitsForNativeAcknowledgement(t *testing.T) {
+	server, manager := newTestServer(t)
+	_ = pairedCookie(t, manager)
+	deviceID := manager.ListDevices()[0].ID
+	host := httptest.NewServer(server.Handler())
+	defer host.Close()
+	ticket := manager.WSTicket(deviceID)
+	wsURL := "ws" + strings.TrimPrefix(host.URL, "http") + APIRoot + "/ws?ticket=" +
+		url.QueryEscape(ticket) + "&nv=" + url.QueryEscape(config.NativeVersion)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, adminJSONRequest(http.MethodPost,
+			APIRoot+"/admin/clipboard", map[string]string{"text": "correct horse battery staple"}))
+		done <- response
+	}()
+	var event protocol.ClipboardEvent
+	if err := conn.ReadJSON(&event); err != nil {
+		t.Fatal(err)
+	}
+	if event.Type != "clipboard" || event.RequestID == "" || event.Text != "correct horse battery staple" {
+		t.Fatalf("event = %+v", event)
+	}
+	if err := conn.WriteJSON(map[string]any{"t": "clipboard-result", "id": event.RequestID, "ok": true}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case response := <-done:
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok":true`) ||
+			!strings.Contains(response.Body.String(), deviceID) {
+			t.Fatalf("clipboard = %d: %s", response.Code, response.Body.String())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("clipboard request did not complete after acknowledgement")
 	}
 }
 

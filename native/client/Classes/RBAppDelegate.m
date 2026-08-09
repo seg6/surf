@@ -63,6 +63,10 @@
     [[self rootController] checkPasteboard];
 }
 
+- (void)applicationDidEnterBackground:(UIApplication *)application {
+    [[self rootController] syncNativeLog];
+}
+
 - (void)applicationDidReceiveMemoryWarning:(UIApplication *)application {
     RBLogEvent(@"application", @"warn", @{@"event": @"memory_warning"}, @"Memory warning received");
 }

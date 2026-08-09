@@ -33,13 +33,15 @@ func Kill(pid int) {
 	}
 }
 
-// Start launches path with args in its own process group (Options.Desktop
-// is a Windows-only concept, ignored here).
+// Start launches path with args in its own process group.
 func Start(path string, args []string, opts Options) (*Started, error) {
-	cmd := command(path, args...)
+	cmd, guarded, err := guardedCommand(path, args, opts.Guardian, opts.GuardianGrace)
+	if err != nil {
+		return nil, err
+	}
 	cmd.Env = opts.Env
 	started := &Started{}
-	if opts.Stdin {
+	if opts.Stdin || guarded {
 		w, err := cmd.StdinPipe()
 		if err != nil {
 			return nil, err
@@ -68,6 +70,7 @@ func Start(path string, args []string, opts Options) (*Started, error) {
 		return nil, err
 	}
 	started.Process = cmd.Process
+	started.Pid = cmd.Process.Pid
 	done := make(chan error, 1)
 	started.Done = done
 	go func() {

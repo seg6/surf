@@ -30,7 +30,7 @@ Surf control messages, media, credentials, browsing data, or client updates.
 
 Pairing is closed until the server owner chooses **Pair device** or runs
 `surf pair`. One invitation accepts one device and closes after use,
-cancellation, daemon restart, or five incorrect manual codes.
+cancellation, server restart, or five incorrect manual codes.
 
 - QR pairing carries the endpoint, a random 128-bit one-time token, and a
   128-bit prefix of the expected certificate fingerprint. The client verifies
@@ -56,6 +56,13 @@ Successful authentication issues a Secure, HttpOnly, SameSite session and a
 device-bound, single-use WebSocket ticket. Revocation removes the device,
 invalidates its outstanding challenges and tickets, and closes its active
 connections immediately.
+
+Host-to-device clipboard delivery is an owner-only loopback admin operation.
+The text travels inside the paired device's pinned TLS/WebSocket session; Surf
+does not place it in command-line arguments, logs, or host storage. The native
+client clears the delivered value after two minutes if its clipboard has not
+changed. While present, it has the normal iOS clipboard trust boundary and may
+be readable by other software running on that device.
 
 Protect `SURF_HOME`. It contains the TLS private key, session-signing key,
 paired public keys, browser profile, and browsing data. Copying the directory

@@ -165,6 +165,28 @@ void RBClearLog(void) {
     });
 }
 
+void RBLogSnapshot(void (^completion)(NSData *data)) {
+    RBInitializeLog();
+    if (!completion) return;
+    dispatch_async(RBLogQueue, ^{
+        [RBLogHandle synchronizeFile];
+        NSMutableData *snapshot = [NSMutableData data];
+        NSData *older = [NSData dataWithContentsOfFile:[RBLogFile stringByAppendingString:@".1"]];
+        NSData *current = [NSData dataWithContentsOfFile:RBLogFile];
+        if ([older length]) [snapshot appendData:older];
+        if ([current length]) [snapshot appendData:current];
+        const NSUInteger maximum = 2 * 1024 * 1024;
+        if ([snapshot length] > maximum) {
+            snapshot = [[snapshot subdataWithRange:NSMakeRange([snapshot length] - maximum, maximum)] mutableCopy];
+            const unsigned char *bytes = [snapshot bytes];
+            NSUInteger firstLine = 0;
+            while (firstLine < [snapshot length] && bytes[firstLine] != '\n') firstLine++;
+            if (firstLine < [snapshot length]) [snapshot replaceBytesInRange:NSMakeRange(0, firstLine + 1) withBytes:NULL length:0];
+        }
+        completion(snapshot);
+    });
+}
+
 static void RBWriteRecord(NSString *component, NSString *level, NSDictionary *fields, NSString *message) {
     RBInitializeLog();
     dispatch_async(RBLogQueue, ^{

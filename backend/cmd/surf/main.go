@@ -3,19 +3,34 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"surf-backend/internal/app"
 	"surf-backend/internal/config"
+	"surf-backend/internal/control"
+	"surf-backend/internal/process"
 )
 
 func main() {
-	prepareConsole(len(os.Args) > 1 && os.Args[1] != "update-helper")
-	if len(os.Args) >= 2 && os.Args[1] == "update-helper" {
-		if err := runUpdateHelper(os.Args[2:]); err != nil {
+	private := len(os.Args) >= 3 && os.Args[1] == "_internal"
+	prepareConsole(!private)
+	if private {
+		var err error
+		switch os.Args[2] {
+		case "update-helper":
+			err = runUpdateHelper(os.Args[3:])
+		case "child-guard":
+			err = process.RunChildGuardian(os.Args[3:])
+		default:
+			err = fmt.Errorf("unknown internal command")
+		}
+		if err != nil {
 			fmt.Fprintln(os.Stderr, "surf update:", err)
 			os.Exit(1)
 		}
@@ -36,13 +51,8 @@ func main() {
 
 	err = nil
 	switch args[0] {
-	case "daemon":
-		if len(args) != 1 {
-			err = fmt.Errorf("usage: surf daemon")
-		} else {
-			watchDesktopParent(os.Stdin, os.Exit)
-			err = app.Serve()
-		}
+	case "serve":
+		err = runServe(args[1:])
 	case "status":
 		if len(args) != 1 {
 			err = fmt.Errorf("usage: surf status")
@@ -76,27 +86,59 @@ func main() {
 		err = runPairCommand()
 	case "devices":
 		err = runDevicesCommand(args[1:])
+	case "logs":
+		err = runLogsCommand(args[1:])
+	case "clipboard":
+		err = runClipboardCommand(args[1:])
 	default:
-		fmt.Fprintln(os.Stderr, "Usage: surf [--home PATH] [daemon|status|pair|devices|doctor|update|version]")
+		fmt.Fprintln(os.Stderr, "Usage: surf [--home PATH] [serve|status|pair|devices|clipboard|logs|doctor|update|version]")
 		err = fmt.Errorf("unknown command %q", args[0])
 	}
 	if err != nil {
-		if args[0] == "daemon" {
-			log.Printf("surf daemon: %v", err)
+		if args[0] == "serve" {
+			log.Printf("surf serve: %v", err)
 		}
 		fmt.Fprintln(os.Stderr, "surf:", err)
 		os.Exit(1)
 	}
 }
 
-func watchDesktopParent(parent io.Reader, exit func(int)) {
+func runServe(args []string) error {
+	pair := false
+	if len(args) == 1 && args[0] == "--pair" {
+		pair = true
+	} else if len(args) != 0 {
+		return fmt.Errorf("usage: surf serve [--pair]")
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	watchDesktopParent(os.Stdin, cancel)
+	ready := make(chan control.Descriptor, 1)
+	done := make(chan error, 1)
+	go func() { done <- app.ServeContext(ctx, ready) }()
+	if pair {
+		select {
+		case <-ready:
+			go func() {
+				if err := runPairCommandContext(ctx); err != nil && ctx.Err() == nil {
+					log.Printf("surf pair: %v", err)
+				}
+			}()
+		case err := <-done:
+			return err
+		}
+	}
+	return <-done
+}
+
+func watchDesktopParent(parent io.Reader, cancel context.CancelFunc) {
 	if os.Getenv("SURF_PARENT_GUARD") != "1" {
 		return
 	}
 	go func() {
 		_, _ = io.Copy(io.Discard, parent)
-		log.Printf("surf daemon: desktop parent exited")
-		exit(0)
+		log.Printf("surf serve: desktop parent exited")
+		cancel()
 	}()
 }
 

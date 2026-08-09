@@ -2,17 +2,18 @@
 
 Surf runs Chromium on a Windows, macOS, or Linux host and exposes one encrypted
 remote-browser port. The desktop build supervises the backend and provides
-local Settings, pairing, device revocation, logs, and updates. `surf daemon` is
-the equivalent foreground process for a service manager.
+local Settings, pairing, device revocation, logs, clipboard delivery, and
+updates. `surf serve` is the equivalent foreground process for a service
+manager. Add `--pair` to open one pairing invitation at startup.
 
 ## Start and pair
 
 Desktop users open **Paired Devices** and choose **Pair device**.
-Headless users start one persistent daemon and connect to it from another
+Headless users start one persistent server and connect to it from another
 terminal:
 
 ```sh
-./surf daemon
+./surf serve
 ./surf status
 ./surf pair
 ```
@@ -23,7 +24,7 @@ self-contained: it carries the reachable address, expected server identity,
 and a random 128-bit one-time token. A manual client enters the address and
 six-digit code separately.
 
-The invitation has no timer; it remains open until used, cancelled, the daemon
+The invitation has no timer; it remains open until used, cancelled, the server
 restarts, or five incorrect manual codes close it. Only one matching client key
 can consume it. QR pairing already pins the identity carried by the code.
 Manual pairing compares a six-word value independently derived from the TLS
@@ -53,7 +54,7 @@ For a VPS, expose the configured Surf TCP port and tell pairing codes which
 reachable address to use:
 
 ```sh
-SURF_PUBLIC_ADDRESS=surf.example.net:18080 ./surf daemon
+SURF_PUBLIC_ADDRESS=surf.example.net:18080 ./surf serve
 ```
 
 This does not provide NAT traversal. LAN firewalls and VPS security groups must
@@ -107,19 +108,48 @@ $SURF_HOME/devices.json
 $SURF_HOME/daemon.json
 ```
 
-`daemon.json` is a permission-restricted, per-run control descriptor. CLI
-commands use it to find and authenticate the daemon's loopback TLS control
+`daemon.json` is a permission-restricted, per-run server control descriptor.
+CLI commands use it to find and authenticate the server's loopback TLS control
 listener; they never start a second browser or create a server identity.
 
-Desktop Surf owns its managed daemon through a private parent pipe. Normal
+Desktop Surf owns its managed server through a private parent pipe. Normal
 Quit performs a graceful shutdown; if the tray is force-closed, the pipe closes
-and the daemon exits with its Chromium process tree. `desktop.lock` and
+and the server exits with its Chromium process tree. `desktop.lock` and
 `server.lock` are kernel-owned locks: their empty files may remain on disk, but
 the locks themselves are released when their owner exits.
 
 The browser profile, downloads, uploads, managed browser, updates, and desktop
 configuration also live below `SURF_HOME`. Back up the entire directory if you
 want to preserve the server identity and existing pairings.
+
+## Logs and clipboard
+
+Surf keeps bounded, rotating host logs under `SURF_HOME`:
+
+```text
+$SURF_HOME/logs/server.log
+$SURF_HOME/logs/desktop.log
+$SURF_HOME/logs/devices/<device-id>.ndjson
+```
+
+The native client uploads an authenticated snapshot when it connects, when it
+enters the background, every 30 seconds after a change, and when the owner
+requests a refresh. View the combined sources in desktop Settings or from a
+terminal:
+
+```sh
+surf logs
+surf logs --follow
+surf logs --source device --device DEVICE_ID
+```
+
+To place text on the clipboard of every connected iOS device, run
+`surf clipboard`. A terminal prompt hides the input; redirected standard input
+is preserved byte-for-byte, including whitespace and newlines. Use
+`surf clipboard --device DEVICE_ID` to target one connected device. The desktop
+Settings page can deliberately read the host clipboard when browser permission
+allows, or accepts a masked value as a fallback. Surf never accepts clipboard
+text as a command-line argument and never records its contents in logs.
 
 Replaceable state recovers conservatively. Invalid desktop settings, device
 registries, and runtime descriptors are moved beside the original with an
@@ -142,6 +172,7 @@ under one root:
 /api/v1/auth/*
 /api/v1/config
 /api/v1/ws
+/api/v1/client/logs
 /api/v1/tab-icons/*
 /api/v1/uploads
 /api/v1/downloads/*

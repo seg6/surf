@@ -26,6 +26,9 @@ static NSString *RBURLEscape(NSString *s);
 @property(nonatomic, copy) NSString *requiredServerVersion;
 @property(nonatomic, assign, readwrite) BOOL requiresPairing;
 @property(nonatomic, assign) unsigned long long touchSequence;
+@property(nonatomic, strong) NSData *lastUploadedLog;
+@property(nonatomic, assign) BOOL logUploadRunning;
+@property(nonatomic, assign) NSUInteger logUploadGeneration;
 @end
 
 @implementation RBSession
@@ -112,7 +115,56 @@ static NSString *RBURLEscape(NSString *s);
     self.socket = nil;
     self.socketOpen = NO;
     self.reconnectDelay = 1.0;
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(periodicLogUpload) object:nil];
+    self.logUploadRunning = NO;
+    self.logUploadGeneration = self.generation;
     [self moveToState:RBSessionStateIdle];
+}
+
+- (void)scheduleLogUpload {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(periodicLogUpload) object:nil];
+    if (self.active) [self performSelector:@selector(periodicLogUpload) withObject:nil afterDelay:30.0];
+}
+
+- (void)periodicLogUpload {
+    [self uploadNativeLogNow];
+    [self scheduleLogUpload];
+}
+
+- (void)uploadNativeLogNow {
+    if (!self.active || self.logUploadRunning || !self.baseURL) return;
+    self.logUploadRunning = YES;
+    NSUInteger generation = self.generation;
+    self.logUploadGeneration = generation;
+    RBLogSnapshot(^(NSData *snapshot) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (generation != self.generation || !self.active) {
+                if (self.logUploadGeneration == generation) self.logUploadRunning = NO;
+                return;
+            }
+            if (self.lastUploadedLog && [self.lastUploadedLog isEqualToData:snapshot]) {
+                if (self.logUploadGeneration == generation) self.logUploadRunning = NO;
+                return;
+            }
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                NSURL *url = [NSURL URLWithString:@"/api/v1/client/logs" relativeToURL:self.baseURL];
+                NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url
+                    cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:20.0];
+                [request setHTTPMethod:@"PUT"];
+                [request setHTTPBody:snapshot ?: [NSData data]];
+                [request setValue:@"application/x-ndjson" forHTTPHeaderField:@"Content-Type"];
+                NSHTTPURLResponse *response = nil;
+                NSError *error = nil;
+                NSData *result = [[RBSecureHTTPClient clientForServer:self.server]
+                    sendRequest:request response:&response error:&error];
+                BOOL uploaded = result != nil && [response statusCode] >= 200 && [response statusCode] < 300;
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if (generation == self.generation && uploaded) self.lastUploadedLog = snapshot;
+                    if (self.logUploadGeneration == generation) self.logUploadRunning = NO;
+                });
+            });
+        });
+    });
 }
 
 - (BOOL)revokeThisDevice:(NSString **)error {
@@ -303,6 +355,8 @@ static NSString *RBURLEscape(NSString *s) {
     self.reconnectDelay = 1.0;
     [self moveToState:RBSessionStateOpen];
     [self.delegate session:self status:@"websocket open"];
+    [self uploadNativeLogNow];
+    [self scheduleLogUpload];
 }
 
 - (void)socket:(RBSocket *)socket didCloseWithError:(NSString *)error {

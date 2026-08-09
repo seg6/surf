@@ -18,7 +18,7 @@
     * { box-sizing: border-box; }
     html, body { min-height: 100%; margin: 0; }
     body { background: var(--bg); }
-    button, input { font: inherit; }
+    button, input, select { font: inherit; }
     button { color: inherit; }
     .shell { min-height: 100vh; }
     .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--quiet); }
@@ -84,6 +84,10 @@
       border: 1px solid var(--line-strong); border-radius: 6px; outline: 0; padding: 9px 10px;
     }
     input:focus { border-color: var(--blue-bright); box-shadow: 0 0 0 1px var(--blue-bright); }
+    select {
+      color: var(--ink); background: var(--field); border: 1px solid var(--line-strong);
+      border-radius: 6px; padding: 7px 9px;
+    }
     .full { grid-column: 1 / -1; }
     .form-actions { display: flex; gap: 10px; margin-top: 20px; }
     .check-row { display: flex; grid-template-columns: none; align-items: center; gap: 9px; margin-top: 14px; }
@@ -136,7 +140,8 @@
     details > summary::after { content: "Show"; color: var(--muted); font-size: 11px; font-weight: 400; }
     details[open] > summary::after { content: "Hide"; }
     .log-body { border-top: 1px solid var(--line); padding: 14px; }
-    .log-toolbar { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+    .log-toolbar { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 10px; }
+    .log-toolbar input { width: min(280px, 100%); padding: 7px 9px; }
     pre {
       margin: 0; min-height: 460px; max-height: calc(100vh - 180px); overflow: auto;
       border: 1px solid var(--line); border-radius: 6px; padding: 12px;
@@ -263,6 +268,17 @@
       </div>
 
       <div class="panel" style="margin-top:12px">
+        <div class="panel-head">
+          <div><h2>Device clipboard</h2><p class="panel-copy">Send a password or other host clipboard text to every connected Surf device. Text is never saved by the server.</p></div>
+          <button class="button primary" id="send-clipboard" type="button">Send clipboard</button>
+        </div>
+        <label id="clipboard-fallback-label" hidden>Paste text securely
+          <input id="clipboard-fallback" type="password" autocomplete="off" spellcheck="false">
+        </label>
+        <p class="note">Delivered text is cleared from each device after two minutes unless its clipboard has changed.</p>
+      </div>
+
+      <div class="panel" style="margin-top:12px">
         <div class="panel-head"><div><h2>Media</h2></div></div>
         <div class="health-list">
           <div class="health-row"><span>Chromium capture</span><strong id="health-capture">—</strong></div>
@@ -274,7 +290,11 @@
       <details class="panel" id="logs">
         <summary>Logs</summary>
         <div class="log-body">
-          <div class="log-toolbar"><button class="button secondary small" id="refresh-logs">Refresh</button></div>
+          <div class="log-toolbar">
+            <select id="log-source" aria-label="Log source"><option value="all">All sources</option><option value="server">Server</option><option value="desktop">Desktop</option></select>
+            <input id="log-search" type="search" placeholder="Filter logs" aria-label="Filter logs">
+            <button class="button secondary small" id="refresh-logs">Refresh devices</button>
+          </div>
           <pre id="log-output">Loading logs…</pre>
         </div>
       </details>
@@ -375,6 +395,32 @@
       } catch (error) { toast(error.message); }
     });
     document.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', () => copy($(button.dataset.copy).textContent)));
+
+    async function deliverClipboard(text) {
+      if (!text) throw new Error('Clipboard is empty');
+      const result = await (await request('/api/backend/api/v1/admin/clipboard', {
+        method:'POST', headers:{'Content-Type':'application/json','X-Surf-Desktop':'1'}, body:JSON.stringify({text})
+      })).json();
+      if (!result.ok) throw new Error(`Copied to ${result.delivered.length}; ${result.failed.length} device(s) did not acknowledge`);
+      toast(`Copied to ${result.delivered.length} connected device(s)`);
+    }
+    $('send-clipboard').addEventListener('click', async () => {
+      const fallback = $('clipboard-fallback');
+      try {
+        let text;
+        if (!$('clipboard-fallback-label').hidden) {
+          text = fallback.value; fallback.value = '';
+        } else {
+          try { text = await navigator.clipboard.readText(); }
+          catch {
+            $('clipboard-fallback-label').hidden = false;
+            fallback.focus(); toast('Paste the text below, then click Send text');
+            $('send-clipboard').textContent = 'Send text'; return;
+          }
+        }
+        await deliverClipboard(text);
+      } catch (error) { toast(error.message); }
+    });
 
     function emptyNode(message) {
       const empty = document.createElement('div'); empty.className = 'empty'; empty.textContent = message;
@@ -497,13 +543,53 @@
       await loadCandidates(); $('add-device').focus();
     });
 
+    let logSources = [], rawLogText = '';
+    async function loadLogSources() {
+      const payload = await (await request('/api/backend/api/v1/admin/logs/sources')).json();
+      logSources = [
+        {id:'server', label:'Server', path:'/api/backend/api/v1/admin/logs?source=server'},
+        {id:'desktop', label:'Desktop', path:'/api/backend/api/v1/admin/logs?source=desktop'},
+        ...(payload.devices || []).map(device => ({
+          id:`device:${device.id}`, label:`${device.name || 'Device'}${payload.online?.[device.id] ? ' · online' : ' · offline'}`,
+          path:`/api/backend/api/v1/admin/logs?source=device&deviceID=${encodeURIComponent(device.id)}`
+        }))
+      ];
+      const selected = $('log-source').value;
+      $('log-source').replaceChildren(new Option('All sources', 'all'));
+      logSources.forEach(source => $('log-source').append(new Option(source.label, source.id)));
+      if ([...$('log-source').options].some(option => option.value === selected)) $('log-source').value = selected;
+    }
+    function renderLogs() {
+      const query = $('log-search').value.toLowerCase();
+      $('log-output').textContent = query
+        ? rawLogText.split('\n').filter(line => line.toLowerCase().includes(query)).join('\n')
+        : rawLogText;
+      $('log-output').scrollTop = $('log-output').scrollHeight;
+    }
     async function loadLogs() {
       try {
-        $('log-output').textContent = await (await request('/logs')).text();
-        $('log-output').scrollTop = $('log-output').scrollHeight;
+        await loadLogSources();
+        const selected = $('log-source').value;
+        const targets = selected === 'all' ? logSources : logSources.filter(source => source.id === selected);
+        const sections = await Promise.all(targets.map(async source => {
+          const text = await (await request(source.path)).text();
+          return text ? `== ${source.label} ==\n${text.trimEnd()}` : '';
+        }));
+        rawLogText = sections.filter(Boolean).join('\n\n') || 'No persisted logs for this source.';
+        renderLogs();
       } catch (error) { $('log-output').textContent = error.message; }
     }
-    $('refresh-logs').addEventListener('click', loadLogs);
+    $('refresh-logs').addEventListener('click', async () => {
+      try {
+        const selected = $('log-source').value;
+        const deviceID = selected.startsWith('device:') ? selected.slice(7) : '';
+        await request('/api/backend/api/v1/admin/logs/refresh', {method:'POST', headers:{'Content-Type':'application/json','X-Surf-Desktop':'1'}, body:JSON.stringify({deviceID})});
+        await new Promise(resolve => setTimeout(resolve, 600));
+        await loadLogs(); toast('Device logs refreshed');
+      } catch (error) { toast(error.message); }
+    });
+    $('log-source').addEventListener('change', loadLogs);
+    $('log-search').addEventListener('input', renderLogs);
     $('logs').addEventListener('toggle', () => { if ($('logs').open) loadLogs(); });
 
     (async () => {

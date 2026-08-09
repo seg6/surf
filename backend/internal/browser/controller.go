@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
 	"sync"
 	"time"
 
@@ -41,7 +40,7 @@ type Tab struct {
 type Controller struct {
 	cfg      *config.Config
 	cdp      *cdp.Client
-	cmd      *os.Process
+	cmd      *process.Started
 	hub      *transport.Hub
 	commands chan controllerCommand
 	events   chan cdp.Event
@@ -356,11 +355,22 @@ func (b *Controller) Shutdown() {
 		if b.touch != nil {
 			b.touch.close()
 		}
+		if b.cmd != nil {
+			if b.cdp != nil {
+				_, _ = b.cdp.Call("", "Browser.close", nil)
+			}
+			select {
+			case <-b.cmd.Done:
+			case <-time.After(time.Second):
+				process.Kill(b.cmd.Process.Pid)
+				<-b.cmd.Done
+			}
+			if b.cmd.Stdin != nil {
+				_ = b.cmd.Stdin.Close()
+			}
+		}
 		if b.cdp != nil {
 			b.cdp.Close()
-		}
-		if b.cmd != nil {
-			process.Kill(b.cmd.Pid)
 		}
 	})
 }

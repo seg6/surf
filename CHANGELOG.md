@@ -2,6 +2,24 @@
 
 This file records the user-visible changes in every Surf release.
 
+## Unreleased
+
+- Replaced the public `surf daemon` command with `surf serve`, added optional
+  first-run pairing through `surf serve --pair`, and made desktop takeover,
+  restart, updates, parent loss, and Chromium shutdown converge on one graceful
+  server lifecycle with verified process-tree cleanup on Linux, Windows, and
+  macOS.
+- Persisted bounded server and desktop logs on every host, automatically
+  mirrored each connected native client's structured log to the server, and
+  added local Settings and `surf logs` access without requiring SSH into the
+  iPad.
+- Added authenticated host-to-device clipboard delivery from desktop Settings or
+  secret-safe `surf clipboard` input, with connected-device fan-out,
+  acknowledgements, no payload persistence or logging, and conditional expiry
+  after two minutes.
+- Bumped the exact native protocol to `20260809-1` for remote clipboard and log
+  synchronization messages.
+
 ## 0.12.5 - 2026-08-08
 
 - Made Chromium's software AVC encoder Surf's strict cross-platform default,

@@ -10,7 +10,7 @@ import (
 )
 
 // MatchesExecutable verifies that pid is running the expected executable.
-// It is used only as a fallback for a locally recorded Surf daemon whose
+// It is used only as a fallback for a locally recorded Surf server whose
 // authenticated control endpoint is no longer responsive.
 func MatchesExecutable(pid int, expected string) bool {
 	if pid <= 0 || expected == "" {

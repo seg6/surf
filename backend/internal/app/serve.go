@@ -3,15 +3,15 @@
 package app
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"surf-backend/internal/auth"
@@ -22,16 +22,40 @@ import (
 	"surf-backend/internal/control"
 	"surf-backend/internal/discovery"
 	"surf-backend/internal/identity"
+	"surf-backend/internal/logstore"
 	"surf-backend/internal/process"
 	"surf-backend/internal/transport"
 	"surf-backend/internal/web"
 )
 
 func Serve() error {
+	return ServeContext(context.Background(), nil)
+}
+
+// ServeContext runs one foreground Surf server lifetime. Signals and desktop
+// parent ownership belong to the command entrypoint; every shutdown source is
+// represented by cancellation so deferred cleanup is never skipped.
+func ServeContext(parent context.Context, ready chan<- control.Descriptor) error {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
+	var mirror io.Writer = os.Stderr
+	if os.Getenv("SURF_PARENT_GUARD") == "1" {
+		mirror = nil
+	}
+	serverLog, err := logstore.Open(logstore.ServerPath(cfg.SurfHome), logstore.ServerMaxBytes, mirror)
+	if err != nil {
+		return fmt.Errorf("open server log: %w", err)
+	}
+	previousLog := log.Writer()
+	log.SetOutput(serverLog)
+	defer func() {
+		log.SetOutput(previousLog)
+		_ = serverLog.Close()
+	}()
 	instance, acquired, err := process.AcquireInstanceLock(
 		filepath.Join(cfg.SurfHome, "server.lock"))
 	if err != nil {
@@ -56,7 +80,12 @@ func Serve() error {
 		return fmt.Errorf("auth: %w", err)
 	}
 	hub := transport.New()
-	a.SetRevokeHandler(hub.CloseDevice)
+	a.SetRevokeHandler(func(deviceID string) {
+		hub.CloseDevice(deviceID)
+		if err := logstore.RemoveDevice(cfg.SurfHome, deviceID); err != nil {
+			log.Printf("remove revoked device log: %v", err)
+		}
+	})
 	b, err := browser.New(cfg, hub)
 	if err != nil {
 		return err
@@ -80,6 +109,7 @@ func Serve() error {
 	}
 	clearBrowserStartupFailures(cfg.SurfHome)
 	srv := web.New(cfg, a, ident, hub)
+	srv.SetShutdown(cancel)
 	srv.SetHealthCheck(b.Health)
 	srv.SetStats(b.Stats)
 	b.RegisterRoutes(srv)
@@ -111,7 +141,7 @@ func Serve() error {
 	}
 	defer func() {
 		if err := control.RemoveOwned(cfg.SurfHome, descriptor.AdminToken); err != nil {
-			log.Printf("remove daemon descriptor: %v", err)
+			log.Printf("remove server control descriptor: %v", err)
 		}
 	}()
 	if os.Getenv("SURF_ADVERTISE") != "0" {
@@ -128,19 +158,22 @@ func Serve() error {
 			log.Printf("bonjour advertised Surf on _surf._tcp port %d", port)
 		}
 	}
-	log.Printf("surf daemon listening with TLS on %s:%d identity=%s", cfg.BindAddr, cfg.Port, ident.Fingerprint)
-	log.Printf("surf daemon control endpoint %s", descriptor.ControlURL)
-
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sig)
+	log.Printf("surf server listening with TLS on %s:%d identity=%s", cfg.BindAddr, cfg.Port, ident.Fingerprint)
+	log.Printf("surf server control endpoint %s", descriptor.ControlURL)
+	if ready != nil {
+		select {
+		case ready <- descriptor:
+		case <-ctx.Done():
+			return nil
+		}
+	}
 	select {
 	case err := <-serverErr:
 		return err
 	case <-b.Died():
 		return fmt.Errorf("chromium connection lost")
-	case signal := <-sig:
-		log.Printf("received %s, shutting down", signal)
+	case <-ctx.Done():
+		log.Printf("server shutdown requested")
 		return nil
 	}
 }

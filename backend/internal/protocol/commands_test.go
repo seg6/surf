@@ -51,6 +51,7 @@ func TestDecodeEveryNativeCommand(t *testing.T) {
 		`{"t":"media-query"}`, `{"t":"media-playpause"}`, `{"t":"media-mute"}`,
 		`{"t":"media-volume","value":0.5}`, `{"t":"mobile","on":true}`,
 		`{"t":"fullscreen","on":true}`,
+		`{"t":"clipboard-result","id":"request","ok":true}`,
 	}
 	for _, data := range cases {
 		command, err := DecodeCommand([]byte(data))

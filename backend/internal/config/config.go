@@ -32,6 +32,8 @@ var Caps = []string{
 	"reqkeyframe", // on-demand IDR request (decode error / resync)
 	"video-retry", // explicit retry after an unavailable encoder state
 	"media-stats", // client decode/presentation health for adaptive profiles
+	"client-logs", // authenticated native log snapshots mirrored to the host
+	"clipboard",   // owner-initiated host-to-native clipboard delivery
 }
 
 type Config struct {

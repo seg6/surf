@@ -125,6 +125,11 @@ type VolumeCommand struct {
 	CommandBase
 	Value float64 `json:"value"`
 }
+type ClipboardResultCommand struct {
+	CommandBase
+	RequestID string `json:"id"`
+	OK        bool   `json:"ok"`
+}
 
 // DecodeCommand is the sole JSON ingress. Unknown commands and trailing JSON
 // are rejected before browser state sees them.
@@ -171,6 +176,8 @@ func DecodeCommand(data []byte) (Command, error) {
 		dst = &MediaStatsCommand{}
 	case "media-volume":
 		dst = &VolumeCommand{}
+	case "clipboard-result":
+		dst = &ClipboardResultCommand{}
 	case "back", "fwd", "reload", "stop", "video-retry", "reqkeyframe",
 		"hist", "bookmark", "downloads", "reader", "media-playpause", "media-mute", "media-query":
 		dst = &EmptyCommand{}

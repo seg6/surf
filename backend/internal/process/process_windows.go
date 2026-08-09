@@ -57,7 +57,7 @@ func ProtectChildren() func() {
 	// Do not close job explicitly: this process is itself a member, so
 	// JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE would terminate Surf before Serve can
 	// report an error or finish graceful shutdown. The OS closes the handle
-	// when the daemon process exits, which is exactly the lifetime we need.
+	// when the server process exits, which is exactly the lifetime we need.
 	return func() {}
 }
 
@@ -118,6 +118,7 @@ func Start(path string, args []string, opts Options) (*Started, error) {
 		return nil, err
 	}
 	started.Process = cmd.Process
+	started.Pid = cmd.Process.Pid
 	done := make(chan error, 1)
 	started.Done = done
 	go func() {

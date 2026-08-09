@@ -34,7 +34,7 @@ func launchUpdateHelper(staged, target string, restart bool) error {
 	if restart {
 		mode = "restart"
 	}
-	command := exec.Command(staged, "update-helper", staged, target, mode)
+	command := exec.Command(staged, "_internal", "update-helper", staged, target, mode)
 	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	return command.Start()
 }

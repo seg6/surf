@@ -11,7 +11,7 @@ extra password. QR pairing carries the expected identity out of band and does
 not require the comparison.
 
 The backend listener itself is pinned TLS. The local Settings page proxies only
-loopback admin operations through the daemon's permission-restricted per-run
+loopback admin operations through the server's permission-restricted per-run
 control descriptor, so device management is neither exposed nor authorized on
 the LAN.
 

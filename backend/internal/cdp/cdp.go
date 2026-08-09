@@ -129,13 +129,13 @@ func (cfg LaunchConfig) Args() []string {
 
 // Launch starts headless Chromium (see Args) and returns a connected browser
 // client.
-func Launch(cfg LaunchConfig) (*Client, *os.Process, error) {
+func Launch(cfg LaunchConfig) (*Client, *process.Started, error) {
 	// A browser killed without a normal shutdown can leave this file behind.
 	// Snapshot it before launch so the fallback can never attach this Surf
 	// instance to an older Chromium that happens to use the same profile.
 	previousEndpoint := readActivePortState(cfg.Profile)
 	started, err := process.Start(cfg.ChromePath, cfg.Args(), process.Options{
-		Stderr: true,
+		Stderr: true, Guardian: true,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -170,7 +170,7 @@ func Launch(cfg LaunchConfig) (*Client, *os.Process, error) {
 		process.Kill(started.Process.Pid)
 		return nil, nil, err
 	}
-	return c, started.Process, nil
+	return c, started, nil
 }
 
 type extensionCaller interface {

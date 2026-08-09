@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,12 +17,14 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"surf-backend/internal/auth"
 	"surf-backend/internal/control"
 	"surf-backend/internal/web"
 
 	qrcode "github.com/skip2/go-qrcode"
+	"golang.org/x/term"
 )
 
 type localAdmin struct {
@@ -37,7 +41,7 @@ func newLocalAdmin() (*localAdmin, error) {
 	}
 	descriptor, err := control.Load(home)
 	if err != nil {
-		return nil, fmt.Errorf("Surf daemon is not running for SURF_HOME=%s: %w", home, err)
+		return nil, fmt.Errorf("Surf server is not running for SURF_HOME=%s: %w", home, err)
 	}
 	want := descriptor.ServerID
 	tlsConfig := &tls.Config{
@@ -61,17 +65,30 @@ func newLocalAdmin() (*localAdmin, error) {
 }
 
 func (a *localAdmin) request(method, path string, body any, target any) error {
+	data, err := a.requestBytes(method, path, body)
+	if err != nil {
+		return err
+	}
+	if target != nil {
+		if err := json.Unmarshal(data, target); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *localAdmin) requestBytes(method, path string, body any) ([]byte, error) {
 	var reader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		reader = bytes.NewReader(data)
 	}
 	request, err := http.NewRequest(method, a.base+path, reader)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
@@ -79,19 +96,18 @@ func (a *localAdmin) request(method, path string, body any, target any) error {
 	request.Header.Set(control.AdminHeader, a.descriptor.AdminToken)
 	response, err := a.client.Do(request)
 	if err != nil {
-		return fmt.Errorf("Surf daemon is not running at %s: %w", a.base, err)
+		return nil, fmt.Errorf("Surf server is not running at %s: %w", a.base, err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		data, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-		return fmt.Errorf("backend returned HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(data)))
+		return nil, fmt.Errorf("backend returned HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(data)))
 	}
-	if target != nil {
-		if err := json.NewDecoder(response.Body).Decode(target); err != nil {
-			return err
-		}
+	data, err := io.ReadAll(io.LimitReader(response.Body, 16<<20))
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	return data, nil
 }
 
 func runStatusCommand() error {
@@ -117,7 +133,7 @@ func runStatusCommand() error {
 	if err := admin.request(http.MethodGet, web.APIRoot+"/admin/devices", nil, &devices); err != nil {
 		return err
 	}
-	fmt.Println("Surf daemon is running.")
+	fmt.Println("Surf server is running.")
 	fmt.Printf("Name: %s\n", terminalText(server.Name))
 	fmt.Printf("PID: %d\n", admin.descriptor.PID)
 	fmt.Printf("Port: %d\n", admin.descriptor.PublicPort)
@@ -128,6 +144,16 @@ func runStatusCommand() error {
 }
 
 func runPairCommand() error {
+	ctx, cancel := signalContext()
+	defer cancel()
+	return runPairCommandContext(ctx)
+}
+
+func signalContext() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), os.Interrupt)
+}
+
+func runPairCommandContext(ctx context.Context) error {
 	admin, err := newLocalAdmin()
 	if err != nil {
 		return err
@@ -157,15 +183,12 @@ func runPairCommand() error {
 	}
 	fmt.Println("Only this one-time code can pair one device. Press Ctrl+C to cancel it.")
 
-	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt)
-	defer signal.Stop(interrupt)
 	ticker := time.NewTicker(750 * time.Millisecond)
 	defer ticker.Stop()
 	shown := map[string]bool{}
 	for {
 		select {
-		case <-interrupt:
+		case <-ctx.Done():
 			fmt.Println("\nPairing cancelled.")
 			return nil
 		case <-ticker.C:
@@ -231,6 +254,186 @@ func runDevicesCommand(args []string) error {
 		return admin.request(http.MethodPost, web.APIRoot+"/admin/devices/revoke/"+url.PathEscape(args[1]), nil, nil)
 	}
 	return fmt.Errorf("usage: surf devices list | surf devices revoke <device-id>")
+}
+
+type logSource struct {
+	label string
+	path  string
+}
+
+func runLogsCommand(args []string) error {
+	source, deviceID, follow := "all", "", false
+	for len(args) > 0 {
+		switch args[0] {
+		case "--source":
+			if len(args) < 2 {
+				return fmt.Errorf("usage: surf logs [--source all|server|desktop|device] [--device ID] [--follow]")
+			}
+			source, args = args[1], args[2:]
+		case "--device":
+			if len(args) < 2 {
+				return fmt.Errorf("usage: surf logs [--source all|server|desktop|device] [--device ID] [--follow]")
+			}
+			deviceID, args = args[1], args[2:]
+		case "--follow":
+			follow, args = true, args[1:]
+		default:
+			return fmt.Errorf("usage: surf logs [--source all|server|desktop|device] [--device ID] [--follow]")
+		}
+	}
+	if source != "all" && source != "server" && source != "desktop" && source != "device" {
+		return fmt.Errorf("unknown log source %q", source)
+	}
+	if source == "device" && deviceID == "" {
+		return errors.New("--device is required with --source device")
+	}
+	admin, err := newLocalAdmin()
+	if err != nil {
+		return err
+	}
+	var sources struct {
+		Devices []auth.Device `json:"devices"`
+	}
+	if source == "all" || source == "device" {
+		if err := admin.request(http.MethodGet, web.APIRoot+"/admin/logs/sources", nil, &sources); err != nil {
+			return err
+		}
+		if source == "device" {
+			found := false
+			for _, device := range sources.Devices {
+				if device.ID == deviceID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("paired device %q was not found", deviceID)
+			}
+		}
+		_, _ = admin.requestBytes(http.MethodPost, web.APIRoot+"/admin/logs/refresh", map[string]string{"deviceID": deviceID})
+		time.Sleep(500 * time.Millisecond)
+	}
+	buildSources := func() []logSource {
+		var result []logSource
+		if source == "all" || source == "server" {
+			result = append(result, logSource{label: "server", path: web.APIRoot + "/admin/logs?source=server"})
+		}
+		if source == "all" || source == "desktop" {
+			result = append(result, logSource{label: "desktop", path: web.APIRoot + "/admin/logs?source=desktop"})
+		}
+		for _, device := range sources.Devices {
+			if source == "device" && device.ID != deviceID || source != "all" && source != "device" {
+				continue
+			}
+			result = append(result, logSource{label: "device " + terminalText(device.Name), path: web.APIRoot + "/admin/logs?source=device&deviceID=" + url.QueryEscape(device.ID)})
+		}
+		return result
+	}
+	previous := map[string]string{}
+	printLogs := func(initial bool) error {
+		for _, item := range buildSources() {
+			data, err := admin.requestBytes(http.MethodGet, item.path, nil)
+			if err != nil {
+				return err
+			}
+			text := string(data)
+			if initial {
+				if text != "" {
+					fmt.Printf("== %s ==\n%s", item.label, text)
+					if !strings.HasSuffix(text, "\n") {
+						fmt.Println()
+					}
+				}
+			} else if old := previous[item.path]; strings.HasPrefix(text, old) {
+				fmt.Print(strings.TrimPrefix(text, old))
+			} else if text != old {
+				fmt.Printf("\n== %s (rotated) ==\n%s", item.label, text)
+			}
+			previous[item.path] = text
+		}
+		return nil
+	}
+	if err := printLogs(true); err != nil || !follow {
+		return err
+	}
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	ctx, cancel := signalContext()
+	defer cancel()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if err := printLogs(false); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func clipboardDevice(args []string) (string, error) {
+	if len(args) == 0 {
+		return "", nil
+	}
+	if len(args) == 2 && args[0] == "--device" && args[1] != "" {
+		return args[1], nil
+	}
+	return "", errors.New("usage: surf clipboard [--device ID]")
+}
+
+func readClipboardText(reader io.Reader, terminalInput bool, readSecret func() ([]byte, error)) (string, error) {
+	var data []byte
+	var err error
+	if terminalInput {
+		data, err = readSecret()
+	} else {
+		data, err = io.ReadAll(io.LimitReader(reader, (64<<10)+1))
+	}
+	if err != nil {
+		return "", err
+	}
+	if len(data) == 0 || len(data) > 64<<10 || !utf8.Valid(data) {
+		return "", errors.New("clipboard text must contain 1 to 65536 bytes of UTF-8")
+	}
+	return string(data), nil
+}
+
+func runClipboardCommand(args []string) error {
+	deviceID, err := clipboardDevice(args)
+	if err != nil {
+		return err
+	}
+	isTerminal := term.IsTerminal(int(os.Stdin.Fd()))
+	if isTerminal {
+		fmt.Fprint(os.Stderr, "Text to copy to connected devices: ")
+	}
+	text, err := readClipboardText(os.Stdin, isTerminal, func() ([]byte, error) {
+		data, readErr := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		return data, readErr
+	})
+	if err != nil {
+		return err
+	}
+	admin, err := newLocalAdmin()
+	if err != nil {
+		return err
+	}
+	var result struct {
+		OK        bool     `json:"ok"`
+		Delivered []string `json:"delivered"`
+		Failed    []string `json:"failed"`
+	}
+	if err := admin.request(http.MethodPost, web.APIRoot+"/admin/clipboard",
+		map[string]string{"deviceID": deviceID, "text": text}, &result); err != nil {
+		return err
+	}
+	fmt.Printf("Copied to %d connected device(s).\n", len(result.Delivered))
+	if !result.OK {
+		return fmt.Errorf("clipboard delivery failed for %d device(s)", len(result.Failed))
+	}
+	return nil
 }
 
 func terminalText(value string) string {
