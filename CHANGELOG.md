@@ -2,7 +2,7 @@
 
 This file records the user-visible changes in every Surf release.
 
-## 0.13.1 - 2026-08-09
+## 0.13.0 - 2026-08-09
 
 - Added `Esc` and `Tab` beside the iOS page-paste control, with the remote-key
   actions grouped on the left and Paste kept prominent on the right.
@@ -11,9 +11,6 @@ This file records the user-visible changes in every Surf release.
   copying for the selected log source.
 - Fixed the hidden clipboard-sync switch widening the Settings page beyond the
   viewport.
-
-## 0.13.0 - 2026-08-09
-
 - Replaced the public `surf daemon` command with `surf serve`, added optional
   first-run pairing through `surf serve --pair`, and made desktop takeover,
   restart, updates, parent loss, and Chromium shutdown converge on one graceful
