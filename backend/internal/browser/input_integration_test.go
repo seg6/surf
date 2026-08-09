@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"surf-backend/internal/cdp"
+	"surf-backend/internal/protocol"
 	"surf-backend/internal/transport"
 )
 
@@ -64,10 +65,164 @@ func launchInputTestBrowser(t *testing.T) (*cdp.Client, string) {
 	return client, attached.SessionID
 }
 
+func installEditableObserver(t *testing.T, client *cdp.Client, session string) string {
+	t.Helper()
+	event, sensor, observer := newEditableScripts()
+	if _, err := client.Call(session, "Runtime.addBinding", editableBindingParams()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Call(session, "Page.addScriptToEvaluateOnNewDocument", editableSensorParams(sensor, true)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Call(session, "Page.addScriptToEvaluateOnNewDocument", editableObserverParams(observer, true)); err != nil {
+		t.Fatal(err)
+	}
+	return event
+}
+
+func installSelectObserver(t *testing.T, client *cdp.Client, session string) {
+	t.Helper()
+	_, sensor, observer := newSelectScripts()
+	if _, err := client.Call(session, "Runtime.addBinding", selectBindingParams()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Call(session, "Page.addScriptToEvaluateOnNewDocument", selectSensorParams(sensor, true)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Call(session, "Page.addScriptToEvaluateOnNewDocument", selectObserverParams(observer, true)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSelectObserverBridgesTrustedTapAndChange(t *testing.T) {
+	client, session := launchInputTestBrowser(t)
+	type report struct {
+		payload   string
+		contextID int64
+	}
+	bindings := make(chan report, 8)
+	client.OnEvent(func(event cdp.Event) {
+		if event.SessionID != session || event.Method != "Runtime.bindingCalled" {
+			return
+		}
+		var binding struct {
+			Name               string `json:"name"`
+			Payload            string `json:"payload"`
+			ExecutionContextID int64  `json:"executionContextId"`
+		}
+		if json.Unmarshal(event.Params, &binding) == nil && binding.Name == selectBinding {
+			bindings <- report{payload: binding.Payload, contextID: binding.ExecutionContextID}
+		}
+	})
+	installSelectObserver(t, client, session)
+	if _, err := client.Call(session, "Emulation.setTouchEmulationEnabled", map[string]any{"enabled": true, "maxTouchPoints": 5}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Call(session, "Runtime.evaluate", map[string]any{"expression": `(function(){
+		document.body.innerHTML='<label for="choice">Background</label><select id="choice" aria-label="Background" style="position:absolute;left:40px;top:80px;width:200px;height:44px"><option>None</option><option selected>Stars</option><option disabled>Disabled</option><option>Nebula</option></select>';
+		window.__selectInput=0;window.__selectChange=0;
+		var select=document.getElementById('choice');
+		select.addEventListener('input',function(){window.__selectInput++});
+		select.addEventListener('change',function(){window.__selectChange++});
+	})()`}); err != nil {
+		t.Fatal(err)
+	}
+	exposure, err := client.EvaluateString(session, `typeof window.__surfSelectOpened+','+typeof window.__surfSelectObserver+','+typeof window.__surfSelectIntentSensor`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exposure != "undefined,undefined,boolean" {
+		t.Fatalf("select observer escaped isolated world: %s", exposure)
+	}
+	touch := func(events ...struct {
+		typ string
+		x   float64
+		y   float64
+	}) {
+		t.Helper()
+		for _, event := range events {
+			points := []any{}
+			if event.typ != "touchEnd" {
+				points = append(points, map[string]any{"id": 0, "x": event.x, "y": event.y, "radiusX": 5, "radiusY": 5, "force": .5})
+			}
+			if _, err := client.Call(session, "Input.dispatchTouchEvent", map[string]any{"type": event.typ, "touchPoints": points}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	touch(
+		struct {
+			typ string
+			x   float64
+			y   float64
+		}{"touchStart", 100, 102},
+		struct {
+			typ string
+			x   float64
+			y   float64
+		}{"touchMove", 100, 145},
+		struct {
+			typ string
+			x   float64
+			y   float64
+		}{"touchEnd", 100, 145},
+	)
+	select {
+	case got := <-bindings:
+		t.Fatalf("drag opened select: %s", got.payload)
+	case <-time.After(250 * time.Millisecond):
+	}
+	touch(
+		struct {
+			typ string
+			x   float64
+			y   float64
+		}{"touchStart", 100, 102},
+		struct {
+			typ string
+			x   float64
+			y   float64
+		}{"touchEnd", 100, 102},
+	)
+	var got report
+	select {
+	case got = <-bindings:
+	case <-time.After(5 * time.Second):
+		t.Fatal("trusted select tap was not bridged")
+	}
+	var state struct {
+		ID       string                  `json:"id"`
+		Title    string                  `json:"title"`
+		Multiple bool                    `json:"multiple"`
+		Options  []protocol.SelectOption `json:"options"`
+		Rect     []float64               `json:"rect"`
+	}
+	if json.Unmarshal([]byte(got.payload), &state) != nil || state.ID == "" || state.Title != "Background" ||
+		state.Multiple || len(state.Options) != 4 || !state.Options[1].Selected || !state.Options[2].Disabled || len(state.Rect) != 4 {
+		t.Fatalf("select payload=%s", got.payload)
+	}
+	idJSON, _ := json.Marshal(state.ID)
+	if _, err := client.Call(session, "Runtime.evaluate", map[string]any{
+		"contextId":  got.contextID,
+		"expression": fmt.Sprintf(`globalThis.__surfApplySelect(%s,[3])`, idJSON),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		result, err := client.EvaluateString(session, `JSON.stringify({value:document.getElementById('choice').value,index:document.getElementById('choice').selectedIndex,input:window.__selectInput,change:window.__selectChange})`)
+		if err == nil && strings.Contains(result, `"value":"Nebula"`) && strings.Contains(result, `"input":1`) && strings.Contains(result, `"change":1`) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("select reply did not update the page and dispatch input/change")
+}
+
 func TestEditableObserverFollowsOOPIFFocus(t *testing.T) {
 	child := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = fmt.Fprint(w, `<input id="login" type="email" autofocus><script>setInterval(function(){document.getElementById('login').focus()},50)</script>`)
+		_, _ = fmt.Fprint(w, `<input id="login" type="email" autofocus>`)
 	}))
 	defer child.Close()
 	childURL := strings.Replace(child.URL, "127.0.0.1", "localhost", 1)
@@ -111,7 +266,7 @@ func TestEditableObserverFollowsOOPIFFocus(t *testing.T) {
 		// state for. Main-frame navigation normally also owns touch, store, and
 		// capture state, which is intentionally absent here.
 		switch event.Method {
-		case "Target.attachedToTarget", "Target.detachedFromTarget", "Runtime.executionContextCreated", "Runtime.bindingCalled":
+		case "Target.attachedToTarget", "Target.detachedFromTarget", "Runtime.bindingCalled":
 			browser.onEvent(event)
 		}
 	})
@@ -128,17 +283,19 @@ func TestEditableObserverFollowsOOPIFFocus(t *testing.T) {
 	defer focusTicker.Stop()
 	childSession := ""
 	lastChildState := "no OOPIF session"
+	sawProgrammaticFocus := false
 	for {
 		select {
 		case childSession = <-children:
+			lastChildState = "attached " + childSession
 		case <-focusTicker.C:
 			if childSession != "" {
 				_, _ = client.Call(session, "Runtime.evaluate", map[string]any{
 					"expression": `document.querySelector('iframe').focus()`, "userGesture": true,
 				})
 				lastChildState, _ = client.EvaluateString(childSession, `(function(){
-					var e=document.getElementById('login');if(e)e.focus();
-					return JSON.stringify({url:location.href,ready:document.readyState,binding:typeof window.__surfEditableChanged,observer:!!window.__surfEditableObserver,hasInput:!!e,active:document.activeElement&&document.activeElement.id});
+					var e=document.getElementById('login');if(e){e.blur();e.focus();}
+					return JSON.stringify({url:location.href,ready:document.readyState,binding:typeof window.__surfEditableChanged,observer:!!window.__surfEditableObserver,sensor:!!window.__surfKeyboardIntentSensor,hasInput:!!e,active:document.activeElement&&document.activeElement.id});
 				})()`)
 			}
 		case got := <-reports:
@@ -148,13 +305,28 @@ func TestEditableObserverFollowsOOPIFFocus(t *testing.T) {
 				Kind string `json:"kind"`
 			}
 			if got.session != session && json.Unmarshal([]byte(got.payload), &state) == nil && state.On {
-				if state.Kind != "email" || state.Show || !browser.isActiveSession(got.session) {
+				if state.Kind != "email" || !browser.isActiveSession(got.session) {
 					t.Fatalf("OOPIF editable session=%q payload=%s", got.session, got.payload)
 				}
-				return
+				if !sawProgrammaticFocus {
+					if state.Show {
+						t.Fatalf("programmatic OOPIF focus requested keyboard: %s", got.payload)
+					}
+					sawProgrammaticFocus = true
+					focusTicker.Stop()
+					point := map[string]any{"id": 0, "x": 70, "y": 18, "radiusX": 5, "radiusY": 5, "force": .5}
+					if _, err := client.Call(got.session, "Input.dispatchTouchEvent", map[string]any{"type": "touchStart", "touchPoints": []any{point}}); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := client.Call(got.session, "Input.dispatchTouchEvent", map[string]any{"type": "touchEnd", "touchPoints": []any{}}); err != nil {
+						t.Fatal(err)
+					}
+				} else if state.Show {
+					return
+				}
 			}
 		case <-deadline:
-			t.Fatalf("editable observer did not report focused OOPIF input: %s", lastChildState)
+			t.Fatalf("editable observer did not report both OOPIF focus states: %s", lastChildState)
 		}
 	}
 }
@@ -174,10 +346,8 @@ func TestEditableObserverFollowsOpenShadowFocus(t *testing.T) {
 			bindings <- binding.Payload
 		}
 	})
-	if _, err := client.Call(session, "Runtime.addBinding", map[string]any{"name": editableBinding}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := client.Call(session, "Runtime.evaluate", map[string]any{"expression": editableObserver}); err != nil {
+	installEditableObserver(t, client, session)
+	if _, err := client.Call(session, "Emulation.setTouchEmulationEnabled", map[string]any{"enabled": true, "maxTouchPoints": 5}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := client.Call(session, "Runtime.evaluate", map[string]any{"expression": `(function(){
@@ -188,6 +358,7 @@ func TestEditableObserverFollowsOpenShadowFocus(t *testing.T) {
 		t.Fatal(err)
 	}
 	deadline := time.After(5 * time.Second)
+	sawProgrammaticFocus := false
 	for {
 		select {
 		case payload := <-bindings:
@@ -198,10 +369,24 @@ func TestEditableObserverFollowsOpenShadowFocus(t *testing.T) {
 				Rect []float64 `json:"rect"`
 			}
 			if json.Unmarshal([]byte(payload), &state) == nil && state.On {
-				if state.Kind != "password" || state.Show || len(state.Rect) != 4 {
+				if state.Kind != "password" || len(state.Rect) != 4 {
 					t.Fatalf("editable payload=%s", payload)
 				}
-				return
+				if !sawProgrammaticFocus {
+					if state.Show {
+						t.Fatalf("programmatic shadow focus requested keyboard: %s", payload)
+					}
+					sawProgrammaticFocus = true
+					point := map[string]any{"id": 0, "x": 100, "y": 75, "radiusX": 5, "radiusY": 5, "force": .5}
+					if _, err := client.Call(session, "Input.dispatchTouchEvent", map[string]any{"type": "touchStart", "touchPoints": []any{point}}); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := client.Call(session, "Input.dispatchTouchEvent", map[string]any{"type": "touchEnd", "touchPoints": []any{}}); err != nil {
+						t.Fatal(err)
+					}
+				} else if state.Show {
+					return
+				}
 			}
 		case <-deadline:
 			t.Fatal("editable observer did not report focused shadow input")
@@ -209,7 +394,7 @@ func TestEditableObserverFollowsOpenShadowFocus(t *testing.T) {
 	}
 }
 
-func TestEditableObserverRequiresTrustedTouchOnFocusedField(t *testing.T) {
+func TestEditableObserverScopesKeyboardIntentToTrustedActivation(t *testing.T) {
 	client, session := launchInputTestBrowser(t)
 	bindings := make(chan string, 32)
 	client.OnEvent(func(event cdp.Event) {
@@ -224,21 +409,31 @@ func TestEditableObserverRequiresTrustedTouchOnFocusedField(t *testing.T) {
 			bindings <- binding.Payload
 		}
 	})
-	if _, err := client.Call(session, "Runtime.addBinding", map[string]any{"name": editableBinding}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := client.Call(session, "Runtime.evaluate", map[string]any{"expression": editableObserver}); err != nil {
-		t.Fatal(err)
-	}
+	intentEvent := installEditableObserver(t, client, session)
 	if _, err := client.Call(session, "Emulation.setTouchEmulationEnabled", map[string]any{"enabled": true, "maxTouchPoints": 5}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := client.Call(session, "Runtime.evaluate", map[string]any{"expression": `(function(){
-		document.body.innerHTML='<button id="start" style="position:absolute;left:40px;top:40px;width:120px;height:40px">Start</button><input id="field" style="position:absolute;left:40px;top:110px;width:120px;height:40px">';
+		document.body.innerHTML='<button id="promise" style="position:absolute;left:40px;top:20px;width:120px;height:35px">Promise</button><button id="timer" style="position:absolute;left:40px;top:65px;width:120px;height:35px">Timer</button><button id="frame" style="position:absolute;left:40px;top:110px;width:120px;height:35px">Frame</button><button id="sync" style="position:absolute;left:40px;top:155px;width:120px;height:35px">Sync</button><button id="window-sync" style="position:absolute;left:200px;top:155px;width:120px;height:35px">Window sync</button><div style="position:absolute;left:40px;top:210px;width:120px;height:40px"><input id="field" style="box-sizing:border-box;width:100%;height:100%"><span id="overlay" style="position:absolute;inset:0"></span></div><label for="label-field" style="position:absolute;left:40px;top:270px;width:120px;height:35px">Label</label><input id="label-field" style="position:absolute;left:40px;top:315px;width:120px;height:40px"><input id="direct-field" style="position:absolute;left:40px;top:375px;width:120px;height:40px">';
 		var field=document.getElementById('field');
-		document.getElementById('start').addEventListener('touchstart',function(){field.focus()});
+		document.getElementById('promise').addEventListener('click',function(){Promise.resolve().then(function(){field.focus()})});
+		document.getElementById('timer').addEventListener('click',function(){setTimeout(function(){field.focus()},0)});
+		document.getElementById('frame').addEventListener('click',function(){requestAnimationFrame(function(){field.focus()})});
+		document.getElementById('sync').addEventListener('click',function(){field.focus()});
+		window.addEventListener('click',function(event){if(event.target.id==='window-sync')field.focus()},true);
+		document.getElementById('overlay').addEventListener('click',function(){field.focus()});
 	})()`}); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := client.Call(session, "Runtime.evaluate", map[string]any{"expression": fmt.Sprintf(`window.__intentCount=0;document.addEventListener(%q,function(){window.__intentCount++})`, intentEvent)}); err != nil {
+		t.Fatal(err)
+	}
+	exposure, err := client.EvaluateString(session, `typeof window.__surfEditableChanged+','+typeof window.__surfEditableObserver+','+typeof window.__surfKeyboardIntentSensor`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exposure != "undefined,undefined,boolean" {
+		t.Fatalf("editable observer escaped isolated world: %s", exposure)
 	}
 
 	type editableState struct {
@@ -256,7 +451,8 @@ func TestEditableObserverRequiresTrustedTouchOnFocusedField(t *testing.T) {
 					return state
 				}
 			case <-deadline:
-				t.Fatalf("timed out waiting for %s", description)
+				diagnostic, _ := client.EvaluateString(session, `JSON.stringify({active:document.activeElement&&document.activeElement.id,intents:window.__intentCount})`)
+				t.Fatalf("timed out waiting for %s: %s", description, diagnostic)
 			}
 		}
 	}
@@ -282,16 +478,51 @@ func TestEditableObserverRequiresTrustedTouchOnFocusedField(t *testing.T) {
 	setFocus(`document.getElementById('field').blur()`)
 	waitFor("blur", func(state editableState) bool { return !state.On })
 
-	// A trusted touch may cause site script to focus a field, but touching a
-	// different element must not authorize the keyboard for that field.
-	touch(100, 60)
-	waitFor("button-triggered focus without keyboard intent", func(state editableState) bool { return state.On && !state.Show })
+	// User activation does not leak into promise, timer, or animation-frame
+	// work scheduled by the page.
+	touch(100, 37)
+	waitFor("promise focus without keyboard intent", func(state editableState) bool { return state.On && !state.Show })
 	setFocus(`document.getElementById('field').blur()`)
 	waitFor("second blur", func(state editableState) bool { return !state.On })
+	touch(100, 82)
+	waitFor("timer focus without keyboard intent", func(state editableState) bool { return state.On && !state.Show })
+	setFocus(`document.getElementById('field').blur()`)
+	waitFor("third blur", func(state editableState) bool { return !state.On })
+	touch(100, 127)
+	waitFor("animation-frame focus without keyboard intent", func(state editableState) bool { return state.On && !state.Show })
+	setFocus(`document.getElementById('field').blur()`)
+	waitFor("fourth blur", func(state editableState) bool { return !state.On })
 
-	// A physical touch on the field itself carries explicit keyboard intent.
-	touch(100, 130)
-	waitFor("trusted field touch with keyboard intent", func(state editableState) bool { return state.On && state.Show })
+	// A website may intentionally focus a field synchronously from another
+	// control. That is part of the user's activation and should open the keyboard.
+	touch(100, 172)
+	waitFor("synchronous website focus with keyboard intent", func(state editableState) bool { return state.On && state.Show })
+	setFocus(`document.getElementById('field').blur()`)
+	waitFor("fifth blur", func(state editableState) bool { return !state.On })
+	touch(260, 172)
+	waitFor("window-capture focus with keyboard intent", func(state editableState) bool { return state.On && state.Show })
+	setFocus(`document.getElementById('field').blur()`)
+	waitFor("sixth blur", func(state editableState) bool { return !state.On })
+
+	// Visible controls may route activation through overlays or wrappers.
+	touch(100, 230)
+	waitFor("synchronous overlay focus with keyboard intent", func(state editableState) bool { return state.On && state.Show })
+	setFocus(`document.getElementById('field').blur()`)
+	waitFor("seventh blur", func(state editableState) bool { return !state.On })
+
+	// Standard labels are part of the field's activation area even when their
+	// own rectangle does not overlap the input.
+	touch(100, 287)
+	waitFor("trusted label touch", func(state editableState) bool { return state.On && state.Show })
+	setFocus(`document.getElementById('label-field').blur()`)
+	waitFor("eighth blur", func(state editableState) bool { return !state.On })
+
+	// Direct fields work, and tapping one again can reopen a keyboard the user
+	// dismissed without requiring a focus transition.
+	touch(100, 395)
+	waitFor("trusted direct field touch", func(state editableState) bool { return state.On && state.Show })
+	touch(100, 395)
+	waitFor("trusted touch on already-focused field", func(state editableState) bool { return state.On && state.Show })
 }
 
 func TestChromiumTouchSequenceSupportsPartialLiftAndPinch(t *testing.T) {

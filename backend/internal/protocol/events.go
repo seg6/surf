@@ -150,6 +150,21 @@ type EditableEvent struct {
 	Rect         []float64 `json:"rect,omitempty"`
 }
 
+type SelectOption struct {
+	Label    string `json:"label"`
+	Disabled bool   `json:"disabled,omitempty"`
+	Selected bool   `json:"selected,omitempty"`
+}
+
+type SelectEvent struct {
+	Type      string         `json:"t"`
+	RequestID string         `json:"id"`
+	Title     string         `json:"title,omitempty"`
+	Multiple  bool           `json:"multiple,omitempty"`
+	Options   []SelectOption `json:"options"`
+	Rect      []float64      `json:"rect,omitempty"`
+}
+
 type MediaStateEvent struct {
 	Type        string  `json:"t"`
 	Available   bool    `json:"available"`
@@ -202,6 +217,7 @@ func (FileChooserEvent) isClientEvent()      {}
 func (SecurityEvent) isClientEvent()         {}
 func (ReaderEvent) isClientEvent()           {}
 func (EditableEvent) isClientEvent()         {}
+func (SelectEvent) isClientEvent()           {}
 func (MediaStateEvent) isClientEvent()       {}
 func (PageFrameEvent) isClientEvent()        {}
 func (ClipboardEvent) isClientEvent()        {}

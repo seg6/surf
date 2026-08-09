@@ -142,6 +142,7 @@ type Controller struct {
 	dialogSessions map[string]bool
 	chooserSession string
 	chooserNode    int64
+	selectRequest  selectRequest
 	dlLastPush     map[string]time.Time // download guid -> last dlprogress
 }
 
@@ -457,8 +458,6 @@ func (b *Controller) onEvent(ev cdp.Event) {
 		b.onEditableTargetAttached(ev)
 	case "Target.detachedFromTarget":
 		b.onEditableTargetDetached(ev)
-	case "Runtime.executionContextCreated":
-		b.onEditableExecutionContext(ev)
 	case "Target.targetCreated":
 		var p struct {
 			TargetInfo targetInfo `json:"targetInfo"`
@@ -542,5 +541,6 @@ func (b *Controller) onEvent(ev cdp.Event) {
 	case "Runtime.bindingCalled":
 		b.onFullscreenBinding(ev)
 		b.onEditableBinding(ev)
+		b.onSelectBinding(ev)
 	}
 }

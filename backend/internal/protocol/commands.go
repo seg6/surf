@@ -112,6 +112,12 @@ type DialogReplyCommand struct {
 	Accept bool   `json:"accept"`
 	Text   string `json:"text"`
 }
+type SelectReplyCommand struct {
+	CommandBase
+	RequestID string `json:"id"`
+	Cancel    bool   `json:"cancel,omitempty"`
+	Indices   []int  `json:"indices,omitempty"`
+}
 type MediaStatsCommand struct {
 	CommandBase
 	PresentedFPS float64 `json:"fps"`
@@ -179,6 +185,8 @@ func DecodeCommand(data []byte) (Command, error) {
 		dst = &ClearCommand{}
 	case "dialogreply":
 		dst = &DialogReplyCommand{}
+	case "selectreply":
+		dst = &SelectReplyCommand{}
 	case "clock":
 		dst = &ClockCommand{}
 	case "media-stats":

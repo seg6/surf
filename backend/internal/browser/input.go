@@ -121,6 +121,9 @@ func (b *Controller) handleCommand(c *transport.Client, command protocol.Command
 	case *protocol.DialogReplyCommand:
 		b.handleDialogReply(m)
 		return
+	case *protocol.SelectReplyCommand:
+		b.handleSelectReply(m)
+		return
 	case *protocol.MediaStatsCommand:
 		b.handleMediaStats(m)
 		return
@@ -339,7 +342,7 @@ func (b *Controller) queryPageMedia(c *transport.Client, session string) {
 
 func renderCommand(t string) bool {
 	switch t {
-	case "touch", "key", "paste", "compose", "nav", "reload", "back", "fwd":
+	case "touch", "key", "paste", "compose", "selectreply", "nav", "reload", "back", "fwd":
 		return true
 	}
 	return false

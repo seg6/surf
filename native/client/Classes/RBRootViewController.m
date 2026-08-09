@@ -23,6 +23,7 @@
 #import "RBPairingClient.h"
 #import "RBPhoneToolbar.h"
 #import "RBSecureHTTPClient.h"
+#import "RBSelectController.h"
 #import "RBServerStore.h"
 #import "RBServersController.h"
 #import "RBSession.h"
@@ -85,8 +86,8 @@ static CGFloat RBEvenExtent(CGFloat value) {
                                     RBMediaControllerDelegate,
                                     RBInteractionTrackerDelegate, RBClientUpdaterDelegate,
                                     UIDocumentInteractionControllerDelegate, UIPopoverControllerDelegate,
-                                     UIAlertViewDelegate,
-                                     RBQRScannerDelegate,
+                                    UIAlertViewDelegate, RBSelectControllerDelegate,
+                                    RBQRScannerDelegate,
                                     UIImagePickerControllerDelegate, UINavigationControllerDelegate,
                                     MFMailComposeViewControllerDelegate>
 // Views
@@ -119,6 +120,9 @@ static CGFloat RBEvenExtent(CGFloat value) {
 @property(nonatomic, copy) NSString *pendingActivityAction;
 @property(nonatomic, strong) UIDocumentInteractionController *docController;
 @property(nonatomic, strong) RBMediaController *pageMediaController;
+@property(nonatomic, strong) RBSelectController *selectController;
+@property(nonatomic, strong) UINavigationController *selectNavigationController;
+@property(nonatomic, strong) UIPopoverController *selectPopover;
 // Connect flow
 @property(nonatomic, strong) NSDictionary *currentServer;
 @property(nonatomic, assign) NSUInteger verificationGeneration;
@@ -189,6 +193,9 @@ static CGFloat RBEvenExtent(CGFloat value) {
 - (void)presentLibraryFromButton:(UIButton *)button;
 - (void)presentPageSwitcher;
 - (void)sendKeyName:(NSString *)name keyCode:(NSInteger)keyCode;
+- (CGSize)constrainedSelectPopoverSize:(RBSelectController *)controller;
+- (void)presentSelectMessage:(NSDictionary *)message;
+- (void)dismissSelectControllerSendingCancel:(BOOL)sendCancel;
 @end
 
 @implementation RBRootViewController
@@ -478,6 +485,10 @@ static CGFloat RBEvenExtent(CGFloat value) {
     [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(sendCurrentViewportSizeForcedAfterTransition) object:nil];
     [self performSelector:@selector(sendCurrentViewportSizeForcedAfterTransition)
                withObject:nil afterDelay:0.10];
+    if (self.selectPopover.popoverVisible && self.selectController) {
+        [self.selectPopover setPopoverContentSize:[self constrainedSelectPopoverSize:self.selectController]
+                                         animated:YES];
+    }
 }
 
 - (void)scheduleViewportUpdate {
@@ -837,6 +848,7 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
             self.audioRequested = NO;
             break;
         case RBSessionStateConnecting:
+            [self dismissSelectControllerSendingCancel:NO];
             self.connectionPill.hidden = YES;
             [self.browserStateView showState:RBBrowserStateConnecting detail:nil];
             [self leaveVideoMode];
@@ -844,12 +856,14 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
             self.audioRequested = NO;
             break;
         case RBSessionStateRetrying:
+            [self dismissSelectControllerSendingCancel:NO];
             self.connectionPill.hidden = YES;
             [self.browserStateView showState:RBBrowserStateReconnecting detail:nil];
             [self leaveVideoMode];
             self.audioRequested = NO;
             break;
         case RBSessionStateIdle:
+            [self dismissSelectControllerSendingCancel:NO];
             self.connectionPill.hidden = YES;
             [self.browserStateView showState:RBBrowserStateDisconnected detail:nil];
             [self leaveVideoMode];
@@ -996,6 +1010,8 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
             self.editableHasRect = NO;
             [self hidePageKeyboard];
         }
+    } else if ([t isEqualToString:@"select"]) {
+        [self presentSelectMessage:message];
     } else if ([t isEqualToString:@"video-config"]) {
         [self handleVideoConfig:message];
     } else if ([t isEqualToString:@"fullscreen"]) {
@@ -1813,6 +1829,16 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
             [self postUploadData:nil filename:nil];
         }
     }
+    if (popoverController == self.selectPopover) {
+        RBSelectController *controller = self.selectController;
+        self.selectPopover = nil;
+        self.selectNavigationController = nil;
+        self.selectController = nil;
+        if (controller) {
+            [self.session sendMessage:@{@"t": @"selectreply", @"id": controller.requestID ?: @"",
+                                        @"cancel": @YES}];
+        }
+    }
 }
 
 // ---------------------------------------------------------------- library
@@ -2127,6 +2153,92 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
 - (void)sendKeyName:(NSString *)name keyCode:(NSInteger)keyCode {
     [self.session sendMessage:@{@"t": @"key", @"down": @YES, @"key": name, @"code": name, @"keyCode": [NSNumber numberWithInteger:keyCode]}];
     [self.session sendMessage:@{@"t": @"key", @"down": @NO, @"key": name, @"code": name, @"keyCode": [NSNumber numberWithInteger:keyCode]}];
+}
+
+// ----------------------------------------------------- native page selects
+
+- (CGSize)constrainedSelectPopoverSize:(RBSelectController *)controller {
+    CGSize preferred = [controller preferredPopoverSize];
+    CGSize available = self.view.bounds.size;
+    CGFloat width = MIN(preferred.width, MAX(220.0, available.width - 24.0));
+    CGFloat height = MIN(preferred.height, MAX(132.0, available.height - 48.0));
+    return CGSizeMake(width, height);
+}
+
+- (CGRect)selectAnchorForRectValue:(id)rectValue {
+    NSArray *values = [rectValue isKindOfClass:[NSArray class]] ? rectValue : nil;
+    CGRect bounds = self.streamView.bounds;
+    CGRect local = CGRectMake(CGRectGetMidX(bounds), CGRectGetMidY(bounds), 2.0, 2.0);
+    if ([values count] == 4) {
+        CGFloat x = [[values objectAtIndex:0] floatValue] * bounds.size.width;
+        CGFloat y = [[values objectAtIndex:1] floatValue] * bounds.size.height;
+        CGFloat width = [[values objectAtIndex:2] floatValue] * bounds.size.width;
+        CGFloat height = [[values objectAtIndex:3] floatValue] * bounds.size.height;
+        CGRect candidate = CGRectIntersection(bounds, CGRectMake(x, y, width, height));
+        if (!CGRectIsNull(candidate) && candidate.size.width > 0.0 && candidate.size.height > 0.0) local = candidate;
+    }
+    return [self.streamView convertRect:local toView:self.view];
+}
+
+- (void)presentSelectMessage:(NSDictionary *)message {
+    NSString *requestID = [message objectForKey:@"id"];
+    NSArray *options = [[message objectForKey:@"options"] isKindOfClass:[NSArray class]]
+        ? [message objectForKey:@"options"] : nil;
+    if (![requestID isKindOfClass:[NSString class]] || ![requestID length] || ![options count]) return;
+
+    // A newer request supersedes the old server-side token. Do not answer the
+    // stale one while replacing its UI.
+    [self dismissSelectControllerSendingCancel:NO];
+    [self hidePageKeyboard];
+    RBSelectController *controller = [[RBSelectController alloc]
+        initWithRequestID:requestID title:[message objectForKey:@"title"] options:options
+                 multiple:[[message objectForKey:@"multiple"] boolValue]];
+    controller.delegate = self;
+    UINavigationController *navigation = [[UINavigationController alloc] initWithRootViewController:controller];
+    self.selectController = controller;
+    self.selectNavigationController = navigation;
+
+    if (RBIsPad()) {
+        CGSize size = [self constrainedSelectPopoverSize:controller];
+        navigation.contentSizeForViewInPopover = size;
+        UIPopoverController *popover = [[UIPopoverController alloc] initWithContentViewController:navigation];
+        popover.delegate = self;
+        popover.popoverContentSize = size;
+        self.selectPopover = popover;
+        CGRect anchor = [self selectAnchorForRectValue:[message objectForKey:@"rect"]];
+        [popover presentPopoverFromRect:anchor inView:self.view
+               permittedArrowDirections:UIPopoverArrowDirectionAny animated:YES];
+    } else {
+        navigation.modalPresentationStyle = UIModalPresentationFullScreen;
+        [self presentViewController:navigation animated:YES completion:nil];
+    }
+}
+
+- (void)dismissSelectControllerSendingCancel:(BOOL)sendCancel {
+    RBSelectController *controller = self.selectController;
+    UIPopoverController *popover = self.selectPopover;
+    UINavigationController *navigation = self.selectNavigationController;
+    self.selectController = nil;
+    self.selectPopover = nil;
+    self.selectNavigationController = nil;
+    if (popover.popoverVisible) [popover dismissPopoverAnimated:YES];
+    if (navigation && !RBIsPad()) [self dismissViewControllerAnimated:YES completion:nil];
+    if (sendCancel && controller) {
+        [self.session sendMessage:@{@"t": @"selectreply", @"id": controller.requestID ?: @"",
+                                    @"cancel": @YES}];
+    }
+}
+
+- (void)selectController:(RBSelectController *)controller choseIndices:(NSArray *)indices {
+    if (controller != self.selectController) return;
+    NSString *requestID = [controller.requestID copy];
+    [self dismissSelectControllerSendingCancel:NO];
+    [self.session sendMessage:@{@"t": @"selectreply", @"id": requestID ?: @"",
+                                @"indices": indices ?: @[]}];
+}
+
+- (void)selectControllerDidCancel:(RBSelectController *)controller {
+    if (controller == self.selectController) [self dismissSelectControllerSendingCancel:YES];
 }
 
 // ---------------------------------------------------------- JS dialogs (M2.1)

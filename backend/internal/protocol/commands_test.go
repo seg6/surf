@@ -48,6 +48,7 @@ func TestDecodeEveryNativeCommand(t *testing.T) {
 		`{"t":"touch","phase":"cancel","seq":4,"surface":1,"ts":4,"points":[]}`,
 		`{"t":"compose","phase":"update","text":"kan","start":3,"end":3}`,
 		`{"t":"video-retry"}`, `{"t":"stop"}`, `{"t":"dialogreply","accept":true,"text":""}`,
+		`{"t":"selectreply","id":"request","indices":[2]}`,
 		`{"t":"media-query"}`, `{"t":"media-playpause"}`, `{"t":"media-mute"}`,
 		`{"t":"media-volume","value":0.5}`, `{"t":"mobile","on":true}`,
 		`{"t":"fullscreen","on":true}`,
