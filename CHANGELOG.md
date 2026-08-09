@@ -9,17 +9,20 @@ This file records the user-visible changes in every Surf release.
   restart, updates, parent loss, and Chromium shutdown converge on one graceful
   server lifecycle with verified process-tree cleanup on Linux, Windows, and
   macOS.
-- Persisted bounded server and desktop logs on every host, streamed each native
-  client log record to the server as it is written, and added a source-selected
-  live Settings viewer plus `surf logs` without requiring SSH into the iPad.
+- Persisted server, desktop, and native logs as one bounded NDJSON schema,
+  streamed parsed records into a source-selected live Settings viewer, added
+  per-source clearing (including durable offline-device clears), and kept
+  `surf logs` useful without requiring SSH into the iPad.
 - Added an owner-controlled, two-way clipboard bridge for Windows, macOS, Linux,
   and connected iOS clients, with a Settings switch and `surf clipboard sync`
   controls. Clipboard text remains memory-only and is never logged.
 - Added one-off clipboard delivery from Settings or secret-safe
   `surf clipboard set` input. Connected devices acknowledge the delivery and
   conditionally clear temporary text after two minutes.
-- Bumped the exact native protocol to `20260809-1` for remote clipboard and log
-  synchronization messages.
+- Moved page paste out of the More menu and onto a native control above the iOS
+  keyboard whenever Chromium reports a focused editable element.
+- Bumped the exact native protocol to `20260809-2` for remote clipboard, live
+  structured logs, and acknowledged native-log clearing.
 
 ## 0.12.5 - 2026-08-08
 
