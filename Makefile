@@ -4,7 +4,9 @@ VERSION := $(shell tr -d '[:space:]' < VERSION)
 PROTOCOL_VERSION := $(shell tr -d '[:space:]' < PROTOCOL_VERSION)
 SURF_GOOS ?= $(shell go env GOOS)
 SURF_GOARCH ?= $(shell go env GOARCH)
-CLIENT_DEB ?=
+# Local rebuilds retain client updating whenever a package for the exact Surf
+# version exists. Release builds may still select an explicit verified package.
+CLIENT_DEB ?= $(shell ls -1t native/client/packages/space.seg6.surf_$(VERSION)-*_iphoneos-arm.deb 2>/dev/null | sed -n '1p')
 MAKENSIS ?= makensis
 SURF_DIST := surf-$(VERSION)-$(SURF_GOOS)-$(SURF_GOARCH)
 SURF_CGO_ENV := CGO_ENABLED=0
