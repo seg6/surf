@@ -376,7 +376,6 @@ func (b *Controller) applyView(t *Tab) {
 	// window must follow the client too; otherwise Chromium scales a stale
 	// surface into the requested encoder dimensions and text becomes soft.
 	b.resizeCaptureSurface(t.TargetID, pixelW, pixelH)
-	b.setTouchMode(s)
 	metrics := map[string]any{
 		"width": w, "height": h, "deviceScaleFactor": 1, "mobile": mobile,
 		"screenWidth": pixelW, "screenHeight": pixelH,
@@ -385,4 +384,9 @@ func (b *Controller) applyView(t *Tab) {
 		},
 	}
 	_, _ = b.cdp.Call(s, "Emulation.setDeviceMetricsOverride", metrics)
+	// Device metrics can replace Chromium's emulation configuration when the
+	// mobile bit changes. Touch must be the final override; otherwise the page
+	// still renders as mobile but Input.dispatchTouchEvent produces no DOM
+	// pointer/touch events until a later navigation happens to restore it.
+	b.setTouchMode(s)
 }

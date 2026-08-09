@@ -602,6 +602,7 @@ func TestChromiumTouchSequenceSupportsPartialLiftAndPinch(t *testing.T) {
 
 func TestChromiumTouchSequenceCommitsFling(t *testing.T) {
 	client, session := launchInputTestBrowser(t)
+	installSelectObserver(t, client, session)
 	for method, params := range map[string]map[string]any{
 		"Emulation.setDeviceMetricsOverride": {
 			"width": 400, "height": 600, "deviceScaleFactor": 1, "mobile": true,
