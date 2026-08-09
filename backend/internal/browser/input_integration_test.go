@@ -144,10 +144,11 @@ func TestEditableObserverFollowsOOPIFFocus(t *testing.T) {
 		case got := <-reports:
 			var state struct {
 				On   bool   `json:"on"`
+				Show bool   `json:"show"`
 				Kind string `json:"kind"`
 			}
 			if got.session != session && json.Unmarshal([]byte(got.payload), &state) == nil && state.On {
-				if state.Kind != "email" || !browser.isActiveSession(got.session) {
+				if state.Kind != "email" || state.Show || !browser.isActiveSession(got.session) {
 					t.Fatalf("OOPIF editable session=%q payload=%s", got.session, got.payload)
 				}
 				return
@@ -192,11 +193,12 @@ func TestEditableObserverFollowsOpenShadowFocus(t *testing.T) {
 		case payload := <-bindings:
 			var state struct {
 				On   bool      `json:"on"`
+				Show bool      `json:"show"`
 				Kind string    `json:"kind"`
 				Rect []float64 `json:"rect"`
 			}
 			if json.Unmarshal([]byte(payload), &state) == nil && state.On {
-				if state.Kind != "password" || len(state.Rect) != 4 {
+				if state.Kind != "password" || state.Show || len(state.Rect) != 4 {
 					t.Fatalf("editable payload=%s", payload)
 				}
 				return
@@ -205,6 +207,91 @@ func TestEditableObserverFollowsOpenShadowFocus(t *testing.T) {
 			t.Fatal("editable observer did not report focused shadow input")
 		}
 	}
+}
+
+func TestEditableObserverRequiresTrustedTouchOnFocusedField(t *testing.T) {
+	client, session := launchInputTestBrowser(t)
+	bindings := make(chan string, 32)
+	client.OnEvent(func(event cdp.Event) {
+		if event.SessionID != session || event.Method != "Runtime.bindingCalled" {
+			return
+		}
+		var binding struct {
+			Name    string `json:"name"`
+			Payload string `json:"payload"`
+		}
+		if json.Unmarshal(event.Params, &binding) == nil && binding.Name == editableBinding {
+			bindings <- binding.Payload
+		}
+	})
+	if _, err := client.Call(session, "Runtime.addBinding", map[string]any{"name": editableBinding}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Call(session, "Runtime.evaluate", map[string]any{"expression": editableObserver}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Call(session, "Emulation.setTouchEmulationEnabled", map[string]any{"enabled": true, "maxTouchPoints": 5}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Call(session, "Runtime.evaluate", map[string]any{"expression": `(function(){
+		document.body.innerHTML='<button id="start" style="position:absolute;left:40px;top:40px;width:120px;height:40px">Start</button><input id="field" style="position:absolute;left:40px;top:110px;width:120px;height:40px">';
+		var field=document.getElementById('field');
+		document.getElementById('start').addEventListener('touchstart',function(){field.focus()});
+	})()`}); err != nil {
+		t.Fatal(err)
+	}
+
+	type editableState struct {
+		On   bool `json:"on"`
+		Show bool `json:"show"`
+	}
+	waitFor := func(description string, match func(editableState) bool) editableState {
+		t.Helper()
+		deadline := time.After(5 * time.Second)
+		for {
+			select {
+			case payload := <-bindings:
+				var state editableState
+				if json.Unmarshal([]byte(payload), &state) == nil && match(state) {
+					return state
+				}
+			case <-deadline:
+				t.Fatalf("timed out waiting for %s", description)
+			}
+		}
+	}
+	setFocus := func(expression string) {
+		t.Helper()
+		if _, err := client.Call(session, "Runtime.evaluate", map[string]any{"expression": expression}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	touch := func(x, y float64) {
+		t.Helper()
+		point := map[string]any{"id": 0, "x": x, "y": y, "radiusX": 5, "radiusY": 5, "force": .5}
+		if _, err := client.Call(session, "Input.dispatchTouchEvent", map[string]any{"type": "touchStart", "touchPoints": []any{point}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := client.Call(session, "Input.dispatchTouchEvent", map[string]any{"type": "touchEnd", "touchPoints": []any{}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	setFocus(`document.getElementById('field').focus()`)
+	waitFor("programmatic focus without keyboard intent", func(state editableState) bool { return state.On && !state.Show })
+	setFocus(`document.getElementById('field').blur()`)
+	waitFor("blur", func(state editableState) bool { return !state.On })
+
+	// A trusted touch may cause site script to focus a field, but touching a
+	// different element must not authorize the keyboard for that field.
+	touch(100, 60)
+	waitFor("button-triggered focus without keyboard intent", func(state editableState) bool { return state.On && !state.Show })
+	setFocus(`document.getElementById('field').blur()`)
+	waitFor("second blur", func(state editableState) bool { return !state.On })
+
+	// A physical touch on the field itself carries explicit keyboard intent.
+	touch(100, 130)
+	waitFor("trusted field touch with keyboard intent", func(state editableState) bool { return state.On && state.Show })
 }
 
 func TestChromiumTouchSequenceSupportsPartialLiftAndPinch(t *testing.T) {

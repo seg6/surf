@@ -10,38 +10,66 @@ import (
 
 const editableBinding = "__surfEditableChanged"
 
-// editableObserver follows actual focus instead of guessing after a touch.
-// It walks open shadow roots and is installed in every same-target frame.
+// editableObserver follows actual focus while keeping keyboard intent separate.
+// Sites may focus fields themselves, but only a trusted physical touch on the
+// exact editable authorizes the native client to raise its keyboard. It walks
+// open shadow roots and is installed in every same-target frame.
 const editableObserver = `(function(){
   if(window.__surfEditableObserver)return;
   window.__surfEditableObserver=true;
+  var armed=null,armUntil=0;
   function focused(){
     var e=document.activeElement;
     while(e&&e.shadowRoot&&e.shadowRoot.activeElement)e=e.shadowRoot.activeElement;
     return e;
   }
-  function state(){
-    var e=focused(),on=false,kind='text';
-    if(e&&!e.disabled&&!e.readOnly){
-      var t=(e.tagName||'').toUpperCase();
-      if(t==='TEXTAREA'){on=true;kind='textarea';}
-      else if(e.isContentEditable){on=true;kind='text';}
-      else if(t==='INPUT'){
-        var ty=(e.type||'text').toLowerCase();
-        var skip={button:1,checkbox:1,radio:1,submit:1,reset:1,file:1,image:1,range:1,color:1,hidden:1,date:1,time:1};
-        if(!skip[ty]){
-          on=true;
-          kind=({password:'password',email:'email',number:'number',tel:'tel',url:'url',search:'search'})[ty]||'text';
-        }
-      }
+  function editable(e){
+    if(!e||e.disabled||e.readOnly)return null;
+    var t=(e.tagName||'').toUpperCase();
+    if(t==='TEXTAREA')return {element:e,kind:'textarea'};
+    if(e.isContentEditable)return {element:e,kind:'text'};
+    if(t==='INPUT'){
+      var ty=(e.type||'text').toLowerCase();
+      var skip={button:1,checkbox:1,radio:1,submit:1,reset:1,file:1,image:1,range:1,color:1,hidden:1,date:1,time:1};
+      if(!skip[ty])return {element:e,kind:({password:'password',email:'email',number:'number',tel:'tel',url:'url',search:'search'})[ty]||'text'};
     }
-    if(!on)return {on:false};
-    var r=e.getBoundingClientRect(),v=window.visualViewport;
+    return null;
+  }
+  function touchedEditable(event){
+    if(!event.isTrusted)return null;
+    var path=event.composedPath?event.composedPath():[event.target];
+    for(var i=0;i<path.length;i++){
+      var e=path[i];
+      if(e&&(e.tagName||'').toUpperCase()==='LABEL'&&e.control){
+        var control=editable(e.control);if(control)return control.element;
+      }
+      var candidate=editable(e);if(candidate)return candidate.element;
+    }
+    return null;
+  }
+  function matches(a,b){
+    if(a===b)return true;
+    return !!(a&&b&&((a.isContentEditable&&a.contains&&a.contains(b))||(b.isContentEditable&&b.contains&&b.contains(a))));
+  }
+  function state(){
+    var item=editable(focused());
+    if(!item)return {on:false};
+    var show=!!(armed&&performance.now()<=armUntil&&matches(item.element,armed));
+    if(show){armed=null;armUntil=0;}
+    else if(armed&&performance.now()>armUntil){armed=null;armUntil=0;}
+    var r=item.element.getBoundingClientRect(),v=window.visualViewport;
     var w=(v&&v.width)||window.innerWidth||1,h=(v&&v.height)||window.innerHeight||1;
-    return {on:true,kind:kind,rect:[r.left/w,r.top/h,r.width/w,r.height/h]};
+    return {on:true,show:show,kind:item.kind,rect:[r.left/w,r.top/h,r.width/w,r.height/h]};
   }
   function report(){try{window.__surfEditableChanged(JSON.stringify(state()));}catch(_){}}
   function soon(){setTimeout(report,0);}
+  function arm(event){
+    var e=touchedEditable(event);
+    if(e){armed=e;armUntil=performance.now()+1000;soon();}
+    else {armed=null;armUntil=0;}
+  }
+  document.addEventListener('pointerdown',arm,true);
+  document.addEventListener('touchstart',arm,true);
   document.addEventListener('focusin',soon,true);
   document.addEventListener('focusout',soon,true);
   window.addEventListener('pagehide',function(){try{window.__surfEditableChanged('{"on":false}');}catch(_){}},false);
@@ -172,6 +200,7 @@ func (b *Controller) onEditableBinding(ev cdp.Event) {
 	}
 	var state struct {
 		On   bool      `json:"on"`
+		Show bool      `json:"show"`
 		Kind string    `json:"kind"`
 		Rect []float64 `json:"rect"`
 	}
@@ -180,6 +209,7 @@ func (b *Controller) onEditableBinding(ev cdp.Event) {
 	}
 	event := protocol.EditableEvent{Type: "editable", On: state.On}
 	if state.On {
+		event.ShowKeyboard = state.Show
 		event.Kind = state.Kind
 		if len(state.Rect) == 4 {
 			event.Rect = state.Rect

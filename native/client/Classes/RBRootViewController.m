@@ -989,8 +989,9 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
         if (self.loading) [self hideErrorCard];
     } else if ([t isEqualToString:@"editable"]) {
         if ([[message objectForKey:@"on"] boolValue]) {
+            BOOL keyboardWasOpen = [self.hiddenInput isFirstResponder];
             [self configureKeyboardForKind:[message objectForKey:@"kind"] rect:[message objectForKey:@"rect"]];
-            [self showKeyboard];
+            if (keyboardWasOpen || [[message objectForKey:@"show"] boolValue]) [self showKeyboard];
         } else {
             self.editableHasRect = NO;
             [self hidePageKeyboard];

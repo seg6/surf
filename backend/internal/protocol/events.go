@@ -143,10 +143,11 @@ type ReaderEvent struct {
 }
 
 type EditableEvent struct {
-	Type string    `json:"t"`
-	On   bool      `json:"on"`
-	Kind string    `json:"kind,omitempty"`
-	Rect []float64 `json:"rect,omitempty"`
+	Type         string    `json:"t"`
+	On           bool      `json:"on"`
+	ShowKeyboard bool      `json:"show,omitempty"`
+	Kind         string    `json:"kind,omitempty"`
+	Rect         []float64 `json:"rect,omitempty"`
 }
 
 type MediaStateEvent struct {
