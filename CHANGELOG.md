@@ -2,7 +2,7 @@
 
 This file records the user-visible changes in every Surf release.
 
-## Unreleased
+## 0.13.0 - 2026-08-09
 
 - Replaced the public `surf daemon` command with `surf serve`, added optional
   first-run pairing through `surf serve --pair`, and made desktop takeover,
