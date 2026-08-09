@@ -45,6 +45,7 @@ type Hub struct {
 	frameSeq uint32
 	handler  Handler
 	aux      func(*Client, protocol.Command) bool
+	connect  func(*Client)
 	upgrader websocket.Upgrader
 
 	controlFailures atomic.Uint64
@@ -81,6 +82,12 @@ func (h *Hub) SetHandler(hd Handler) { h.handler = hd }
 func (h *Hub) SetAuxHandler(handler func(*Client, protocol.Command) bool) {
 	h.mu.Lock()
 	h.aux = handler
+	h.mu.Unlock()
+}
+
+func (h *Hub) SetConnectHandler(handler func(*Client)) {
+	h.mu.Lock()
+	h.connect = handler
 	h.mu.Unlock()
 }
 
@@ -227,6 +234,12 @@ func (h *Hub) ServeHTTPForDevice(w http.ResponseWriter, r *http.Request, deviceI
 
 	if h.handler != nil {
 		h.handler.ClientConnected(c)
+	}
+	h.mu.Lock()
+	connect := h.connect
+	h.mu.Unlock()
+	if connect != nil {
+		connect(c)
 	}
 
 	_ = conn.SetReadDeadline(time.Now().Add(pongWait))

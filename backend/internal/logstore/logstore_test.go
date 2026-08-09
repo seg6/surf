@@ -70,3 +70,50 @@ func TestWriterBoundsSingleOversizedRecord(t *testing.T) {
 		t.Fatalf("bounded record = %q", got)
 	}
 }
+
+func TestLiveDeviceRecordAppendsToSnapshot(t *testing.T) {
+	home := t.TempDir()
+	id := strings.Repeat("b", 64)
+	first := []byte("{\"ts\":\"one\",\"level\":\"info\",\"component\":\"app\",\"message\":\"first\",\"fields\":{}}\n")
+	if err := WriteDeviceSnapshot(home, id, first); err != nil {
+		t.Fatal(err)
+	}
+	second := []byte("{\"ts\":\"two\",\"level\":\"warn\",\"component\":\"video\",\"message\":\"second\",\"fields\":{}}")
+	if err := AppendDeviceRecord(home, id, second); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadDeviceSnapshot(home, id, DeviceMaxBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := append(append([]byte(nil), first...), append(second, '\n')...)
+	if !bytes.Equal(got, want) {
+		t.Fatalf("snapshot=%q want=%q", got, want)
+	}
+}
+
+func TestRepairSnapshotPreservesRecordsThatArrivedAfterCapture(t *testing.T) {
+	home := t.TempDir()
+	id := strings.Repeat("c", 64)
+	first := []byte("{\"ts\":\"one\",\"level\":\"info\",\"component\":\"app\",\"message\":\"first\",\"fields\":{}}\n")
+	second := []byte("{\"ts\":\"two\",\"level\":\"info\",\"component\":\"app\",\"message\":\"captured\",\"fields\":{}}\n")
+	live := []byte("{\"ts\":\"three\",\"level\":\"info\",\"component\":\"app\",\"message\":\"live\",\"fields\":{}}")
+	if err := WriteDeviceSnapshot(home, id, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendDeviceRecord(home, id, live); err != nil {
+		t.Fatal(err)
+	}
+	captured := append(append([]byte(nil), first...), second...)
+	if err := WriteDeviceSnapshot(home, id, captured); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadDeviceSnapshot(home, id, DeviceMaxBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := append(append(captured, live...), '\n')
+	if !bytes.Equal(got, want) {
+		t.Fatalf("snapshot=%q want=%q", got, want)
+	}
+}

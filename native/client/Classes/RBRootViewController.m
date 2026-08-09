@@ -48,6 +48,16 @@ static BOOL RBIsPad(void) {
     return UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad;
 }
 
+static BOOL RBValidClipboardText(id value) {
+    if (![value isKindOfClass:[NSString class]]) return NO;
+    NSString *text = value;
+    for (NSUInteger index = 0; index < [text length]; index++) {
+        if ([text characterAtIndex:index] == 0) return NO;
+    }
+    NSData *data = [text dataUsingEncoding:NSUTF8StringEncoding];
+    return data != nil && [data length] <= 64 * 1024;
+}
+
 // iOS 6 form sheets keep the keyboard on screen even after their child view
 // resigns first responder unless the navigation controller opts out.
 @interface RBModalNavigationController : UINavigationController
@@ -165,6 +175,11 @@ static CGFloat RBEvenExtent(CGFloat value) {
 // Pasteboard banner (M4.2)
 @property(nonatomic, strong) UIAlertView *pasteboardAlert;
 @property(nonatomic, copy) NSString *pasteboardURL;
+// Host-controlled clipboard synchronization. Clipboard text stays in memory
+// and on the two system pasteboards; it is never written to Surf's settings.
+@property(nonatomic, assign) BOOL clipboardSyncEnabled;
+@property(nonatomic, assign) NSInteger clipboardChangeCount;
+@property(nonatomic, strong) NSTimer *clipboardSyncTimer;
 // Edge swipes (M2.6): 0 none, -1 left edge (back), 1 right edge (forward)
 @property(nonatomic, assign) int edgeSwipe;
 @property(nonatomic, assign) CGPoint edgeStart;
@@ -177,6 +192,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
 @implementation RBRootViewController
 
 - (void)dealloc {
+    [self.clipboardSyncTimer invalidate];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
@@ -1078,26 +1094,51 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
         [self.libraryController consumeHistoryReply:message];
     } else if ([t isEqualToString:@"log-request"]) {
         [self.session uploadNativeLogNow];
+    } else if ([t isEqualToString:@"clipboard-sync"]) {
+        BOOL enabled = [[message objectForKey:@"enabled"] boolValue];
+        BOOL known = [[message objectForKey:@"known"] boolValue];
+        NSString *text = [message objectForKey:@"text"];
+        [self setClipboardSyncEnabled:enabled];
+        if (enabled && known && RBValidClipboardText(text)) {
+            [UIPasteboard generalPasteboard].string = text;
+            self.clipboardChangeCount = [UIPasteboard generalPasteboard].changeCount;
+            RBLogEvent(@"clipboard", @"info",
+                       @{ @"direction": @"host-to-device",
+                          @"bytes": @([[text dataUsingEncoding:NSUTF8StringEncoding] length]) },
+                       @"Synchronized host clipboard to device");
+        } else if (enabled && !known) {
+            [self sendCurrentClipboardIfValid];
+        }
     } else if ([t isEqualToString:@"clipboard"]) {
         NSString *requestID = [message objectForKey:@"id"];
         NSString *text = [message objectForKey:@"text"];
-        BOOL valid = [requestID isKindOfClass:[NSString class]] && [requestID length] &&
-                     [text isKindOfClass:[NSString class]] && [text length] &&
-                     [[text dataUsingEncoding:NSUTF8StringEncoding] length] <= 64 * 1024;
+        BOOL synchronized = [[message objectForKey:@"sync"] boolValue];
+        BOOL valid = RBValidClipboardText(text) &&
+                     (synchronized || ([requestID isKindOfClass:[NSString class]] && [requestID length]));
         if (valid) {
             [UIPasteboard generalPasteboard].string = text;
-            [self showToast:@"Copied to clipboard"];
-            RBLogEvent(@"clipboard", @"info", @{ @"bytes": @([[text dataUsingEncoding:NSUTF8StringEncoding] length]),
-                                                  @"expires_seconds": @120 }, @"Host text copied to device clipboard");
-            NSString *delivered = [text copy];
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(120.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                if ([[UIPasteboard generalPasteboard].string isEqualToString:delivered]) {
-                    [UIPasteboard generalPasteboard].string = @"";
-                    RBLogEvent(@"clipboard", @"info", @{}, @"Expired host-delivered clipboard text");
-                }
-            });
+            self.clipboardChangeCount = [UIPasteboard generalPasteboard].changeCount;
+            [self showToast:(synchronized ? @"Clipboard synchronized" : @"Copied to clipboard")];
+            RBLogEvent(@"clipboard", @"info",
+                       @{ @"direction": @"host-to-device",
+                          @"bytes": @([[text dataUsingEncoding:NSUTF8StringEncoding] length]),
+                          @"synchronized": @(synchronized),
+                          @"expires_seconds": @(synchronized ? 0 : 120) },
+                       synchronized ? @"Synchronized host clipboard to device" : @"Host text copied to device clipboard");
+            if (!synchronized) {
+                NSString *delivered = [text copy];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(120.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    if ([[UIPasteboard generalPasteboard].string isEqualToString:delivered]) {
+                        [UIPasteboard generalPasteboard].string = @"";
+                        self.clipboardChangeCount = [UIPasteboard generalPasteboard].changeCount;
+                        RBLogEvent(@"clipboard", @"info", @{}, @"Expired host-delivered clipboard text");
+                    }
+                });
+            }
         }
-        [self.session sendMessage:@{ @"t": @"clipboard-result", @"id": requestID ?: @"", @"ok": @(valid) }];
+        if ([requestID isKindOfClass:[NSString class]] && [requestID length]) {
+            [self.session sendMessage:@{ @"t": @"clipboard-result", @"id": requestID, @"ok": @(valid) }];
+        }
     }
 }
 
@@ -2251,6 +2292,39 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
 }
 
 // ---------------------------------------- device integration (M4.1 / M4.2)
+
+- (void)setClipboardSyncEnabled:(BOOL)enabled {
+    _clipboardSyncEnabled = enabled;
+    self.clipboardChangeCount = [UIPasteboard generalPasteboard].changeCount;
+    [self.clipboardSyncTimer invalidate];
+    self.clipboardSyncTimer = nil;
+    if (!enabled) return;
+    self.clipboardSyncTimer = [NSTimer timerWithTimeInterval:0.6 target:self
+                                                   selector:@selector(pollClipboardSync:)
+                                                   userInfo:nil repeats:YES];
+    [[NSRunLoop mainRunLoop] addTimer:self.clipboardSyncTimer forMode:NSRunLoopCommonModes];
+}
+
+- (void)sendCurrentClipboardIfValid {
+    if (!self.clipboardSyncEnabled || self.session.state != RBSessionStateOpen) return;
+    NSString *text = [UIPasteboard generalPasteboard].string;
+    if (!RBValidClipboardText(text)) return;
+    self.clipboardChangeCount = [UIPasteboard generalPasteboard].changeCount;
+    [self.session sendMessage:@{ @"t": @"clipboard-change", @"text": text }];
+    RBLogEvent(@"clipboard", @"info",
+               @{ @"direction": @"device-to-host",
+                  @"bytes": @([[text dataUsingEncoding:NSUTF8StringEncoding] length]) },
+               @"Synchronized device clipboard to host");
+}
+
+- (void)pollClipboardSync:(NSTimer *)timer {
+    (void)timer;
+    if (!self.clipboardSyncEnabled || self.session.state != RBSessionStateOpen) return;
+    NSInteger changeCount = [UIPasteboard generalPasteboard].changeCount;
+    if (changeCount == self.clipboardChangeCount) return;
+    self.clipboardChangeCount = changeCount;
+    [self sendCurrentClipboardIfValid];
+}
 
 - (void)openURLString:(NSString *)url {
     if (![url length]) return;

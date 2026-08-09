@@ -170,6 +170,14 @@ type ClipboardEvent struct {
 	Type      string `json:"t"`
 	RequestID string `json:"id"`
 	Text      string `json:"text"`
+	Sync      bool   `json:"sync,omitempty"`
+}
+
+type ClipboardSyncEvent struct {
+	Type    string `json:"t"`
+	Enabled bool   `json:"enabled"`
+	Known   bool   `json:"known,omitempty"`
+	Text    string `json:"text"`
 }
 
 func (HelloEvent) isClientEvent()            {}
@@ -196,3 +204,4 @@ func (EditableEvent) isClientEvent()         {}
 func (MediaStateEvent) isClientEvent()       {}
 func (PageFrameEvent) isClientEvent()        {}
 func (ClipboardEvent) isClientEvent()        {}
+func (ClipboardSyncEvent) isClientEvent()    {}

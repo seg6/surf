@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bufio"
 	"bytes"
 	"crypto"
 	"crypto/rand"
@@ -25,6 +26,7 @@ import (
 	"surf-backend/internal/auth"
 	"surf-backend/internal/config"
 	"surf-backend/internal/identity"
+	"surf-backend/internal/logstore"
 	"surf-backend/internal/protocol"
 	"surf-backend/internal/transport"
 )
@@ -277,15 +279,28 @@ func TestAdminShutdownRequiresLocalToken(t *testing.T) {
 	}
 }
 
-func TestAdminClipboardRejectsSecretsWithoutConnectedDevice(t *testing.T) {
+func TestAdminClipboardControlsHostWithoutConnectedDevice(t *testing.T) {
 	server, _ := newTestServer(t)
-	empty := httptest.NewRecorder()
-	server.Handler().ServeHTTP(empty, adminJSONRequest(http.MethodPost, APIRoot+"/admin/clipboard", map[string]string{"text": ""}))
-	if empty.Code != http.StatusBadRequest {
-		t.Fatalf("empty clipboard = %d", empty.Code)
+	set := httptest.NewRecorder()
+	server.Handler().ServeHTTP(set, adminJSONRequest(http.MethodPost, APIRoot+"/admin/clipboard", map[string]string{"text": "host value"}))
+	if set.Code != http.StatusOK {
+		t.Fatalf("host clipboard = %d: %s", set.Code, set.Body.String())
+	}
+	state := httptest.NewRecorder()
+	server.Handler().ServeHTTP(state, adminRequest(http.MethodGet, APIRoot+"/admin/clipboard"))
+	if state.Code != http.StatusOK || !strings.Contains(state.Body.String(), `"known":true`) ||
+		!strings.Contains(state.Body.String(), `"text":"host value"`) {
+		t.Fatalf("host clipboard state = %d: %s", state.Code, state.Body.String())
+	}
+	clear := httptest.NewRecorder()
+	server.Handler().ServeHTTP(clear, adminJSONRequest(http.MethodPost, APIRoot+"/admin/clipboard", map[string]string{"text": ""}))
+	if clear.Code != http.StatusOK {
+		t.Fatalf("clear clipboard = %d: %s", clear.Code, clear.Body.String())
 	}
 	offline := httptest.NewRecorder()
-	server.Handler().ServeHTTP(offline, adminJSONRequest(http.MethodPost, APIRoot+"/admin/clipboard", map[string]string{"text": "secret"}))
+	server.Handler().ServeHTTP(offline, adminJSONRequest(http.MethodPost, APIRoot+"/admin/clipboard", map[string]string{
+		"deviceID": "missing", "text": "secret",
+	}))
 	if offline.Code != http.StatusConflict || !strings.Contains(offline.Body.String(), "no matching") {
 		t.Fatalf("offline clipboard = %d: %s", offline.Code, offline.Body.String())
 	}
@@ -305,6 +320,10 @@ func TestAdminClipboardDeliversAndWaitsForNativeAcknowledgement(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
+	var syncEvent protocol.ClipboardSyncEvent
+	if err := conn.ReadJSON(&syncEvent); err != nil || syncEvent.Type != "clipboard-sync" {
+		t.Fatalf("initial sync event = %+v, %v", syncEvent, err)
+	}
 
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
@@ -331,6 +350,146 @@ func TestAdminClipboardDeliversAndWaitsForNativeAcknowledgement(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("clipboard request did not complete after acknowledgement")
+	}
+}
+
+func TestClipboardSyncAcceptsDeviceChangesAndBroadcastsThem(t *testing.T) {
+	server, manager := newTestServer(t)
+	_ = pairedCookie(t, manager)
+	deviceID := manager.ListDevices()[0].ID
+	host := httptest.NewServer(server.Handler())
+	defer host.Close()
+	ticket := manager.WSTicket(deviceID)
+	wsURL := "ws" + strings.TrimPrefix(host.URL, "http") + APIRoot + "/ws?ticket=" +
+		url.QueryEscape(ticket) + "&nv=" + url.QueryEscape(config.NativeVersion)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	var initial protocol.ClipboardSyncEvent
+	if err := conn.ReadJSON(&initial); err != nil || initial.Type != "clipboard-sync" {
+		t.Fatalf("initial sync event = %+v, %v", initial, err)
+	}
+
+	enable := httptest.NewRecorder()
+	server.Handler().ServeHTTP(enable, adminJSONRequest(http.MethodPut, APIRoot+"/admin/clipboard/sync", map[string]bool{"enabled": true}))
+	if enable.Code != http.StatusOK || !strings.Contains(enable.Body.String(), `"enabled":true`) {
+		t.Fatalf("enable sync = %d: %s", enable.Code, enable.Body.String())
+	}
+	var enabled protocol.ClipboardSyncEvent
+	if err := conn.ReadJSON(&enabled); err != nil || enabled.Type != "clipboard-sync" || !enabled.Enabled {
+		t.Fatalf("enabled sync event = %+v, %v", enabled, err)
+	}
+	if err := conn.WriteJSON(map[string]any{"t": "clipboard-change", "text": "from iPad"}); err != nil {
+		t.Fatal(err)
+	}
+	var update protocol.ClipboardEvent
+	if err := conn.ReadJSON(&update); err != nil || update.Type != "clipboard" || !update.Sync || update.Text != "from iPad" {
+		t.Fatalf("clipboard update = %+v, %v", update, err)
+	}
+	state := httptest.NewRecorder()
+	server.Handler().ServeHTTP(state, adminRequest(http.MethodGet, APIRoot+"/admin/clipboard"))
+	if state.Code != http.StatusOK || !strings.Contains(state.Body.String(), `"text":"from iPad"`) {
+		t.Fatalf("clipboard state = %d: %s", state.Code, state.Body.String())
+	}
+}
+
+func TestDeviceLogRecordIsImmediatelyRetrievable(t *testing.T) {
+	server, manager := newTestServer(t)
+	_ = pairedCookie(t, manager)
+	deviceID := manager.ListDevices()[0].ID
+	host := httptest.NewServer(server.Handler())
+	defer host.Close()
+	ticket := manager.WSTicket(deviceID)
+	wsURL := "ws" + strings.TrimPrefix(host.URL, "http") + APIRoot + "/ws?ticket=" +
+		url.QueryEscape(ticket) + "&nv=" + url.QueryEscape(config.NativeVersion)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	var initial protocol.ClipboardSyncEvent
+	if err := conn.ReadJSON(&initial); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.WriteJSON(map[string]any{"t": "log-record", "record": map[string]any{
+		"ts": "now", "level": "info", "component": "session", "message": "live record", "fields": map[string]any{},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		read := httptest.NewRecorder()
+		server.Handler().ServeHTTP(read, adminRequest(http.MethodGet,
+			APIRoot+"/admin/logs?source=device&deviceID="+url.QueryEscape(deviceID)))
+		if read.Code == http.StatusOK && strings.Contains(read.Body.String(), `"message":"live record"`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("live log was not persisted: %d %s", read.Code, read.Body.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestAdminLogStreamAppendsWithoutSourceHeadings(t *testing.T) {
+	server, manager := newTestServer(t)
+	_ = pairedCookie(t, manager)
+	deviceID := manager.ListDevices()[0].ID
+	first := []byte("{\"ts\":\"one\",\"level\":\"info\",\"component\":\"session\",\"message\":\"first\",\"fields\":{}}\n")
+	if err := logstore.WriteDeviceSnapshot(server.cfg.SurfHome, deviceID, first); err != nil {
+		t.Fatal(err)
+	}
+	host := httptest.NewServer(server.Handler())
+	defer host.Close()
+	request, err := http.NewRequest(http.MethodGet, host.URL+APIRoot+"/admin/logs/stream?source=device&deviceID="+url.QueryEscape(deviceID), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("X-Surf-Admin", testAdminToken)
+	response, err := (&http.Client{Timeout: 3 * time.Second}).Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK || !strings.HasPrefix(response.Header.Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("stream = %d %q", response.StatusCode, response.Header.Get("Content-Type"))
+	}
+	reader := bufio.NewReader(response.Body)
+	readUpdate := func() struct {
+		Text  string `json:"text"`
+		Reset bool   `json:"reset"`
+	} {
+		for {
+			line, readErr := reader.ReadString('\n')
+			if readErr != nil {
+				t.Fatalf("read stream: %v", readErr)
+			}
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			var update struct {
+				Text  string `json:"text"`
+				Reset bool   `json:"reset"`
+			}
+			if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data: "))), &update); err != nil {
+				t.Fatalf("decode stream: %v", err)
+			}
+			return update
+		}
+	}
+	initial := readUpdate()
+	if !initial.Reset || initial.Text != string(first) || strings.Contains(initial.Text, "==") {
+		t.Fatalf("initial update = %+v", initial)
+	}
+	second := json.RawMessage(`{"ts":"two","level":"info","component":"session","message":"second","fields":{}}`)
+	if err := logstore.AppendDeviceRecord(server.cfg.SurfHome, deviceID, second); err != nil {
+		t.Fatal(err)
+	}
+	update := readUpdate()
+	if update.Reset || !strings.Contains(update.Text, `"message":"second"`) || strings.Contains(update.Text, "==") {
+		t.Fatalf("append update = %+v", update)
 	}
 }
 

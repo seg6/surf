@@ -115,20 +115,10 @@ static NSString *RBURLEscape(NSString *s);
     self.socket = nil;
     self.socketOpen = NO;
     self.reconnectDelay = 1.0;
-    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(periodicLogUpload) object:nil];
     self.logUploadRunning = NO;
     self.logUploadGeneration = self.generation;
+    RBSetLogRecordHandler(nil);
     [self moveToState:RBSessionStateIdle];
-}
-
-- (void)scheduleLogUpload {
-    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(periodicLogUpload) object:nil];
-    if (self.active) [self performSelector:@selector(periodicLogUpload) withObject:nil afterDelay:30.0];
-}
-
-- (void)periodicLogUpload {
-    [self uploadNativeLogNow];
-    [self scheduleLogUpload];
 }
 
 - (void)uploadNativeLogNow {
@@ -352,11 +342,18 @@ static NSString *RBURLEscape(NSString *s) {
         return;
     }
     self.socketOpen = YES;
+    __weak RBSession *weakSelf = self;
+    RBSetLogRecordHandler(^(NSDictionary *record) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            RBSession *session = weakSelf;
+            if (!session || !session.socketOpen || !session.active) return;
+            [session sendMessage:@{@"t": @"log-record", @"record": record ?: @{}}];
+        });
+    });
     self.reconnectDelay = 1.0;
     [self moveToState:RBSessionStateOpen];
     [self.delegate session:self status:@"websocket open"];
     [self uploadNativeLogNow];
-    [self scheduleLogUpload];
 }
 
 - (void)socket:(RBSocket *)socket didCloseWithError:(NSString *)error {

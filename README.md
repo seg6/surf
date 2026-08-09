@@ -94,8 +94,8 @@ Download the package for your computer and the universal iOS `.deb` from the
 [latest release](https://github.com/seg6/surf/releases/latest).
 
 The desktop build provides a Settings window for the server name, port, paired
-devices, detected LAN address, logs, and updates. For a terminal or server
-installation:
+devices, detected LAN address, live logs, clipboard sync, and updates. For a
+terminal or server installation:
 
 ```sh
 ./surf serve

@@ -13,6 +13,7 @@ static dispatch_queue_t RBLogQueue;
 static NSDateFormatter *RBLogDateFormatter;
 static NSFileHandle *RBLogHandle;
 static unsigned long long RBLogSize;
+static void (^RBLogRecordHandler)(NSDictionary *record);
 
 static NSString *RBMigratedLevelForMessage(NSString *message) {
     NSString *lower = [message lowercaseString], *level = @"info";
@@ -187,6 +188,13 @@ void RBLogSnapshot(void (^completion)(NSData *data)) {
     });
 }
 
+void RBSetLogRecordHandler(void (^handler)(NSDictionary *record)) {
+    RBInitializeLog();
+    dispatch_async(RBLogQueue, ^{
+        RBLogRecordHandler = [handler copy];
+    });
+}
+
 static void RBWriteRecord(NSString *component, NSString *level, NSDictionary *fields, NSString *message) {
     RBInitializeLog();
     dispatch_async(RBLogQueue, ^{
@@ -215,6 +223,7 @@ static void RBWriteRecord(NSString *component, NSString *level, NSDictionary *fi
         }
         [RBLogHandle writeData:data];
         RBLogSize += [data length];
+        if (RBLogRecordHandler) RBLogRecordHandler(record);
     });
 }
 

@@ -257,12 +257,13 @@ func TestManagementHomeIsSinglePageUtility(t *testing.T) {
 	request.RemoteAddr = "127.0.0.1:12345"
 	app.managementHandler().ServeHTTP(response, request)
 	body := response.Body.String()
-	for _, required := range []string{`id="settings-form"`, `id="lan-address"`, `id="device-list"`, `id="add-device"`, `id="send-clipboard"`, `id="logs"`} {
+	for _, required := range []string{`id="settings-form"`, `id="lan-address"`, `id="device-list"`, `id="add-device"`,
+		`id="clipboard-sync"`, `id="clipboard-text"`, `id="send-clipboard"`, `id="logs"`, `id="log-live"`} {
 		if !strings.Contains(body, required) {
 			t.Errorf("management page is missing %s", required)
 		}
 	}
-	for _, removed := range []string{`class="sidebar"`, `data-view=`, `/diagnostics/`} {
+	for _, removed := range []string{`class="sidebar"`, `data-view=`, `/diagnostics/`, `All sources`, `id="refresh-logs"`, `== ${source.label} ==`} {
 		if strings.Contains(body, removed) {
 			t.Errorf("management page still contains %s", removed)
 		}
@@ -514,11 +515,14 @@ func TestApplyHomeFlag(t *testing.T) {
 }
 
 func TestClipboardCommandNeverAcceptsSecretArgument(t *testing.T) {
-	if _, err := clipboardDevice([]string{"password"}); err == nil {
+	if _, err := parseClipboardCommand([]string{"set", "password"}); err == nil {
 		t.Fatal("clipboard secret was accepted as a process argument")
 	}
-	if got, err := clipboardDevice([]string{"--device", "abc"}); err != nil || got != "abc" {
-		t.Fatalf("device=%q err=%v", got, err)
+	if got, err := parseClipboardCommand([]string{"set", "--device", "abc"}); err != nil || got.deviceID != "abc" {
+		t.Fatalf("command=%+v err=%v", got, err)
+	}
+	if got, err := parseClipboardCommand([]string{"sync", "on"}); err != nil || !got.enabled {
+		t.Fatalf("command=%+v err=%v", got, err)
 	}
 	want := " leading password\n"
 	got, err := readClipboardText(strings.NewReader(want), false, nil)

@@ -57,12 +57,15 @@ device-bound, single-use WebSocket ticket. Revocation removes the device,
 invalidates its outstanding challenges and tickets, and closes its active
 connections immediately.
 
-Host-to-device clipboard delivery is an owner-only loopback admin operation.
-The text travels inside the paired device's pinned TLS/WebSocket session; Surf
-does not place it in command-line arguments, logs, or host storage. The native
-client clears the delivered value after two minutes if its clipboard has not
-changed. While present, it has the normal iOS clipboard trust boundary and may
-be readable by other software running on that device.
+Clipboard control is an owner-only loopback admin operation. When two-way sync
+is enabled, host clipboard changes and iOS pasteboard changes travel inside the
+paired device's pinned TLS/WebSocket session. A one-off send uses the same
+authenticated path and is cleared by the native client after two minutes if
+unchanged. Surf persists only the sync-enabled preference: it does not put
+clipboard text in command-line arguments, logs, or host storage. While text is
+present on either system clipboard, it has that operating system's normal
+clipboard trust boundary and may be readable by other software on that host or
+device.
 
 Protect `SURF_HOME`. It contains the TLS private key, session-signing key,
 paired public keys, browser profile, and browsing data. Copying the directory

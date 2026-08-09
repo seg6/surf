@@ -18,7 +18,7 @@
     * { box-sizing: border-box; }
     html, body { min-height: 100%; margin: 0; }
     body { background: var(--bg); }
-    button, input, select { font: inherit; }
+    button, input, select, textarea { font: inherit; }
     button { color: inherit; }
     .shell { min-height: 100vh; }
     .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--quiet); }
@@ -79,11 +79,12 @@
     .health-row strong { color: var(--ink); font-weight: 500; }
     .form-grid { display: grid; grid-template-columns: 1fr 150px; gap: 14px; }
     label { color: var(--muted); display: grid; gap: 6px; font-size: 12px; font-weight: 500; }
-    input {
+    input, textarea {
       width: 100%; color: var(--ink); background: var(--field);
       border: 1px solid var(--line-strong); border-radius: 6px; outline: 0; padding: 9px 10px;
     }
-    input:focus { border-color: var(--blue-bright); box-shadow: 0 0 0 1px var(--blue-bright); }
+    input:focus, textarea:focus { border-color: var(--blue-bright); box-shadow: 0 0 0 1px var(--blue-bright); }
+    textarea { min-height: 84px; resize: vertical; line-height: 1.45; }
     select {
       color: var(--ink); background: var(--field); border: 1px solid var(--line-strong);
       border-radius: 6px; padding: 7px 9px;
@@ -95,6 +96,34 @@
     .first-run { display: none; margin-bottom: 12px; border-color: var(--blue); }
     .first-run.show { display: block; }
     .note { color: var(--quiet); font-size: 11px; line-height: 1.5; margin-top: 14px; }
+    .clipboard-head { align-items: flex-start; }
+    .toggle-row {
+      display: flex; align-items: center; gap: 9px; color: var(--ink); font-size: 12px;
+      cursor: pointer; white-space: nowrap; user-select: none;
+    }
+    .toggle-row input { position: absolute; opacity: 0; pointer-events: none; }
+    .switch-track {
+      position: relative; display: inline-block; width: 34px; height: 20px;
+      border: 1px solid var(--line-strong); border-radius: 999px; background: var(--field);
+      transition: background 120ms ease, border-color 120ms ease;
+    }
+    .switch-track::after {
+      content: ""; position: absolute; width: 14px; height: 14px; top: 2px; left: 2px;
+      border-radius: 50%; background: var(--muted); transition: transform 120ms ease, background 120ms ease;
+    }
+    .toggle-row input:checked + .switch-track { background: var(--blue); border-color: #528bdc; }
+    .toggle-row input:checked + .switch-track::after { transform: translateX(14px); background: #fff; }
+    .toggle-row input:focus-visible + .switch-track { box-shadow: 0 0 0 2px var(--blue-bright); }
+    .toggle-row input:disabled + .switch-track { opacity: .55; cursor: wait; }
+    .clipboard-status {
+      display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 8px 10px;
+      border: 1px solid var(--line); border-radius: 6px; background: var(--field);
+      color: var(--muted); font-size: 12px;
+    }
+    .clipboard-status .dot { flex: 0 0 auto; }
+    .clipboard-once { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+    .clipboard-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 9px; }
+    .clipboard-actions .note { margin: 0; }
     .device-section + .device-section { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 16px; }
     .device-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
     .device-section-title { font-size: 12px; font-weight: 600; }
@@ -140,10 +169,18 @@
     details > summary::after { content: "Show"; color: var(--muted); font-size: 11px; font-weight: 400; }
     details[open] > summary::after { content: "Hide"; }
     .log-body { border-top: 1px solid var(--line); padding: 14px; }
-    .log-toolbar { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 10px; }
-    .log-toolbar input { width: min(280px, 100%); padding: 7px 9px; }
+    .log-toolbar { display: grid; grid-template-columns: 170px minmax(160px, 1fr) auto; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .log-toolbar input { padding: 7px 9px; }
+    .live-state {
+      display: inline-flex; align-items: center; gap: 7px; min-width: 76px; justify-content: flex-end;
+      color: var(--muted); font-size: 11px;
+    }
+    .live-state .dot { background: var(--quiet); }
+    .live-state.live { color: var(--green); }
+    .live-state.live .dot { background: var(--green); animation: live-pulse 1.8s ease-out infinite; }
+    @keyframes live-pulse { 0%, 45% { box-shadow: 0 0 0 0 rgba(85,185,122,.32); } 100% { box-shadow: 0 0 0 5px rgba(85,185,122,0); } }
     pre {
-      margin: 0; min-height: 460px; max-height: calc(100vh - 180px); overflow: auto;
+      margin: 0; height: clamp(320px, 52vh, 560px); overflow: auto;
       border: 1px solid var(--line); border-radius: 6px; padding: 12px;
       background: #111316; color: #bdc2ca; font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
       white-space: pre-wrap; overflow-wrap: anywhere;
@@ -173,7 +210,12 @@
       .device { align-items: flex-start; flex-direction: column; }
       .device > .hero-actions, .device > .button { width: 100%; }
       .device > .hero-actions .button { flex: 1; }
+      .clipboard-actions { align-items: stretch; flex-direction: column; }
+      .clipboard-actions .button { width: 100%; }
+      .log-toolbar { grid-template-columns: 1fr auto; }
+      .log-toolbar select { grid-column: 1 / -1; }
     }
+    @media (prefers-reduced-motion: reduce) { .live-state.live .dot { animation: none; } }
   </style>
 </head>
 <body>
@@ -267,15 +309,21 @@
         </div>
       </div>
 
-      <div class="panel" style="margin-top:12px">
-        <div class="panel-head">
-          <div><h2>Device clipboard</h2><p class="panel-copy">Send a password or other host clipboard text to every connected Surf device. Text is never saved by the server.</p></div>
-          <button class="button primary" id="send-clipboard" type="button">Send clipboard</button>
+      <div class="panel" id="clipboard-panel" style="margin-top:12px">
+        <div class="panel-head clipboard-head">
+          <div><h2>Clipboard</h2><p class="panel-copy">Keep text synchronized between this computer and connected Surf devices.</p></div>
+          <label class="toggle-row" for="clipboard-sync"><span>Two-way sync</span><input id="clipboard-sync" type="checkbox" role="switch"><span class="switch-track" aria-hidden="true"></span></label>
         </div>
-        <label id="clipboard-fallback-label" hidden>Paste text securely
-          <input id="clipboard-fallback" type="password" autocomplete="off" spellcheck="false">
-        </label>
-        <p class="note">Delivered text is cleared from each device after two minutes unless its clipboard has changed.</p>
+        <div class="clipboard-status" id="clipboard-sync-status" aria-live="polite"><span class="dot" id="clipboard-sync-dot"></span><span>Checking clipboard support…</span></div>
+        <div class="clipboard-once" id="clipboard-once">
+          <label for="clipboard-text">Send once
+            <textarea id="clipboard-text" autocomplete="off" spellcheck="false" placeholder="Paste a password or other text"></textarea>
+          </label>
+          <div class="clipboard-actions">
+            <p class="note">Text is never saved. The device clears it after two minutes unless its clipboard changes.</p>
+            <button class="button primary" id="send-clipboard" type="button">Send once</button>
+          </div>
+        </div>
       </div>
 
       <div class="panel" style="margin-top:12px">
@@ -291,11 +339,11 @@
         <summary>Logs</summary>
         <div class="log-body">
           <div class="log-toolbar">
-            <select id="log-source" aria-label="Log source"><option value="all">All sources</option><option value="server">Server</option><option value="desktop">Desktop</option></select>
+            <select id="log-source" aria-label="Log source"><option value="server">Server</option><option value="desktop">Desktop</option></select>
             <input id="log-search" type="search" placeholder="Filter logs" aria-label="Filter logs">
-            <button class="button secondary small" id="refresh-logs">Refresh devices</button>
+            <span class="live-state" id="log-live" role="status"><span class="dot"></span><span id="log-live-text">Paused</span></span>
           </div>
-          <pre id="log-output">Loading logs…</pre>
+          <pre id="log-output">Open Logs to start the live stream.</pre>
         </div>
       </details>
     </main>
@@ -396,30 +444,61 @@
     });
     document.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', () => copy($(button.dataset.copy).textContent)));
 
+    let clipboardState = null;
+    function renderClipboard(state) {
+      clipboardState = state;
+      const enabled = Boolean(state.enabled);
+      const toggle = $('clipboard-sync');
+      toggle.checked = enabled;
+      toggle.setAttribute('aria-checked', String(enabled));
+      $('clipboard-once').hidden = enabled;
+      const status = $('clipboard-sync-status');
+      const dot = $('clipboard-sync-dot');
+      dot.classList.toggle('online', enabled);
+      let message = 'Two-way sync is off. Use Send once for temporary text.';
+      if (enabled && state.error) message = `Client sync is live; ${state.system} could not access the host clipboard (${state.error}).`;
+      else if (enabled && state.available) message = `Two-way sync is live through ${state.system}.`;
+      else if (enabled) message = 'Sync is live between Surf clients; this host has no system clipboard provider.';
+      status.lastElementChild.textContent = message;
+    }
+    async function loadClipboard() {
+      const state = await (await request('/api/backend/api/v1/admin/clipboard')).json();
+      renderClipboard(state);
+    }
+    $('clipboard-sync').addEventListener('change', async event => {
+      const toggle = event.currentTarget;
+      toggle.disabled = true;
+      try {
+        const state = await (await request('/api/backend/api/v1/admin/clipboard/sync', {
+          method:'PUT', headers:{'Content-Type':'application/json','X-Surf-Desktop':'1'},
+          body:JSON.stringify({enabled:toggle.checked})
+        })).json();
+        renderClipboard(state);
+        toast(state.enabled ? 'Two-way clipboard sync enabled' : 'Two-way clipboard sync disabled');
+      } catch (error) {
+        if (clipboardState) renderClipboard(clipboardState);
+        toast(error.message);
+      } finally { toggle.disabled = false; }
+    });
     async function deliverClipboard(text) {
-      if (!text) throw new Error('Clipboard is empty');
+      if (!text) throw new Error('Enter some text first');
       const result = await (await request('/api/backend/api/v1/admin/clipboard', {
         method:'POST', headers:{'Content-Type':'application/json','X-Surf-Desktop':'1'}, body:JSON.stringify({text})
       })).json();
-      if (!result.ok) throw new Error(`Copied to ${result.delivered.length}; ${result.failed.length} device(s) did not acknowledge`);
-      toast(`Copied to ${result.delivered.length} connected device(s)`);
+      if (!result.ok) throw new Error(`Sent to ${result.delivered.length}; ${result.failed.length} device(s) did not acknowledge`);
+      if (!result.delivered.length) throw new Error('No Surf device is connected');
+      toast(`Sent once to ${result.delivered.length} connected device(s)`);
     }
     $('send-clipboard').addEventListener('click', async () => {
-      const fallback = $('clipboard-fallback');
+      const field = $('clipboard-text');
+      const button = $('send-clipboard');
+      const text = field.value;
+      field.value = '';
+      button.disabled = true;
       try {
-        let text;
-        if (!$('clipboard-fallback-label').hidden) {
-          text = fallback.value; fallback.value = '';
-        } else {
-          try { text = await navigator.clipboard.readText(); }
-          catch {
-            $('clipboard-fallback-label').hidden = false;
-            fallback.focus(); toast('Paste the text below, then click Send text');
-            $('send-clipboard').textContent = 'Send text'; return;
-          }
-        }
         await deliverClipboard(text);
       } catch (error) { toast(error.message); }
+      finally { button.disabled = false; }
     });
 
     function emptyNode(message) {
@@ -543,54 +622,71 @@
       await loadCandidates(); $('add-device').focus();
     });
 
-    let logSources = [], rawLogText = '';
+    let logSources = [], rawLogText = '', logStream = null;
     async function loadLogSources() {
       const payload = await (await request('/api/backend/api/v1/admin/logs/sources')).json();
       logSources = [
-        {id:'server', label:'Server', path:'/api/backend/api/v1/admin/logs?source=server'},
-        {id:'desktop', label:'Desktop', path:'/api/backend/api/v1/admin/logs?source=desktop'},
+        {id:'server', label:'Server', source:'server'},
+        {id:'desktop', label:'Desktop', source:'desktop'},
         ...(payload.devices || []).map(device => ({
           id:`device:${device.id}`, label:`${device.name || 'Device'}${payload.online?.[device.id] ? ' · online' : ' · offline'}`,
-          path:`/api/backend/api/v1/admin/logs?source=device&deviceID=${encodeURIComponent(device.id)}`
+          source:'device', deviceID:device.id
         }))
       ];
       const selected = $('log-source').value;
-      $('log-source').replaceChildren(new Option('All sources', 'all'));
+      $('log-source').replaceChildren();
       logSources.forEach(source => $('log-source').append(new Option(source.label, source.id)));
       if ([...$('log-source').options].some(option => option.value === selected)) $('log-source').value = selected;
+      else $('log-source').value = 'server';
     }
-    function renderLogs() {
+    function renderLogs(forceBottom = false) {
+      const output = $('log-output');
+      const nearBottom = output.scrollHeight - output.scrollTop - output.clientHeight < 48;
       const query = $('log-search').value.toLowerCase();
-      $('log-output').textContent = query
+      const visible = query
         ? rawLogText.split('\n').filter(line => line.toLowerCase().includes(query)).join('\n')
         : rawLogText;
-      $('log-output').scrollTop = $('log-output').scrollHeight;
+      output.textContent = visible || (query ? 'No matching log lines.' : 'Waiting for log output…');
+      if (forceBottom || nearBottom) output.scrollTop = output.scrollHeight;
     }
-    async function loadLogs() {
+    function setLogLive(state, text) {
+      $('log-live').classList.toggle('live', state === 'live');
+      $('log-live-text').textContent = text;
+    }
+    function stopLogStream() {
+      if (logStream) logStream.close();
+      logStream = null;
+      setLogLive('paused', 'Paused');
+    }
+    async function startLogStream() {
+      stopLogStream();
+      if (!$('logs').open) return;
       try {
         await loadLogSources();
-        const selected = $('log-source').value;
-        const targets = selected === 'all' ? logSources : logSources.filter(source => source.id === selected);
-        const sections = await Promise.all(targets.map(async source => {
-          const text = await (await request(source.path)).text();
-          return text ? `== ${source.label} ==\n${text.trimEnd()}` : '';
-        }));
-        rawLogText = sections.filter(Boolean).join('\n\n') || 'No persisted logs for this source.';
-        renderLogs();
-      } catch (error) { $('log-output').textContent = error.message; }
+        const selected = logSources.find(source => source.id === $('log-source').value) || logSources[0];
+        const params = new URLSearchParams({source:selected.source || selected.id});
+        if (selected.deviceID) params.set('deviceID', selected.deviceID);
+        rawLogText = '';
+        renderLogs(true);
+        setLogLive('connecting', 'Connecting');
+        const stream = new EventSource(`/api/backend/api/v1/admin/logs/stream?${params}`);
+        logStream = stream;
+        stream.onopen = () => { if (logStream === stream) setLogLive('live', 'Live'); };
+        stream.onmessage = event => {
+          if (logStream !== stream) return;
+          const update = JSON.parse(event.data);
+          rawLogText = update.reset ? update.text : rawLogText + update.text;
+          renderLogs();
+        };
+        stream.onerror = () => { if (logStream === stream) setLogLive('connecting', 'Reconnecting'); };
+      } catch (error) {
+        $('log-output').textContent = error.message;
+        setLogLive('paused', 'Unavailable');
+      }
     }
-    $('refresh-logs').addEventListener('click', async () => {
-      try {
-        const selected = $('log-source').value;
-        const deviceID = selected.startsWith('device:') ? selected.slice(7) : '';
-        await request('/api/backend/api/v1/admin/logs/refresh', {method:'POST', headers:{'Content-Type':'application/json','X-Surf-Desktop':'1'}, body:JSON.stringify({deviceID})});
-        await new Promise(resolve => setTimeout(resolve, 600));
-        await loadLogs(); toast('Device logs refreshed');
-      } catch (error) { toast(error.message); }
-    });
-    $('log-source').addEventListener('change', loadLogs);
+    $('log-source').addEventListener('change', startLogStream);
     $('log-search').addEventListener('input', renderLogs);
-    $('logs').addEventListener('toggle', () => { if ($('logs').open) loadLogs(); });
+    $('logs').addEventListener('toggle', () => { if ($('logs').open) startLogStream(); else stopLogStream(); });
 
     (async () => {
       try { await loadConfig(); } catch (error) { toast(error.message); }
@@ -600,6 +696,7 @@
       } catch {}
       await loadDevices();
       await loadCandidates();
+      try { await loadClipboard(); } catch (error) { toast(error.message); }
       setInterval(loadCandidates, 1500);
       setInterval(loadDevices, 5000);
       if (location.hash === '#logs') $('logs').open = true;

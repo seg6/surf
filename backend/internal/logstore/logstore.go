@@ -25,6 +25,8 @@ const (
 	DefaultReadBytes = 8 << 20
 )
 
+var deviceMu sync.Mutex
+
 func Root(home string) string        { return filepath.Join(home, "logs") }
 func ServerPath(home string) string  { return filepath.Join(Root(home), "server.log") }
 func DesktopPath(home string) string { return filepath.Join(Root(home), "desktop.log") }
@@ -136,6 +138,21 @@ func (w *Writer) Close() error {
 	return err
 }
 
+func validateDeviceRecord(line []byte) error {
+	var record struct {
+		Timestamp string         `json:"ts"`
+		Level     string         `json:"level"`
+		Component string         `json:"component"`
+		Message   string         `json:"message"`
+		Fields    map[string]any `json:"fields"`
+	}
+	if len(line) > DeviceMaxLine || json.Unmarshal(line, &record) != nil ||
+		record.Level == "" || record.Component == "" || record.Message == "" || record.Fields == nil {
+		return errors.New("native log contains an invalid NDJSON record")
+	}
+	return nil
+}
+
 func ValidateDeviceSnapshot(data []byte) error {
 	if len(data) > DeviceMaxBytes {
 		return fmt.Errorf("native log exceeds %d bytes", DeviceMaxBytes)
@@ -147,21 +164,62 @@ func ValidateDeviceSnapshot(data []byte) error {
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
-		var record struct {
-			Timestamp string         `json:"ts"`
-			Level     string         `json:"level"`
-			Component string         `json:"component"`
-			Message   string         `json:"message"`
-			Fields    map[string]any `json:"fields"`
-		}
-		if json.Unmarshal(line, &record) != nil || record.Level == "" || record.Component == "" || record.Message == "" || record.Fields == nil {
-			return errors.New("native log contains an invalid NDJSON record")
+		if err := validateDeviceRecord(line); err != nil {
+			return err
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("scan native log: %w", err)
 	}
 	return nil
+}
+
+// mergeDeviceSnapshot keeps records that arrived over the live socket after
+// the client captured its HTTP repair snapshot. The newest common record is
+// the ordering boundary: the snapshot is authoritative through that record,
+// and any host-side suffix after it was written later.
+func mergeDeviceSnapshot(snapshot, existing []byte) []byte {
+	if len(snapshot) == 0 || len(existing) == 0 {
+		return snapshot
+	}
+	snapshotLines := bytes.FieldsFunc(snapshot, func(r rune) bool { return r == '\n' })
+	existingLines := bytes.FieldsFunc(existing, func(r rune) bool { return r == '\n' })
+	positions := make(map[string]struct{}, len(snapshotLines))
+	for _, line := range snapshotLines {
+		positions[string(line)] = struct{}{}
+	}
+	lastCommon := -1
+	for index, line := range existingLines {
+		if _, ok := positions[string(line)]; ok {
+			lastCommon = index
+		}
+	}
+	if lastCommon < 0 || lastCommon+1 == len(existingLines) {
+		return snapshot
+	}
+	merged := append([]byte(nil), snapshot...)
+	if len(merged) > 0 && merged[len(merged)-1] != '\n' {
+		merged = append(merged, '\n')
+	}
+	for _, line := range existingLines[lastCommon+1:] {
+		merged = append(merged, line...)
+		merged = append(merged, '\n')
+	}
+	if len(merged) <= DeviceMaxBytes {
+		return merged
+	}
+	return readTailBytes(merged, DeviceMaxBytes)
+}
+
+func readTailBytes(data []byte, max int) []byte {
+	if len(data) <= max {
+		return data
+	}
+	data = data[len(data)-max:]
+	if newline := bytes.IndexByte(data, '\n'); newline >= 0 {
+		data = data[newline+1:]
+	}
+	return data
 }
 
 func WriteDeviceSnapshot(home, deviceID string, data []byte) error {
@@ -175,12 +233,67 @@ func WriteDeviceSnapshot(home, deviceID string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
+	deviceMu.Lock()
+	defer deviceMu.Unlock()
 	if len(data) == 0 {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		return nil
 	}
+	if existing, readErr := os.ReadFile(path); readErr == nil {
+		data = mergeDeviceSnapshot(data, existing)
+	} else if !errors.Is(readErr, os.ErrNotExist) {
+		return readErr
+	}
+	temporary := path + ".tmp"
+	if err := os.WriteFile(temporary, data, 0o600); err != nil {
+		return err
+	}
+	if err := atomicfile.Replace(temporary, path); err != nil {
+		_ = os.Remove(temporary)
+		return err
+	}
+	return nil
+}
+
+// AppendDeviceRecord mirrors one native log record immediately over the live
+// control socket while keeping the same bounded snapshot file used at startup.
+func AppendDeviceRecord(home, deviceID string, record json.RawMessage) error {
+	if err := validateDeviceRecord(record); err != nil {
+		return err
+	}
+	path, err := DevicePath(home, deviceID)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	line := append(append([]byte(nil), record...), '\n')
+	deviceMu.Lock()
+	defer deviceMu.Unlock()
+	info, statErr := os.Stat(path)
+	if errors.Is(statErr, os.ErrNotExist) || statErr == nil && info.Size()+int64(len(line)) <= DeviceMaxBytes {
+		file, openErr := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+		if openErr != nil {
+			return openErr
+		}
+		_, writeErr := file.Write(line)
+		closeErr := file.Close()
+		if writeErr != nil {
+			return writeErr
+		}
+		return closeErr
+	}
+	if statErr != nil {
+		return statErr
+	}
+	existing, err := ReadTail(path, DeviceMaxBytes-int64(len(line)))
+	if err != nil {
+		return err
+	}
+	data := append(existing, line...)
 	temporary := path + ".tmp"
 	if err := os.WriteFile(temporary, data, 0o600); err != nil {
 		return err
@@ -197,10 +310,22 @@ func RemoveDevice(home, deviceID string) error {
 	if err != nil {
 		return err
 	}
+	deviceMu.Lock()
+	defer deviceMu.Unlock()
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return nil
+}
+
+func ReadDeviceSnapshot(home, deviceID string, max int64) ([]byte, error) {
+	path, err := DevicePath(home, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	deviceMu.Lock()
+	defer deviceMu.Unlock()
+	return ReadTail(path, max)
 }
 
 func ReadTail(path string, max int64) ([]byte, error) {

@@ -109,6 +109,7 @@ func ServeContext(parent context.Context, ready chan<- control.Descriptor) error
 	}
 	clearBrowserStartupFailures(cfg.SurfHome)
 	srv := web.New(cfg, a, ident, hub)
+	srv.StartClipboardSync(ctx)
 	srv.SetShutdown(cancel)
 	srv.SetHealthCheck(b.Health)
 	srv.SetStats(b.Stats)

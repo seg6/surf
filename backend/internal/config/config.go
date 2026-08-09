@@ -20,20 +20,20 @@ var AppVersion = "dev"
 // feature-gates on these instead of parsing version strings, so server and app
 // can ship independently once both understand a capability.
 var Caps = []string{
-	"dialog",      // JS dialog forwarding + dialogreply
-	"filechooser", // upload intercept + POST /api/v1/uploads
-	"history2",    // paginated history query + histdel/clear
-	"reader",      // reader-mode extraction
-	"security",    // TLS state on url messages
-	"pageerror",   // native error surface messages
-	"clock",       // NTP-style monotonic clock synchronization
-	"dlprogress",  // download progress events
-	"dldel",       // delete a download from the server
-	"reqkeyframe", // on-demand IDR request (decode error / resync)
-	"video-retry", // explicit retry after an unavailable encoder state
-	"media-stats", // client decode/presentation health for adaptive profiles
-	"client-logs", // authenticated native log snapshots mirrored to the host
-	"clipboard",   // owner-initiated host-to-native clipboard delivery
+	"dialog",         // JS dialog forwarding + dialogreply
+	"filechooser",    // upload intercept + POST /api/v1/uploads
+	"history2",       // paginated history query + histdel/clear
+	"reader",         // reader-mode extraction
+	"security",       // TLS state on url messages
+	"pageerror",      // native error surface messages
+	"clock",          // NTP-style monotonic clock synchronization
+	"dlprogress",     // download progress events
+	"dldel",          // delete a download from the server
+	"reqkeyframe",    // on-demand IDR request (decode error / resync)
+	"video-retry",    // explicit retry after an unavailable encoder state
+	"media-stats",    // client decode/presentation health for adaptive profiles
+	"live-logs",      // authenticated native log records mirrored live to the host
+	"clipboard-sync", // owner-controlled bidirectional system clipboard bridge
 }
 
 type Config struct {

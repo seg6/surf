@@ -132,10 +132,10 @@ $SURF_HOME/logs/desktop.log
 $SURF_HOME/logs/devices/<device-id>.ndjson
 ```
 
-The native client uploads an authenticated snapshot when it connects, when it
-enters the background, every 30 seconds after a change, and when the owner
-requests a refresh. View the combined sources in desktop Settings or from a
-terminal:
+The native client sends each structured record over its authenticated session
+as soon as it is written. It also uploads bounded snapshots at connection and
+background boundaries so reconnects can repair any missed interval. Desktop
+Settings follows one selected source live; terminal access is available with:
 
 ```sh
 surf logs
@@ -143,13 +143,29 @@ surf logs --follow
 surf logs --source device --device DEVICE_ID
 ```
 
-To place text on the clipboard of every connected iOS device, run
-`surf clipboard`. A terminal prompt hides the input; redirected standard input
-is preserved byte-for-byte, including whitespace and newlines. Use
-`surf clipboard --device DEVICE_ID` to target one connected device. The desktop
-Settings page can deliberately read the host clipboard when browser permission
-allows, or accepts a masked value as a fallback. Surf never accepts clipboard
-text as a command-line argument and never records its contents in logs.
+Clipboard synchronization is controlled by the host owner:
+
+```sh
+surf clipboard status
+surf clipboard sync on
+surf clipboard get
+surf clipboard set
+surf clipboard set --device DEVICE_ID
+surf clipboard sync off
+```
+
+With two-way sync on, copying text on the host or any connected iOS client
+updates the others. Surf uses the native Windows clipboard API, `pbcopy` and
+`pbpaste` on macOS, and `wl-clipboard`, `xclip`, or `xsel` on Linux. A headless
+host without one of those providers can still synchronize connected Surf
+clients and expose the current memory-only value through `surf clipboard get`.
+
+With sync off, desktop Settings presents a **Send once** text box. The
+equivalent `surf clipboard set` terminal prompt hides input; redirected
+standard input is preserved byte-for-byte, including whitespace and newlines.
+Surf never accepts clipboard text as a command-line argument. Only the enabled
+preference is stored under `SURF_HOME`; clipboard text is not persisted or
+included in logs. One-off device values expire after two minutes if unchanged.
 
 Replaceable state recovers conservatively. Invalid desktop settings, device
 registries, and runtime descriptors are moved beside the original with an

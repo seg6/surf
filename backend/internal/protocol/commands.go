@@ -130,6 +130,14 @@ type ClipboardResultCommand struct {
 	RequestID string `json:"id"`
 	OK        bool   `json:"ok"`
 }
+type ClipboardChangeCommand struct {
+	CommandBase
+	Text string `json:"text"`
+}
+type LogRecordCommand struct {
+	CommandBase
+	Record json.RawMessage `json:"record"`
+}
 
 // DecodeCommand is the sole JSON ingress. Unknown commands and trailing JSON
 // are rejected before browser state sees them.
@@ -178,6 +186,10 @@ func DecodeCommand(data []byte) (Command, error) {
 		dst = &VolumeCommand{}
 	case "clipboard-result":
 		dst = &ClipboardResultCommand{}
+	case "clipboard-change":
+		dst = &ClipboardChangeCommand{}
+	case "log-record":
+		dst = &LogRecordCommand{}
 	case "back", "fwd", "reload", "stop", "video-retry", "reqkeyframe",
 		"hist", "bookmark", "downloads", "reader", "media-playpause", "media-mute", "media-query":
 		dst = &EmptyCommand{}

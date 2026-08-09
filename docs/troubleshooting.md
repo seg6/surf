@@ -135,12 +135,24 @@ process tree before replacing it and launch the new version after a silent
 update. `SURF_HOME` is not removed, so the server identity, pairings, and
 browser profile remain in place.
 
+## Clipboard sync has no host integration
+
+Run `surf clipboard status`. Windows and macOS use their built-in clipboard
+facilities. On Linux, a graphical session needs `wl-copy` and `wl-paste`
+(`wl-clipboard`) under Wayland, or `xclip`/`xsel` under X11, with the matching
+display environment available to the Surf process. A headless service can
+still synchronize text between connected Surf clients and use
+`surf clipboard get`/`set`; it simply cannot read or write a desktop system
+clipboard that does not exist.
+
 ## Collect logs
 
-The Surf tray Settings page shows the server, desktop, and latest mirrored log
-from each paired device. `surf logs` prints those sources without first copying
-anything off the device; use `surf logs --follow` while reproducing a problem.
-The host copies are bounded under `$SURF_HOME/logs/`.
+The Surf tray Settings page follows the selected server, desktop, or paired
+device source live. Each iOS structured record is sent to the host as it is
+written, while bounded snapshots repair reconnect gaps. `surf logs` prints the
+same host copies without first copying anything off the device; use
+`surf logs --follow` while reproducing a problem. The host copies are bounded
+under `$SURF_HOME/logs/`.
 
 On iOS, **Settings > Diagnostics > Logs** still provides color-coded structured
 events, expandable typed fields, live updates, copy, and clear controls. Its

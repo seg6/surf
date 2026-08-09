@@ -17,9 +17,9 @@ import (
 	"strings"
 	"time"
 	"unicode"
-	"unicode/utf8"
 
 	"surf-backend/internal/auth"
+	"surf-backend/internal/clipboard"
 	"surf-backend/internal/control"
 	"surf-backend/internal/web"
 
@@ -372,14 +372,27 @@ func runLogsCommand(args []string) error {
 	}
 }
 
-func clipboardDevice(args []string) (string, error) {
-	if len(args) == 0 {
-		return "", nil
+type clipboardCommand struct {
+	action   string
+	deviceID string
+	enabled  bool
+}
+
+func parseClipboardCommand(args []string) (clipboardCommand, error) {
+	usage := errors.New("usage: surf clipboard get | set [--device ID] | status | sync on|off")
+	if len(args) == 1 && (args[0] == "get" || args[0] == "status") {
+		return clipboardCommand{action: args[0]}, nil
 	}
-	if len(args) == 2 && args[0] == "--device" && args[1] != "" {
-		return args[1], nil
+	if len(args) == 1 && args[0] == "set" {
+		return clipboardCommand{action: "set"}, nil
 	}
-	return "", errors.New("usage: surf clipboard [--device ID]")
+	if len(args) == 3 && args[0] == "set" && args[1] == "--device" && args[2] != "" {
+		return clipboardCommand{action: "set", deviceID: args[2]}, nil
+	}
+	if len(args) == 2 && args[0] == "sync" && (args[1] == "on" || args[1] == "off") {
+		return clipboardCommand{action: "sync", enabled: args[1] == "on"}, nil
+	}
+	return clipboardCommand{}, usage
 }
 
 func readClipboardText(reader io.Reader, terminalInput bool, readSecret func() ([]byte, error)) (string, error) {
@@ -393,20 +406,77 @@ func readClipboardText(reader io.Reader, terminalInput bool, readSecret func() (
 	if err != nil {
 		return "", err
 	}
-	if len(data) == 0 || len(data) > 64<<10 || !utf8.Valid(data) {
-		return "", errors.New("clipboard text must contain 1 to 65536 bytes of UTF-8")
+	if err := clipboard.Validate(string(data)); err != nil {
+		return "", err
 	}
 	return string(data), nil
 }
 
 func runClipboardCommand(args []string) error {
-	deviceID, err := clipboardDevice(args)
+	command, err := parseClipboardCommand(args)
 	if err != nil {
 		return err
 	}
+	admin, err := newLocalAdmin()
+	if err != nil {
+		return err
+	}
+	type clipboardState struct {
+		Enabled   bool   `json:"enabled"`
+		Available bool   `json:"available"`
+		System    string `json:"system"`
+		Known     bool   `json:"known"`
+		Text      string `json:"text"`
+		Error     string `json:"error"`
+	}
+	switch command.action {
+	case "get":
+		var state clipboardState
+		if err := admin.request(http.MethodGet, web.APIRoot+"/admin/clipboard", nil, &state); err != nil {
+			return err
+		}
+		if !state.Known {
+			if state.Error != "" {
+				return errors.New(state.Error)
+			}
+			return errors.New("clipboard has no text value")
+		}
+		_, err := io.WriteString(os.Stdout, state.Text)
+		if err == nil && term.IsTerminal(int(os.Stdout.Fd())) && !strings.HasSuffix(state.Text, "\n") {
+			fmt.Fprintln(os.Stdout)
+		}
+		return err
+	case "status":
+		var state clipboardState
+		if err := admin.request(http.MethodGet, web.APIRoot+"/admin/clipboard", nil, &state); err != nil {
+			return err
+		}
+		fmt.Printf("Two-way sync: %s\n", map[bool]string{true: "on", false: "off"}[state.Enabled])
+		fmt.Printf("Host integration: %s", terminalText(state.System))
+		if !state.Available {
+			fmt.Print(" (unavailable)")
+		}
+		fmt.Println()
+		if state.Error != "" {
+			fmt.Printf("Host error: %s\n", terminalText(state.Error))
+		}
+		return nil
+	case "sync":
+		var state clipboardState
+		if err := admin.request(http.MethodPut, web.APIRoot+"/admin/clipboard/sync",
+			map[string]bool{"enabled": command.enabled}, &state); err != nil {
+			return err
+		}
+		fmt.Printf("Two-way clipboard sync %s.\n", map[bool]string{true: "enabled", false: "disabled"}[state.Enabled])
+		if state.Error != "" {
+			fmt.Fprintf(os.Stderr, "surf: host clipboard warning: %s\n", terminalText(state.Error))
+		}
+		return nil
+	}
+
 	isTerminal := term.IsTerminal(int(os.Stdin.Fd()))
 	if isTerminal {
-		fmt.Fprint(os.Stderr, "Text to copy to connected devices: ")
+		fmt.Fprint(os.Stderr, "Clipboard text (input hidden; empty clears): ")
 	}
 	text, err := readClipboardText(os.Stdin, isTerminal, func() ([]byte, error) {
 		data, readErr := term.ReadPassword(int(os.Stdin.Fd()))
@@ -416,20 +486,25 @@ func runClipboardCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	admin, err := newLocalAdmin()
-	if err != nil {
-		return err
-	}
 	var result struct {
 		OK        bool     `json:"ok"`
 		Delivered []string `json:"delivered"`
 		Failed    []string `json:"failed"`
+		HostOK    bool     `json:"hostOK"`
+		HostError string   `json:"hostError"`
 	}
 	if err := admin.request(http.MethodPost, web.APIRoot+"/admin/clipboard",
-		map[string]string{"deviceID": deviceID, "text": text}, &result); err != nil {
+		map[string]string{"deviceID": command.deviceID, "text": text}, &result); err != nil {
 		return err
 	}
-	fmt.Printf("Copied to %d connected device(s).\n", len(result.Delivered))
+	if command.deviceID == "" {
+		fmt.Printf("Clipboard set; synchronized with %d connected device(s).\n", len(result.Delivered))
+	} else {
+		fmt.Printf("Clipboard sent to %d connected device(s).\n", len(result.Delivered))
+	}
+	if result.HostError != "" {
+		fmt.Fprintf(os.Stderr, "surf: host clipboard warning: %s\n", terminalText(result.HostError))
+	}
 	if !result.OK {
 		return fmt.Errorf("clipboard delivery failed for %d device(s)", len(result.Failed))
 	}

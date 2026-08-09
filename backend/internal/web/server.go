@@ -2,6 +2,7 @@
 package web
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"crypto/tls"
@@ -18,9 +19,9 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"surf-backend/internal/auth"
+	"surf-backend/internal/clipboard"
 	"surf-backend/internal/config"
 	"surf-backend/internal/control"
 	"surf-backend/internal/identity"
@@ -35,19 +36,20 @@ import (
 const APIRoot = "/api/v1"
 
 type Server struct {
-	cfg         *config.Config
-	auth        *auth.Manager
-	identity    *identity.Identity
-	hub         *transport.Hub
-	extra       map[string]http.HandlerFunc
-	health      func() error
-	stats       func() map[string]any
-	client      *clientPackage
-	adminToken  string
-	shutdown    func()
-	clipboardMu sync.Mutex
-	clipboard   map[string]*clipboardRequest
-	tunnelSlots chan struct{}
+	cfg           *config.Config
+	auth          *auth.Manager
+	identity      *identity.Identity
+	hub           *transport.Hub
+	extra         map[string]http.HandlerFunc
+	health        func() error
+	stats         func() map[string]any
+	client        *clientPackage
+	adminToken    string
+	shutdown      func()
+	clipboardMu   sync.Mutex
+	clipboard     map[string]*clipboardRequest
+	hostClipboard *clipboard.Controller
+	tunnelSlots   chan struct{}
 }
 
 type clipboardRequest struct {
@@ -57,17 +59,29 @@ type clipboardRequest struct {
 }
 
 func New(cfg *config.Config, manager *auth.Manager, ident *identity.Identity, hub *transport.Hub) *Server {
+	clipboardController, clipboardErr := clipboard.New(cfg.SurfHome)
+	if clipboardErr != nil {
+		log.Printf("clipboard: settings ignored: %v", clipboardErr)
+	}
 	s := &Server{
 		cfg: cfg, auth: manager, identity: ident, hub: hub,
-		extra: map[string]http.HandlerFunc{}, clipboard: map[string]*clipboardRequest{}, tunnelSlots: make(chan struct{}, 8),
+		extra: map[string]http.HandlerFunc{}, clipboard: map[string]*clipboardRequest{},
+		hostClipboard: clipboardController, tunnelSlots: make(chan struct{}, 8),
 	}
 	hub.SetAuxHandler(s.handleAuxCommand)
+	hub.SetConnectHandler(s.handleClientConnected)
 	if client := embeddedClientPackage(); client != nil {
 		s.client = client
 		s.extra[APIRoot+"/updates/client"] = client.ServeHTTP
 		log.Printf("updates: embedded iOS client %s protocol %s (%d bytes)", client.Version, client.Protocol, len(client.Data))
 	}
 	return s
+}
+
+func (s *Server) StartClipboardSync(ctx context.Context) {
+	s.hostClipboard.Start(ctx, func(state clipboard.State) {
+		s.hub.BroadcastJSON(protocol.ClipboardEvent{Type: "clipboard", Text: state.Text, Sync: true})
+	})
 }
 
 func (s *Server) SetHealthCheck(fn func() error)    { s.health = fn }
@@ -440,6 +454,8 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"devices": s.auth.ListDevices(), "online": online})
 	case p == APIRoot+"/admin/logs" && r.Method == http.MethodGet:
 		s.handleAdminLogs(w, r)
+	case p == APIRoot+"/admin/logs/stream" && r.Method == http.MethodGet:
+		s.handleAdminLogStream(w, r)
 	case p == APIRoot+"/admin/logs/refresh" && r.Method == http.MethodPost:
 		var request struct {
 			DeviceID string `json:"deviceID"`
@@ -449,8 +465,12 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		}
 		targets := s.hub.SendDeviceJSON(request.DeviceID, protocol.EmptyEvent{Type: "log-request"})
 		writeJSON(w, http.StatusOK, map[string]any{"devices": targets})
+	case p == APIRoot+"/admin/clipboard" && r.Method == http.MethodGet:
+		s.handleAdminClipboardState(w, r)
 	case p == APIRoot+"/admin/clipboard" && r.Method == http.MethodPost:
 		s.handleAdminClipboard(w, r)
+	case p == APIRoot+"/admin/clipboard/sync" && r.Method == http.MethodPut:
+		s.handleAdminClipboardSync(w, r)
 	case p == APIRoot+"/admin/shutdown" && r.Method == http.MethodPost:
 		if s.shutdown == nil {
 			http.Error(w, "shutdown unavailable", http.StatusServiceUnavailable)
@@ -463,22 +483,44 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleClientConnected(client *transport.Client) {
+	state := s.hostClipboard.State()
+	client.SendJSON(protocol.ClipboardSyncEvent{
+		Type: "clipboard-sync", Enabled: state.Enabled, Known: state.Known, Text: state.Text,
+	})
+}
+
 func (s *Server) handleAuxCommand(client *transport.Client, command protocol.Command) bool {
-	result, ok := command.(*protocol.ClipboardResultCommand)
-	if !ok {
+	switch value := command.(type) {
+	case *protocol.ClipboardResultCommand:
+		s.clipboardMu.Lock()
+		pending := s.clipboard[value.RequestID]
+		if pending != nil && pending.expected[client.DeviceID()] && !pending.acked[client.DeviceID()] {
+			pending.acked[client.DeviceID()] = value.OK
+			select {
+			case pending.notify <- struct{}{}:
+			default:
+			}
+		}
+		s.clipboardMu.Unlock()
+		return true
+	case *protocol.ClipboardChangeCommand:
+		state, changed, err := s.hostClipboard.SetRemote(context.Background(), value.Text)
+		if err != nil && !errors.Is(err, clipboard.ErrUnavailable) {
+			log.Printf("clipboard: device-to-host bridge failed system=%s: %v", state.System, err)
+		}
+		if changed {
+			s.hub.BroadcastJSON(protocol.ClipboardEvent{Type: "clipboard", Text: state.Text, Sync: true})
+		}
+		return true
+	case *protocol.LogRecordCommand:
+		if err := logstore.AppendDeviceRecord(s.cfg.SurfHome, client.DeviceID(), value.Record); err != nil {
+			log.Printf("native log: rejected live record device=%s: %v", shortID(client.DeviceID()), err)
+		}
+		return true
+	default:
 		return false
 	}
-	s.clipboardMu.Lock()
-	pending := s.clipboard[result.RequestID]
-	if pending != nil && pending.expected[client.DeviceID()] && !pending.acked[client.DeviceID()] {
-		pending.acked[client.DeviceID()] = result.OK
-		select {
-		case pending.notify <- struct{}{}:
-		default:
-		}
-	}
-	s.clipboardMu.Unlock()
-	return true
 }
 
 func (s *Server) handleAdminClipboard(w http.ResponseWriter, r *http.Request) {
@@ -489,9 +531,28 @@ func (s *Server) handleAdminClipboard(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &request) {
 		return
 	}
-	if request.Text == "" || !utf8.ValidString(request.Text) || len([]byte(request.Text)) > 64<<10 {
-		http.Error(w, "clipboard text must contain 1 to 65536 bytes of UTF-8", http.StatusBadRequest)
+	if err := clipboard.Validate(request.Text); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+	state := s.hostClipboard.State()
+	var hostErr error
+	if request.DeviceID == "" {
+		state, _, hostErr = s.hostClipboard.SetHost(r.Context(), request.Text)
+	}
+	targets := s.hub.ConnectedDevices()
+	if request.DeviceID != "" {
+		filtered := targets[:0]
+		for _, deviceID := range targets {
+			if deviceID == request.DeviceID {
+				filtered = append(filtered, deviceID)
+			}
+		}
+		targets = filtered
+		if len(targets) == 0 {
+			http.Error(w, "no matching paired device is connected", http.StatusConflict)
+			return
+		}
 	}
 	random := make([]byte, 16)
 	if _, err := rand.Read(random); err != nil {
@@ -508,26 +569,15 @@ func (s *Server) handleAdminClipboard(w http.ResponseWriter, r *http.Request) {
 		delete(s.clipboard, requestID)
 		s.clipboardMu.Unlock()
 	}()
-	targets := s.hub.ConnectedDevices()
-	if request.DeviceID != "" {
-		filtered := targets[:0]
-		for _, deviceID := range targets {
-			if deviceID == request.DeviceID {
-				filtered = append(filtered, deviceID)
-			}
-		}
-		targets = filtered
-	}
-	if len(targets) == 0 {
-		http.Error(w, "no matching paired device is connected", http.StatusConflict)
-		return
-	}
 	s.clipboardMu.Lock()
 	for _, deviceID := range targets {
 		pending.expected[deviceID] = true
 	}
 	s.clipboardMu.Unlock()
-	s.hub.SendDeviceJSON(request.DeviceID, protocol.ClipboardEvent{Type: "clipboard", RequestID: requestID, Text: request.Text})
+	syncValue := request.DeviceID == "" && state.Enabled
+	s.hub.SendDeviceJSON(request.DeviceID, protocol.ClipboardEvent{
+		Type: "clipboard", RequestID: requestID, Text: request.Text, Sync: syncValue,
+	})
 	deadline := time.NewTimer(5 * time.Second)
 	defer deadline.Stop()
 	for {
@@ -555,8 +605,57 @@ finished:
 		}
 	}
 	s.clipboardMu.Unlock()
-	log.Printf("clipboard: bytes=%d targets=%d delivered=%d failed=%d", len([]byte(request.Text)), len(targets), len(delivered), len(failed))
-	writeJSON(w, http.StatusOK, map[string]any{"ok": len(failed) == 0, "delivered": delivered, "failed": failed})
+	hostError := ""
+	if hostErr != nil {
+		hostError = hostErr.Error()
+	}
+	log.Printf("clipboard: bytes=%d sync=%t targets=%d delivered=%d failed=%d host_ok=%t",
+		len([]byte(request.Text)), syncValue, len(targets), len(delivered), len(failed), hostErr == nil)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": len(failed) == 0, "delivered": delivered, "failed": failed,
+		"enabled": state.Enabled, "available": state.Available, "system": state.System,
+		"hostOK": hostErr == nil, "hostError": hostError,
+	})
+}
+
+func clipboardStatePayload(state clipboard.State, err error) map[string]any {
+	errorText := ""
+	if err != nil {
+		errorText = err.Error()
+	}
+	return map[string]any{
+		"enabled": state.Enabled, "available": state.Available, "system": state.System,
+		"known": state.Known, "text": state.Text, "revision": state.Revision, "error": errorText,
+	}
+}
+
+func (s *Server) handleAdminClipboardState(w http.ResponseWriter, r *http.Request) {
+	state, err := s.hostClipboard.Read(r.Context())
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, clipboardStatePayload(state, err))
+}
+
+func (s *Server) handleAdminClipboardSync(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		Enabled bool `json:"enabled"`
+	}
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	state, err := s.hostClipboard.SetEnabled(r.Context(), request.Enabled)
+	if state.Enabled != request.Enabled {
+		message := "could not update clipboard sync preference"
+		if err != nil {
+			message = err.Error()
+		}
+		http.Error(w, message, http.StatusInternalServerError)
+		return
+	}
+	s.hub.BroadcastJSON(protocol.ClipboardSyncEvent{
+		Type: "clipboard-sync", Enabled: state.Enabled, Known: state.Known, Text: state.Text,
+	})
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, clipboardStatePayload(state, err))
 }
 
 func (s *Server) handleClientLogs(w http.ResponseWriter, r *http.Request, deviceID string) {
@@ -581,6 +680,17 @@ func (s *Server) handleClientLogs(w http.ResponseWriter, r *http.Request, device
 }
 
 func (s *Server) handleAdminLogs(w http.ResponseWriter, r *http.Request) {
+	data, err := s.readAdminLogs(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(data)
+}
+
+func (s *Server) readAdminLogs(r *http.Request) ([]byte, error) {
 	source := r.URL.Query().Get("source")
 	if source == "" {
 		source = "server"
@@ -593,15 +703,9 @@ func (s *Server) handleAdminLogs(w http.ResponseWriter, r *http.Request) {
 	case "desktop":
 		path, rotated = logstore.DesktopPath(s.cfg.SurfHome), true
 	case "device":
-		var err error
-		path, err = logstore.DevicePath(s.cfg.SurfHome, r.URL.Query().Get("deviceID"))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
+		return logstore.ReadDeviceSnapshot(s.cfg.SurfHome, r.URL.Query().Get("deviceID"), logstore.DefaultReadBytes)
 	default:
-		http.Error(w, "unknown log source", http.StatusBadRequest)
-		return
+		return nil, errors.New("unknown log source")
 	}
 	var data []byte
 	var err error
@@ -610,13 +714,73 @@ func (s *Server) handleAdminLogs(w http.ResponseWriter, r *http.Request) {
 	} else {
 		data, err = logstore.ReadTail(path, logstore.DefaultReadBytes)
 	}
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	return data, err
+}
+
+func (s *Server) handleAdminLogStream(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "live logs unavailable", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	current, err := s.readAdminLogs(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write(data)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	controller := http.NewResponseController(w)
+	send := func(text []byte, reset bool) bool {
+		_ = controller.SetWriteDeadline(time.Now().Add(30 * time.Second))
+		data, _ := json.Marshal(map[string]any{"text": string(text), "reset": reset})
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+	if !send(current, true) {
+		return
+	}
+	previous := string(current)
+	lastWrite := time.Now()
+	ticker := time.NewTicker(350 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+		}
+		next, err := s.readAdminLogs(r)
+		if err != nil {
+			return
+		}
+		text := string(next)
+		if text == previous {
+			if time.Since(lastWrite) >= 15*time.Second {
+				_ = controller.SetWriteDeadline(time.Now().Add(30 * time.Second))
+				if _, err := io.WriteString(w, ": keepalive\n\n"); err != nil {
+					return
+				}
+				flusher.Flush()
+				lastWrite = time.Now()
+			}
+			continue
+		}
+		reset := !strings.HasPrefix(text, previous)
+		chunk := next
+		if !reset {
+			chunk = next[len(previous):]
+		}
+		if !send(chunk, reset) {
+			return
+		}
+		lastWrite = time.Now()
+		previous = text
+	}
 }
 
 func (s *Server) pairingSessionResponse(session auth.PairingSession, address string) map[string]any {
