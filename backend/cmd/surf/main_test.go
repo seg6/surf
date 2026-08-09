@@ -339,6 +339,18 @@ func TestManagementAdminProxyRejectsCrossSiteMutation(t *testing.T) {
 	}
 }
 
+func TestDesktopMutationGateAllowsAuthenticatedPut(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPut, "/api/backend/api/v1/admin/clipboard/sync", nil)
+	request.Header.Set("X-Surf-Desktop", "1")
+	if !validDesktopMutation(request) {
+		t.Fatal("authenticated clipboard sync PUT was rejected")
+	}
+	request.Header.Del("X-Surf-Desktop")
+	if validDesktopMutation(request) {
+		t.Fatal("unauthenticated clipboard sync PUT was accepted")
+	}
+}
+
 func testDaemonDescriptor(t *testing.T, home string, handler func(http.ResponseWriter, *http.Request, string)) (*httptest.Server, control.Descriptor) {
 	t.Helper()
 	wantToken := ""

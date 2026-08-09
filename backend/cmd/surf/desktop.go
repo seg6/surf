@@ -791,7 +791,8 @@ func (a *desktopApp) managementUpdateApply(w http.ResponseWriter, r *http.Reques
 }
 
 func validDesktopMutation(r *http.Request) bool {
-	return (r.Method == http.MethodPost || r.Method == http.MethodDelete) && r.Header.Get("X-Surf-Desktop") == "1"
+	return (r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodDelete) &&
+		r.Header.Get("X-Surf-Desktop") == "1"
 }
 
 func (a *desktopApp) applyDesktopUpdate(release updater.Release) {
