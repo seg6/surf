@@ -2,6 +2,16 @@
 
 This file records the user-visible changes in every Surf release.
 
+## 0.13.3 - 2026-08-09
+
+- Restored DOM touch and Pointer Events after switching between Desktop and
+  Mobile Websites by applying Chromium device metrics before re-enabling touch
+  emulation. This fixes mobile TikTok and YouTube Shorts swipes, including the
+  older intermittent state that appeared to recover after a restart or later
+  navigation.
+- Exercised native-select interception during the real-Chromium fling test so
+  future page-control work cannot silently regress physical scrolling.
+
 ## 0.13.2 - 2026-08-09
 
 - Made native-keyboard intent follow the complete trusted activation: direct
