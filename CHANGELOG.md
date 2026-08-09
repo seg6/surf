@@ -2,6 +2,18 @@
 
 This file records the user-visible changes in every Surf release.
 
+## 0.13.2 - 2026-08-09
+
+- Made native-keyboard intent follow the complete trusted activation: direct
+  fields, labels, overlays, and synchronous site focus now open the keyboard,
+  while page-load, promise, timer, and animation-frame focus remain silent.
+- Replaced Chromium's uncaptured HTML select popup with an adaptive native
+  picker: anchored and scrolling on iPad, full-screen on narrow devices, with
+  disabled options, multi-select, rotation, shadow DOM, and cross-origin-frame
+  support.
+- Bumped the exact native protocol to `20260809-4` for native select requests
+  and one-shot replies scoped to the originating Chromium execution context.
+
 ## 0.13.1 - 2026-08-09
 
 - Prevented sites from opening the iOS keyboard through autofocus or scripted
