@@ -2,6 +2,13 @@
 
 This file records the user-visible changes in every Surf release.
 
+## 0.13.1 - 2026-08-09
+
+- Prevented sites from opening the iOS keyboard through autofocus or scripted
+  focus; the keyboard now opens only after a physical touch on that exact field.
+- Bumped the exact native protocol to `20260809-3` to carry explicit keyboard
+  intent separately from editable focus state.
+
 ## 0.13.0 - 2026-08-09
 
 - Added `Esc` and `Tab` beside the iOS page-paste control, with the remote-key
