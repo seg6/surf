@@ -188,6 +188,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
 - (void)cacheThumbnailForTabKey:(NSNumber *)tabKey;
 - (void)presentLibraryFromButton:(UIButton *)button;
 - (void)presentPageSwitcher;
+- (void)sendKeyName:(NSString *)name keyCode:(NSInteger)keyCode;
 @end
 
 @implementation RBRootViewController
@@ -303,11 +304,15 @@ static CGFloat RBEvenExtent(CGFloat value) {
     UIToolbar *inputBar = [[UIToolbar alloc] initWithFrame:CGRectMake(0.0, 0.0, self.view.bounds.size.width, 38.0)];
     inputBar.barStyle = UIBarStyleBlack;
     inputBar.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    UIBarButtonItem *escape = [[UIBarButtonItem alloc] initWithTitle:@"Esc" style:UIBarButtonItemStylePlain
+                                                             target:self action:@selector(escapePageInput)];
+    UIBarButtonItem *tab = [[UIBarButtonItem alloc] initWithTitle:@"Tab" style:UIBarButtonItemStylePlain
+                                                          target:self action:@selector(tabPageInput)];
     UIBarButtonItem *space = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
                                                                           target:nil action:nil];
     self.pagePasteButton = [[UIBarButtonItem alloc] initWithTitle:@"Paste" style:UIBarButtonItemStyleDone
                                                           target:self action:@selector(pasteToPage)];
-    inputBar.items = @[space, self.pagePasteButton];
+    inputBar.items = @[escape, tab, space, self.pagePasteButton];
     self.hiddenInput.inputAccessoryView = inputBar;
     [self.view addSubview:self.hiddenInput];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(hiddenInputDidChange:)
@@ -1516,6 +1521,14 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
     }
     [self.session sendMessage:@{@"t": @"paste", @"text": text}];
     [self showToast:@"Pasted to page"];
+}
+
+- (void)escapePageInput {
+    [self sendKeyName:@"Escape" keyCode:27];
+}
+
+- (void)tabPageInput {
+    [self sendKeyName:@"Tab" keyCode:9];
 }
 
 - (void)toggleFullscreen {
