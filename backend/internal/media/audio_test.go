@@ -41,6 +41,50 @@ func TestNativeCaptureFeedsPCMChunks(t *testing.T) {
 	}
 }
 
+func TestPCMSignalWindowDistinguishesSignalFromSilence(t *testing.T) {
+	var signal pcmSignalWindow
+	signal.observe([]byte{
+		0x00, 0x00, // 0
+		0x01, 0x00, // 1
+		0xff, 0xff, // -1
+		0xff, 0x7f, // 32767
+		0x00, 0x80, // -32768
+	})
+
+	fields := signal.fields()
+	if got := fields["pcm_state"]; got != "signal" {
+		t.Fatalf("pcm_state=%v, want signal", got)
+	}
+	if got := fields["pcm_chunks"]; got != uint64(1) {
+		t.Fatalf("pcm_chunks=%v, want 1", got)
+	}
+	if got := fields["pcm_silent_chunks"]; got != uint64(0) {
+		t.Fatalf("pcm_silent_chunks=%v, want 0", got)
+	}
+	if got := fields["pcm_samples"]; got != uint64(5) {
+		t.Fatalf("pcm_samples=%v, want 5", got)
+	}
+	if got := fields["pcm_nonzero_sample_percent"]; got != 80.0 {
+		t.Fatalf("pcm_nonzero_sample_percent=%v, want 80", got)
+	}
+	if got := fields["pcm_mean_absolute"]; got != 13107.4 {
+		t.Fatalf("pcm_mean_absolute=%v, want 13107.4", got)
+	}
+	if got := fields["pcm_peak"]; got != uint64(32768) {
+		t.Fatalf("pcm_peak=%v, want 32768", got)
+	}
+
+	signal.reset()
+	signal.observe(make([]byte, chunkBytes))
+	fields = signal.fields()
+	if got := fields["pcm_state"]; got != "silent" {
+		t.Fatalf("silent pcm_state=%v, want silent", got)
+	}
+	if got := fields["pcm_silent_chunks"]; got != uint64(1) {
+		t.Fatalf("silent pcm_silent_chunks=%v, want 1", got)
+	}
+}
+
 func TestCaptureFailureClosesSubscription(t *testing.T) {
 	s := NewAudioPipeline(AudioConfig{
 		Capture: func() (io.ReadCloser, error) {

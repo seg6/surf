@@ -6,6 +6,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"surf-backend/internal/logs"
 )
 
 const (
@@ -18,7 +20,76 @@ const (
 	// reservoirs from accumulating audible lag.
 	queueCap       = 1 // one 20ms packet; overflow drops the oldest below
 	audioIdleDelay = 5 * time.Second
+	// At 20ms per chunk this emits one content-free signal summary every five
+	// seconds. It is frequent enough for issue diagnostics without turning
+	// packet-rate activity into packet-rate logs.
+	pcmSignalLogChunks = 250
 )
+
+type pcmSignalWindow struct {
+	chunks         uint64
+	silentChunks   uint64
+	samples        uint64
+	nonzeroSamples uint64
+	absSum         uint64
+	peak           uint64
+}
+
+func (w *pcmSignalWindow) observe(data []byte) {
+	var nonzero, absSum, peak uint64
+	samples := uint64(len(data) / 2)
+	for i := 0; i+1 < len(data); i += 2 {
+		sample := int16(uint16(data[i]) | uint16(data[i+1])<<8)
+		magnitude := int64(sample)
+		if magnitude < 0 {
+			magnitude = -magnitude
+		}
+		absolute := uint64(magnitude)
+		if absolute != 0 {
+			nonzero++
+		}
+		absSum += absolute
+		if absolute > peak {
+			peak = absolute
+		}
+	}
+	w.chunks++
+	if nonzero == 0 {
+		w.silentChunks++
+	}
+	w.samples += samples
+	w.nonzeroSamples += nonzero
+	w.absSum += absSum
+	if peak > w.peak {
+		w.peak = peak
+	}
+}
+
+func (w *pcmSignalWindow) fields() map[string]any {
+	nonzeroPercent := 0.0
+	meanAbsolute := 0.0
+	if w.samples != 0 {
+		nonzeroPercent = 100 * float64(w.nonzeroSamples) / float64(w.samples)
+		meanAbsolute = float64(w.absSum) / float64(w.samples)
+	}
+	state := "silent"
+	if w.nonzeroSamples != 0 {
+		state = "signal"
+	}
+	return map[string]any{
+		"pcm_state":                  state,
+		"pcm_chunks":                 w.chunks,
+		"pcm_silent_chunks":          w.silentChunks,
+		"pcm_samples":                w.samples,
+		"pcm_nonzero_sample_percent": nonzeroPercent,
+		"pcm_mean_absolute":          meanAbsolute,
+		"pcm_peak":                   w.peak,
+	}
+}
+
+func (w *pcmSignalWindow) reset() {
+	*w = pcmSignalWindow{}
+}
 
 type AudioConfig struct {
 	// Capture opens a PCM source that produces signed little-endian 16 kHz
@@ -119,11 +190,17 @@ func (s *AudioPipeline) startLocked() {
 
 func (s *AudioPipeline) readLoop(r io.Reader, runID uint64) {
 	buf := make([]byte, chunkBytes)
+	var signal pcmSignalWindow
 	for {
 		if _, err := io.ReadFull(r, buf); err != nil {
 			break
 		}
 		data := append([]byte(nil), buf...)
+		signal.observe(data)
+		if signal.chunks >= pcmSignalLogChunks {
+			logs.Info("audio", "Chromium tab-capture PCM signal sample", signal.fields())
+			signal.reset()
+		}
 		s.mu.Lock()
 		if runID != s.runID || !s.running {
 			s.mu.Unlock()

@@ -2,6 +2,15 @@
 
 This file records the user-visible changes in every Surf release.
 
+## 0.13.4 - 2026-08-11
+
+- Activated an explicit iOS playback audio session before creating the PCM
+  queue, so Surf audio is not suppressed by the default ambient category or
+  the device's Silent switch; session failures are now recorded in client logs.
+- Added bounded, content-free PCM signal summaries to Chromium capture and iOS
+  receive logs, making zero-filled capture distinguishable from transport and
+  device playback failures without recording raw audio.
+
 ## 0.13.3 - 2026-08-09
 
 - Restored DOM touch and Pointer Events after switching between Desktop and
