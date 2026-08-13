@@ -364,7 +364,7 @@ jobs:
             END { if (!found) exit 1 }
           ' CHANGELOG.md > release-notes.md
           test -s release-notes.md
-          printf '\nNative iOS and unified Linux, Windows, and macOS packages are attached. Launch `surf` for the desktop app or run `surf daemon` under a service manager for a headless backend.\n' >> release-notes.md
+          printf '\nNative iOS and unified Linux, Windows, and macOS packages are attached. Launch `surf` for the desktop app or run `surf serve` under a service manager for a headless backend.\n' >> release-notes.md
 
           sha256sum dist/native/*.deb update.json
 

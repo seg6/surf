@@ -2,6 +2,18 @@
 
 This file records the user-visible changes in every Surf release.
 
+## 0.13.5 - 2026-08-13
+
+- Made Chromium an on-demand child of the persistent Surf server: it starts
+  with the first authenticated native client and exits two minutes after the
+  final disconnect, while pairing, updates, logs, and clipboard controls stay
+  available.
+- Preserved tabs, the active tab, mobile-site mode, cookies, and site storage
+  across idle shutdowns, deferred shutdown during active downloads, and made
+  reconnects and unexpected Chromium exits recover without restarting Surf.
+- Added browser lifecycle state to diagnostics and the desktop management UI,
+  plus `SURF_BROWSER_IDLE_TIMEOUT` (`0` keeps Chromium warm).
+
 ## 0.13.4 - 2026-08-11
 
 - Activated an explicit iOS playback audio session before creating the PCM
