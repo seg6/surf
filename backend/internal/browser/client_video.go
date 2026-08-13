@@ -38,7 +38,7 @@ func (b *Controller) subscribeVideo(c *transport.Client) {
 	// the dormant encoder first so it never starts at the backend default and
 	// immediately restarts at the iPad size.
 	b.video.SetSize(viewW, viewH)
-	c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "starting", Generation: b.video.Generation(), Profile: b.profileName()})
+	b.send(c, protocol.VideoConfigEvent{Type: "video-config", State: "starting", Generation: b.video.Generation(), Profile: b.profileName()})
 	sub := b.video.Subscribe()
 	select {
 	case <-c.Closed():
@@ -98,7 +98,7 @@ func (b *Controller) onVideoFrame(frame media.VideoFrame) {
 	}
 	b.mu.Unlock()
 	if pageReady {
-		b.hub.BroadcastJSON(protocol.PageFrameEvent{Type: "pageframe", SourceSeq: sourceSeq})
+		b.broadcast(protocol.PageFrameEvent{Type: "pageframe", SourceSeq: sourceSeq})
 	}
 }
 
@@ -124,7 +124,7 @@ func (b *Controller) pumpVideo(c *transport.Client, sub *media.VideoSubscription
 			return
 		}
 		generation = au.Generation
-		c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "ready", W: au.W, H: au.H, Generation: au.Generation, Profile: b.profileName()})
+		b.send(c, protocol.VideoConfigEvent{Type: "video-config", State: "ready", W: au.W, H: au.H, Generation: au.Generation, Profile: b.profileName()})
 		b.deliverAU(c, sub, au)
 	case <-time.After(firstAUWait):
 		log.Printf("video: no AU within %s, lane unavailable", firstAUWait)
@@ -138,12 +138,12 @@ func (b *Controller) pumpVideo(c *transport.Client, sub *media.VideoSubscription
 			// A viewport/fullscreen change restarts WebCodecs without
 			// replacing the subscription. Reconfigure VideoToolbox before the
 			// new generation's first IDR, exactly like initial subscription.
-			c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "ready", W: au.W, H: au.H, Generation: au.Generation, Profile: b.profileName()})
+			b.send(c, protocol.VideoConfigEvent{Type: "video-config", State: "ready", W: au.W, H: au.H, Generation: au.Generation, Profile: b.profileName()})
 		}
 		b.deliverAU(c, sub, au)
 	}
 	// Channel closed: encoder gave up (or we unsubscribed).
-	c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "unavailable", Reason: "encoder-stopped"})
+	b.send(c, protocol.VideoConfigEvent{Type: "video-config", State: "unavailable", Reason: "encoder-stopped"})
 	b.stopVideo(c)
 }
 
@@ -172,7 +172,7 @@ func (b *Controller) deliverAU(c *transport.Client, sub *media.VideoSubscription
 }
 
 func (b *Controller) videoFailed(c *transport.Client) {
-	c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "unavailable", Reason: "encoder-start-timeout"})
+	b.send(c, protocol.VideoConfigEvent{Type: "video-config", State: "unavailable", Reason: "encoder-start-timeout"})
 	b.stopVideo(c)
 }
 

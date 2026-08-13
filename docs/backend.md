@@ -91,6 +91,7 @@ Surf reads configuration from environment variables:
 | `STREAM_SCALE` | empty | Optional maximum stream size |
 | `SURF_CONTENT_BLOCKER` | `1` | Manage uBlock Origin Lite |
 | `SURF_ADAPTIVE_VIDEO` | `0` | Experimental adaptive stream profile |
+| `SURF_BROWSER_IDLE_TIMEOUT` | `2m` | Stop Chromium after the final native client disconnects; `0` keeps it warm |
 | `CHROME_NO_SANDBOX` | automatic for root | Disable Chromium sandbox where required |
 
 There is no password variable and no plaintext mode.
@@ -106,6 +107,7 @@ $SURF_HOME/identity/server.key
 $SURF_HOME/identity/session.key
 $SURF_HOME/devices.json
 $SURF_HOME/daemon.json
+$SURF_HOME/browser-session.json
 ```
 
 `daemon.json` is a permission-restricted, per-run server control descriptor.
@@ -121,6 +123,14 @@ the locks themselves are released when their owner exits.
 The browser profile, downloads, uploads, managed browser, updates, and desktop
 configuration also live below `SURF_HOME`. Back up the entire directory if you
 want to preserve the server identity and existing pairings.
+
+The Surf daemon does not keep Chromium resident just to provide pairing,
+management, logs, updates, or clipboard services. The first authenticated
+native WebSocket starts Chromium. Media stops as soon as the last socket
+disconnects, and Chromium exits after `SURF_BROWSER_IDLE_TIMEOUT` unless a
+download is still active. Reconnecting during that grace period cancels the
+shutdown. Tabs, the active tab, mobile-site mode, cookies, and site storage are
+restored on the next connection.
 
 ## Logs and clipboard
 

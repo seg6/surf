@@ -23,7 +23,7 @@ func (b *Controller) handleAudio(c *transport.Client, on bool) {
 	b.audioSubs[c] = sub
 	b.mediaMu.Unlock()
 	log.Printf("audio: client subscribed")
-	c.SendJSON(protocol.AudioConfigEvent{Type: "audio-config", OK: true, Rate: 16000, Channels: 1})
+	b.send(c, protocol.AudioConfigEvent{Type: "audio-config", OK: true, Rate: 16000, Channels: 1})
 	go b.pumpAudio(c, sub)
 }
 
@@ -34,7 +34,7 @@ func (b *Controller) pumpAudio(c *transport.Client, sub *media.AudioSubscription
 		}
 		_ = c.SendBinary(protocol.EncodeAudioPCM(chunk.Seq, chunk.SampleRate, chunk.Channels, chunk.Data))
 	}
-	c.SendJSON(protocol.AudioConfigEvent{Type: "audio-config"})
+	b.send(c, protocol.AudioConfigEvent{Type: "audio-config"})
 	b.stopAudio(c)
 }
 

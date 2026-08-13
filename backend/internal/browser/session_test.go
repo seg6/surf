@@ -1,0 +1,88 @@
+package browser
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"surf-backend/internal/config"
+)
+
+func TestBrowserSessionRoundTrip(t *testing.T) {
+	home := t.TempDir()
+	controller := &Controller{
+		cfg: &config.Config{SurfHome: home},
+		tabs: map[int]*Tab{
+			1: {ID: 1, URL: "https://example.com"},
+			2: {ID: 2, URL: "chrome://settings"},
+			3: {ID: 3, URL: "https://example.org"},
+		},
+		activeID: 3,
+		mobile:   true,
+	}
+	if err := controller.SaveSession(); err != nil {
+		t.Fatal(err)
+	}
+	session := loadBrowserSession(home)
+	if session.Version != browserSessionVersion || !session.Mobile || session.Active != 1 {
+		t.Fatalf("unexpected session metadata: %#v", session)
+	}
+	if len(session.Tabs) != 2 || session.Tabs[0] != "https://example.com" || session.Tabs[1] != "https://example.org" {
+		t.Fatalf("unexpected tabs: %#v", session.Tabs)
+	}
+	info, err := os.Stat(filepath.Join(home, "browser-session.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("session mode = %o, want 600", info.Mode().Perm())
+	}
+}
+
+func TestEmptyControllerDoesNotEraseBrowserSession(t *testing.T) {
+	home := t.TempDir()
+	path := browserSessionPath(home)
+	want := []byte("existing")
+	if err := os.WriteFile(path, want, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	controller := &Controller{cfg: &config.Config{SurfHome: home}, tabs: map[int]*Tab{}}
+	if err := controller.SaveSession(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("empty controller replaced session with %q", got)
+	}
+}
+
+func TestRestoredTargetsKeepOrderAndActiveTabAcrossAttachRace(t *testing.T) {
+	controller := &Controller{tabs: map[int]*Tab{}}
+	targets := []targetInfo{
+		{TargetID: "first", URL: "https://one.example"},
+		{TargetID: "second", URL: "https://two.example"},
+		{TargetID: "third", URL: "https://three.example"},
+	}
+	controller.beginRestore(targets, "second")
+	if controller.restoreOrder["first"] != 1 || controller.restoreOrder["second"] != 2 || controller.restoreOrder["third"] != 3 {
+		t.Fatalf("unexpected restore order: %#v", controller.restoreOrder)
+	}
+	controller.tabs[1] = &Tab{ID: 1}
+	controller.tabs[2] = &Tab{ID: 2}
+	controller.tabs[3] = &Tab{ID: 3}
+	if handled, activate := controller.finishRestoreTarget("third", 3); !handled || activate != 0 {
+		t.Fatalf("third completion = handled %t activate %d", handled, activate)
+	}
+	if handled, activate := controller.finishRestoreTarget("first", 1); !handled || activate != 0 {
+		t.Fatalf("first completion = handled %t activate %d", handled, activate)
+	}
+	if handled, activate := controller.finishRestoreTarget("second", 2); !handled || activate != 2 {
+		t.Fatalf("final completion = handled %t activate %d", handled, activate)
+	}
+	if controller.restorePending != nil || controller.restoreOrder != nil {
+		t.Fatal("restore batch was not released")
+	}
+}

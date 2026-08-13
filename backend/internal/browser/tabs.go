@@ -56,8 +56,11 @@ func (b *Controller) attachTarget(info targetInfo) {
 			return
 		}
 	}
-	b.seq++
-	id := b.seq
+	id, restoring := b.restoreOrder[info.TargetID]
+	if !restoring {
+		b.seq++
+		id = b.seq
+	}
 	t := &Tab{ID: id, TargetID: info.TargetID, Title: info.Title, URL: info.URL}
 	b.tabs[id] = t
 	b.byTarget[info.TargetID] = t
@@ -70,12 +73,18 @@ func (b *Controller) attachTarget(info targetInfo) {
 		delete(b.tabs, id)
 		delete(b.byTarget, info.TargetID)
 		b.mu.Unlock()
+		if handled, activate := b.finishRestoreTarget(info.TargetID, 0); handled && activate != 0 {
+			b.switchActive(activate)
+		}
 		return
 	}
 	var att struct {
 		SessionID string `json:"sessionId"`
 	}
 	if json.Unmarshal(res, &att) != nil || att.SessionID == "" {
+		if handled, activate := b.finishRestoreTarget(info.TargetID, 0); handled && activate != 0 {
+			b.switchActive(activate)
+		}
 		return
 	}
 	b.mu.Lock()
@@ -113,6 +122,12 @@ func (b *Controller) attachTarget(info targetInfo) {
 	if first && (info.URL == "" || info.URL == "about:blank" || info.URL == "chrome://newtab/") {
 		_ = b.cdp.Dispatch(s, "Page.navigate", map[string]any{"url": b.cfg.StartURL})
 	}
+	if handled, activate := b.finishRestoreTarget(info.TargetID, id); handled {
+		if activate != 0 {
+			b.switchActive(activate)
+		}
+		return
+	}
 	b.switchActive(id)
 }
 
@@ -121,6 +136,9 @@ func (b *Controller) dropTarget(targetID string) {
 	t := b.byTarget[targetID]
 	if t == nil {
 		b.mu.Unlock()
+		if handled, activate := b.finishRestoreTarget(targetID, 0); handled && activate != 0 {
+			b.switchActive(activate)
+		}
 		return
 	}
 	delete(b.tabs, t.ID)
@@ -145,6 +163,9 @@ func (b *Controller) dropTarget(targetID string) {
 		}
 	}
 	b.mu.Unlock()
+	if handled, activate := b.finishRestoreTarget(targetID, 0); handled && activate != 0 {
+		b.switchActive(activate)
+	}
 
 	if wasActive {
 		if nextID != 0 {
@@ -179,7 +200,7 @@ func (b *Controller) targetInfoChanged(info targetInfo) {
 
 	if urlChanged && active {
 		b.setTouchMode(t.Session)
-		b.hub.BroadcastJSON(b.urlMessage(url))
+		b.broadcast(b.urlMessage(url))
 		b.pushNavState()
 	}
 	if titleChanged || urlChanged {
@@ -219,7 +240,7 @@ func (b *Controller) tabNavigated(session, url string) {
 	if active {
 		b.touch.cancel(false)
 		b.setTouchMode(session)
-		b.hub.BroadcastJSON(b.urlMessage(url))
+		b.broadcast(b.urlMessage(url))
 		b.pushNavState()
 	}
 	b.broadcastTabs()
@@ -252,7 +273,7 @@ func (b *Controller) tabList() []protocol.TabInfo {
 }
 
 func (b *Controller) broadcastTabs() {
-	b.hub.BroadcastJSON(protocol.TabsEvent{Type: "tabs", Tabs: b.tabList()})
+	b.broadcast(protocol.TabsEvent{Type: "tabs", Tabs: b.tabList()})
 }
 
 // urlMessage carries the bookmark state so the star button stays in sync,
@@ -289,7 +310,7 @@ func (b *Controller) pushNavState() {
 		if !b.isActiveSession(s) {
 			return
 		}
-		b.hub.BroadcastJSON(protocol.HistoryStateEvent{
+		b.broadcast(protocol.HistoryStateEvent{
 			Type: "histstate", Back: h.CanGoBack(), Fwd: h.CanGoForward(),
 		})
 	}()
@@ -343,11 +364,11 @@ func (b *Controller) switchActive(id int) {
 	if !b.isActiveGeneration(id, generation) {
 		return
 	}
-	b.hub.BroadcastJSON(b.urlMessage(url))
+	b.broadcast(b.urlMessage(url))
 	b.mu.Lock()
 	fullscreen := next.Fullscreen
 	b.mu.Unlock()
-	b.hub.BroadcastJSON(protocol.BoolEvent{Type: "fullscreen", On: fullscreen})
+	b.broadcast(protocol.BoolEvent{Type: "fullscreen", On: fullscreen})
 	b.pushNavState()
 	b.broadcastTabs()
 }

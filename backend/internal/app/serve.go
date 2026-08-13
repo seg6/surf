@@ -89,28 +89,25 @@ func ServeContext(parent context.Context, ready chan<- control.Descriptor) error
 			log.Printf("remove revoked device log: %v", err)
 		}
 	})
-	b, err := browser.New(cfg, hub)
-	if err != nil {
-		return err
-	}
-	hub.SetHandler(b)
-	defer b.Shutdown()
-	if err := b.Start(); err != nil {
+	b := browser.NewManager(cfg, hub)
+	b.SetStartupRecovery(func(startErr error) bool {
 		recoverProfile, recoveryErr := noteBrowserStartupFailure(cfg.SurfHome, cfg.Profile, time.Now())
 		if recoveryErr != nil {
 			log.Printf("browser recovery state: %v", recoveryErr)
 		}
-		if recoverProfile {
-			backup, backupErr := chromium.QuarantineProfile(cfg.Profile)
-			if backupErr != nil {
-				return fmt.Errorf("browser startup failed: %w; profile recovery failed: %v", err, backupErr)
-			}
-			log.Printf("browser startup failed twice; profile preserved at %s", backup)
-			return fmt.Errorf("browser startup failed: %w; profile was preserved and reset for retry", err)
+		if !recoverProfile {
+			return false
 		}
-		return err
-	}
-	clearBrowserStartupFailures(cfg.SurfHome)
+		backup, backupErr := chromium.QuarantineProfile(cfg.Profile)
+		if backupErr != nil {
+			log.Printf("browser startup failed: %v; profile recovery failed: %v", startErr, backupErr)
+			return false
+		}
+		log.Printf("browser startup failed twice; profile preserved at %s", backup)
+		return true
+	}, func() { clearBrowserStartupFailures(cfg.SurfHome) })
+	hub.SetHandler(b)
+	defer b.Shutdown()
 	srv := web.New(cfg, a, ident, hub)
 	srv.SetServerLog(serverLog)
 	srv.StartClipboardSync(ctx)
@@ -175,8 +172,6 @@ func ServeContext(parent context.Context, ready chan<- control.Descriptor) error
 	select {
 	case err := <-serverErr:
 		return err
-	case <-b.Died():
-		return fmt.Errorf("chromium connection lost")
 	case <-ctx.Done():
 		log.Printf("server shutdown requested")
 		return nil

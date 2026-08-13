@@ -55,7 +55,7 @@ func (b *Controller) onJavascriptDialog(ev cdp.Event) {
 	b.verbMu.Lock()
 	b.dialogSessions[ev.SessionID] = true
 	b.verbMu.Unlock()
-	b.hub.BroadcastJSON(protocol.DialogEvent{
+	b.broadcast(protocol.DialogEvent{
 		Type: "dialog", Kind: p.Type, Text: p.Message, Default: p.DefaultPrompt,
 	})
 }
@@ -65,7 +65,7 @@ func (b *Controller) onJavascriptDialogClosed(ev cdp.Event) {
 	delete(b.dialogSessions, ev.SessionID)
 	b.verbMu.Unlock()
 	// Covers dialogs dismissed by navigation etc. so the client UI can drop.
-	b.hub.BroadcastJSON(protocol.EmptyEvent{Type: "dialogdone"})
+	b.broadcast(protocol.EmptyEvent{Type: "dialogdone"})
 }
 
 // handleDialogReply answers whichever session is showing a dialog. In
@@ -111,7 +111,7 @@ func (b *Controller) onFileChooserOpened(ev cdp.Event) {
 	b.chooserSession = ev.SessionID
 	b.chooserNode = p.BackendNodeID
 	b.verbMu.Unlock()
-	b.hub.BroadcastJSON(protocol.FileChooserEvent{
+	b.broadcast(protocol.FileChooserEvent{
 		Type: "filechooser", Multiple: p.Mode == "selectMultiple",
 	})
 }
@@ -273,7 +273,7 @@ func (b *Controller) onSecurityStateChanged(ev cdp.Event) {
 	active := t != nil && t.ID == b.activeID
 	b.mu.Unlock()
 	if active {
-		b.hub.BroadcastJSON(protocol.SecurityEvent{Type: "security", State: p.SecurityState})
+		b.broadcast(protocol.SecurityEvent{Type: "security", State: p.SecurityState})
 	}
 }
 
@@ -287,7 +287,7 @@ func (b *Controller) noteNavigationError(t *Tab) {
 	u := t.URL
 	b.mu.Unlock()
 	if active {
-		b.hub.BroadcastJSON(protocol.URLStateEvent{Type: "pageerror", URL: u})
+		b.broadcast(protocol.URLStateEvent{Type: "pageerror", URL: u})
 	}
 }
 
@@ -329,7 +329,7 @@ func (b *Controller) handleReader(c *transport.Client, t *Tab, session string) {
 	raw, err := b.cdp.EvaluateString(session, readerExpr)
 	if err != nil {
 		if b.isActiveSession(session) {
-			c.SendJSON(protocol.ReaderEvent{Type: "reader"})
+			b.send(c, protocol.ReaderEvent{Type: "reader"})
 		}
 		return
 	}
@@ -341,10 +341,10 @@ func (b *Controller) handleReader(c *transport.Client, t *Tab, session string) {
 		return
 	}
 	if json.Unmarshal([]byte(raw), &article) != nil || strings.TrimSpace(article.HTML) == "" {
-		c.SendJSON(protocol.ReaderEvent{Type: "reader"})
+		b.send(c, protocol.ReaderEvent{Type: "reader"})
 		return
 	}
-	c.SendJSON(protocol.ReaderEvent{
+	b.send(c, protocol.ReaderEvent{
 		Type: "reader", OK: true, Title: article.Title, HTML: article.HTML, URL: u,
 	})
 }
@@ -355,15 +355,15 @@ func (b *Controller) handleClear(c *transport.Client, session, what string) {
 	switch what {
 	case "history":
 		b.store.ClearHistory()
-		c.SendJSON(protocol.TextEvent{Type: "toast", Text: "history cleared"})
+		b.send(c, protocol.TextEvent{Type: "toast", Text: "history cleared"})
 	case "cookies":
 		_, err := b.cdp.Call(session, "Network.clearBrowserCookies", nil)
 		if err != nil {
 			log.Printf("clear cookies: %v", err)
 		}
-		c.SendJSON(protocol.TextEvent{Type: "toast", Text: "cookies cleared"})
+		b.send(c, protocol.TextEvent{Type: "toast", Text: "cookies cleared"})
 	case "cache":
 		_, _ = b.cdp.Call(session, "Network.clearBrowserCache", nil)
-		c.SendJSON(protocol.TextEvent{Type: "toast", Text: "cache cleared"})
+		b.send(c, protocol.TextEvent{Type: "toast", Text: "cache cleared"})
 	}
 }

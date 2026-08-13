@@ -44,22 +44,29 @@ type Controller struct {
 	hub      *transport.Hub
 	commands chan controllerCommand
 	events   chan cdp.Event
+	stop     chan struct{}
+	stopped  chan struct{}
 	touch    *touchInput
 
-	mu           sync.Mutex
-	tabs         map[int]*Tab
-	byTarget     map[string]*Tab
-	bySession    map[string]*Tab
-	seq          int
-	activeID     int
-	activeGen    uint64
-	viewW        int
-	viewH        int
-	mobile       bool
-	resizeMu     sync.Mutex
-	resizeTimer  *time.Timer
-	resizeGen    uint64
-	resizeClosed bool
+	mu                  sync.Mutex
+	tabs                map[int]*Tab
+	byTarget            map[string]*Tab
+	bySession           map[string]*Tab
+	seq                 int
+	activeID            int
+	activeGen           uint64
+	viewW               int
+	viewH               int
+	mobile              bool
+	resizeMu            sync.Mutex
+	resizeTimer         *time.Timer
+	resizeGen           uint64
+	resizeClosed        bool
+	startupSession      browserSession
+	restorePending      map[string]struct{}
+	restoreOrder        map[string]int
+	restoreActiveTarget string
+	restoreActiveID     int
 
 	store        *Store
 	icons        map[string]*favicon // origin -> icon, guarded by b.mu
@@ -68,13 +75,15 @@ type Controller struct {
 	dlMu    sync.Mutex
 	dlNames map[string]string // download guid -> final filename
 
-	video     *media.VideoPipeline
-	audio     *media.AudioPipeline
-	capture   *media.Capture
-	mediaMu   sync.Mutex // guards client media subscriptions below
-	shutdown  sync.Once
-	videoSubs map[*transport.Client]*media.VideoSubscription
-	audioSubs map[*transport.Client]*media.AudioSubscription
+	video       *media.VideoPipeline
+	audio       *media.AudioPipeline
+	capture     *media.Capture
+	mediaMu     sync.Mutex // guards client media subscriptions below
+	lifecycleMu sync.RWMutex
+	alive       bool
+	shutdown    sync.Once
+	videoSubs   map[*transport.Client]*media.VideoSubscription
+	audioSubs   map[*transport.Client]*media.AudioSubscription
 
 	startedAt          time.Time
 	adaptiveProfile    int
@@ -190,19 +199,27 @@ func New(cfg *config.Config, hub *transport.Hub) (*Controller, error) {
 		perfCounts:     map[string]int{},
 		commands:       make(chan controllerCommand, 256),
 		events:         make(chan cdp.Event, 512),
+		stop:           make(chan struct{}),
+		stopped:        make(chan struct{}),
 		startedAt:      time.Now(),
 		widevineState:  "unknown",
+		alive:          true,
 	}
+	b.startupSession = loadBrowserSession(cfg.SurfHome)
+	b.mobile = b.startupSession.Mobile
 	b.touch = newTouchInput(b)
 	go b.runController()
 	return b, nil
 }
 
 func (b *Controller) runController() {
+	defer close(b.stopped)
 	motionTicker := time.NewTicker(25 * time.Millisecond)
 	defer motionTicker.Stop()
 	for {
 		select {
+		case <-b.stop:
+			return
 		case item := <-b.commands:
 			select {
 			case <-item.client.Closed():
@@ -272,7 +289,13 @@ func (b *Controller) Start() (err error) {
 		b.userAgentMetadata = metadata
 		log.Printf("browser identity: preserving native client hints")
 	}
-	client.OnEvent(func(event cdp.Event) { b.events <- event })
+	client.OnEvent(func(event cdp.Event) {
+		select {
+		case b.events <- event:
+		case <-b.stop:
+		}
+	})
+	b.prepareStartupSession()
 	// Full Chrome restores its previous pages and also creates the explicit
 	// about:blank launch target. Remove only those redundant startup blanks
 	// before discovery; otherwise an empty target can win the asynchronous
@@ -333,6 +356,10 @@ func (b *Controller) newTargetParams(rawURL string) map[string]any {
 
 func (b *Controller) Shutdown() {
 	b.shutdown.Do(func() {
+		b.lifecycleMu.Lock()
+		b.alive = false
+		b.lifecycleMu.Unlock()
+		close(b.stop)
 		b.resizeMu.Lock()
 		b.resizeClosed = true
 		b.resizeGen++
@@ -373,11 +400,38 @@ func (b *Controller) Shutdown() {
 		if b.cdp != nil {
 			b.cdp.Close()
 		}
+		<-b.stopped
 	})
 }
 
-// Died signals that the Chromium connection is gone (supervisor restarts us).
+func (b *Controller) broadcast(event protocol.Event) {
+	b.lifecycleMu.RLock()
+	defer b.lifecycleMu.RUnlock()
+	if b.alive {
+		b.hub.BroadcastJSON(event)
+	}
+}
+
+func (b *Controller) send(client *transport.Client, event protocol.Event) {
+	b.lifecycleMu.RLock()
+	defer b.lifecycleMu.RUnlock()
+	if b.alive {
+		client.SendJSON(event)
+	}
+}
+
+// Died signals that the Chromium connection is gone.
 func (b *Controller) Died() <-chan struct{} { return b.cdp.Closed() }
+
+// IdleSafe reports whether Chromium can be parked without interrupting a
+// download. Media subscriptions are removed synchronously when the final
+// client disconnects, so downloads are the only browser-owned work allowed
+// to extend the idle deadline.
+func (b *Controller) IdleSafe() bool {
+	b.dlMu.Lock()
+	defer b.dlMu.Unlock()
+	return len(b.dlNames) == 0
+}
 
 // Stats is the /api/v1/health?stats=1 runtime snapshot: enough to see
 // what the server thinks is happening without ssh + log spelunking.
@@ -501,7 +555,7 @@ func (b *Controller) onEvent(ev cdp.Event) {
 			b.mu.Lock()
 			t.loading = true
 			b.mu.Unlock()
-			b.hub.BroadcastJSON(protocol.BoolEvent{Type: "loading", On: true})
+			b.broadcast(protocol.BoolEvent{Type: "loading", On: true})
 		}
 	case "Page.frameStoppedLoading":
 		if t, active := b.tabBySession(ev.SessionID); t != nil {
@@ -509,7 +563,7 @@ func (b *Controller) onEvent(ev cdp.Event) {
 			t.loading = false
 			b.mu.Unlock()
 			if active {
-				b.hub.BroadcastJSON(protocol.BoolEvent{Type: "loading"})
+				b.broadcast(protocol.BoolEvent{Type: "loading"})
 				b.pushNavState()
 			}
 			go b.refreshFavicon(t) // Runtime.evaluate inside; must not block dispatch

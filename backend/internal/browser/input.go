@@ -47,14 +47,16 @@ func (b *Controller) ClientConnected(c *transport.Client) {
 	b.mu.Lock()
 	w, h := b.viewW, b.viewH
 	b.mu.Unlock()
-	c.SendJSON(protocol.HelloEvent{Type: "hello", W: w, H: h})
-	c.SendJSON(protocol.TabsEvent{Type: "tabs", Tabs: b.tabList()})
+	b.send(c, protocol.HelloEvent{Type: "hello", W: w, H: h})
+	b.send(c, protocol.TabsEvent{Type: "tabs", Tabs: b.tabList()})
 	// The native controller sends its laid-out viewport immediately after the
 	// socket opens. Let that ordered message settle before starting capture so
 	// startup does not encode at the config default and then restart twice.
 	time.AfterFunc(150*time.Millisecond, func() {
 		select {
 		case <-c.Closed():
+			return
+		case <-b.stop:
 			return
 		default:
 			b.subscribeVideo(c)
@@ -65,8 +67,8 @@ func (b *Controller) ClientConnected(c *transport.Client) {
 		u := t.URL
 		fullscreen := t.Fullscreen
 		b.mu.Unlock()
-		c.SendJSON(b.urlMessage(u))
-		c.SendJSON(protocol.BoolEvent{Type: "fullscreen", On: fullscreen})
+		b.send(c, b.urlMessage(u))
+		b.send(c, protocol.BoolEvent{Type: "fullscreen", On: fullscreen})
 		b.pushNavState()
 	}
 }
@@ -82,6 +84,7 @@ func (b *Controller) HandleMessage(c *transport.Client, command protocol.Command
 	select {
 	case b.commands <- controllerCommand{client: c, command: command, receivedNS: telemetry.MonoNS()}:
 	case <-c.Closed():
+	case <-b.stop:
 	default:
 		c.Close()
 	}
@@ -139,7 +142,7 @@ func (b *Controller) handleCommand(c *transport.Client, command protocol.Command
 		_, subscribed := b.videoSubs[c]
 		b.mediaMu.Unlock()
 		if subscribed {
-			c.SendJSON(protocol.VideoConfigEvent{Type: "video-config", State: "starting", Generation: b.video.Generation(), Profile: b.profileName()})
+			b.send(c, protocol.VideoConfigEvent{Type: "video-config", State: "starting", Generation: b.video.Generation(), Profile: b.profileName()})
 			b.video.Restart()
 		} else {
 			// A failed first-AU wait removes this client's subscription while
@@ -337,7 +340,7 @@ func (b *Controller) queryPageMedia(c *transport.Client, session string) {
 		return
 	}
 	reply.Result.Value.Type = "media-state"
-	c.SendJSON(reply.Result.Value)
+	b.send(c, reply.Result.Value)
 }
 
 func renderCommand(t string) bool {

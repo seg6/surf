@@ -225,7 +225,7 @@ func (b *Controller) onSelectBinding(ev cdp.Event) {
 		}
 	}
 	log.Printf("input: native select opened options=%d multiple=%t", len(state.Options), state.Multiple)
-	b.hub.BroadcastJSON(event)
+	b.broadcast(event)
 }
 
 func (b *Controller) handleSelectReply(reply *protocol.SelectReplyCommand) {

@@ -49,7 +49,7 @@ func (b *Controller) onFullscreenBinding(ev cdp.Event) {
 	active := tab.ID == b.activeID
 	b.mu.Unlock()
 	if changed && active {
-		b.hub.BroadcastJSON(protocol.BoolEvent{Type: "fullscreen", On: on})
+		b.broadcast(protocol.BoolEvent{Type: "fullscreen", On: on})
 	}
 }
 

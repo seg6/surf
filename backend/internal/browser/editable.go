@@ -334,5 +334,5 @@ func (b *Controller) onEditableBinding(ev cdp.Event) {
 			event.Rect = state.Rect
 		}
 	}
-	b.hub.BroadcastJSON(event)
+	b.broadcast(event)
 }

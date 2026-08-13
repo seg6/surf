@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -195,7 +194,7 @@ func (b *Controller) onDownloadBegin(ev cdp.Event) {
 	}
 	b.dlNames[p.GUID] = final
 	b.dlMu.Unlock()
-	b.hub.BroadcastJSON(protocol.TextEvent{Type: "toast", Text: "downloading " + final})
+	b.broadcast(protocol.TextEvent{Type: "toast", Text: "downloading " + final})
 }
 
 func (b *Controller) onDownloadProgress(ev cdp.Event) {
@@ -225,7 +224,7 @@ func (b *Controller) onDownloadProgress(ev cdp.Event) {
 			if p.TotalBytes > 0 {
 				pct = int(p.ReceivedBytes / p.TotalBytes * 100)
 			}
-			b.hub.BroadcastJSON(protocol.DownloadProgressEvent{Type: "dlprogress", Name: name, Pct: pct})
+			b.broadcast(protocol.DownloadProgressEvent{Type: "dlprogress", Name: name, Pct: pct})
 		}
 		return
 	}
@@ -240,7 +239,7 @@ func (b *Controller) onDownloadProgress(ev cdp.Event) {
 		return
 	}
 	_ = os.Rename(filepath.Join(b.cfg.DownloadsDir, p.GUID), filepath.Join(b.cfg.DownloadsDir, name))
-	b.hub.BroadcastJSON(protocol.NameEvent{Type: "download", Name: name})
+	b.broadcast(protocol.NameEvent{Type: "download", Name: name})
 }
 
 func (b *Controller) downloadList() []protocol.DownloadItem {
@@ -256,38 +255,6 @@ func (b *Controller) downloadList() []protocol.DownloadItem {
 		})
 	}
 	return items
-}
-
-// ---- HTTP routes ---------------------------------------------------------
-
-// RegisterRoutes adds feature routes (all behind paired-device auth).
-func (b *Controller) RegisterRoutes(srv *web.Server) {
-	srv.Gated(web.APIRoot+"/tab-icons/", func(w http.ResponseWriter, r *http.Request) {
-		id, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Path, web.APIRoot+"/tab-icons/"))
-		b.mu.Lock()
-		var ic *favicon
-		if t := b.tabs[id]; t != nil {
-			ic = b.icons[t.IconKey]
-		}
-		b.mu.Unlock()
-		if ic == nil {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", ic.ctype)
-		w.Header().Set("Cache-Control", "public, max-age=604800")
-		_, _ = w.Write(ic.data)
-	})
-	srv.Gated(web.APIRoot+"/uploads", b.handleUpload)
-	srv.Gated(web.APIRoot+"/downloads/", func(w http.ResponseWriter, r *http.Request) {
-		name := filepath.Base(strings.TrimPrefix(r.URL.Path, web.APIRoot+"/downloads/"))
-		if name == "." || name == "/" || strings.HasPrefix(name, ".") {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Disposition", "inline; filename=\""+name+"\"")
-		http.ServeFile(w, r, filepath.Join(b.cfg.DownloadsDir, name))
-	})
 }
 
 // ---- feature messages ------------------------------------------------------
@@ -310,10 +277,10 @@ func (b *Controller) handleFeatureMessage(c *transport.Client, t *Tab, session s
 	case *protocol.QueryCommand:
 		switch kind {
 		case "suggest":
-			c.SendJSON(protocol.SuggestEvent{Type: "suggest", Items: b.store.Suggest(m.Q)})
+			b.send(c, protocol.SuggestEvent{Type: "suggest", Items: b.store.Suggest(m.Q)})
 		case "history":
 			items, total := b.store.Search(m.Q, m.Offset, 50)
-			c.SendJSON(protocol.HistoryPageEvent{
+			b.send(c, protocol.HistoryPageEvent{
 				Type: "history", Query: m.Q, Items: items, Offset: m.Offset, Total: total,
 			})
 		}
@@ -327,11 +294,11 @@ func (b *Controller) handleFeatureMessage(c *transport.Client, t *Tab, session s
 		if name != "." && name != "/" && !strings.HasPrefix(name, ".") {
 			_ = os.Remove(filepath.Join(b.cfg.DownloadsDir, name))
 		}
-		c.SendJSON(protocol.DownloadsEvent{Type: "downloads", Items: b.downloadList()})
+		b.send(c, protocol.DownloadsEvent{Type: "downloads", Items: b.downloadList()})
 	case *protocol.HistoryDeleteCommand:
 		if kind == "histdel" {
 			b.store.DeleteHistory(m.URL, m.TS)
-			c.SendJSON(protocol.TextEvent{Type: "toast", Text: "removed"})
+			b.send(c, protocol.TextEvent{Type: "toast", Text: "removed"})
 		}
 	case *protocol.URLCommand:
 		if kind == "bmdel" {
@@ -339,7 +306,7 @@ func (b *Controller) handleFeatureMessage(c *transport.Client, t *Tab, session s
 			b.mu.Lock()
 			u := t.URL
 			b.mu.Unlock()
-			c.SendJSON(protocol.BoolEvent{Type: "starred", On: b.store.IsBookmarked(u)})
+			b.send(c, protocol.BoolEvent{Type: "starred", On: b.store.IsBookmarked(u)})
 		}
 	case *protocol.ClearCommand:
 		if kind == "clear" {
@@ -351,7 +318,7 @@ func (b *Controller) handleFeatureMessage(c *transport.Client, t *Tab, session s
 			b.mu.Lock()
 			u := t.URL
 			b.mu.Unlock()
-			c.SendJSON(protocol.LibraryEvent{
+			b.send(c, protocol.LibraryEvent{
 				Type: "hist", History: b.store.Recent(50), Bookmarks: b.store.Bookmarks(),
 				Starred: b.store.IsBookmarked(u),
 			})
@@ -364,10 +331,10 @@ func (b *Controller) handleFeatureMessage(c *transport.Client, t *Tab, session s
 			if on {
 				msg = "bookmarked"
 			}
-			c.SendJSON(protocol.TextEvent{Type: "toast", Text: msg})
-			c.SendJSON(protocol.BoolEvent{Type: "starred", On: on})
+			b.send(c, protocol.TextEvent{Type: "toast", Text: msg})
+			b.send(c, protocol.BoolEvent{Type: "starred", On: on})
 		case "downloads":
-			c.SendJSON(protocol.DownloadsEvent{Type: "downloads", Items: b.downloadList()})
+			b.send(c, protocol.DownloadsEvent{Type: "downloads", Items: b.downloadList()})
 		case "reader":
 			go b.handleReader(c, t, session) // heavy evaluate; off the controller loop
 		}
@@ -384,5 +351,5 @@ func (b *Controller) handleFind(c *transport.Client, t *Tab, session string, m *
 	if err != nil {
 		found = false
 	}
-	c.SendJSON(protocol.BoolEvent{Type: "found", On: found})
+	b.send(c, protocol.BoolEvent{Type: "found", On: found})
 }

@@ -3,6 +3,7 @@ package config
 import (
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func clearConfigEnv(t *testing.T) {
@@ -14,6 +15,7 @@ func clearConfigEnv(t *testing.T) {
 		"SURF_TUNNEL_HOST",
 		"CHROME_NO_SANDBOX",
 		"SURF_ADAPTIVE_VIDEO",
+		"SURF_BROWSER_IDLE_TIMEOUT",
 		"STREAM_SCALE", "STREAM_BITRATE", "STREAM_QUANTIZER",
 	} {
 		t.Setenv(key, "")
@@ -52,6 +54,25 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.StreamQuantizer != 12 {
 		t.Fatalf("StreamQuantizer=%d, want 12", cfg.StreamQuantizer)
+	}
+	if cfg.BrowserIdleTimeout != 2*time.Minute {
+		t.Fatalf("BrowserIdleTimeout=%s, want 2m", cfg.BrowserIdleTimeout)
+	}
+}
+
+func TestBrowserIdleTimeout(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("SURF_BROWSER_IDLE_TIMEOUT", "45s")
+	if got := loadConfig(t).BrowserIdleTimeout; got != 45*time.Second {
+		t.Fatalf("BrowserIdleTimeout=%s, want 45s", got)
+	}
+	t.Setenv("SURF_BROWSER_IDLE_TIMEOUT", "0")
+	if got := loadConfig(t).BrowserIdleTimeout; got != 0 {
+		t.Fatalf("BrowserIdleTimeout=%s, want 0", got)
+	}
+	t.Setenv("SURF_BROWSER_IDLE_TIMEOUT", "nonsense")
+	if got := loadConfig(t).BrowserIdleTimeout; got != 2*time.Minute {
+		t.Fatalf("invalid BrowserIdleTimeout=%s, want default", got)
 	}
 }
 

@@ -424,7 +424,10 @@
         $('metric-clients').textContent = stats.clients ?? 0;
         $('metric-tabs').textContent = stats.tabs ?? 0;
         $('metric-drops').textContent = Number(stats.transport_video_drops || 0) + Number(stats.transport_audio_drops || 0);
-        $('health-capture').textContent = stats.casting ? 'Active' : 'Idle';
+        const browserState = stats.browserState || 'running';
+        $('health-capture').textContent = browserState === 'stopped' ? 'Parked' :
+          browserState === 'starting' ? 'Starting' : browserState === 'stopping' ? 'Stopping' :
+          stats.casting ? 'Active' : 'Idle';
         $('health-video').textContent = stats.videoSubs ?? 0;
         $('health-audio').textContent = stats.audioSubs ?? 0;
       } catch { setOnline(false); }
