@@ -2,6 +2,15 @@
 
 This file records the user-visible changes in every Surf release.
 
+## 0.13.6 - 2026-08-21
+
+- Quiesced audio playback, video decoding, presentation, clipboard polling,
+  and diagnostics as soon as the iOS client enters the background, preventing
+  its silent AudioQueue from keeping legacy devices awake and draining power.
+- Added a one-minute background grace period before disconnecting the secure
+  session, with fast in-place resume during the grace period and automatic
+  reconnection afterward.
+
 ## 0.13.5 - 2026-08-13
 
 - Made Chromium an on-demand child of the persistent Surf server: it starts

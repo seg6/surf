@@ -44,6 +44,7 @@
 static const CGFloat kRBTopBarHeight = 44.0;
 static const CGFloat kRBTabStripHeight = 29.0;
 static const CGFloat kRBFindBarHeight = 38.0;
+static const NSTimeInterval kRBBackgroundDisconnectDelay = 60.0;
 
 static BOOL RBIsPad(void) {
     return UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad;
@@ -131,6 +132,10 @@ static CGFloat RBEvenExtent(CGFloat value) {
 @property(nonatomic, strong) UIAlertView *updateAlert;
 @property(nonatomic, strong) UIAlertView *updateInstalledAlert;
 @property(nonatomic, assign) BOOL audioRequested;
+@property(nonatomic, assign) BOOL applicationInBackground;
+@property(nonatomic, assign) BOOL disconnectedForBackground;
+@property(nonatomic, strong) NSTimer *backgroundDisconnectTimer;
+@property(nonatomic, assign) UIBackgroundTaskIdentifier backgroundTaskIdentifier;
 // Page state
 @property(nonatomic, assign) BOOL loading;
 @property(nonatomic, assign) BOOL fullscreen;
@@ -200,7 +205,18 @@ static CGFloat RBEvenExtent(CGFloat value) {
 
 @implementation RBRootViewController
 
+- (id)init {
+    self = [super init];
+    if (self) self.backgroundTaskIdentifier = UIBackgroundTaskInvalid;
+    return self;
+}
+
 - (void)dealloc {
+    [self.backgroundDisconnectTimer invalidate];
+    if (self.backgroundTaskIdentifier != UIBackgroundTaskInvalid) {
+        [[UIApplication sharedApplication] endBackgroundTask:self.backgroundTaskIdentifier];
+        self.backgroundTaskIdentifier = UIBackgroundTaskInvalid;
+    }
     [self.clipboardSyncTimer invalidate];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
@@ -353,6 +369,94 @@ static CGFloat RBEvenExtent(CGFloat value) {
     [NSTimer scheduledTimerWithTimeInterval:1.0 target:self selector:@selector(watchdogTick:) userInfo:nil repeats:YES];
 
     RBLogEvent(@"application", @"info", @{@"protocol": RBNativeVersion ?: @""}, @"Browser interface loaded");
+}
+
+- (void)finishBackgroundTask {
+    [self.backgroundDisconnectTimer invalidate];
+    self.backgroundDisconnectTimer = nil;
+    if (self.backgroundTaskIdentifier == UIBackgroundTaskInvalid) return;
+    UIBackgroundTaskIdentifier identifier = self.backgroundTaskIdentifier;
+    self.backgroundTaskIdentifier = UIBackgroundTaskInvalid;
+    [[UIApplication sharedApplication] endBackgroundTask:identifier];
+}
+
+- (void)disconnectAfterBackgroundTimeout:(NSTimer *)timer {
+    (void)timer;
+    if (!self.applicationInBackground) {
+        [self finishBackgroundTask];
+        return;
+    }
+    BOOL hadSession = self.session && self.session.state != RBSessionStateIdle;
+    RBLogEvent(@"application", @"info",
+               @{@"idle_seconds": @(kRBBackgroundDisconnectDelay),
+                 @"connected": @(hadSession)},
+               @"Background idle timeout reached");
+    [self.mediaPipeline stop];
+    self.streamView.videoActive = NO;
+    [self.session shutdown];
+    self.disconnectedForBackground = hadSession;
+    [self finishBackgroundTask];
+}
+
+- (void)applicationDidEnterBackground {
+    if (self.applicationInBackground) return;
+    self.applicationInBackground = YES;
+
+    // AudioQueue otherwise keeps asking for silent buffers forever. Stop and
+    // deactivate it immediately, before the one-minute reconnect grace period.
+    if (self.session.state == RBSessionStateOpen) {
+        [self.session sendMessage:@{@"t": @"audio", @"on": @NO}];
+    }
+    self.audioRequested = NO;
+    [self.mediaPipeline stopAudio];
+
+    // Do not decode or present the video frames that may arrive during the
+    // grace period. If Surf returns quickly, the live socket can be reused.
+    self.streamView.videoActive = NO;
+    [self.clipboardSyncTimer invalidate];
+    self.clipboardSyncTimer = nil;
+
+    RBLogEvent(@"application", @"info",
+               @{@"disconnect_delay_seconds": @(kRBBackgroundDisconnectDelay)},
+               @"Application backgrounded; media quiesced");
+
+    __weak RBRootViewController *weakSelf = self;
+    self.backgroundTaskIdentifier = [[UIApplication sharedApplication]
+        beginBackgroundTaskWithExpirationHandler:^{
+            RBRootViewController *controller = weakSelf;
+            if (controller) [controller disconnectAfterBackgroundTimeout:nil];
+        }];
+    if (self.backgroundTaskIdentifier == UIBackgroundTaskInvalid) {
+        [self disconnectAfterBackgroundTimeout:nil];
+        return;
+    }
+    self.backgroundDisconnectTimer = [NSTimer timerWithTimeInterval:kRBBackgroundDisconnectDelay
+                                                              target:self
+                                                            selector:@selector(disconnectAfterBackgroundTimeout:)
+                                                            userInfo:nil repeats:NO];
+    [[NSRunLoop mainRunLoop] addTimer:self.backgroundDisconnectTimer forMode:NSRunLoopCommonModes];
+}
+
+- (void)applicationDidBecomeActive {
+    BOOL wasBackgrounded = self.applicationInBackground;
+    self.applicationInBackground = NO;
+    [self finishBackgroundTask];
+    if (!wasBackgrounded) return;
+
+    if (self.clipboardSyncEnabled && !self.clipboardSyncTimer) {
+        [self setClipboardSyncEnabled:YES];
+    }
+    if (self.disconnectedForBackground) {
+        self.disconnectedForBackground = NO;
+        NSDictionary *server = self.currentServer ?: [RBServerStore lastSelectedServer];
+        if (server) [self connectToServer:server];
+        return;
+    }
+    if (self.session.state == RBSessionStateOpen && self.videoActive) {
+        self.streamView.videoActive = YES;
+        [self.session sendMessage:@{@"t": @"reqkeyframe"}];
+    }
+    RBLogEvent(@"application", @"info", @{}, @"Application resumed during background grace period");
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -910,7 +1014,7 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
         self.browserStateView.state == RBBrowserStateStartingVideo)
         [self.browserStateView showState:RBBrowserStateHidden detail:nil];
     self.videoActive = YES;
-    self.streamView.videoActive = YES;
+    self.streamView.videoActive = !self.applicationInBackground;
 }
 
 - (void)mediaPipeline:(RBMediaPipeline *)pipeline didDecodePixelBuffer:(CVPixelBufferRef)pixelBuffer
@@ -961,6 +1065,7 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
 // --------------------------------------------------------- incoming frames
 
 - (void)session:(RBSession *)session didReceiveFrameData:(NSData *)data {
+    if (self.applicationInBackground) return;
     [self.mediaPipeline consumeFrameData:data];
 }
 
@@ -1017,7 +1122,7 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
     } else if ([t isEqualToString:@"fullscreen"]) {
         [self setFullscreen:[[message objectForKey:@"on"] boolValue] notifyPage:NO];
     } else if ([t isEqualToString:@"audio-config"]) {
-        if ([[message objectForKey:@"ok"] boolValue]) {
+        if ([[message objectForKey:@"ok"] boolValue] && !self.applicationInBackground) {
             [self.mediaPipeline configureAudioSampleRate:[[message objectForKey:@"rate"] intValue]
                                                 channels:[[message objectForKey:@"channels"] intValue]];
             RBLogEvent(@"media", @"info", @{@"lane": @"audio", @"state": @"ready"}, @"Audio lane ready");
@@ -2541,6 +2646,7 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
 }
 
 - (void)watchdogTick:(NSTimer *)timer {
+    if (self.applicationInBackground) return;
     CFTimeInterval presentedAt = self.streamView.lastPresentationAt;
     double age = presentedAt > 0.0 ? CACurrentMediaTime() - presentedAt : 0.0;
     // Decoder errors request an IDR directly; elapsed wall time alone is not

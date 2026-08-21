@@ -59,12 +59,14 @@
 }
 
 - (void)applicationDidBecomeActive:(UIApplication *)application {
+    [[self rootController] applicationDidBecomeActive];
     // "Open copied link?" (M4.2)
     [[self rootController] checkPasteboard];
 }
 
 - (void)applicationDidEnterBackground:(UIApplication *)application {
     [[self rootController] syncNativeLog];
+    [[self rootController] applicationDidEnterBackground];
 }
 
 - (void)applicationDidReceiveMemoryWarning:(UIApplication *)application {
