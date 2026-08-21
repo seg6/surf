@@ -61,5 +61,6 @@ grep -Fq 'cydia://url/https://cydia.saurik.com/api/share#?source=https://seg6.sp
 grep -Fq 'sileo://source/https://seg6.space/surf/' "$repository_dir/index.html"
 grep -Fq "href=\"$package_path\"" "$repository_dir/index.html"
 grep -Fq 'https://seg6.space/surf/' "$repository_dir/index.html"
+grep -Fq 'href="https://ko-fi.com/seg6_"' "$repository_dir/index.html"
 
 printf 'Verified Surf package repository in %s\n' "$repository_dir"
