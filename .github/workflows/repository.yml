@@ -78,7 +78,9 @@ jobs:
           git init .
           git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
           gh auth setup-git
-          git fetch --force --depth=1 origin \
+          # Keep ancestry available so a newer landing-page commit can safely
+          # republish an older, still-current signed release.
+          git fetch --force origin \
             "refs/heads/main:refs/remotes/origin/main" \
             "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
           git checkout --detach "$GITHUB_SHA"
