@@ -2,6 +2,15 @@
 
 This file records the user-visible changes in every Surf release.
 
+## 0.13.7 - 2026-08-21
+
+- Added a public Cydia and Sileo repository at `https://seg6.space/surf/`,
+  including an iOS 6-compatible landing page and direct `.deb` download.
+- Generated and hash-verified the flat APT repository from each published,
+  signed Surf release, then published only those artifacts to `gh-pages`.
+- Linked the iOS installer from the desktop Paired Devices panel, the terminal
+  pairing flow, and the quick-start guide.
+
 ## 0.13.6 - 2026-08-21
 
 - Quiesced audio playback, video decoding, presentation, clipboard polling,

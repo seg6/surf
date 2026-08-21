@@ -176,6 +176,7 @@ func runPairCommandContext(ctx context.Context) error {
 	address = strings.TrimSpace(session.Address)
 	fmt.Printf("Server: %s\nFingerprint: %s\n", terminalText(session.Name), session.ServerID)
 	fmt.Printf("Pairing code: %s\n", session.Code)
+	fmt.Println("Need the iOS app? Open https://seg6.space/surf/ on the device.")
 	fmt.Println("On the client, scan this QR code. On older devices, enter the server address and six-digit code.")
 	if address != "" {
 		fmt.Printf("Manual address: %s\n", address)

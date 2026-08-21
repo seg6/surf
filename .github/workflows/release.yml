@@ -14,6 +14,7 @@ on:
         type: string
 
 permissions:
+  actions: write
   contents: write
   packages: write
 
@@ -437,3 +438,12 @@ jobs:
           test "$(jq -c '[.assets[].name] | sort' <<< "$published")" = \
             "$expected_names_json"
           jq -r '.url, (.assets[].name)' <<< "$published"
+
+      - name: Queue package repository publication
+        if: env.CACHE_ONLY != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh workflow run repository.yml --ref main -f "tag=$RELEASE_TAG"
+          echo "Queued $RELEASE_TAG for the Cydia and Sileo repository"

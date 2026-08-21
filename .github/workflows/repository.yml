@@ -1,0 +1,176 @@
+name: Package Repository
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published Surf release to expose through the package repository
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: surf-package-repository
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish ${{ inputs.tag }} for Cydia and Sileo
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - name: Fetch and verify publication source
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for command in ar bzip2 gh git gzip jq md5sum sed sha1sum \
+              sha256sum sha512sum stat tar; do
+            command -v "$command" >/dev/null || {
+              echo "required command is unavailable: $command" >&2
+              exit 1
+            }
+          done
+
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || {
+            echo "invalid release tag: $RELEASE_TAG" >&2
+            exit 1
+          }
+
+          main_commit="$(gh api "repos/$GH_REPO/commits/$GITHUB_SHA")"
+          test "$(jq -r '.sha' <<< "$main_commit")" = "$GITHUB_SHA"
+          test "$(jq -r '.commit.verification.verified' <<< "$main_commit")" = "true" || {
+            echo "package repository source commit is not signature-verified" >&2
+            exit 1
+          }
+
+          tag_ref="$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG")"
+          tag_object_type="$(jq -r '.object.type' <<< "$tag_ref")"
+          tag_object_sha="$(jq -r '.object.sha' <<< "$tag_ref")"
+          test "$tag_object_type" = "tag" || {
+            echo "$RELEASE_TAG is not an annotated tag" >&2
+            exit 1
+          }
+          tag_json="$(gh api "repos/$GH_REPO/git/tags/$tag_object_sha")"
+          tag_commit="$(jq -r '.object.sha' <<< "$tag_json")"
+          test "$(jq -r '.tag' <<< "$tag_json")" = "$RELEASE_TAG"
+          test "$(jq -r '.object.type' <<< "$tag_json")" = "commit"
+          test "$(jq -r '.verification.verified' <<< "$tag_json")" = "true" || {
+            echo "$RELEASE_TAG signature is not verified" >&2
+            exit 1
+          }
+
+          release_json="$(gh release view "$RELEASE_TAG" \
+            --json assets,isDraft,isPrerelease,publishedAt,tagName)"
+          test "$(jq -r '.tagName' <<< "$release_json")" = "$RELEASE_TAG"
+          test "$(jq -r '.isDraft' <<< "$release_json")" = "false"
+          test "$(jq -r '.isPrerelease' <<< "$release_json")" = "false"
+          published_at="$(jq -r '.publishedAt' <<< "$release_json")"
+          test -n "$published_at"
+
+          git init .
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          gh auth setup-git
+          git fetch --force --depth=1 origin \
+            "refs/heads/main:refs/remotes/origin/main" \
+            "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          git checkout --detach "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$tag_commit"
+          git merge-base --is-ancestor "$tag_commit" "$GITHUB_SHA"
+          git diff --exit-code
+
+          release_dir="$RUNNER_TEMP/surf-release"
+          mkdir -p "$release_dir"
+          gh release download "$RELEASE_TAG" --pattern update.json --dir "$release_dir"
+          manifest="$release_dir/update.json"
+          version="${RELEASE_TAG#v}"
+          jq -e --arg version "$version" \
+            '.schema == 1 and .version == $version and
+             (.client.name | type == "string") and
+             (.client.sha256 | test("^[0-9a-f]{64}$")) and
+             (.client.size | type == "number" and . > 0)' \
+            "$manifest" >/dev/null
+          client_name="$(jq -r '.client.name' "$manifest")"
+          client_sha256="$(jq -r '.client.sha256' "$manifest")"
+          client_size="$(jq -r '.client.size' "$manifest")"
+          [[ "$client_name" =~ ^space\.seg6\.surf_${version}-[0-9]+_iphoneos-arm\.deb$ ]]
+          gh release download "$RELEASE_TAG" --pattern "$client_name" --dir "$release_dir"
+          client_deb="$release_dir/$client_name"
+          test "$(sha256sum "$client_deb" | cut -d ' ' -f 1)" = "$client_sha256"
+          test "$(stat -c '%s' "$client_deb")" = "$client_size"
+          jq -e --arg name "$client_name" --arg digest "sha256:$client_sha256" \
+            '[.assets[] | select(.name == $name and .digest == $digest)] | length == 1' \
+            <<< "$release_json" >/dev/null
+
+          {
+            echo "client_deb=$client_deb"
+            echo "client_name=$client_name"
+            echo "published_at=$published_at"
+          } >> "$GITHUB_OUTPUT"
+          echo "Verified $RELEASE_TAG and $client_name from signed source"
+
+      - name: Build and verify package repository
+        shell: bash
+        env:
+          SURF_REPOSITORY_DATE: ${{ steps.source.outputs.published_at }}
+        run: |
+          set -euo pipefail
+
+          repository_dir="$RUNNER_TEMP/surf-repository"
+          mkdir -p "$repository_dir"
+          packaging/repository/build.sh \
+            "${{ steps.source.outputs.client_deb }}" "$repository_dir"
+          packaging/repository/verify.sh \
+            "${{ steps.source.outputs.client_deb }}" "$repository_dir"
+
+      - name: Publish generated gh-pages branch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          repository_dir="$RUNNER_TEMP/surf-repository"
+          publish_dir="$RUNNER_TEMP/surf-pages"
+          client_name="${{ steps.source.outputs.client_name }}"
+          git init "$publish_dir"
+          cd "$publish_dir"
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          gh auth setup-git
+
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null; then
+            git fetch --force --depth=1 origin \
+              "refs/heads/gh-pages:refs/remotes/origin/gh-pages"
+            git checkout -b gh-pages refs/remotes/origin/gh-pages
+            git rm -r --quiet --ignore-unmatch -- .
+          else
+            git checkout --orphan gh-pages
+          fi
+
+          install -d debs
+          install -m 0644 "$repository_dir/.nojekyll" .nojekyll
+          install -m 0644 "$repository_dir/CydiaIcon.png" CydiaIcon.png
+          install -m 0644 "$repository_dir/Packages" Packages
+          install -m 0644 "$repository_dir/Packages.gz" Packages.gz
+          install -m 0644 "$repository_dir/Packages.bz2" Packages.bz2
+          install -m 0644 "$repository_dir/Release" Release
+          install -m 0644 "$repository_dir/index.html" index.html
+          install -m 0644 "$repository_dir/debs/$client_name" "debs/$client_name"
+          git add -- .nojekyll CydiaIcon.png Packages Packages.gz Packages.bz2 \
+            Release index.html "debs/$client_name"
+
+          git config user.name 'github-actions[bot]'
+          git config user.email \
+            '41898282+github-actions[bot]@users.noreply.github.com'
+          if git diff --cached --quiet; then
+            echo "$RELEASE_TAG is already the published package repository"
+            exit 0
+          fi
+          git commit -m "Publish Surf $RELEASE_TAG package repository"
+          git push origin gh-pages

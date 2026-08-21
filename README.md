@@ -90,7 +90,7 @@ Linux system on it.
 
 ### 1. Start Surf on the computer
 
-Download the package for your computer and the universal iOS `.deb` from the
+Download the package for your computer from the
 [latest release](https://github.com/seg6/surf/releases/latest).
 
 The desktop build provides a Settings window for the server name, port, paired
@@ -108,8 +108,17 @@ manager can supervise it. In another terminal, `surf status`, `surf pair`, and
 
 ### 2. Install the iOS client
 
-Install `space.seg6.surf_<version>_iphoneos-arm.deb` with Filza or iFile, or
-copy it over SSH:
+Open the [Surf package repository](https://seg6.space/surf/) on the jailbroken
+device and add it to Cydia or Sileo. The landing page works in iOS 6 Safari,
+offers the current `.deb` directly, and always points both package managers at:
+
+```text
+https://seg6.space/surf/
+```
+
+Install `Surf` from the package manager. As a manual alternative, download
+`space.seg6.surf_<version>_iphoneos-arm.deb` from that page and open it with
+Filza or iFile, or copy it over SSH:
 
 ```sh
 scp space.seg6.surf_*.deb root@DEVICE_IP:/tmp/surf.deb

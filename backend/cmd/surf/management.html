@@ -49,6 +49,7 @@
       border: 1px solid var(--line-strong); border-radius: 6px; padding: 7px 12px;
       font-weight: 500; cursor: pointer; background: #30343a;
       display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      text-decoration: none;
     }
     .button:hover { background: #393e45; }
     .primary { background: var(--blue); border-color: #528bdc; color: #fff; }
@@ -64,6 +65,7 @@
     .metric-unit { color: var(--quiet); font-size: 11px; margin-left: 3px; }
     .grid { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 12px; }
     .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin-bottom: 14px; }
+    .panel-actions { display: flex; align-items: center; gap: 8px; }
     .panel-copy { color: var(--muted); font-size: 12px; margin: 4px 0 0; line-height: 1.4; }
     .credential { display: grid; gap: 6px; margin-top: 12px; }
     .credential-label { color: var(--muted); font-size: 11px; }
@@ -228,6 +230,7 @@
       .form-grid { grid-template-columns: 1fr; }
       .panel-head { align-items: flex-start; flex-direction: column; }
       .panel-head .button { width: 100%; }
+      .panel-actions { align-items: stretch; flex-direction: column; width: 100%; }
       .pairing-content { grid-template-columns: 1fr; }
       .pairing-qr { margin: 12px auto 0; }
       .device { align-items: flex-start; flex-direction: column; }
@@ -293,7 +296,10 @@
         <div class="panel">
           <div class="panel-head">
             <div><h2>Paired devices</h2><p class="panel-copy">Add or revoke clients.</p></div>
-            <button class="button primary" id="add-device" type="button" aria-controls="pairing-state" aria-expanded="false">Pair device</button>
+            <div class="panel-actions">
+              <a class="button secondary" href="https://seg6.space/surf/" target="_blank" rel="noopener">Get iOS app</a>
+              <button class="button primary" id="add-device" type="button" aria-controls="pairing-state" aria-expanded="false">Pair device</button>
+            </div>
           </div>
           <div class="pairing-state" id="pairing-state">
             <div class="pairing-state-head">

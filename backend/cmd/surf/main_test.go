@@ -286,6 +286,8 @@ func TestManagementPairingUIUsesServerInitiatedInvitation(t *testing.T) {
 	app.managementHandler().ServeHTTP(response, request)
 	body := response.Body.String()
 	for _, required := range []string{
+		`href="https://seg6.space/surf/"`,
+		`>Get iOS app</a>`,
 		`>Pair device</button>`,
 		`id="pairing-code"`,
 		`id="pairing-address"`,
