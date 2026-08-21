@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="format-detection" content="telephone=no">
+  <title>Get Surf for iOS</title>
+  <link rel="icon" href="CydiaIcon.png">
+  <style>
+    html, body { margin: 0; padding: 0; }
+    body {
+      background: #dfe8ef;
+      color: #17232d;
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-size: 16px;
+      line-height: 1.45;
+      -webkit-text-size-adjust: 100%;
+    }
+    a { color: #0878b9; }
+    .topbar {
+      background: #17354a;
+      border-bottom: 4px solid #35a5d8;
+      color: #fff;
+      padding: 12px 18px;
+    }
+    .topbar-inner, .shell {
+      margin: 0 auto;
+      max-width: 760px;
+    }
+    .brand {
+      font-size: 16px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+    .brand-note {
+      color: #b9d2df;
+      float: right;
+      font-size: 12px;
+      letter-spacing: 1px;
+      padding-top: 3px;
+      text-transform: uppercase;
+    }
+    .shell { padding: 24px 14px 36px; }
+    .panel {
+      background: #fff;
+      border: 1px solid #b9c8d3;
+      border-radius: 9px;
+      box-shadow: 0 2px 7px rgba(23, 53, 74, .18);
+      margin-bottom: 16px;
+      overflow: hidden;
+    }
+    .hero { display: table; width: 100%; }
+    .hero-icon, .hero-copy {
+      display: table-cell;
+      vertical-align: middle;
+    }
+    .hero-icon {
+      background: #edf4f8;
+      border-right: 1px solid #d1dde5;
+      padding: 30px;
+      text-align: center;
+      width: 144px;
+    }
+    .hero-icon img {
+      border-radius: 24px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, .24);
+      height: 112px;
+      width: 112px;
+    }
+    .hero-copy { padding: 28px 30px; }
+    .eyebrow {
+      color: #657984;
+      font-size: 11px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      margin: 0 0 7px;
+      text-transform: uppercase;
+    }
+    h1 {
+      color: #17354a;
+      font-size: 32px;
+      letter-spacing: -1px;
+      line-height: 1.08;
+      margin: 0 0 12px;
+    }
+    .lead { color: #455762; margin: 0; }
+    .action-block { padding: 24px 30px 26px; }
+    h2 {
+      color: #17354a;
+      font-size: 20px;
+      line-height: 1.2;
+      margin: 0 0 8px;
+    }
+    .subtle { color: #61717a; font-size: 14px; margin: 0 0 18px; }
+    .buttons { margin: -5px; }
+    .button {
+      background: #168dc8;
+      border: 1px solid #0871aa;
+      border-radius: 7px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28), 0 1px 2px rgba(0, 0, 0, .15);
+      color: #fff;
+      display: inline-block;
+      font-size: 16px;
+      font-weight: bold;
+      margin: 5px;
+      padding: 11px 17px;
+      text-align: center;
+      text-decoration: none;
+    }
+    .button:active { background: #0871aa; }
+    .button-secondary {
+      background: #edf3f6;
+      border-color: #aebec8;
+      color: #244255;
+    }
+    .button-secondary:active { background: #d8e4ea; }
+    .source-box {
+      background: #f4f7f9;
+      border: 1px solid #c8d4dc;
+      border-radius: 6px;
+      color: #17354a;
+      font-family: Menlo, Monaco, monospace;
+      font-size: 13px;
+      margin-top: 18px;
+      overflow: auto;
+      padding: 11px 12px;
+      white-space: nowrap;
+      -webkit-overflow-scrolling: touch;
+    }
+    .route {
+      border-top: 1px solid #d8e1e7;
+      display: table;
+      table-layout: fixed;
+      width: 100%;
+    }
+    .route-step {
+      border-right: 1px solid #d8e1e7;
+      display: table-cell;
+      padding: 20px;
+      vertical-align: top;
+      width: 33.333%;
+    }
+    .route-step:last-child { border-right: 0; }
+    .step-number {
+      background: #17354a;
+      border-radius: 15px;
+      color: #fff;
+      display: inline-block;
+      font-size: 12px;
+      font-weight: bold;
+      height: 24px;
+      line-height: 24px;
+      margin-bottom: 9px;
+      text-align: center;
+      width: 24px;
+    }
+    .route-step strong { color: #17354a; display: block; margin-bottom: 4px; }
+    .route-step p { color: #5b6b74; font-size: 13px; margin: 0; }
+    .fine-print {
+      color: #53656f;
+      font-size: 13px;
+      padding: 0 4px;
+    }
+    .fine-print p { margin: 8px 0; }
+    .checksum {
+      font-family: Menlo, Monaco, monospace;
+      font-size: 11px;
+      overflow-wrap: break-word;
+      word-wrap: break-word;
+    }
+    .clear { clear: both; }
+    @media screen and (max-width: 520px) {
+      .brand-note { display: none; }
+      .shell { padding-top: 14px; }
+      .hero, .hero-icon, .hero-copy, .route, .route-step { display: block; width: auto; }
+      .hero-icon {
+        border-bottom: 1px solid #d1dde5;
+        border-right: 0;
+        padding: 12px;
+      }
+      .hero-icon img { border-radius: 14px; height: 64px; width: 64px; }
+      .hero-copy, .action-block { padding: 18px 22px; }
+      h1 { font-size: 26px; }
+      .lead { font-size: 15px; }
+      .subtle { margin-bottom: 12px; }
+      .button { display: block; }
+      .route-step { border-bottom: 1px solid #d8e1e7; border-right: 0; }
+      .route-step:last-child { border-bottom: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="brand">Surf</span>
+      <span class="brand-note">Modern web, classic iOS</span>
+      <div class="clear"></div>
+    </div>
+  </div>
+
+  <div class="shell">
+    <div class="panel">
+      <div class="hero">
+        <div class="hero-icon"><img src="CydiaIcon.png" alt="Surf app icon"></div>
+        <div class="hero-copy">
+          <p class="eyebrow">iOS client / version 0.13.7</p>
+          <h1>Put the modern web on this screen.</h1>
+          <p class="lead">Surf streams a current Chromium browser from your computer to this iPhone or iPad.</p>
+        </div>
+      </div>
+
+      <div class="action-block">
+        <h2>Add the Surf repository</h2>
+        <p class="subtle">Use Cydia on iOS 6–10. Sileo is offered for supported newer jailbreaks.</p>
+        <div class="buttons">
+          <a class="button" href="cydia://url/https://cydia.saurik.com/api/share#?source=https://seg6.space/surf/">Add to Cydia</a>
+          <a class="button button-secondary" href="sileo://source/https://seg6.space/surf/">Add to Sileo</a>
+          <a class="button button-secondary" href="debs/space.seg6.surf_0.13.7-1_iphoneos-arm.deb">Download .deb</a>
+        </div>
+        <div class="source-box">https://seg6.space/surf/</div>
+      </div>
+
+      <div class="route">
+        <div class="route-step">
+          <span class="step-number">1</span>
+          <strong>Add the source</strong>
+          <p>Tap the button above, or paste the source URL into your package manager.</p>
+        </div>
+        <div class="route-step">
+          <span class="step-number">2</span>
+          <strong>Install Surf</strong>
+          <p>Search for Surf, install it, then let the device respring if requested.</p>
+        </div>
+        <div class="route-step">
+          <span class="step-number">3</span>
+          <strong>Pair your device</strong>
+          <p><a href="https://github.com/seg6/surf/releases/latest">Run Surf on a computer</a>, choose Pair device, and scan its QR code.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="fine-print">
+      <p>Requires a compatible rootful jailbreak and a 64-bit Windows, macOS, or Linux computer running Surf. This page and Cydia path are compatible with iOS 6 Safari; Sileo itself requires a newer iOS version.</p>
+      <p>Direct package: Surf 0.13.7-1, 562432 bytes.</p>
+      <p class="checksum">SHA-256: f0f00116945145b2be777dc543bcab97ee86a6c06cf75dc01c48970f1c0fab3b</p>
+      <p><a href="https://github.com/seg6/surf">Source code and setup guide</a></p>
+    </div>
+  </div>
+</body>
+</html>
