@@ -4,248 +4,197 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="format-detection" content="telephone=no">
-  <title>Get Surf for iOS</title>
+  <title>Surf Repository</title>
   <link rel="icon" href="CydiaIcon.png">
   <style>
     html, body { margin: 0; padding: 0; }
     body {
-      background: #dfe8ef;
-      color: #17232d;
+      background: #c7ced5;
+      color: #111;
       font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-      font-size: 16px;
-      line-height: 1.45;
+      font-size: 14px;
+      line-height: 1.35;
       -webkit-text-size-adjust: 100%;
     }
-    a { color: #0878b9; }
-    .topbar {
-      background: #17354a;
-      border-bottom: 4px solid #35a5d8;
+    a { color: #1765a5; }
+    .navbar {
+      background: #486d91;
+      background: -webkit-linear-gradient(top, #7895b1 0%, #4c7093 50%, #345a7e 51%, #2f5273 100%);
+      border-bottom: 1px solid #1e3f5c;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35), 0 1px 2px rgba(0, 0, 0, .3);
       color: #fff;
-      padding: 12px 18px;
-    }
-    .topbar-inner, .shell {
-      margin: 0 auto;
-      max-width: 760px;
-    }
-    .brand {
-      font-size: 16px;
+      font-size: 18px;
       font-weight: bold;
-      letter-spacing: 2px;
-      text-transform: uppercase;
+      line-height: 43px;
+      min-height: 43px;
+      text-align: center;
+      text-shadow: 0 -1px 0 rgba(0, 0, 0, .55);
     }
-    .brand-note {
-      color: #b9d2df;
-      float: right;
-      font-size: 12px;
-      letter-spacing: 1px;
-      padding-top: 3px;
-      text-transform: uppercase;
+    .page {
+      margin: 0 auto;
+      max-width: 520px;
+      padding: 18px 10px 30px;
     }
-    .shell { padding: 24px 14px 36px; }
-    .panel {
-      background: #fff;
-      border: 1px solid #b9c8d3;
-      border-radius: 9px;
-      box-shadow: 0 2px 7px rgba(23, 53, 74, .18);
-      margin-bottom: 16px;
-      overflow: hidden;
+    .package {
+      display: table;
+      margin-bottom: 18px;
+      width: 100%;
     }
-    .hero { display: table; width: 100%; }
-    .hero-icon, .hero-copy {
+    .package-icon, .package-info {
       display: table-cell;
       vertical-align: middle;
     }
-    .hero-icon {
-      background: #edf4f8;
-      border-right: 1px solid #d1dde5;
-      padding: 30px;
-      text-align: center;
-      width: 144px;
+    .package-icon { width: 68px; }
+    .package-icon img {
+      border-radius: 12px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, .45);
+      display: block;
+      height: 57px;
+      width: 57px;
     }
-    .hero-icon img {
-      border-radius: 24px;
-      box-shadow: 0 2px 5px rgba(0, 0, 0, .24);
-      height: 112px;
-      width: 112px;
-    }
-    .hero-copy { padding: 28px 30px; }
-    .eyebrow {
-      color: #657984;
-      font-size: 11px;
+    .package-name {
+      font-size: 21px;
       font-weight: bold;
-      letter-spacing: 2px;
-      margin: 0 0 7px;
+      line-height: 1.15;
+      margin: 0 0 3px;
+      text-shadow: 0 1px 0 rgba(255, 255, 255, .7);
+    }
+    .package-meta, .package-description {
+      color: #4b535b;
+      margin: 0;
+      text-shadow: 0 1px 0 rgba(255, 255, 255, .55);
+    }
+    .package-description { margin-top: 3px; }
+    .section-title {
+      color: #4f5963;
+      font-size: 12px;
+      font-weight: bold;
+      margin: 17px 11px 5px;
+      text-shadow: 0 1px 0 rgba(255, 255, 255, .7);
       text-transform: uppercase;
     }
-    h1 {
-      color: #17354a;
-      font-size: 32px;
-      letter-spacing: -1px;
-      line-height: 1.08;
-      margin: 0 0 12px;
+    .group {
+      background: #fff;
+      border: 1px solid #9da4aa;
+      border-radius: 10px;
+      box-shadow: 0 1px 0 rgba(255, 255, 255, .55);
+      list-style: none;
+      margin: 0;
+      overflow: hidden;
+      padding: 0;
     }
-    .lead { color: #455762; margin: 0; }
-    .action-block { padding: 24px 30px 26px; }
-    h2 {
-      color: #17354a;
-      font-size: 20px;
-      line-height: 1.2;
-      margin: 0 0 8px;
+    .row {
+      border-bottom: 1px solid #c8c8c8;
+      min-height: 43px;
+      position: relative;
     }
-    .subtle { color: #61717a; font-size: 14px; margin: 0 0 18px; }
-    .buttons { margin: -5px; }
-    .button {
-      background: #168dc8;
-      border: 1px solid #0871aa;
-      border-radius: 7px;
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28), 0 1px 2px rgba(0, 0, 0, .15);
-      color: #fff;
-      display: inline-block;
+    .row:last-child { border-bottom: 0; }
+    .row a {
+      color: #111;
+      display: block;
       font-size: 16px;
-      font-weight: bold;
-      margin: 5px;
-      padding: 11px 17px;
-      text-align: center;
+      min-height: 21px;
+      padding: 11px 34px 11px 13px;
       text-decoration: none;
     }
-    .button:active { background: #0871aa; }
-    .button-secondary {
-      background: #edf3f6;
-      border-color: #aebec8;
-      color: #244255;
+    .row a:active { background: #d9e7f4; }
+    .row a:after {
+      color: #7d858c;
+      content: "\203a";
+      font-family: Arial, sans-serif;
+      font-size: 25px;
+      line-height: 20px;
+      position: absolute;
+      right: 12px;
+      top: 11px;
     }
-    .button-secondary:active { background: #d8e4ea; }
-    .source-box {
-      background: #f4f7f9;
-      border: 1px solid #c8d4dc;
-      border-radius: 6px;
-      color: #17354a;
+    .row-detail {
+      color: #6b7176;
+      float: right;
+      font-size: 13px;
+      padding: 2px 2px 0 10px;
+    }
+    .source {
+      color: #20262b;
       font-family: Menlo, Monaco, monospace;
       font-size: 13px;
-      margin-top: 18px;
       overflow: auto;
-      padding: 11px 12px;
+      padding: 13px;
       white-space: nowrap;
       -webkit-overflow-scrolling: touch;
     }
-    .route {
-      border-top: 1px solid #d8e1e7;
+    .info-row {
       display: table;
-      table-layout: fixed;
+      min-height: 43px;
       width: 100%;
     }
-    .route-step {
-      border-right: 1px solid #d8e1e7;
+    .info-label, .info-value {
       display: table-cell;
-      padding: 20px;
-      vertical-align: top;
-      width: 33.333%;
+      padding: 11px 13px;
+      vertical-align: middle;
     }
-    .route-step:last-child { border-right: 0; }
-    .step-number {
-      background: #17354a;
-      border-radius: 15px;
-      color: #fff;
-      display: inline-block;
+    .info-label { width: 90px; }
+    .info-value {
+      color: #646b71;
+      text-align: right;
+    }
+    .note {
+      color: #4d555c;
       font-size: 12px;
-      font-weight: bold;
-      height: 24px;
-      line-height: 24px;
-      margin-bottom: 9px;
-      text-align: center;
-      width: 24px;
+      margin: 7px 11px 0;
+      text-shadow: 0 1px 0 rgba(255, 255, 255, .65);
     }
-    .route-step strong { color: #17354a; display: block; margin-bottom: 4px; }
-    .route-step p { color: #5b6b74; font-size: 13px; margin: 0; }
-    .fine-print {
-      color: #53656f;
-      font-size: 13px;
-      padding: 0 4px;
-    }
-    .fine-print p { margin: 8px 0; }
     .checksum {
       font-family: Menlo, Monaco, monospace;
-      font-size: 11px;
+      font-size: 10px;
       overflow-wrap: break-word;
       word-wrap: break-word;
     }
-    .clear { clear: both; }
-    @media screen and (max-width: 520px) {
-      .brand-note { display: none; }
-      .shell { padding-top: 14px; }
-      .hero, .hero-icon, .hero-copy, .route, .route-step { display: block; width: auto; }
-      .hero-icon {
-        border-bottom: 1px solid #d1dde5;
-        border-right: 0;
-        padding: 12px;
-      }
-      .hero-icon img { border-radius: 14px; height: 64px; width: 64px; }
-      .hero-copy, .action-block { padding: 18px 22px; }
-      h1 { font-size: 26px; }
-      .lead { font-size: 15px; }
-      .subtle { margin-bottom: 12px; }
-      .button { display: block; }
-      .route-step { border-bottom: 1px solid #d8e1e7; border-right: 0; }
-      .route-step:last-child { border-bottom: 0; }
+    @media screen and (min-width: 700px) {
+      .page { padding-top: 28px; }
     }
   </style>
 </head>
 <body>
-  <div class="topbar">
-    <div class="topbar-inner">
-      <span class="brand">Surf</span>
-      <span class="brand-note">Modern web, classic iOS</span>
-      <div class="clear"></div>
-    </div>
-  </div>
+  <div class="navbar">Surf Repository</div>
 
-  <div class="shell">
-    <div class="panel">
-      <div class="hero">
-        <div class="hero-icon"><img src="CydiaIcon.png" alt="Surf app icon"></div>
-        <div class="hero-copy">
-          <p class="eyebrow">iOS client / version 0.13.7</p>
-          <h1>Put the modern web on this screen.</h1>
-          <p class="lead">Surf streams a current Chromium browser from your computer to this iPhone or iPad.</p>
-        </div>
-      </div>
-
-      <div class="action-block">
-        <h2>Add the Surf repository</h2>
-        <p class="subtle">Use Cydia on iOS 6–10. Sileo is offered for supported newer jailbreaks.</p>
-        <div class="buttons">
-          <a class="button" href="cydia://url/https://cydia.saurik.com/api/share#?source=https://seg6.space/surf/">Add to Cydia</a>
-          <a class="button button-secondary" href="sileo://source/https://seg6.space/surf/">Add to Sileo</a>
-          <a class="button button-secondary" href="debs/space.seg6.surf_0.13.7-1_iphoneos-arm.deb">Download .deb</a>
-        </div>
-        <div class="source-box">https://seg6.space/surf/</div>
-      </div>
-
-      <div class="route">
-        <div class="route-step">
-          <span class="step-number">1</span>
-          <strong>Add the source</strong>
-          <p>Tap the button above, or paste the source URL into your package manager.</p>
-        </div>
-        <div class="route-step">
-          <span class="step-number">2</span>
-          <strong>Install Surf</strong>
-          <p>Search for Surf, install it, then let the device respring if requested.</p>
-        </div>
-        <div class="route-step">
-          <span class="step-number">3</span>
-          <strong>Pair your device</strong>
-          <p><a href="https://github.com/seg6/surf/releases/latest">Run Surf on a computer</a>, choose Pair device, and scan its QR code.</p>
-        </div>
+  <div class="page">
+    <div class="package">
+      <div class="package-icon"><img src="CydiaIcon.png" alt="Surf icon"></div>
+      <div class="package-info">
+        <p class="package-name">Surf</p>
+        <p class="package-meta">Version 0.13.7-1 &middot; iOS 6+</p>
+        <p class="package-description">Package source for the Surf iOS client.</p>
       </div>
     </div>
 
-    <div class="fine-print">
-      <p>Requires a compatible rootful jailbreak and a 64-bit Windows, macOS, or Linux computer running Surf. This page and Cydia path are compatible with iOS 6 Safari; Sileo itself requires a newer iOS version.</p>
-      <p>Direct package: Surf 0.13.7-1, 562432 bytes.</p>
-      <p class="checksum">SHA-256: f0f00116945145b2be777dc543bcab97ee86a6c06cf75dc01c48970f1c0fab3b</p>
-      <p><a href="https://github.com/seg6/surf">Source code and setup guide</a></p>
+    <p class="section-title">Install</p>
+    <ul class="group">
+      <li class="row"><a href="cydia://url/https://cydia.saurik.com/api/share#?source=https://seg6.space/surf/">Open in Cydia<span class="row-detail">iOS 6&ndash;10</span></a></li>
+      <li class="row"><a href="sileo://source/https://seg6.space/surf/">Open in Sileo<span class="row-detail">newer iOS</span></a></li>
+      <li class="row"><a href="debs/space.seg6.surf_0.13.7-1_iphoneos-arm.deb">Download .deb</a></li>
+    </ul>
+
+    <p class="section-title">Source address</p>
+    <div class="group"><div class="source">https://seg6.space/surf/</div></div>
+    <p class="note">In Cydia, open Sources, tap Edit, then Add. Paste the address above and install Surf.</p>
+
+    <p class="section-title">Requirements</p>
+    <div class="group">
+      <div class="row info-row"><span class="info-label">Device</span><span class="info-value">iOS 6.0&ndash;14.8.1, rootful</span></div>
+      <div class="row info-row"><span class="info-label">Computer</span><span class="info-value">64-bit Windows, macOS, or Linux</span></div>
     </div>
+    <p class="note">After installation, run Surf on the computer, choose Pair device, and scan the QR code.</p>
+
+    <p class="section-title">Links</p>
+    <ul class="group">
+      <li class="row"><a href="https://github.com/seg6/surf/releases/latest">Computer downloads</a></li>
+      <li class="row"><a href="https://github.com/seg6/surf">Source code and setup</a></li>
+      <li class="row"><a href="https://ko-fi.com/seg6_">Support Surf on Ko-fi</a></li>
+    </ul>
+
+    <p class="note">Package size: 562432 bytes.</p>
+    <p class="note checksum">SHA-256: f0f00116945145b2be777dc543bcab97ee86a6c06cf75dc01c48970f1c0fab3b</p>
   </div>
 </body>
 </html>
