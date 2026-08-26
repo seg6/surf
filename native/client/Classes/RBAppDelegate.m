@@ -2,6 +2,7 @@
 #import "RBConfig.h"
 #import "RBLog.h"
 #import "RBRootViewController.h"
+#import "RBTheme.h"
 
 @implementation RBAppDelegate
 
@@ -12,6 +13,7 @@
     // Mobile pages are the natural default on the touch-first Surf client.
     // registerDefaults preserves an explicit user choice on upgrades.
     [[NSUserDefaults standardUserDefaults] registerDefaults:@{RBDefaultsMobileLayoutKey: @YES}];
+    [RBTheme styleNavigationBar:(UINavigationBar *)[UINavigationBar appearance]];
 
     self.window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
     self.window.rootViewController = [[RBRootViewController alloc] init];

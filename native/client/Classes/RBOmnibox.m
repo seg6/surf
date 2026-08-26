@@ -9,7 +9,7 @@
 @property(nonatomic, strong) UITextField *field;
 @property(nonatomic, strong) UIButton *starButton;
 @property(nonatomic, strong) UIButton *reloadButton;
-@property(nonatomic, strong) UILabel *lockLabel;
+@property(nonatomic, strong) UIImageView *securityView;
 @property(nonatomic, assign) BOOL lockVisible;
 @property(nonatomic, assign) BOOL loading;
 @property(nonatomic, assign) BOOL progressVisible;
@@ -28,14 +28,18 @@
 
         self.fieldBackground = [[UIView alloc] initWithFrame:CGRectZero];
         self.fieldBackground.backgroundColor = [UIColor whiteColor];
-        self.fieldBackground.layer.cornerRadius = 6.0;
+        self.fieldBackground.layer.cornerRadius = 10.0;
         self.fieldBackground.layer.borderWidth = 1.0;
-        self.fieldBackground.layer.borderColor = [[UIColor colorWithRed:0.42 green:0.45 blue:0.50 alpha:1.0] CGColor];
+        self.fieldBackground.layer.borderColor = [[RBTheme mistColor] CGColor];
         self.fieldBackground.layer.masksToBounds = YES;
         [self addSubview:self.fieldBackground];
 
-        self.progressLayer = [CALayer layer];
-        self.progressLayer.backgroundColor = [[RBTheme progressFillColor] CGColor];
+        CAGradientLayer *progress = [CAGradientLayer layer];
+        progress.colors = @[(id)[[RBTheme accentColor] CGColor], (id)[[RBTheme seaGlassColor] CGColor]];
+        progress.startPoint = CGPointMake(0.0, 0.5);
+        progress.endPoint = CGPointMake(1.0, 0.5);
+        progress.cornerRadius = 1.5;
+        self.progressLayer = progress;
         self.progressLayer.anchorPoint = CGPointMake(0.0, 0.0);
         self.progressLayer.opacity = 0.0;
         [self.fieldBackground.layer addSublayer:self.progressLayer];
@@ -45,7 +49,7 @@
         self.field.borderStyle = UITextBorderStyleNone;
         self.field.backgroundColor = [UIColor clearColor];
         self.field.font = [RBTheme fontOfSize:14.0 bold:NO];
-        self.field.textColor = [UIColor colorWithWhite:0.15 alpha:1.0];
+        self.field.textColor = [RBTheme primaryTextColor];
         self.field.placeholder = @"Search or enter address";
         self.field.autocorrectionType = UITextAutocorrectionTypeNo;
         self.field.autocapitalizationType = UITextAutocapitalizationTypeNone;
@@ -68,12 +72,12 @@
         [self.reloadButton addTarget:self action:@selector(reloadTapped:) forControlEvents:UIControlEventTouchUpInside];
         [self.fieldBackground addSubview:self.reloadButton];
 
-        self.lockLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-        self.lockLabel.backgroundColor = [UIColor clearColor];
-        self.lockLabel.font = [UIFont systemFontOfSize:12.0];
-        self.lockLabel.textAlignment = NSTextAlignmentCenter;
-        self.lockLabel.hidden = YES;
-        [self.fieldBackground addSubview:self.lockLabel];
+        self.securityView = [[UIImageView alloc] initWithFrame:CGRectZero];
+        self.securityView.backgroundColor = [UIColor clearColor];
+        self.securityView.contentMode = UIViewContentModeCenter;
+        self.securityView.hidden = YES;
+        self.securityView.isAccessibilityElement = YES;
+        [self.fieldBackground addSubview:self.securityView];
     }
     return self;
 }
@@ -94,16 +98,18 @@
     self.starButton.frame = CGRectMake(0.0, 0.0, side, h);
     self.reloadButton.frame = CGRectMake(w - side, 0.0, side, h);
     BOOL showLock = self.lockVisible && !editing;
-    self.lockLabel.hidden = !showLock;
-    self.lockLabel.frame = CGRectMake(self.showsBookmarkButton ? side - 4.0 : 4.0, 0.0, 16.0, h);
+    self.securityView.hidden = !showLock;
+    self.securityView.frame = CGRectMake(self.showsBookmarkButton ? side - 2.0 : 7.0, 0.0, 18.0, h);
     CGFloat left = editing ? 10.0 : (self.showsBookmarkButton ? side : 10.0);
     if (showLock) left += self.showsBookmarkButton ? 14.0 : 16.0;
     CGFloat right = editing ? 4.0 : side;
     self.field.frame = CGRectMake(left, 0.0, MAX(40.0, w - left - right), h);
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    self.progressLayer.bounds = CGRectMake(0.0, 0.0, self.progressVisible ? self.progressLayer.bounds.size.width : 0.0, h);
-    self.progressLayer.position = CGPointMake(0.0, 0.0);
+    CGFloat progressH = 2.5;
+    self.progressLayer.bounds = CGRectMake(0.0, 0.0,
+        self.progressVisible ? self.progressLayer.bounds.size.width : 0.0, progressH);
+    self.progressLayer.position = CGPointMake(0.0, h - progressH);
     [CATransaction commit];
 }
 
@@ -166,10 +172,13 @@
 
 - (void)setSecurityState:(NSString *)state {
     if ([state isEqualToString:@"secure"]) {
-        self.lockLabel.text = @"\U0001F512"; // padlock
+        self.securityView.image = [RBTheme icon:RBIconLock size:13.0 color:[RBTheme seaGlassColor]];
+        self.securityView.accessibilityLabel = @"Secure connection";
         self.lockVisible = YES;
     } else if ([state isEqualToString:@"insecure"]) {
-        self.lockLabel.text = @"⚠"; // warning triangle
+        self.securityView.image = [RBTheme icon:RBIconWarning size:13.0
+                                               color:[UIColor colorWithRed:0.78 green:0.35 blue:0.18 alpha:1.0]];
+        self.securityView.accessibilityLabel = @"Connection is not secure";
         self.lockVisible = YES;
     } else {
         self.lockVisible = NO;
@@ -192,7 +201,7 @@
     _loading = loading;
     [self styleReload];
     CGFloat w = self.fieldBackground.bounds.size.width;
-    CGFloat h = self.fieldBackground.bounds.size.height;
+    CGFloat h = 2.5;
     if (loading) {
         self.progressVisible = YES;
         [CATransaction begin];
@@ -234,6 +243,8 @@
     textField.attributedText = nil;
     textField.font = [RBTheme fontOfSize:15.0 bold:NO];
     textField.textColor = [RBTheme primaryTextColor];
+    self.fieldBackground.layer.borderColor = [[RBTheme accentColor] CGColor];
+    self.fieldBackground.layer.borderWidth = 1.5;
     textField.text = self.committedURL ?: @"";
     [self setNeedsLayout];
     [self.delegate omniboxEditingBegan:self];
@@ -241,6 +252,8 @@
 }
 
 - (void)textFieldDidEndEditing:(UITextField *)textField {
+    self.fieldBackground.layer.borderColor = [[RBTheme mistColor] CGColor];
+    self.fieldBackground.layer.borderWidth = 1.0;
     [self displayCommittedURL];
     [self setNeedsLayout];
     [self.delegate omniboxEditingEnded:self];

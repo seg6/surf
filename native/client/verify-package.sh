@@ -113,16 +113,96 @@ if grep -q '<string>armv7</string>' <<< "$required_capabilities"; then
   exit 1
 fi
 
+app_fonts="$(sed -n '/<key>UIAppFonts<\/key>/,/<\/array>/p' "$plist_xml")"
+if ! grep -q '<string>Lucide.ttf</string>' <<< "$app_fonts"; then
+  echo "Info.plist does not register the bundled Lucide icon font" >&2
+  exit 1
+fi
+
+for icon_name in icon-57 icon-60 icon-72 icon-76 icon-167; do
+  if ! grep -q "<string>$icon_name</string>" "$plist_xml"; then
+    echo "Info.plist does not register $icon_name" >&2
+    exit 1
+  fi
+done
+
 for resource in \
-  icon-57.png icon-57@2x.png icon-72.png icon-72@2x.png \
+  icon-57.png icon-57@2x.png icon-72.png icon-72@2x.png icon-144.png brand-mark.png \
+  icon-60.png icon-60@2x.png icon-60@3x.png \
+  icon-76.png icon-76@2x.png icon-167.png \
   Default.png Default@2x.png Default-568h@2x.png \
-  Default-667h@2x.png Default-736h@3x.png Default-Landscape-736h@3x.png
+  Default-667h@2x.png Default-736h@3x.png Default-Landscape-736h@3x.png \
+  Lucide.ttf ThirdPartyNotices/README.md \
+  ThirdPartyNotices/DETA-SURF-LICENSE.txt ThirdPartyNotices/LUCIDE-LICENSE.txt
 do
-  if [ ! -f "$tmp/Applications/Surf.app/$resource" ]; then
+  if [ ! -s "$tmp/Applications/Surf.app/$resource" ]; then
     echo "Missing phone/tablet resource in package: $resource" >&2
     exit 1
   fi
 done
+
+verify_png() {
+  resource="$1"
+  dimensions="$2"
+  description="$(file -b "$tmp/Applications/Surf.app/$resource")"
+  case "$description" in
+    "PNG image data, $dimensions, 8-bit"*) ;;
+    *)
+      echo "$resource has unexpected image metadata: $description" >&2
+      exit 1
+      ;;
+  esac
+}
+
+verify_png icon-57.png "57 x 57"
+verify_png icon-57@2x.png "114 x 114"
+verify_png icon-72.png "72 x 72"
+verify_png icon-72@2x.png "144 x 144"
+verify_png icon-144.png "144 x 144"
+verify_png icon-60.png "60 x 60"
+verify_png icon-60@2x.png "120 x 120"
+verify_png icon-60@3x.png "180 x 180"
+verify_png icon-76.png "76 x 76"
+verify_png icon-76@2x.png "152 x 152"
+verify_png icon-167.png "167 x 167"
+verify_png brand-mark.png "144 x 144"
+verify_png Default.png "320 x 480"
+verify_png Default@2x.png "640 x 960"
+verify_png Default-568h@2x.png "640 x 1136"
+verify_png Default-667h@2x.png "750 x 1334"
+verify_png Default-736h@3x.png "1242 x 2208"
+verify_png Default-Landscape-736h@3x.png "2208 x 1242"
+
+for resource in icon-57.png icon-57@2x.png icon-72.png icon-72@2x.png icon-144.png; do
+  description="$(file -b "$tmp/Applications/Surf.app/$resource")"
+  case "$description" in
+    *"8-bit/color RGBA,"*) ;;
+    *)
+      echo "$resource must preserve the transparent iOS 6 plane-break artwork" >&2
+      exit 1
+      ;;
+  esac
+done
+
+for resource in icon-60.png icon-60@2x.png icon-60@3x.png icon-76.png icon-76@2x.png icon-167.png; do
+  description="$(file -b "$tmp/Applications/Surf.app/$resource")"
+  case "$description" in
+    *"8-bit/color RGB,"*) ;;
+    *)
+      echo "$resource must be opaque so iOS 7+ cannot show a black edge" >&2
+      exit 1
+      ;;
+  esac
+done
+
+font_description="$(file -b "$tmp/Applications/Surf.app/Lucide.ttf")"
+case "$font_description" in
+  "TrueType Font data"*) ;;
+  *)
+    echo "Lucide.ttf is not a TrueType font: $font_description" >&2
+    exit 1
+    ;;
+esac
 
 updater_mode="$(
   dpkg-deb -c "$package" |

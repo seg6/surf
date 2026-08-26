@@ -46,6 +46,7 @@ typedef enum {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    [RBTheme styleTableView:self.tableView];
     self.title = @"Library";
     self.segments = [[UISegmentedControl alloc] initWithItems:@[@"Bookmarks", @"History", @"Downloads"]];
     self.segments.segmentedControlStyle = UISegmentedControlStyleBar;
@@ -61,7 +62,7 @@ typedef enum {
     self.searchBar.placeholder = @"Search bookmarks";
     self.libraryHeader = [[UIView alloc] initWithFrame:CGRectMake(0.0, 0.0,
                                                                   self.view.bounds.size.width, 78.0)];
-    self.libraryHeader.backgroundColor = [RBTheme pageBackgroundColor];
+    self.libraryHeader.backgroundColor = [RBTheme foamColor];
     [self.libraryHeader addSubview:self.segments];
     [self.libraryHeader addSubview:self.searchBar];
     self.tableView.tableHeaderView = self.libraryHeader;

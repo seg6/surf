@@ -10,9 +10,10 @@
 - (void)settings:(RBSettingsController *)settings diagnosticsVisible:(BOOL)visible;
 - (void)settings:(RBSettingsController *)settings preference:(NSString *)key enabled:(BOOL)enabled;
 - (void)settingsWantsMediaControls:(RBSettingsController *)settings;
+- (void)settingsWantsDiagnosticsInspector:(RBSettingsController *)settings;
 @end
 
-@interface RBSettingsController : UITableViewController
+@interface RBSettingsController : UIViewController
 @property(nonatomic, assign) id<RBSettingsDelegate> delegate;
 @property(nonatomic, assign) BOOL connected;
 @property(nonatomic, assign) BOOL diagnosticsVisible;

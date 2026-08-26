@@ -8,35 +8,22 @@
 @class RBTabStrip;
 
 static UIColor *RBTabRowTopColor(void) {
-    return [RBTheme usesClassicAppearance]
-        ? [UIColor colorWithRed:0.70 green:0.73 blue:0.79 alpha:1.0]
-        : [UIColor colorWithWhite:0.91 alpha:1.0];
+    return [RBTheme stripTopColor];
 }
 
 static UIColor *RBTabRowBottomColor(void) {
-    return [RBTheme usesClassicAppearance]
-        ? [UIColor colorWithRed:0.59 green:0.63 blue:0.70 alpha:1.0]
-        : [UIColor colorWithWhite:0.88 alpha:1.0];
+    return [RBTheme stripBottomColor];
 }
 
 static UIColor *RBTabBorderColor(void) {
-    return [RBTheme usesClassicAppearance]
-        ? [UIColor colorWithRed:0.42 green:0.46 blue:0.53 alpha:1.0]
-        : [RBTheme separatorColor];
+    return [RBTheme barLineColor];
 }
 
 static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
     UIColor *top = nil;
     UIColor *bottom = nil;
-    if ([RBTheme usesClassicAppearance]) {
-        top = active ? [UIColor colorWithRed:0.95 green:0.96 blue:0.98 alpha:1.0]
-                     : [UIColor colorWithRed:0.79 green:0.81 blue:0.85 alpha:1.0];
-        bottom = active ? [RBTheme pageBackgroundColor]
-                        : [UIColor colorWithRed:0.68 green:0.72 blue:0.78 alpha:1.0];
-    } else {
-        top = active ? [RBTheme pageBackgroundColor] : [UIColor colorWithWhite:0.94 alpha:1.0];
-        bottom = active ? [RBTheme pageBackgroundColor] : [UIColor colorWithWhite:0.88 alpha:1.0];
-    }
+    top = active ? [UIColor whiteColor] : [UIColor colorWithRed:0.91 green:0.95 blue:0.97 alpha:1.0];
+    bottom = active ? [RBTheme foamColor] : [UIColor colorWithRed:0.86 green:0.91 blue:0.94 alpha:1.0];
     if (highlighted) {
         top = [top colorWithAlphaComponent:0.72];
         bottom = [bottom colorWithAlphaComponent:0.72];
@@ -116,6 +103,8 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
     if (self) {
         self.backgroundColor = [UIColor clearColor];
         self.opaque = YES;
+        self.layer.cornerRadius = 7.0;
+        self.layer.masksToBounds = YES;
 
         self.fillLayer = [CAGradientLayer layer];
         [self.layer insertSublayer:self.fillLayer atIndex:0];
@@ -146,7 +135,7 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
 
         self.titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
         self.titleLabel.backgroundColor = [UIColor clearColor];
-        self.titleLabel.font = [RBTheme fontOfSize:([RBTheme usesClassicAppearance] ? 11.0 : 12.0) bold:NO];
+        self.titleLabel.font = [RBTheme fontOfSize:12.0 bold:NO];
         self.titleLabel.textAlignment = NSTextAlignmentLeft;
         self.titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
         self.titleLabel.userInteractionEnabled = NO;
@@ -157,10 +146,8 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
 
 - (void)setActive:(BOOL)active {
     _active = active;
-    self.titleLabel.textColor = active ? [RBTheme primaryTextColor]
-                                       : ([RBTheme usesClassicAppearance]
-                                          ? [UIColor colorWithWhite:0.26 alpha:1.0]
-                                          : [RBTheme secondaryTextColor]);
+    self.titleLabel.textColor = active ? [RBTheme primaryTextColor] : [RBTheme secondaryTextColor];
+    self.titleLabel.font = active ? [RBTheme displayFontOfSize:12.0] : [RBTheme fontOfSize:12.0 bold:NO];
     self.closeButton.alpha = active ? 1.0 : 0.72;
     self.fillLayer.colors = RBTabFillColors(active, self.highlighted);
     self.bottomBorder.hidden = active;
@@ -216,19 +203,17 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
         self.tabContainer.backgroundColor = [UIColor clearColor];
         [self addSubview:self.tabContainer];
         self.overflowButton = [[RBTabAuxButton alloc] initWithFrame:CGRectZero];
-        [self.overflowButton setTitle:@"\u00bb" forState:UIControlStateNormal];
-        [self.overflowButton setTitleColor:[RBTheme primaryTextColor]
-                                  forState:UIControlStateNormal];
-        self.overflowButton.titleLabel.font = [RBTheme fontOfSize:16.0 bold:YES];
+        [self.overflowButton setImage:[RBTheme icon:RBIconMore size:19.0 color:[RBTheme accentColor]]
+                              forState:UIControlStateNormal];
         self.overflowButton.accessibilityLabel = @"More Tabs";
         [self.overflowButton addTarget:self action:@selector(overflowTapped:) forControlEvents:UIControlEventTouchUpInside];
         [self addSubview:self.overflowButton];
         self.addTabButton = [[RBTabAuxButton alloc] initWithFrame:CGRectZero];
-        [self.addTabButton setTitle:@"+" forState:UIControlStateNormal];
-        [self.addTabButton setTitle:@"+" forState:UIControlStateHighlighted];
-        [self.addTabButton setTitleColor:[UIColor blackColor] forState:UIControlStateNormal];
-        [self.addTabButton setTitleColor:[UIColor blackColor] forState:UIControlStateHighlighted];
-        self.addTabButton.titleLabel.font = [RBTheme fontOfSize:23.0 bold:YES];
+        [self.addTabButton setImage:[RBTheme icon:RBIconPlus size:18.0 color:[RBTheme accentColor]]
+                           forState:UIControlStateNormal];
+        [self.addTabButton setImage:[RBTheme icon:RBIconPlus size:18.0 color:[RBTheme deepTideColor]]
+                           forState:UIControlStateHighlighted];
+        self.addTabButton.adjustsImageWhenHighlighted = NO;
         [self.addTabButton addTarget:self action:@selector(newTapped:) forControlEvents:UIControlEventTouchUpInside];
         self.addTabButton.accessibilityLabel = @"New Tab";
         [self addSubview:self.addTabButton];
@@ -282,13 +267,13 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
     NSString *title = [tab objectForKey:@"title"];
     NSString *url = [tab objectForKey:@"url"];
     title = [title stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if ([url hasPrefix:@"about:blank"] || [title hasPrefix:@"about:blank"]) return @"New Page";
+    if ([url hasPrefix:@"about:blank"] || [title hasPrefix:@"about:blank"]) return @"New Tab";
     if (![title length] || [title isEqualToString:url]) {
         NSURL *parsedURL = [NSURL URLWithString:url ?: @""];
         title = [parsedURL host];
         if (![title length]) title = url;
     }
-    return [title length] ? title : @"New Page";
+    return [title length] ? title : @"New Tab";
 }
 
 - (NSArray *)visibleTabsForCount:(NSUInteger)capacity {
@@ -316,11 +301,11 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
     [super layoutSubviews];
     CGFloat w = self.bounds.size.width;
     CGFloat h = self.bounds.size.height;
-    CGFloat buttonW = 34.0;
-    BOOL needsOverflow = [self.tabs count] > (NSUInteger)MAX(1, floor((w - buttonW) / 108.0));
+    CGFloat buttonW = 38.0;
+    BOOL needsOverflow = [self.tabs count] > (NSUInteger)MAX(1, floor((w - buttonW) / 112.0));
     CGFloat controlsW = buttonW + (needsOverflow ? buttonW : 0.0);
     CGFloat available = MAX(1.0, w - controlsW);
-    NSUInteger capacity = (NSUInteger)MAX(1, floor(available / 108.0));
+    NSUInteger capacity = (NSUInteger)MAX(1, floor(available / 112.0));
     NSArray *visibleTabs = [self visibleTabsForCount:capacity];
     needsOverflow = [self.hiddenTabs count] > 0;
     self.overflowButton.hidden = !needsOverflow;
@@ -329,7 +314,7 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
     self.tabContainer.frame = CGRectMake(0.0, 0.0, w - buttonW - (needsOverflow ? buttonW : 0.0), h);
 
     NSMutableSet *used = [NSMutableSet set];
-    CGFloat cellW = [visibleTabs count] ? MIN(190.0, self.tabContainer.bounds.size.width / [visibleTabs count]) : 0.0;
+    CGFloat cellW = [visibleTabs count] ? MIN(210.0, self.tabContainer.bounds.size.width / [visibleTabs count]) : 0.0;
     RBTabCell *activeCell = nil;
     for (NSUInteger visibleIndex = 0; visibleIndex < [visibleTabs count]; visibleIndex++) {
         NSDictionary *tab = [visibleTabs objectAtIndex:visibleIndex];
@@ -347,7 +332,7 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
         cell.hidden = NO;
         CGFloat cellX = floor(visibleIndex * cellW);
         CGFloat nextX = floor((visibleIndex + 1) * cellW);
-        cell.frame = CGRectMake(cellX, 0.0, MAX(70.0, nextX - cellX), h);
+        cell.frame = CGRectMake(cellX + 2.0, 2.0, MAX(70.0, nextX - cellX - 3.0), h - 2.0);
         cell.titleLabel.text = [self titleForTab:tab];
         id iconValue = [tab objectForKey:@"icon"];
         cell.iconPath = [iconValue isKindOfClass:[NSString class]] ? iconValue : nil;

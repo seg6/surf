@@ -33,7 +33,7 @@
         self.backButton.accessibilityLabel = @"Back";
         self.fwdButton.accessibilityLabel = @"Forward";
         self.shareButton.accessibilityLabel = @"Share";
-        self.libraryButton.accessibilityLabel = @"Bookmarks";
+        self.libraryButton.accessibilityLabel = @"Library";
         self.moreButton.accessibilityLabel = @"More";
         [self addSubview:self.backButton];
         [self addSubview:self.fwdButton];
@@ -45,11 +45,9 @@
         self.titleLabel.backgroundColor = [UIColor clearColor];
         self.titleLabel.textAlignment = NSTextAlignmentCenter;
         self.titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
-        self.titleLabel.font = [RBTheme fontOfSize:14.0 bold:YES];
+        self.titleLabel.font = [RBTheme displayFontOfSize:14.0];
         self.titleLabel.textColor = [RBTheme primaryTextColor];
-        self.titleLabel.shadowColor = [RBTheme usesClassicAppearance]
-            ? [UIColor colorWithWhite:1.0 alpha:0.72] : nil;
-        self.titleLabel.shadowOffset = CGSizeMake(0.0, 1.0);
+        self.titleLabel.shadowColor = nil;
         [self addSubview:self.titleLabel];
 
         self.omnibox = [[RBOmnibox alloc] initWithFrame:CGRectZero];
@@ -86,22 +84,22 @@
     if (self.phoneLayout) {
         self.titleLabel.hidden = YES;
         self.titleLabel.frame = CGRectZero;
-        CGFloat fieldH = 32.0;
+        CGFloat fieldH = 36.0;
         CGFloat y = floorf((h - fieldH) / 2.0);
-        self.omnibox.frame = CGRectMake(8.0, y, MAX(80.0, w - 16.0), fieldH);
+        self.omnibox.frame = CGRectMake(10.0, y, MAX(80.0, w - 20.0), fieldH);
         return;
     }
 
     self.titleLabel.hidden = YES;
-    CGFloat buttonW = 40.0;
-    CGFloat fieldH = 32.0;
+    CGFloat buttonW = 44.0;
+    CGFloat fieldH = 36.0;
     CGFloat y = floorf((h - fieldH) / 2.0);
-    self.backButton.frame = CGRectMake(2.0, 0.0, buttonW, h);
-    self.fwdButton.frame = CGRectMake(2.0 + buttonW, 0.0, buttonW, h);
-    self.moreButton.frame = CGRectMake(w - buttonW - 2.0, 0.0, buttonW, h);
-    self.libraryButton.frame = CGRectMake(w - buttonW * 2.0 - 2.0, 0.0, buttonW, h);
-    self.shareButton.frame = CGRectMake(w - buttonW * 3.0 - 2.0, 0.0, buttonW, h);
-    CGFloat left = 2.0 + buttonW * 2.0 + 6.0;
+    self.backButton.frame = CGRectMake(0.0, 0.0, buttonW, h);
+    self.fwdButton.frame = CGRectMake(buttonW, 0.0, buttonW, h);
+    self.moreButton.frame = CGRectMake(w - buttonW, 0.0, buttonW, h);
+    self.libraryButton.frame = CGRectMake(w - buttonW * 2.0, 0.0, buttonW, h);
+    self.shareButton.frame = CGRectMake(w - buttonW * 3.0, 0.0, buttonW, h);
+    CGFloat left = buttonW * 2.0 + 6.0;
     CGFloat right = CGRectGetMinX(self.shareButton.frame) - 6.0;
     self.omnibox.frame = CGRectMake(left, y, MAX(120.0, right - left), fieldH);
 }

@@ -29,6 +29,7 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    [RBTheme styleTableView:self.tableView];
     self.tableView.backgroundColor = [RBTheme pageBackgroundColor];
     self.tableView.separatorColor = [RBTheme separatorColor];
     self.tableView.rowHeight = 62.0;
@@ -166,7 +167,7 @@
     cell.detailTextLabel.text = [NSString stringWithFormat:@"%@   %@   %@",
                                  [event objectForKey:@"time"], level,
                                  [[event objectForKey:@"component"] uppercaseString]];
-    cell.detailTextLabel.font = [UIFont fontWithName:@"Courier-Bold" size:10.0] ?: [UIFont boldSystemFontOfSize:10.0];
+    cell.detailTextLabel.font = [RBTheme monospacedFontOfSize:10.0 bold:YES];
     cell.detailTextLabel.textColor = [self colorForLevel:[event objectForKey:@"level"]];
     cell.textLabel.textColor = [RBTheme primaryTextColor];
     cell.backgroundColor = [RBTheme pageBackgroundColor];

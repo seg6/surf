@@ -15,7 +15,7 @@
 
 // Device-specific Safari top chrome. Phones show the unified omnibox while
 // iPads show navigation and browser controls around it. Phone page titles live
-// in Pages, where they remain readable without crowding the address field.
+// in Tabs, where they remain readable without crowding the address field.
 @interface RBChromeBar : RBGradientBar
 @property(nonatomic, assign) id<RBChromeBarDelegate> delegate;
 @property(nonatomic, readonly) RBOmnibox *omnibox;

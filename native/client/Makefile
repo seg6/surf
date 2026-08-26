@@ -36,6 +36,18 @@ after-stage::
 	@cp Resources/icon-72.png $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-72.png
 	@cp Resources/icon-72@2x.png $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-72@2x.png
 	@cp Resources/icon-144.png $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-144.png
+	@cp Resources/icon-60.png $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-60.png
+	@cp Resources/icon-60@2x.png $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-60@2x.png
+	@cp Resources/icon-60@3x.png $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-60@3x.png
+	@cp Resources/icon-76.png $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-76.png
+	@cp Resources/icon-76@2x.png $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-76@2x.png
+	@cp Resources/icon-167.png $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-167.png
+	@cp Resources/brand-mark.png $(THEOS_STAGING_DIR)/Applications/Surf.app/brand-mark.png
+	@cp Resources/Lucide.ttf $(THEOS_STAGING_DIR)/Applications/Surf.app/Lucide.ttf
+	@mkdir -p $(THEOS_STAGING_DIR)/Applications/Surf.app/ThirdPartyNotices
+	@cp $(REPO_ROOT)/THIRD_PARTY_NOTICES.md $(THEOS_STAGING_DIR)/Applications/Surf.app/ThirdPartyNotices/README.md
+	@cp Artwork/DETA-SURF-LICENSE.txt $(THEOS_STAGING_DIR)/Applications/Surf.app/ThirdPartyNotices/DETA-SURF-LICENSE.txt
+	@cp Artwork/LUCIDE-LICENSE.txt $(THEOS_STAGING_DIR)/Applications/Surf.app/ThirdPartyNotices/LUCIDE-LICENSE.txt
 	@cp Resources/Default.png $(THEOS_STAGING_DIR)/Applications/Surf.app/Default.png
 	@cp Resources/Default@2x.png $(THEOS_STAGING_DIR)/Applications/Surf.app/Default@2x.png
 	@cp Resources/Default-568h@2x.png $(THEOS_STAGING_DIR)/Applications/Surf.app/Default-568h@2x.png

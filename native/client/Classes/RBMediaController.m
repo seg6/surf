@@ -43,11 +43,11 @@
     self.timeLabel.textColor = [RBTheme secondaryTextColor];
     [self.view addSubview:self.timeLabel];
 
-    self.playButton = [self controlButton:@"Play"];
+    self.playButton = [self controlButton:@"Play" icon:RBIconMedia];
     [self.playButton addTarget:self action:@selector(playTapped:) forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:self.playButton];
 
-    self.muteButton = [self controlButton:@"Mute"];
+    self.muteButton = [self controlButton:@"Mute" icon:RBIconMute];
     [self.muteButton addTarget:self action:@selector(muteTapped:) forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:self.muteButton];
 
@@ -70,15 +70,12 @@
     [self.view addSubview:self.emptyLabel];
 }
 
-- (UIButton *)controlButton:(NSString *)title {
+- (UIButton *)controlButton:(NSString *)title icon:(RBIcon)icon {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
-    button.backgroundColor = [UIColor whiteColor];
-    button.layer.cornerRadius = 6.0;
-    button.layer.borderWidth = 1.0;
-    button.layer.borderColor = [[RBTheme separatorColor] CGColor];
-    button.titleLabel.font = [RBTheme fontOfSize:14.0 bold:YES];
+    [RBTheme styleSecondaryButton:button];
     [button setTitle:title forState:UIControlStateNormal];
-    [button setTitleColor:[RBTheme accentColor] forState:UIControlStateNormal];
+    [button setImage:[RBTheme icon:icon size:17.0 color:[RBTheme accentColor]] forState:UIControlStateNormal];
+    button.imageEdgeInsets = UIEdgeInsetsMake(0.0, -5.0, 0.0, 5.0);
     return button;
 }
 
@@ -134,6 +131,9 @@ static NSString *RBMediaTime(double seconds) {
            RBMediaTime(current), RBMediaTime(duration), (long)count, count == 1 ? @"" : @"s"]
         : [NSString stringWithFormat:@"%ld media item%@", (long)count, count == 1 ? @"" : @"s"];
     [self.playButton setTitle:([[state objectForKey:@"paused"] boolValue] ? @"Play" : @"Pause")
+                     forState:UIControlStateNormal];
+    RBIcon playbackIcon = [[state objectForKey:@"paused"] boolValue] ? RBIconMedia : RBIconPause;
+    [self.playButton setImage:[RBTheme icon:playbackIcon size:17.0 color:[RBTheme accentColor]]
                      forState:UIControlStateNormal];
     [self.muteButton setTitle:([[state objectForKey:@"muted"] boolValue] ? @"Unmute" : @"Mute")
                      forState:UIControlStateNormal];

@@ -153,17 +153,19 @@ static void RBSetBrightScreenExposureBias(AVCaptureDevice *camera) {
 
     self.scanFrame = [[UIView alloc] initWithFrame:CGRectZero];
     self.scanFrame.backgroundColor = [UIColor clearColor];
-    self.scanFrame.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:.9].CGColor;
-    self.scanFrame.layer.borderWidth = 2.0;
-    self.scanFrame.layer.cornerRadius = 10.0;
+    self.scanFrame.layer.borderColor = [RBTheme seaGlassColor].CGColor;
+    self.scanFrame.layer.borderWidth = 3.0;
+    self.scanFrame.layer.cornerRadius = 14.0;
     [self.view addSubview:self.scanFrame];
 
     self.guideLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    self.guideLabel.backgroundColor = [UIColor colorWithWhite:0 alpha:.62];
+    self.guideLabel.backgroundColor = [[RBTheme deepTideColor] colorWithAlphaComponent:0.90];
     self.guideLabel.textColor = [UIColor whiteColor];
     self.guideLabel.textAlignment = NSTextAlignmentCenter;
     self.guideLabel.numberOfLines = 2;
-    self.guideLabel.font = [RBTheme fontOfSize:15.0 bold:YES];
+    self.guideLabel.font = [RBTheme displayFontOfSize:15.0];
+    self.guideLabel.layer.cornerRadius = 10.0;
+    self.guideLabel.layer.masksToBounds = YES;
     self.guideLabel.text = @"Point at the pairing code";
     [self.view addSubview:self.guideLabel];
     [self.spinner stopAnimating];
@@ -203,9 +205,9 @@ static void RBSetBrightScreenExposureBias(AVCaptureDevice *camera) {
         self.unavailableLabel.numberOfLines = 0;
         self.unavailableLabel.font = [RBTheme fontOfSize:17.0 bold:NO];
         [self.view addSubview:self.unavailableLabel];
-        self.manualButton = [UIButton buttonWithType:UIButtonTypeRoundedRect];
-        self.manualButton.titleLabel.font = [RBTheme fontOfSize:17.0 bold:YES];
+        self.manualButton = [UIButton buttonWithType:UIButtonTypeCustom];
         [self.manualButton setTitle:@"Enter Address" forState:UIControlStateNormal];
+        [RBTheme stylePrimaryButton:self.manualButton];
         [self.manualButton addTarget:self action:@selector(cancel:) forControlEvents:UIControlEventTouchUpInside];
         [self.view addSubview:self.manualButton];
     }

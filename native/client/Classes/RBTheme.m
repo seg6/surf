@@ -2,23 +2,21 @@
 
 #import <QuartzCore/QuartzCore.h>
 
-#include <math.h>
-
 @interface RBGradientBar ()
 @property(nonatomic, strong) UIColor *lineColor;
 @end
 
 @implementation RBGradientBar
 
-+ (Class)layerClass {
-    return [CAGradientLayer class];
-}
++ (Class)layerClass { return [CAGradientLayer class]; }
 
 - (id)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
         self.opaque = YES;
-        [self setTopColor:[RBTheme barTopColor] bottomColor:[RBTheme barBottomColor] lineColor:[RBTheme barLineColor]];
+        [self setTopColor:[RBTheme barTopColor]
+              bottomColor:[RBTheme barBottomColor]
+                lineColor:[RBTheme barLineColor]];
     }
     return self;
 }
@@ -26,8 +24,10 @@
 - (void)setTopColor:(UIColor *)top bottomColor:(UIColor *)bottom lineColor:(UIColor *)line {
     CAGradientLayer *layer = (CAGradientLayer *)self.layer;
     layer.colors = @[(id)[top CGColor], (id)[bottom CGColor]];
+    layer.startPoint = CGPointMake(0.5, 0.0);
+    layer.endPoint = CGPointMake(0.5, 1.0);
     self.lineColor = line;
-    [self setNeedsDisplay];
+    [self setNeedsLayout];
 }
 
 - (void)layoutSubviews {
@@ -41,10 +41,11 @@
         [hairline setValue:@YES forKey:@"rbHairline"];
         [self.layer addSublayer:hairline];
     }
-    hairline.backgroundColor = [self.lineColor CGColor];
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    hairline.frame = CGRectMake(0.0, self.bounds.size.height - 1.0, self.bounds.size.width, 1.0);
+    hairline.backgroundColor = [self.lineColor CGColor];
+    hairline.frame = CGRectMake(0.0, self.bounds.size.height - 1.0,
+                                self.bounds.size.width, 1.0);
     [CATransaction commit];
 }
 
@@ -53,280 +54,169 @@
 @implementation RBTheme
 
 + (BOOL)usesClassicAppearance {
+    // Retained as an API-availability predicate for older call sites. Surf's
+    // visual identity is intentionally the same on every supported OS.
     return [[[UIDevice currentDevice] systemVersion] floatValue] < 7.0;
 }
 
-+ (UIColor *)barTopColor {
-    return [self usesClassicAppearance]
-        ? [UIColor colorWithRed:0.91 green:0.93 blue:0.96 alpha:1.0]
-        : [UIColor colorWithWhite:0.97 alpha:0.98];
-}
-+ (UIColor *)barBottomColor {
-    return [self usesClassicAppearance]
-        ? [UIColor colorWithRed:0.82 green:0.85 blue:0.89 alpha:1.0]
-        : [UIColor colorWithWhite:0.97 alpha:0.98];
-}
-+ (UIColor *)barLineColor {
-    return [self usesClassicAppearance]
-        ? [UIColor colorWithRed:0.54 green:0.58 blue:0.64 alpha:1.0]
-        : [UIColor colorWithWhite:0.78 alpha:1.0];
-}
-+ (UIColor *)stripTopColor {
-    return [self usesClassicAppearance]
-        ? [UIColor colorWithRed:0.47 green:0.52 blue:0.60 alpha:1.0]
-        : [UIColor colorWithWhite:0.91 alpha:1.0];
-}
-+ (UIColor *)stripBottomColor {
-    return [self usesClassicAppearance]
-        ? [UIColor colorWithRed:0.35 green:0.40 blue:0.48 alpha:1.0]
-        : [UIColor colorWithWhite:0.91 alpha:1.0];
-}
-+ (UIColor *)iconColor {
-    return [self usesClassicAppearance]
-        ? [UIColor colorWithRed:0.20 green:0.24 blue:0.30 alpha:1.0]
-        : [self accentColor];
-}
-+ (UIColor *)progressFillColor { return [[self accentColor] colorWithAlphaComponent:0.30]; }
-+ (UIColor *)pageBackgroundColor { return [UIColor colorWithRed:0.95 green:0.96 blue:0.97 alpha:1.0]; }
-+ (UIColor *)primaryTextColor { return [UIColor colorWithRed:0.12 green:0.14 blue:0.17 alpha:1.0]; }
-+ (UIColor *)secondaryTextColor { return [UIColor colorWithRed:0.39 green:0.43 blue:0.49 alpha:1.0]; }
-+ (UIColor *)separatorColor { return [UIColor colorWithRed:0.76 green:0.79 blue:0.83 alpha:1.0]; }
-+ (UIColor *)accentColor { return [UIColor colorWithRed:0.18 green:0.38 blue:0.66 alpha:1.0]; }
++ (UIColor *)deepTideColor { return [UIColor colorWithRed:0.063 green:0.165 blue:0.227 alpha:1.0]; }
++ (UIColor *)accentColor { return [UIColor colorWithRed:0.078 green:0.451 blue:0.722 alpha:1.0]; }
++ (UIColor *)seaGlassColor { return [UIColor colorWithRed:0.208 green:0.663 blue:0.722 alpha:1.0]; }
++ (UIColor *)foamColor { return [UIColor colorWithRed:0.969 green:0.980 blue:0.988 alpha:1.0]; }
++ (UIColor *)mistColor { return [UIColor colorWithRed:0.863 green:0.910 blue:0.933 alpha:1.0]; }
++ (UIColor *)slateColor { return [UIColor colorWithRed:0.365 green:0.447 blue:0.502 alpha:1.0]; }
+
++ (UIColor *)barTopColor { return [UIColor colorWithRed:0.985 green:0.995 blue:1.0 alpha:1.0]; }
++ (UIColor *)barBottomColor { return [UIColor colorWithRed:0.945 green:0.972 blue:0.982 alpha:1.0]; }
++ (UIColor *)barLineColor { return [UIColor colorWithRed:0.76 green:0.84 blue:0.88 alpha:1.0]; }
++ (UIColor *)stripTopColor { return [UIColor colorWithRed:0.91 green:0.95 blue:0.97 alpha:1.0]; }
++ (UIColor *)stripBottomColor { return [UIColor colorWithRed:0.86 green:0.91 blue:0.94 alpha:1.0]; }
++ (UIColor *)iconColor { return [self accentColor]; }
++ (UIColor *)progressFillColor { return [self accentColor]; }
++ (UIColor *)pageBackgroundColor { return [self foamColor]; }
++ (UIColor *)primaryTextColor { return [self deepTideColor]; }
++ (UIColor *)secondaryTextColor { return [self slateColor]; }
++ (UIColor *)separatorColor { return [self mistColor]; }
 
 + (UIFont *)fontOfSize:(CGFloat)size bold:(BOOL)bold {
     return bold ? [UIFont boldSystemFontOfSize:size] : [UIFont systemFontOfSize:size];
 }
 
++ (UIFont *)displayFontOfSize:(CGFloat)size {
+    // Keep display and body copy in the device's native UI family. Mixing
+    // Avenir Next headings with Helvetica table controls was especially
+    // conspicuous on iOS 7, where the lighter system typography dominates.
+    return [UIFont boldSystemFontOfSize:size];
+}
+
++ (UIFont *)monospacedFontOfSize:(CGFloat)size bold:(BOOL)bold {
+    NSString *name = bold ? @"Menlo-Bold" : @"Menlo-Regular";
+    NSString *fallback = bold ? @"Courier-Bold" : @"Courier";
+    return [UIFont fontWithName:name size:size] ?: [UIFont fontWithName:fallback size:size] ?:
+        [self fontOfSize:size bold:bold];
+}
+
++ (UIImage *)solidImage:(UIColor *)color cornerRadius:(CGFloat)radius {
+    CGSize size = CGSizeMake(radius * 2.0 + 2.0, radius * 2.0 + 2.0);
+    UIGraphicsBeginImageContextWithOptions(size, NO, 0.0);
+    UIBezierPath *path = [UIBezierPath bezierPathWithRoundedRect:(CGRect){CGPointZero, size}
+                                                    cornerRadius:radius];
+    [color setFill];
+    [path fill];
+    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    return [image resizableImageWithCapInsets:UIEdgeInsetsMake(radius + 1.0, radius + 1.0,
+                                                                radius + 1.0, radius + 1.0)];
+}
+
++ (void)styleNavigationBar:(UINavigationBar *)navigationBar {
+    if (!navigationBar) return;
+    navigationBar.tintColor = [UIColor whiteColor];
+    [navigationBar setBackgroundImage:[self solidImage:[self deepTideColor] cornerRadius:0.0]
+                        forBarMetrics:UIBarMetricsDefault];
+    if ([navigationBar respondsToSelector:@selector(setShadowImage:)]) {
+        navigationBar.shadowImage = [self solidImage:[[self seaGlassColor] colorWithAlphaComponent:0.72]
+                                          cornerRadius:0.0];
+    }
+    navigationBar.titleTextAttributes = @{
+        UITextAttributeTextColor: [UIColor whiteColor],
+        UITextAttributeTextShadowColor: [UIColor clearColor],
+        UITextAttributeFont: [self displayFontOfSize:17.0]
+    };
+}
+
++ (void)styleTableView:(UITableView *)tableView {
+    if (!tableView) return;
+    tableView.backgroundView = nil;
+    tableView.backgroundColor = [self foamColor];
+    tableView.separatorColor = [self mistColor];
+}
+
++ (void)stylePrimaryButton:(UIButton *)button {
+    button.backgroundColor = [self accentColor];
+    button.layer.cornerRadius = 9.0;
+    button.layer.borderWidth = 0.0;
+    [button setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    [button setTitleColor:[[UIColor whiteColor] colorWithAlphaComponent:0.70]
+                  forState:UIControlStateHighlighted];
+    button.titleLabel.font = [self displayFontOfSize:15.0];
+}
+
++ (void)styleSecondaryButton:(UIButton *)button {
+    button.backgroundColor = [UIColor whiteColor];
+    button.layer.cornerRadius = 9.0;
+    button.layer.borderWidth = 1.0;
+    button.layer.borderColor = [[self mistColor] CGColor];
+    [button setTitleColor:[self accentColor] forState:UIControlStateNormal];
+    [button setTitleColor:[[self accentColor] colorWithAlphaComponent:0.55]
+                  forState:UIControlStateHighlighted];
+    button.titleLabel.font = [self displayFontOfSize:14.0];
+}
+
 + (UIButton *)barButtonWithIcon:(RBIcon)icon target:(id)target action:(SEL)action {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
-    UIImage *normal = [self icon:icon size:19.0 color:[self iconColor]];
-    UIImage *pressed = [self icon:icon size:19.0 color:[[self iconColor] colorWithAlphaComponent:0.4]];
-    UIImage *disabled = [self icon:icon size:19.0 color:[[self iconColor] colorWithAlphaComponent:0.25]];
-    [button setImage:normal forState:UIControlStateNormal];
-    [button setImage:pressed forState:UIControlStateHighlighted];
-    [button setImage:disabled forState:UIControlStateDisabled];
-    if ([self usesClassicAppearance]) {
-        button.imageView.layer.shadowColor = [[UIColor whiteColor] CGColor];
-        button.imageView.layer.shadowOpacity = 0.7;
-        button.imageView.layer.shadowRadius = 0.0;
-        button.imageView.layer.shadowOffset = CGSizeMake(0.0, 1.0);
-    }
+    [button setImage:[self icon:icon size:20.0 color:[self iconColor]] forState:UIControlStateNormal];
+    [button setImage:[self icon:icon size:20.0 color:[self deepTideColor]] forState:UIControlStateHighlighted];
+    [button setImage:[self icon:icon size:20.0 color:[[self slateColor] colorWithAlphaComponent:0.28]]
+             forState:UIControlStateDisabled];
+    [button setBackgroundImage:[self solidImage:[[self accentColor] colorWithAlphaComponent:0.10]
+                                      cornerRadius:9.0]
+                      forState:UIControlStateHighlighted];
+    button.adjustsImageWhenHighlighted = NO;
     [button addTarget:target action:action forControlEvents:UIControlEventTouchUpInside];
     return button;
 }
 
-// All icons are drawn into a size x size box with roughly 15% padding.
-+ (UIImage *)icon:(RBIcon)icon size:(CGFloat)size color:(UIColor *)color {
-    UIGraphicsBeginImageContextWithOptions(CGSizeMake(size, size), NO, 0.0);
-    CGContextRef ctx = UIGraphicsGetCurrentContext();
-    CGContextSetStrokeColorWithColor(ctx, [color CGColor]);
-    CGContextSetFillColorWithColor(ctx, [color CGColor]);
-    CGContextSetLineCap(ctx, kCGLineCapRound);
-    CGContextSetLineJoin(ctx, kCGLineJoinRound);
-    CGFloat s = size;
-    CGFloat pad = s * 0.15;
-    CGFloat mid = s / 2.0;
-    CGFloat lw = MAX(2.0, s * 0.11);
-    CGContextSetLineWidth(ctx, lw);
-
++ (unichar)codepointForIcon:(RBIcon)icon {
+    // Codepoints from lucide-static 1.34.0. The source package and complete
+    // ISC/MIT notices are retained in native/client/Artwork.
     switch (icon) {
-        case RBIconBack: {
-            CGContextMoveToPoint(ctx, s - pad * 1.6, pad);
-            CGContextAddLineToPoint(ctx, pad * 1.4, mid);
-            CGContextAddLineToPoint(ctx, s - pad * 1.6, s - pad);
-            CGContextStrokePath(ctx);
-            break;
-        }
-        case RBIconForward: {
-            CGContextMoveToPoint(ctx, pad * 1.6, pad);
-            CGContextAddLineToPoint(ctx, s - pad * 1.4, mid);
-            CGContextAddLineToPoint(ctx, pad * 1.6, s - pad);
-            CGContextStrokePath(ctx);
-            break;
-        }
-        case RBIconChevronUp: {
-            CGContextMoveToPoint(ctx, pad, s - pad * 1.8);
-            CGContextAddLineToPoint(ctx, mid, pad * 1.4);
-            CGContextAddLineToPoint(ctx, s - pad, s - pad * 1.8);
-            CGContextStrokePath(ctx);
-            break;
-        }
-        case RBIconChevronDown: {
-            CGContextMoveToPoint(ctx, pad, pad * 1.8);
-            CGContextAddLineToPoint(ctx, mid, s - pad * 1.4);
-            CGContextAddLineToPoint(ctx, s - pad, pad * 1.8);
-            CGContextStrokePath(ctx);
-            break;
-        }
-        case RBIconReload: {
-            CGFloat r = mid - pad;
-            // Open circular arc with an arrowhead at the gap.
-            CGContextAddArc(ctx, mid, mid, r, (CGFloat)(-M_PI * 0.35), (CGFloat)(M_PI * 1.25), 0);
-            CGContextStrokePath(ctx);
-            CGFloat ax = mid + r * (CGFloat)cos(-M_PI * 0.35);
-            CGFloat ay = mid + r * (CGFloat)sin(-M_PI * 0.35);
-            CGFloat ah = s * 0.24;
-            CGContextMoveToPoint(ctx, ax - ah * 0.9, ay - ah * 0.55);
-            CGContextAddLineToPoint(ctx, ax + ah * 0.45, ay - ah * 0.35);
-            CGContextAddLineToPoint(ctx, ax - ah * 0.15, ay + ah * 0.75);
-            CGContextClosePath(ctx);
-            CGContextFillPath(ctx);
-            break;
-        }
-        case RBIconStop:
-        case RBIconClose: {
-            CGFloat p = icon == RBIconClose ? pad * 1.4 : pad * 1.1;
-            CGContextMoveToPoint(ctx, p, p);
-            CGContextAddLineToPoint(ctx, s - p, s - p);
-            CGContextMoveToPoint(ctx, s - p, p);
-            CGContextAddLineToPoint(ctx, p, s - p);
-            CGContextStrokePath(ctx);
-            break;
-        }
+        case RBIconBack: return 57454;
+        case RBIconForward: return 57455;
+        case RBIconChevronDown: return 57453;
+        case RBIconChevronUp: return 57456;
+        case RBIconReload: return 57669;
+        case RBIconStop: return 57703;
+        case RBIconClose: return 57778;
         case RBIconStar:
-        case RBIconStarFill: {
-            CGFloat rOuter = mid - pad * 0.7;
-            CGFloat rInner = rOuter * 0.42;
-            CGContextMoveToPoint(ctx, mid, mid - rOuter);
-            for (int i = 1; i < 10; i++) {
-                CGFloat r = (i % 2 == 0) ? rOuter : rInner;
-                CGFloat a = (CGFloat)(-M_PI_2 + i * M_PI / 5.0);
-                CGContextAddLineToPoint(ctx, mid + r * (CGFloat)cos(a), mid + r * (CGFloat)sin(a));
-            }
-            CGContextClosePath(ctx);
-            if (icon == RBIconStarFill) CGContextFillPath(ctx);
-            else {
-                CGContextSetLineWidth(ctx, MAX(1.5, lw * 0.7));
-                CGContextStrokePath(ctx);
-            }
-            break;
-        }
-        case RBIconGear: {
-            CGFloat rOuter = mid - pad * 0.8;
-            CGFloat rBody = rOuter * 0.72;
-            CGFloat rHole = rOuter * 0.32;
-            for (int i = 0; i < 8; i++) {
-                CGFloat a = (CGFloat)(i * M_PI / 4.0);
-                CGFloat toothW = rOuter * 0.42;
-                CGContextSaveGState(ctx);
-                CGContextTranslateCTM(ctx, mid, mid);
-                CGContextRotateCTM(ctx, a);
-                CGContextFillRect(ctx, CGRectMake(-toothW / 2.0, -rOuter, toothW, rOuter));
-                CGContextRestoreGState(ctx);
-            }
-            CGContextFillEllipseInRect(ctx, CGRectMake(mid - rBody, mid - rBody, rBody * 2.0, rBody * 2.0));
-            CGContextSetBlendMode(ctx, kCGBlendModeClear);
-            CGContextFillEllipseInRect(ctx, CGRectMake(mid - rHole, mid - rHole, rHole * 2.0, rHole * 2.0));
-            CGContextSetBlendMode(ctx, kCGBlendModeNormal);
-            break;
-        }
-        case RBIconPlus: {
-            CGContextMoveToPoint(ctx, mid, pad);
-            CGContextAddLineToPoint(ctx, mid, s - pad);
-            CGContextMoveToPoint(ctx, pad, mid);
-            CGContextAddLineToPoint(ctx, s - pad, mid);
-            CGContextStrokePath(ctx);
-            break;
-        }
-        case RBIconExpand: {
-            // Two outward arrows, corner to corner.
-            CGFloat a = s * 0.30;
-            CGContextMoveToPoint(ctx, s - pad - a, pad);
-            CGContextAddLineToPoint(ctx, s - pad, pad);
-            CGContextAddLineToPoint(ctx, s - pad, pad + a);
-            CGContextMoveToPoint(ctx, s - pad, pad);
-            CGContextAddLineToPoint(ctx, mid + s * 0.04, mid - s * 0.04);
-            CGContextMoveToPoint(ctx, pad, s - pad - a);
-            CGContextAddLineToPoint(ctx, pad, s - pad);
-            CGContextAddLineToPoint(ctx, pad + a, s - pad);
-            CGContextMoveToPoint(ctx, pad, s - pad);
-            CGContextAddLineToPoint(ctx, mid - s * 0.04, mid + s * 0.04);
-            CGContextStrokePath(ctx);
-            break;
-        }
-        case RBIconBook: {
-            // Open book: spine at center, two gently sloped page panels.
-            CGFloat top = s * 0.24, bottom = s * 0.78, inset = pad * 0.8;
-            CGFloat lw2 = MAX(1.5, lw * 0.65);
-            CGContextSetLineWidth(ctx, lw2);
-            CGContextMoveToPoint(ctx, mid, top + s * 0.05);
-            CGContextAddLineToPoint(ctx, mid, bottom);
-            CGContextStrokePath(ctx);
-            // left page
-            CGContextMoveToPoint(ctx, mid, top + s * 0.05);
-            CGContextAddQuadCurveToPoint(ctx, mid - s * 0.18, top - s * 0.02, inset, top + s * 0.06);
-            CGContextAddLineToPoint(ctx, inset, bottom - s * 0.02);
-            CGContextAddQuadCurveToPoint(ctx, mid - s * 0.18, bottom - s * 0.09, mid, bottom);
-            CGContextClosePath(ctx);
-            CGContextStrokePath(ctx);
-            // right page
-            CGContextMoveToPoint(ctx, mid, top + s * 0.05);
-            CGContextAddQuadCurveToPoint(ctx, mid + s * 0.18, top - s * 0.02, s - inset, top + s * 0.06);
-            CGContextAddLineToPoint(ctx, s - inset, bottom - s * 0.02);
-            CGContextAddQuadCurveToPoint(ctx, mid + s * 0.18, bottom - s * 0.09, mid, bottom);
-            CGContextClosePath(ctx);
-            CGContextStrokePath(ctx);
-            break;
-        }
-        case RBIconMore: {
-            CGFloat r = MAX(1.7, s * 0.075);
-            for (int i = -1; i <= 1; i++) {
-                CGFloat x = mid + i * s * 0.23;
-                CGContextFillEllipseInRect(ctx, CGRectMake(x - r, mid - r, r * 2.0, r * 2.0));
-            }
-            break;
-        }
-        case RBIconShare: {
-            CGFloat boxTop = s * 0.43;
-            CGContextMoveToPoint(ctx, pad, boxTop);
-            CGContextAddLineToPoint(ctx, pad, s - pad);
-            CGContextAddLineToPoint(ctx, s - pad, s - pad);
-            CGContextAddLineToPoint(ctx, s - pad, boxTop);
-            CGContextStrokePath(ctx);
-            CGContextMoveToPoint(ctx, mid, s * 0.62);
-            CGContextAddLineToPoint(ctx, mid, pad * 0.55);
-            CGContextMoveToPoint(ctx, mid, pad * 0.55);
-            CGContextAddLineToPoint(ctx, mid - s * 0.19, s * 0.28);
-            CGContextMoveToPoint(ctx, mid, pad * 0.55);
-            CGContextAddLineToPoint(ctx, mid + s * 0.19, s * 0.28);
-            CGContextStrokePath(ctx);
-            break;
-        }
-        case RBIconTabs: {
-            CGFloat offset = s * 0.16;
-            CGFloat box = s - pad * 2.0 - offset;
-            CGContextSetLineWidth(ctx, MAX(1.5, lw * 0.75));
-            CGContextStrokeRect(ctx, CGRectMake(pad + offset, pad, box, box));
-            CGContextStrokeRect(ctx, CGRectMake(pad, pad + offset, box, box));
-            break;
-        }
-        case RBIconSearch: {
-            CGFloat r = s * 0.25;
-            CGPoint c = CGPointMake(s * 0.43, s * 0.42);
-            CGContextAddEllipseInRect(ctx, CGRectMake(c.x - r, c.y - r, r * 2.0, r * 2.0));
-            CGContextStrokePath(ctx);
-            CGContextMoveToPoint(ctx, c.x + r * 0.72, c.y + r * 0.72);
-            CGContextAddLineToPoint(ctx, s - pad, s - pad);
-            CGContextStrokePath(ctx);
-            break;
-        }
-        case RBIconShrink: {
-            CGFloat a = s * 0.30;
-            CGContextMoveToPoint(ctx, mid + s * 0.06, mid - s * 0.06 - a);
-            CGContextAddLineToPoint(ctx, mid + s * 0.06, mid - s * 0.06);
-            CGContextAddLineToPoint(ctx, mid + s * 0.06 + a, mid - s * 0.06);
-            CGContextMoveToPoint(ctx, mid + s * 0.06, mid - s * 0.06);
-            CGContextAddLineToPoint(ctx, s - pad, pad);
-            CGContextMoveToPoint(ctx, mid - s * 0.06 - a, mid + s * 0.06);
-            CGContextAddLineToPoint(ctx, mid - s * 0.06, mid + s * 0.06);
-            CGContextAddLineToPoint(ctx, mid - s * 0.06, mid + s * 0.06 + a);
-            CGContextMoveToPoint(ctx, mid - s * 0.06, mid + s * 0.06);
-            CGContextAddLineToPoint(ctx, pad, s - pad);
-            CGContextStrokePath(ctx);
-            break;
-        }
+        case RBIconStarFill: return 57718;
+        case RBIconGear: return 57684;
+        case RBIconPlus: return 57661;
+        case RBIconExpand: return 57618;
+        case RBIconShrink: return 57626;
+        case RBIconBook: return 57439;
+        case RBIconMore: return 57526;
+        case RBIconShare: return 57685;
+        case RBIconTabs: return 57644;
+        case RBIconSearch: return 57681;
+        case RBIconLock: return 58673;
+        case RBIconWarning: return 57747;
+        case RBIconReader: return 58184;
+        case RBIconMedia: return 57472;
+        case RBIconSliders: return 58010;
+        case RBIconHistory: return 57845;
+        case RBIconDownload: return 57522;
+        case RBIconServer: return 57629;
+        case RBIconQR: return 57944;
+        case RBIconMoon: return 57630;
+        case RBIconGauge: return 57791;
+        case RBIconPause: return 57646;
+        case RBIconMute: return 57772;
     }
+    return 57681;
+}
 
++ (UIImage *)icon:(RBIcon)icon size:(CGFloat)size color:(UIColor *)color {
+    UIFont *font = [UIFont fontWithName:@"lucide" size:size];
+    if (!font) return nil;
+    unichar codepoint = [self codepointForIcon:icon];
+    NSString *glyph = [NSString stringWithCharacters:&codepoint length:1];
+    CGSize glyphSize = [glyph sizeWithFont:font];
+    UIGraphicsBeginImageContextWithOptions(CGSizeMake(size, size), NO, 0.0);
+    [color set];
+    CGPoint point = CGPointMake(floorf((size - glyphSize.width) / 2.0),
+                                floorf((size - glyphSize.height) / 2.0));
+    [glyph drawAtPoint:point withFont:font];
     UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
     UIGraphicsEndImageContext();
     return image;

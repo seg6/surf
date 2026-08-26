@@ -8,8 +8,8 @@
 - (void)pageSwitcherNewTab:(RBPageSwitcherController *)controller;
 @end
 
-// Classic iPhone Safari "Pages" view: one horizontally paged preview per
-// remote tab, with close, New Page, and Done controls.
+// Phone tab overview: one horizontally paged preview per remote tab, with
+// close, New Tab, and Done controls.
 @interface RBPageSwitcherController : UIViewController <UIScrollViewDelegate>
 @property(nonatomic, assign) id<RBPageSwitcherDelegate> delegate;
 

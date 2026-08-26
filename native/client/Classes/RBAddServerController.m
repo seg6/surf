@@ -30,6 +30,7 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    [RBTheme styleTableView:self.tableView];
     if (!self.addressField) self.addressField = [[UITextField alloc] initWithFrame:CGRectZero];
     self.addressField.delegate = self;
     self.addressField.font = [RBTheme fontOfSize:16.0 bold:NO];
@@ -57,7 +58,7 @@
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return 1; }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
-    return 36.0;
+    return 48.0;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {

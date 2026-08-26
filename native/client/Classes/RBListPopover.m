@@ -19,6 +19,11 @@
 
 @implementation RBListPopover
 
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    [RBTheme styleTableView:self.tableView];
+}
+
 - (id)initWithSections:(NSArray *)sections {
     self = [super initWithStyle:UITableViewStylePlain];
     if (self) {

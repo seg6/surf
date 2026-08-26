@@ -3,6 +3,44 @@
 @class RBMediaPipeline;
 @class RBStreamView;
 
+typedef enum {
+    RBDiagnosticsHealthOffline,
+    RBDiagnosticsHealthSmooth,
+    RBDiagnosticsHealthDelayed,
+    RBDiagnosticsHealthUnstable
+} RBDiagnosticsHealth;
+
+// Immutable UI snapshot. Health is classified here rather than in the view so
+// every diagnostics surface gives the same answer for the same pipeline state.
+@interface RBDiagnosticsSnapshot : NSObject
+@property(nonatomic, readonly, copy) NSString *server;
+@property(nonatomic, readonly, copy) NSString *version;
+@property(nonatomic, readonly, copy) NSString *protocolVersion;
+@property(nonatomic, readonly, copy) NSString *streamState;
+@property(nonatomic, readonly, copy) NSString *state;
+@property(nonatomic, readonly, assign) RBDiagnosticsHealth health;
+@property(nonatomic, readonly, copy) NSString *healthLabel;
+@property(nonatomic, readonly, copy) NSString *healthReason;
+@property(nonatomic, readonly, assign) double imageFPS;
+@property(nonatomic, readonly, assign) double AURate;
+@property(nonatomic, readonly, assign) double latencyMS;
+@property(nonatomic, readonly, assign) double RTTMS;
+@property(nonatomic, readonly, assign) double ageMS;
+@property(nonatomic, readonly, assign) double maxGapMS;
+@property(nonatomic, readonly, assign) int queuedAUs;
+@property(nonatomic, readonly, assign) unsigned long long sequenceGaps;
+@property(nonatomic, readonly, assign) unsigned long long overwrittenFrames;
+@property(nonatomic, readonly, assign) double submitMS;
+@property(nonatomic, readonly, assign) double callbackMS;
+@property(nonatomic, readonly, assign) double wrapMS;
+@property(nonatomic, readonly, assign) unsigned long long decodeErrors;
+@property(nonatomic, readonly, assign) unsigned long long droppedAUs;
+@property(nonatomic, readonly, assign) int audioQueuedBuffers;
+@property(nonatomic, readonly, assign) unsigned long long audioDroppedPCM;
+@property(nonatomic, readonly, assign) unsigned long long audioUnderruns;
+@property(nonatomic, readonly, assign) unsigned long long audioRestarts;
+@end
+
 // One bounded five-second diagnostics sample. Rates are derived from
 // cumulative media counters; the service never sits on the decode or display
 // path.
@@ -33,9 +71,11 @@
 - (NSDictionary *)clockProbeIfIdle;
 - (BOOL)consumeControlMessage:(NSDictionary *)message;
 - (RBDiagnosticsReport *)reportAtTime:(CFTimeInterval)now age:(double)age;
-- (NSDictionary *)overlaySnapshotForServer:(NSString *)server
-                                   version:(NSString *)version
-                                     state:(NSString *)state
-                                   latency:(double)latency
-                                       age:(double)age;
+- (RBDiagnosticsSnapshot *)overlaySnapshotForServer:(NSString *)server
+                                            version:(NSString *)version
+                                           protocol:(NSString *)protocolVersion
+                                             stream:(NSString *)streamState
+                                              state:(NSString *)state
+                                            latency:(double)latency
+                                                age:(double)age;
 @end

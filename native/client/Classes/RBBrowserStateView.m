@@ -4,6 +4,7 @@
 #import <QuartzCore/QuartzCore.h>
 
 @interface RBBrowserStateView ()
+@property(nonatomic, strong) UIImageView *markView;
 @property(nonatomic, strong) UIActivityIndicatorView *spinner;
 @property(nonatomic, strong) UILabel *titleLabel;
 @property(nonatomic, strong) UILabel *detailLabel;
@@ -18,12 +19,15 @@
     if (self) {
         self.backgroundColor = [RBTheme pageBackgroundColor];
         self.hidden = YES;
+        self.markView = [[UIImageView alloc] initWithImage:[UIImage imageNamed:@"brand-mark.png"]];
+        self.markView.contentMode = UIViewContentModeScaleAspectFit;
+        [self addSubview:self.markView];
         self.spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleGray];
         [self addSubview:self.spinner];
         self.titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
         self.titleLabel.backgroundColor = [UIColor clearColor];
         self.titleLabel.textAlignment = NSTextAlignmentCenter;
-        self.titleLabel.font = [RBTheme fontOfSize:20.0 bold:YES];
+        self.titleLabel.font = [RBTheme displayFontOfSize:21.0];
         self.titleLabel.textColor = [RBTheme primaryTextColor];
         [self addSubview:self.titleLabel];
         self.detailLabel = [[UILabel alloc] initWithFrame:CGRectZero];
@@ -37,8 +41,7 @@
         [self.primaryButton addTarget:self action:@selector(primary:) forControlEvents:UIControlEventTouchUpInside];
         [self addSubview:self.primaryButton];
         self.secondaryButton = [self button];
-        self.secondaryButton.backgroundColor = [UIColor clearColor];
-        [self.secondaryButton setTitleColor:[RBTheme accentColor] forState:UIControlStateNormal];
+        [RBTheme styleSecondaryButton:self.secondaryButton];
         [self.secondaryButton addTarget:self action:@selector(secondary:) forControlEvents:UIControlEventTouchUpInside];
         [self addSubview:self.secondaryButton];
     }
@@ -47,10 +50,7 @@
 
 - (UIButton *)button {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
-    button.backgroundColor = [RBTheme accentColor];
-    button.layer.cornerRadius = 7.0;
-    [button setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    button.titleLabel.font = [RBTheme fontOfSize:14.0 bold:YES];
+    [RBTheme stylePrimaryButton:button];
     return button;
 }
 
@@ -110,7 +110,9 @@
     [super layoutSubviews];
     CGFloat w = self.bounds.size.width, h = self.bounds.size.height;
     CGFloat boxW = MIN(480.0, w - 60.0);
-    CGFloat y = MAX(48.0, floorf(h * 0.22));
+    CGFloat y = MAX(28.0, floorf(h * 0.15));
+    self.markView.frame = CGRectMake((w - 58.0) / 2.0, y, 58.0, 58.0);
+    y += 70.0;
     self.spinner.frame = CGRectMake((w - 24.0) / 2.0, y, 24.0, 24.0);
     if (self.spinner.isAnimating) y += 38.0;
     self.titleLabel.frame = CGRectMake((w - boxW) / 2.0, y, boxW, 30.0);

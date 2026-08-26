@@ -1,6 +1,8 @@
 #import "RBFindBar.h"
 #import "RBTheme.h"
 
+#import <QuartzCore/QuartzCore.h>
+
 #include <math.h>
 
 @interface RBFindBar () <UITextFieldDelegate>
@@ -24,7 +26,11 @@
 
         self.field = [[UITextField alloc] initWithFrame:CGRectZero];
         self.field.delegate = self;
-        self.field.borderStyle = UITextBorderStyleRoundedRect;
+        self.field.borderStyle = UITextBorderStyleNone;
+        self.field.backgroundColor = [UIColor whiteColor];
+        self.field.layer.cornerRadius = 8.0;
+        self.field.layer.borderWidth = 1.0;
+        self.field.layer.borderColor = [[RBTheme mistColor] CGColor];
         self.field.font = [RBTheme fontOfSize:14.0 bold:NO];
         self.field.placeholder = @"Find on page";
         self.field.autocorrectionType = UITextAutocorrectionTypeNo;
@@ -41,14 +47,14 @@
         self.stateLabel = [[UILabel alloc] initWithFrame:CGRectZero];
         self.stateLabel.backgroundColor = [UIColor clearColor];
         self.stateLabel.font = [RBTheme fontOfSize:12.0 bold:NO];
-        self.stateLabel.textColor = [UIColor colorWithRed:0.55 green:0.10 blue:0.10 alpha:1.0];
+        self.stateLabel.textColor = [UIColor colorWithRed:0.72 green:0.24 blue:0.28 alpha:1.0];
         [self addSubview:self.stateLabel];
 
         self.doneButton = [UIButton buttonWithType:UIButtonTypeCustom];
         [self.doneButton setTitle:@"Done" forState:UIControlStateNormal];
         [self.doneButton setTitleColor:[RBTheme iconColor] forState:UIControlStateNormal];
         [self.doneButton setTitleColor:[[RBTheme iconColor] colorWithAlphaComponent:0.4] forState:UIControlStateHighlighted];
-        self.doneButton.titleLabel.font = [RBTheme fontOfSize:14.0 bold:YES];
+        self.doneButton.titleLabel.font = [RBTheme displayFontOfSize:14.0];
         [self.doneButton addTarget:self action:@selector(doneTapped:) forControlEvents:UIControlEventTouchUpInside];
         [self addSubview:self.doneButton];
     }

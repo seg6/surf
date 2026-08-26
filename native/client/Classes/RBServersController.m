@@ -49,6 +49,7 @@ enum {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    [RBTheme styleTableView:self.tableView];
     if (self.allowsCancel) {
         self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel
                                                                                              target:self action:@selector(cancelTapped:)];

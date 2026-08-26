@@ -25,6 +25,11 @@ static const NSInteger kRBServerForgetAlert = 3203;
 
 @implementation RBServerDetailController
 
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    [RBTheme styleTableView:self.tableView];
+}
+
 - (id)initWithServer:(NSDictionary *)server {
     self = [super initWithStyle:UITableViewStyleGrouped];
     if (self) {

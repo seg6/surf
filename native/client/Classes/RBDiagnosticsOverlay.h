@@ -1,8 +1,23 @@
 #import <UIKit/UIKit.h>
+#import "RBDiagnostics.h"
 
-// Compact on-device performance dashboard. It accepts cumulative counters and
-// derives one-second rates internally so diagnostics do not perturb media
-// delivery or presentation.
+typedef enum {
+    RBDiagnosticsOverlayCompact,
+    RBDiagnosticsOverlayExpanded
+} RBDiagnosticsOverlayMode;
+
+@class RBDiagnosticsOverlay;
+
+@protocol RBDiagnosticsOverlayDelegate <NSObject>
+- (void)diagnosticsOverlayDidChangeMode:(RBDiagnosticsOverlay *)overlay;
+- (void)diagnosticsOverlayDidRequestClose:(RBDiagnosticsOverlay *)overlay;
+@end
+
+// A compact health instrument that expands to its content height without
+// scrolling or changing the browser viewport.
 @interface RBDiagnosticsOverlay : UIView
-- (void)updateWithSnapshot:(NSDictionary *)snapshot;
+@property(nonatomic, assign) id<RBDiagnosticsOverlayDelegate> delegate;
+@property(nonatomic, assign) RBDiagnosticsOverlayMode displayMode;
+- (CGFloat)preferredExpandedHeightForWidth:(CGFloat)width;
+- (void)updateWithSnapshot:(RBDiagnosticsSnapshot *)snapshot;
 @end

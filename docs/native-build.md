@@ -72,6 +72,13 @@ the native protocol gate from `PROTOCOL_VERSION`, and verifies the resulting
 package. Do not edit generated `native/client/control` or
 `native/client/Resources/Info.plist` by hand.
 
+For every physical-device test iteration, increment `VERSION` before packaging
+and increment `CFBundleVersion` in `Resources/Info.plist.in`. Theos package
+revisions such as `-2` are useful artifact identifiers, but they do not trigger
+Surf's in-app updater: the client and backend compare the app version from
+`VERSION`. Rebuild the backend with that exact new `.deb` embedded before
+reconnecting the device.
+
 ## Compatibility
 
 The package contains universal `armv7` and `arm64` binaries:
@@ -92,14 +99,14 @@ chrome, orientation, and fullscreen determine the live even-sized surface.
 Named sizes in tests are regression examples only.
 
 The runtime layout is selected with `UI_USER_INTERFACE_IDIOM()`. Phone builds
-use a bottom toolbar and a full-screen Pages controller; tablet builds use a
-top toolbar and persistent tab row. Width affects spacing and rotation only,
+use a five-action bottom toolbar and a full-screen Tabs controller; tablet
+builds use a top toolbar and persistent tab row. Width affects spacing and rotation only,
 so an iPhone-compatibility installation on an iPad exercises the real phone
-path. iOS 6 receives Surf's procedural skeuomorphic gradients, shadows, and
-icons; iOS 7–14 use the flatter system-era palette without copied Apple art.
+path. iOS 6–14 share Surf's Oceanic Precision palette, typography, and
+professionally sourced Lucide interface glyphs.
 
 Phone tab previews are snapshots of the last decoded frame. They are captured
-only when Pages opens or the active phone tab is left, retained in a 12-entry
+only when Tabs opens or the active phone tab is left, retained in a 12-entry
 LRU cache, and purged on memory warnings. This keeps preview work off the normal
 60 FPS presentation path.
 
@@ -126,8 +133,9 @@ native/client/.theos/last_package
 
 The verifier extracts that exact `.deb` and checks the package identifier,
 `iphoneos-arm` metadata, both architectures and minimum iOS versions in the app
-and updater, both device families, required phone/tablet resources, and the
-updater's root/setuid mode:
+and updater, both device families, every registered icon size, RGBA legacy
+plane-break icons, opaque iOS 7+ icons, the registered Lucide font, bundled
+third-party notices, and the updater's root/setuid mode:
 
 ```sh
 docker run --rm -v "$PWD:/src" surf-buildenv bash /src/native/client/verify-package.sh
@@ -138,15 +146,23 @@ docker run --rm -v "$PWD:/src" surf-buildenv bash -c \
 For device acceptance, verify both idioms rather than resizing one layout:
 
 - On iPad, test the top toolbar, persistent tabs and overflow, anchored Share,
-  Bookmarks, and More popovers, rotation, Surf fullscreen, page-requested
+  Library, and custom More popovers, rotation, Surf fullscreen, page-requested
   fullscreen, video, audio, and input. Fullscreen should expose only Exit.
-- On an iPhone/iPod or phone-only compatibility package, test the six-button
-  bottom toolbar, Pages previews and cache behavior, full-screen Library and
-  activities, portrait/landscape transitions, and Surf Settings discovery.
+- On iOS 6, confirm the original paper plane escapes the pre-rendered blue tile.
+  On iOS 7 and later, confirm SpringBoard selects the opaque native-size icon
+  without a black perimeter or an inset second tile.
+- On an iPhone/iPod or phone-only compatibility package, test the five-action
+  bottom toolbar, Tabs previews and cache behavior, full-screen Library, Share,
+  the custom More drawer, portrait/landscape transitions, and Settings discovery.
+- Confirm More never exposes AirDrop or another share target; only Share should
+  invoke `UIActivityViewController` and system destinations.
 - Watch the native diagnostics/log during every chrome transition. The
   reported viewport must equal the remaining even-sized stream surface, and
   rotation/fullscreen changes must produce one settled encoder generation,
   retain the WebSocket, and recover automatically without Retry Video.
+- Expand and collapse the performance inspector while watching viewport logs;
+  the panel must overlay the stream without producing a viewport update or a
+  new encoder generation.
 - Exercise rapid portrait/landscape changes as well as entering and leaving a
   player such as YouTube. Returning from page fullscreen must restore the
   device-specific chrome at the correct viewport without black borders.

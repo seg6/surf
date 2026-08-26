@@ -31,6 +31,7 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    [RBTheme styleTableView:self.tableView];
     self.tableView.backgroundColor = [RBTheme pageBackgroundColor];
     self.tableView.separatorColor = [RBTheme separatorColor];
     self.tableView.rowHeight = 44.0;

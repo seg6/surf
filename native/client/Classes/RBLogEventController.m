@@ -28,6 +28,7 @@ enum {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    [RBTheme styleTableView:self.tableView];
     self.tableView.backgroundColor = [RBTheme pageBackgroundColor];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Copy Event"
         style:UIBarButtonItemStyleBordered target:self action:@selector(copyTapped:)];
@@ -51,7 +52,7 @@ enum {
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"value"];
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
     cell.textLabel.font = [RBTheme fontOfSize:13.0 bold:NO];
-    cell.detailTextLabel.font = [UIFont fontWithName:@"Courier" size:11.0] ?: [UIFont systemFontOfSize:11.0];
+    cell.detailTextLabel.font = [RBTheme monospacedFontOfSize:11.0 bold:NO];
     cell.textLabel.textColor = [RBTheme secondaryTextColor];
     cell.detailTextLabel.textColor = [RBTheme primaryTextColor];
     return cell;
@@ -83,7 +84,7 @@ enum {
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
     cell.textLabel.numberOfLines = 0;
     cell.textLabel.font = indexPath.section == RBLogEventRawSection
-        ? ([UIFont fontWithName:@"Courier" size:10.0] ?: [UIFont systemFontOfSize:10.0])
+        ? [RBTheme monospacedFontOfSize:10.0 bold:NO]
         : [RBTheme fontOfSize:13.0 bold:NO];
     cell.textLabel.textColor = [RBTheme primaryTextColor];
     cell.textLabel.text = indexPath.section == RBLogEventMessageSection

@@ -1,5 +1,6 @@
 #import "RBRootViewController.h"
 #import "RBActionActivity.h"
+#import "RBActionMenuController.h"
 #import "RBChromeBar.h"
 #import "RBBrowserStateView.h"
 #import "RBConfig.h"
@@ -41,9 +42,9 @@
 #include <stdlib.h>
 
 
-static const CGFloat kRBTopBarHeight = 44.0;
-static const CGFloat kRBTabStripHeight = 29.0;
-static const CGFloat kRBFindBarHeight = 38.0;
+static const CGFloat kRBTopBarHeight = 50.0;
+static const CGFloat kRBTabStripHeight = 32.0;
+static const CGFloat kRBFindBarHeight = 40.0;
 static const NSTimeInterval kRBBackgroundDisconnectDelay = 60.0;
 
 static BOOL RBIsPad(void) {
@@ -90,7 +91,8 @@ static CGFloat RBEvenExtent(CGFloat value) {
                                     UIAlertViewDelegate, RBSelectControllerDelegate,
                                     RBQRScannerDelegate,
                                     UIImagePickerControllerDelegate, UINavigationControllerDelegate,
-                                    MFMailComposeViewControllerDelegate>
+                                    MFMailComposeViewControllerDelegate,
+                                    RBDiagnosticsOverlayDelegate>
 // Views
 @property(nonatomic, strong) RBStreamView *streamView;
 @property(nonatomic, strong) RBNewTabView *startPageView;
@@ -118,6 +120,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
 @property(nonatomic, strong) UIPopoverController *popover;
 @property(nonatomic, strong) UIViewController *compactPopoverController;
 @property(nonatomic, strong) UIViewController *activityController;
+@property(nonatomic, strong) RBActionMenuController *actionMenuController;
 @property(nonatomic, copy) NSString *pendingActivityAction;
 @property(nonatomic, strong) UIDocumentInteractionController *docController;
 @property(nonatomic, strong) RBMediaController *pageMediaController;
@@ -286,8 +289,8 @@ static CGFloat RBEvenExtent(CGFloat value) {
     [self.view addSubview:self.suggestPanel];
 
     self.restoreButton = [UIButton buttonWithType:UIButtonTypeCustom];
-    self.restoreButton.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.42];
-    self.restoreButton.layer.cornerRadius = 8.0;
+    self.restoreButton.backgroundColor = [[RBTheme deepTideColor] colorWithAlphaComponent:0.82];
+    self.restoreButton.layer.cornerRadius = 11.0;
     [self.restoreButton setImage:[RBTheme icon:RBIconShrink size:20.0 color:[UIColor colorWithWhite:1.0 alpha:0.9]]
                         forState:UIControlStateNormal];
     [self.restoreButton addTarget:self action:@selector(toggleFullscreen) forControlEvents:UIControlEventTouchUpInside];
@@ -296,8 +299,8 @@ static CGFloat RBEvenExtent(CGFloat value) {
     [self.view addSubview:self.restoreButton];
 
     self.fullscreenBackButton = [UIButton buttonWithType:UIButtonTypeCustom];
-    self.fullscreenBackButton.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.42];
-    self.fullscreenBackButton.layer.cornerRadius = 8.0;
+    self.fullscreenBackButton.backgroundColor = [[RBTheme deepTideColor] colorWithAlphaComponent:0.82];
+    self.fullscreenBackButton.layer.cornerRadius = 11.0;
     [self.fullscreenBackButton setImage:[RBTheme icon:RBIconBack size:20.0 color:[UIColor colorWithWhite:1.0 alpha:0.9]]
                                  forState:UIControlStateNormal];
     [self.fullscreenBackButton addTarget:self action:@selector(fullscreenBackTapped:)
@@ -307,8 +310,8 @@ static CGFloat RBEvenExtent(CGFloat value) {
     [self.view addSubview:self.fullscreenBackButton];
 
     self.fullscreenForwardButton = [UIButton buttonWithType:UIButtonTypeCustom];
-    self.fullscreenForwardButton.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.42];
-    self.fullscreenForwardButton.layer.cornerRadius = 8.0;
+    self.fullscreenForwardButton.backgroundColor = [[RBTheme deepTideColor] colorWithAlphaComponent:0.82];
+    self.fullscreenForwardButton.layer.cornerRadius = 11.0;
     [self.fullscreenForwardButton setImage:[RBTheme icon:RBIconForward size:20.0 color:[UIColor colorWithWhite:1.0 alpha:0.9]]
                                     forState:UIControlStateNormal];
     [self.fullscreenForwardButton addTarget:self action:@selector(fullscreenForwardTapped:)
@@ -342,7 +345,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
                                                  name:UITextFieldTextDidChangeNotification object:self.hiddenInput];
 
     self.toastLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    self.toastLabel.backgroundColor = [UIColor colorWithWhite:0.10 alpha:0.86];
+    self.toastLabel.backgroundColor = [[RBTheme deepTideColor] colorWithAlphaComponent:0.92];
     self.toastLabel.textColor = [UIColor colorWithWhite:0.97 alpha:1.0];
     self.toastLabel.textAlignment = NSTextAlignmentCenter;
     self.toastLabel.font = [RBTheme fontOfSize:14.0 bold:NO];
@@ -352,7 +355,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
     [self.view addSubview:self.toastLabel];
 
     self.connectionPill = [[UILabel alloc] initWithFrame:CGRectZero];
-    self.connectionPill.backgroundColor = [UIColor colorWithWhite:0.10 alpha:0.80];
+    self.connectionPill.backgroundColor = [[RBTheme deepTideColor] colorWithAlphaComponent:0.88];
     self.connectionPill.textColor = [UIColor colorWithWhite:0.95 alpha:1.0];
     self.connectionPill.textAlignment = NSTextAlignmentCenter;
     self.connectionPill.font = [RBTheme fontOfSize:12.0 bold:NO];
@@ -362,6 +365,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
     [self.view addSubview:self.connectionPill];
 
     self.diagnosticsOverlay = [[RBDiagnosticsOverlay alloc] initWithFrame:CGRectZero];
+    self.diagnosticsOverlay.delegate = self;
     self.diagnosticsOverlay.hidden = YES;
     [self.view addSubview:self.diagnosticsOverlay];
     [self setDebugVisible:[[NSUserDefaults standardUserDefaults] boolForKey:RBDefaultsDiagnosticsKey]];
@@ -484,7 +488,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
     CGFloat h = self.view.bounds.size.height;
     BOOL pad = RBIsPad();
     CGFloat topBarHeight = kRBTopBarHeight;
-    CGFloat bottomBarHeight = pad ? 0.0 : 44.0;
+    CGFloat bottomBarHeight = pad ? 0.0 : 48.0;
 
     self.chromeBar.phoneLayout = !pad;
     self.chromeBar.hidden = self.fullscreen;
@@ -533,7 +537,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
     self.browserStateView.frame = CGRectMake(streamX, contentTop, streamW, streamH);
 
     CGRect omniboxFrame = [self.chromeBar convertRect:self.chromeBar.omnibox.frame toView:self.view];
-    CGFloat suggestTop = MAX(0.0, topBarHeight - 4.0);
+    CGFloat suggestTop = MAX(0.0, topBarHeight - 2.0);
     CGFloat suggestH = MIN([self.suggestPanel desiredHeight],
                            MAX(0.0, contentBottom - suggestTop));
     self.suggestPanel.frame = CGRectMake(omniboxFrame.origin.x, suggestTop,
@@ -545,10 +549,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
     CGFloat toastW = MIN(320.0, MAX(120.0, w - 20.0));
     self.toastLabel.frame = CGRectMake(floorf((w - toastW) / 2.0), contentTop + 14.0, toastW, 28.0);
     self.connectionPill.frame = CGRectMake(10.0, contentBottom - 34.0, 150.0, 22.0);
-    CGFloat diagnosticsW = MIN(520.0, w - 20.0);
-    CGFloat diagnosticsH = MIN(270.0, streamH - 20.0);
-    self.diagnosticsOverlay.frame = CGRectMake(10.0, contentTop + 10.0,
-                                                diagnosticsW, MAX(220.0, diagnosticsH));
+    [self layoutDiagnosticsOverlayAnimated:NO];
     [self scheduleViewportUpdate];
 }
 
@@ -707,6 +708,17 @@ static CGFloat RBEvenExtent(CGFloat value) {
     [self dismissViewControllerAnimated:YES completion:^{
         UIButton *anchor = RBIsPad() ? self.chromeBar.moreButton : self.phoneToolbar.moreButton;
         [self presentMediaControlsFromButton:anchor];
+    }];
+}
+
+- (void)settingsWantsDiagnosticsInspector:(RBSettingsController *)settings {
+    self.settingsController = nil;
+    self.serversController = nil;
+    self.modalNavigationController = nil;
+    [self dismissViewControllerAnimated:YES completion:^{
+        [self setDebugVisible:YES];
+        self.diagnosticsOverlay.displayMode = RBDiagnosticsOverlayExpanded;
+        [self layoutDiagnosticsOverlayAnimated:YES];
     }];
 }
 
@@ -1164,7 +1176,7 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
                 NSString *activeURL = [tab objectForKey:@"url"];
                 if ([activeURL hasPrefix:@"about:blank#surf-new"] ||
                     [activeTitle hasPrefix:@"about:blank#surf-new"]) {
-                    activeTitle = @"New Page";
+                    activeTitle = @"New Tab";
                 } else if (![activeTitle length]) {
                     activeTitle = activeURL;
                 }
@@ -1412,10 +1424,6 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
     [self presentShareFromButton:button];
 }
 
-- (void)phoneToolbar:(RBPhoneToolbar *)toolbar libraryFromButton:(UIButton *)button {
-    [self presentLibraryFromButton:button];
-}
-
 - (void)phoneToolbar:(RBPhoneToolbar *)toolbar pagesFromButton:(UIButton *)button {
     [self presentPageSwitcher];
 }
@@ -1511,23 +1519,67 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
 }
 
 - (void)presentMoreFromButton:(UIButton *)button {
-    NSArray *activities = @[
-        [self activityForAction:@"reader" title:@"Reader" icon:RBIconBook],
-        [self activityForAction:@"find" title:@"Find on Page" icon:RBIconSearch],
-        [self activityForAction:@"media" title:@"Media Controls" icon:RBIconMore],
-        [self activityForAction:@"fullscreen" title:(self.fullscreen ? @"Exit Fullscreen" : @"Fullscreen")
-                            icon:(self.fullscreen ? RBIconShrink : RBIconExpand)],
-        [self activityForAction:@"settings" title:@"Surf Settings" icon:RBIconGear],
+    [self dismissPopover];
+    [self dismissActionMenuAnimated:NO performingAction:nil];
+    NSArray *items = @[
+        [RBActionMenuItem itemWithTitle:@"Library" action:@"library" icon:RBIconBook],
+        [RBActionMenuItem itemWithTitle:@"Reader" action:@"reader" icon:RBIconReader],
+        [RBActionMenuItem itemWithTitle:@"Find on Page" action:@"find" icon:RBIconSearch],
+        [RBActionMenuItem itemWithTitle:@"Media Controls" action:@"media" icon:RBIconMedia],
+        [RBActionMenuItem itemWithTitle:(self.fullscreen ? @"Exit Fullscreen" : @"Fullscreen")
+                                  action:@"fullscreen"
+                                    icon:(self.fullscreen ? RBIconShrink : RBIconExpand)],
+        [RBActionMenuItem itemWithTitle:@"Settings" action:@"settings" icon:RBIconSliders]
     ];
-    UIActivityViewController *controller = [[UIActivityViewController alloc]
-                                             initWithActivityItems:@[@{@"surf": @"actions"}]
-                                             applicationActivities:activities];
-    controller.excludedActivityTypes = @[UIActivityTypePostToFacebook, UIActivityTypePostToTwitter,
-                                          UIActivityTypePostToWeibo, UIActivityTypeMessage,
-                                          UIActivityTypeMail, UIActivityTypePrint,
-                                          UIActivityTypeCopyToPasteboard, UIActivityTypeAssignToContact,
-                                          UIActivityTypeSaveToCameraRoll];
-    [self presentActivityController:controller fromButton:button];
+    BOOL phone = !RBIsPad();
+    RBActionMenuController *controller = [[RBActionMenuController alloc] initWithItems:items phoneLayout:phone];
+    __weak RBRootViewController *weakSelf = self;
+    controller.onSelect = ^(NSString *action) {
+        [weakSelf dismissActionMenuAnimated:YES performingAction:action];
+    };
+    controller.onDismiss = ^{
+        [weakSelf dismissActionMenuAnimated:YES performingAction:nil];
+    };
+    self.actionMenuController = controller;
+    if (phone) {
+        [self addChildViewController:controller];
+        controller.view.frame = self.view.bounds;
+        controller.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        [self.view addSubview:controller.view];
+        [controller didMoveToParentViewController:self];
+        [controller showAnimated:YES];
+    } else {
+        UIPopoverController *popover = [[UIPopoverController alloc] initWithContentViewController:controller];
+        popover.delegate = self;
+        self.popover = popover;
+        CGRect anchor = [button convertRect:button.bounds toView:self.view];
+        [popover presentPopoverFromRect:anchor inView:self.view
+               permittedArrowDirections:UIPopoverArrowDirectionUp animated:YES];
+    }
+}
+
+- (void)dismissActionMenuAnimated:(BOOL)animated performingAction:(NSString *)action {
+    RBActionMenuController *controller = self.actionMenuController;
+    if (!controller) {
+        if ([action length]) [self handlePageAction:action];
+        return;
+    }
+    self.actionMenuController = nil;
+    if (RBIsPad()) {
+        if (self.popover.popoverVisible) [self.popover dismissPopoverAnimated:animated];
+        self.popover = nil;
+        if ([action length]) {
+            [self performSelector:@selector(handlePageAction:) withObject:action
+                       afterDelay:(animated ? 0.22 : 0.0)];
+        }
+        return;
+    }
+    [controller dismissAnimated:animated completion:^{
+        [controller willMoveToParentViewController:nil];
+        [controller.view removeFromSuperview];
+        [controller removeFromParentViewController];
+        if ([action length]) [self handlePageAction:action];
+    }];
 }
 
 - (void)handlePageAction:(NSString *)action {
@@ -1925,6 +1977,7 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
         self.pageMediaController = nil;
         self.libraryController = nil;
         self.activityController = nil;
+        self.actionMenuController = nil;
     }
     if (popoverController == self.uploadPopover) {
         // Swiped away without picking: cancel the pending server chooser.
@@ -1949,7 +2002,7 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
 // ---------------------------------------------------------------- library
 
 - (void)presentLibrary {
-    UIButton *button = RBIsPad() ? self.chromeBar.libraryButton : self.phoneToolbar.libraryButton;
+    UIButton *button = RBIsPad() ? self.chromeBar.libraryButton : nil;
     [self presentLibraryFromButton:button];
 }
 
@@ -2622,12 +2675,51 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
         CFTimeInterval presented = self.streamView.lastPresentationAt;
         [self refreshDebugOverlayWithAge:(presented > 0.0 ? CACurrentMediaTime() - presented : 0.0)];
         [self.view bringSubviewToFront:self.diagnosticsOverlay];
+        [self layoutDiagnosticsOverlayAnimated:NO];
+    } else {
+        self.diagnosticsOverlay.displayMode = RBDiagnosticsOverlayCompact;
     }
 }
 
 - (void)toggleDebug:(UITapGestureRecognizer *)tap {
     if (tap.state != UIGestureRecognizerStateEnded) return;
     [self setDebugVisible:!self.debugVisible];
+}
+
+- (CGRect)diagnosticsOverlayFrame {
+    CGRect streamFrame = self.streamView.frame;
+    CGFloat availableWidth = MAX(1.0, streamFrame.size.width - 20.0);
+    CGFloat availableHeight = MAX(1.0, streamFrame.size.height - 20.0);
+    if (self.diagnosticsOverlay.displayMode == RBDiagnosticsOverlayCompact) {
+        CGFloat width = MIN(280.0, availableWidth);
+        CGFloat height = MIN(38.0, availableHeight);
+        return CGRectMake(CGRectGetMaxX(streamFrame) - width - 10.0,
+                          CGRectGetMinY(streamFrame) + 10.0, width, height);
+    }
+    CGFloat width = RBIsPad() ? MIN(372.0, availableWidth) : availableWidth;
+    CGFloat height = MIN([self.diagnosticsOverlay preferredExpandedHeightForWidth:width],
+                         availableHeight);
+    CGFloat x = RBIsPad() ? CGRectGetMaxX(streamFrame) - width - 10.0
+                          : CGRectGetMinX(streamFrame) + 10.0;
+    CGFloat y = CGRectGetMinY(streamFrame) + 10.0;
+    return CGRectMake(x, y, width, height);
+}
+
+- (void)layoutDiagnosticsOverlayAnimated:(BOOL)animated {
+    CGRect frame = [self diagnosticsOverlayFrame];
+    if (!animated) {
+        self.diagnosticsOverlay.frame = frame;
+        return;
+    }
+    [UIView animateWithDuration:0.18 animations:^{ self.diagnosticsOverlay.frame = frame; }];
+}
+
+- (void)diagnosticsOverlayDidChangeMode:(RBDiagnosticsOverlay *)overlay {
+    [self layoutDiagnosticsOverlayAnimated:YES];
+}
+
+- (void)diagnosticsOverlayDidRequestClose:(RBDiagnosticsOverlay *)overlay {
+    [self setDebugVisible:NO];
 }
 
 - (void)refreshDebugOverlayWithAge:(double)age {
@@ -2637,11 +2729,13 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
     NSString *server = [self.currentServer objectForKey:@"name"];
     if (server.length == 0) server = self.session.baseURL.host;
     if (server.length == 0) server = @"Surf";
-    NSDictionary *snapshot = [self.diagnostics overlaySnapshotForServer:server
-                                                                 version:[NSString stringWithFormat:@"%@  %@", RBNativeVersion, lane]
-                                                                   state:state
-                                                                 latency:self.session.interactionTracker.lastInteractionToPresentMS
-                                                                     age:age];
+    RBDiagnosticsSnapshot *snapshot = [self.diagnostics overlaySnapshotForServer:server
+                                                                          version:RBAppVersion
+                                                                         protocol:RBNativeVersion
+                                                                           stream:lane
+                                                                            state:state
+                                                                          latency:self.session.interactionTracker.lastInteractionToPresentMS
+                                                                              age:age];
     [self.diagnosticsOverlay updateWithSnapshot:snapshot];
 }
 

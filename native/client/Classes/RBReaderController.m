@@ -1,5 +1,6 @@
 #import "RBReaderController.h"
 #import "RBConfig.h"
+#import "RBTheme.h"
 
 @interface RBReaderController () <UIWebViewDelegate>
 @property(nonatomic, copy) NSString *articleTitle;
@@ -31,11 +32,18 @@
 
     self.navBar = [[UINavigationBar alloc] initWithFrame:CGRectMake(0.0, 0.0, self.view.bounds.size.width, 44.0)];
     self.navBar.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    [RBTheme styleNavigationBar:self.navBar];
     UINavigationItem *item = [[UINavigationItem alloc] initWithTitle:self.articleTitle ?: @"Reader"];
     item.leftBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
                                                                            target:self action:@selector(doneTapped:)];
-    item.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"☾" style:UIBarButtonItemStylePlain
-                                                              target:self action:@selector(nightTapped:)];
+    UIButton *nightButton = [RBTheme barButtonWithIcon:RBIconMoon target:self action:@selector(nightTapped:)];
+    nightButton.frame = CGRectMake(0.0, 0.0, 42.0, 36.0);
+    [nightButton setImage:[RBTheme icon:RBIconMoon size:20.0 color:[UIColor whiteColor]]
+                 forState:UIControlStateNormal];
+    [nightButton setImage:[RBTheme icon:RBIconMoon size:20.0 color:[RBTheme seaGlassColor]]
+                 forState:UIControlStateHighlighted];
+    nightButton.accessibilityLabel = @"Toggle night mode";
+    item.rightBarButtonItem = [[UIBarButtonItem alloc] initWithCustomView:nightButton];
     [self.navBar pushNavigationItem:item animated:NO];
     [self.view addSubview:self.navBar];
 
@@ -49,9 +57,9 @@
 }
 
 - (void)render {
-    NSString *bg = self.night ? @"#171717" : @"#fbfaf7";
-    NSString *fg = self.night ? @"#c8c8c4" : @"#232220";
-    NSString *link = self.night ? @"#7fa7d0" : @"#20507a";
+    NSString *bg = self.night ? @"#0f2a3a" : @"#f7fafc";
+    NSString *fg = self.night ? @"#dcecf3" : @"#102a3a";
+    NSString *link = self.night ? @"#63c2cf" : @"#1473b8";
     NSString *page = [NSString stringWithFormat:
         @"<!doctype html><html><head><meta charset=\"utf-8\">"
         @"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
@@ -60,7 +68,7 @@
         @"margin:0;padding:20px 24px 60px;}"
         @"#rb-article{max-width:640px;margin:0 auto;}"
         @"h1.rb-title{font-size:26px;line-height:1.25;margin:0 0 4px;}"
-        @".rb-src{color:#8a8a86;font-size:13px;font-family:Helvetica,sans-serif;margin:0 0 24px;"
+        @".rb-src{color:#5d7280;font-size:13px;font-family:Helvetica,sans-serif;margin:0 0 24px;"
         @"border-bottom:1px solid rgba(128,128,128,0.25);padding-bottom:14px;}"
         @"img{max-width:100%%;height:auto;}"
         @"a{color:%@;}"

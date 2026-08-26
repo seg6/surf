@@ -68,16 +68,19 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.view.backgroundColor = [RBTheme stripBottomColor];
+    self.view.backgroundColor = [RBTheme foamColor];
 
     self.titleBar = [[RBGradientBar alloc] initWithFrame:CGRectZero];
+    [self.titleBar setTopColor:[RBTheme deepTideColor]
+                   bottomColor:[RBTheme deepTideColor]
+                     lineColor:[RBTheme seaGlassColor]];
     [self.view addSubview:self.titleBar];
     self.titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     self.titleLabel.backgroundColor = [UIColor clearColor];
-    self.titleLabel.text = @"Pages";
+    self.titleLabel.text = @"Tabs";
     self.titleLabel.textAlignment = NSTextAlignmentCenter;
-    self.titleLabel.font = [RBTheme fontOfSize:18.0 bold:YES];
-    self.titleLabel.textColor = [RBTheme primaryTextColor];
+    self.titleLabel.font = [RBTheme displayFontOfSize:18.0];
+    self.titleLabel.textColor = [UIColor whiteColor];
     [self.titleBar addSubview:self.titleLabel];
 
     self.scrollView = [[UIScrollView alloc] initWithFrame:CGRectZero];
@@ -92,21 +95,28 @@
 
     self.pageControl = [[UIPageControl alloc] initWithFrame:CGRectZero];
     self.pageControl.userInteractionEnabled = NO;
+    if ([self.pageControl respondsToSelector:@selector(setCurrentPageIndicatorTintColor:)]) {
+        self.pageControl.currentPageIndicatorTintColor = [RBTheme accentColor];
+        self.pageControl.pageIndicatorTintColor = [RBTheme mistColor];
+    }
     [self.view addSubview:self.pageControl];
 
     self.bottomBar = [[RBGradientBar alloc] initWithFrame:CGRectZero];
     [self.view addSubview:self.bottomBar];
     self.addPageButton = [UIButton buttonWithType:UIButtonTypeCustom];
-    [self.addPageButton setTitle:@"New Page" forState:UIControlStateNormal];
+    [self.addPageButton setTitle:@"New Tab" forState:UIControlStateNormal];
+    [self.addPageButton setImage:[RBTheme icon:RBIconPlus size:17.0 color:[RBTheme accentColor]]
+                        forState:UIControlStateNormal];
+    self.addPageButton.titleEdgeInsets = UIEdgeInsetsMake(0.0, 7.0, 0.0, 0.0);
     [self.addPageButton setTitleColor:[RBTheme iconColor] forState:UIControlStateNormal];
-    self.addPageButton.titleLabel.font = [RBTheme fontOfSize:15.0 bold:YES];
-    self.addPageButton.accessibilityLabel = @"New Page";
+    self.addPageButton.titleLabel.font = [RBTheme displayFontOfSize:15.0];
+    self.addPageButton.accessibilityLabel = @"New Tab";
     [self.addPageButton addTarget:self action:@selector(newTapped:) forControlEvents:UIControlEventTouchUpInside];
     [self.bottomBar addSubview:self.addPageButton];
     self.doneButton = [UIButton buttonWithType:UIButtonTypeCustom];
     [self.doneButton setTitle:@"Done" forState:UIControlStateNormal];
     [self.doneButton setTitleColor:[RBTheme iconColor] forState:UIControlStateNormal];
-    self.doneButton.titleLabel.font = [RBTheme fontOfSize:15.0 bold:YES];
+    self.doneButton.titleLabel.font = [RBTheme displayFontOfSize:15.0];
     self.doneButton.accessibilityLabel = @"Done";
     [self.doneButton addTarget:self action:@selector(doneTapped:) forControlEvents:UIControlEventTouchUpInside];
     [self.bottomBar addSubview:self.doneButton];
@@ -152,10 +162,10 @@
 
 - (NSString *)titleForTab:(NSDictionary *)tab {
     NSString *url = [tab objectForKey:@"url"];
-    if ([url hasPrefix:@"about:blank#surf-new"]) return @"New Page";
+    if ([url hasPrefix:@"about:blank#surf-new"]) return @"New Tab";
     NSString *title = [tab objectForKey:@"title"];
     if (![title length]) title = url;
-    if ([title hasPrefix:@"about:blank#surf-new"]) title = @"New Page";
+    if ([title hasPrefix:@"about:blank#surf-new"]) title = @"New Tab";
     return [title length] ? title : @"Untitled";
 }
 
@@ -166,13 +176,17 @@
         NSInteger tabID = [[tab objectForKey:@"id"] integerValue];
         RBPageCard *card = [[RBPageCard alloc] initWithFrame:CGRectZero];
         card.tabID = tabID;
-        card.backgroundColor = [UIColor clearColor];
-        card.layer.cornerRadius = 7.0;
-        card.layer.borderWidth = 0.0;
-        card.layer.masksToBounds = YES;
+        card.backgroundColor = [UIColor whiteColor];
+        card.layer.cornerRadius = 12.0;
+        card.layer.borderWidth = 1.0;
+        card.layer.borderColor = [[RBTheme mistColor] CGColor];
+        card.layer.shadowColor = [[RBTheme deepTideColor] CGColor];
+        card.layer.shadowOpacity = 0.16;
+        card.layer.shadowRadius = 9.0;
+        card.layer.shadowOffset = CGSizeMake(0.0, 4.0);
 
         UIView *header = [[UIView alloc] initWithFrame:CGRectZero];
-        header.backgroundColor = [UIColor colorWithWhite:0.90 alpha:1.0];
+        header.backgroundColor = [UIColor whiteColor];
         [card addSubview:header];
         card.headerView = header;
 
@@ -181,7 +195,7 @@
         title.text = [self titleForTab:tab];
         title.textAlignment = NSTextAlignmentCenter;
         title.lineBreakMode = NSLineBreakByTruncatingTail;
-        title.font = [RBTheme fontOfSize:13.0 bold:YES];
+        title.font = [RBTheme displayFontOfSize:13.0];
         title.textColor = [RBTheme primaryTextColor];
         [card addSubview:title];
         card.pageTitleLabel = title;
@@ -229,14 +243,18 @@
         UIButton *close = [UIButton buttonWithType:UIButtonTypeCustom];
         close.tag = tabID;
         close.backgroundColor = [UIColor clearColor];
-        close.accessibilityLabel = @"Close Page";
+        close.accessibilityLabel = @"Close Tab";
         [close addTarget:self action:@selector(closeTapped:) forControlEvents:UIControlEventTouchUpInside];
         UIView *closeDot = [[UIView alloc] initWithFrame:CGRectZero];
-        closeDot.backgroundColor = [UIColor colorWithRed:0.86 green:0.20 blue:0.18 alpha:1.0];
-        closeDot.layer.borderWidth = 0.5;
-        closeDot.layer.borderColor = [[UIColor colorWithRed:0.58 green:0.08 blue:0.07 alpha:1.0] CGColor];
-        closeDot.layer.cornerRadius = 8.0;
+        closeDot.backgroundColor = [RBTheme mistColor];
+        closeDot.layer.borderWidth = 0.0;
+        closeDot.layer.cornerRadius = 9.0;
         closeDot.userInteractionEnabled = NO;
+        UIImageView *closeGlyph = [[UIImageView alloc] initWithImage:
+            [RBTheme icon:RBIconClose size:11.0 color:[RBTheme slateColor]]];
+        closeGlyph.tag = 9107;
+        closeGlyph.userInteractionEnabled = NO;
+        [closeDot addSubview:closeGlyph];
         [close addSubview:closeDot];
         [card addSubview:close];
         card.closeButton = close;
@@ -291,7 +309,9 @@
             placeholder.frame = CGRectMake(24.0, hasPlaceholderIcon ? centerY - 4.0 : centerY - 38.0, cardW - 48.0, 78.0);
         }
         card.closeButton.frame = CGRectMake(0.0, 0.0, 32.0, 28.0);
-        card.closeDot.frame = CGRectMake(8.0, 6.0, 16.0, 16.0);
+        card.closeDot.frame = CGRectMake(7.0, 5.0, 18.0, 18.0);
+        UIView *closeGlyph = [card.closeDot viewWithTag:9107];
+        closeGlyph.frame = card.closeDot.bounds;
     }
     self.scrollView.contentSize = CGSizeMake(w * [self.tabs count], self.scrollView.bounds.size.height);
     if (self.selectedIndex != NSNotFound && [self.tabs count]) {

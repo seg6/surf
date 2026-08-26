@@ -76,7 +76,7 @@ typedef enum {
     self.titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     self.titleLabel.backgroundColor = [UIColor clearColor];
     self.titleLabel.textAlignment = NSTextAlignmentCenter;
-    self.titleLabel.font = [RBTheme fontOfSize:22.0 bold:YES];
+    self.titleLabel.font = [RBTheme displayFontOfSize:22.0];
     self.titleLabel.textColor = [RBTheme primaryTextColor];
     self.titleLabel.numberOfLines = 2;
     [self.view addSubview:self.titleLabel];
@@ -90,12 +90,14 @@ typedef enum {
     [self.view addSubview:self.detailLabel];
 
     self.phraseLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    self.phraseLabel.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.72];
+    self.phraseLabel.backgroundColor = [UIColor whiteColor];
     self.phraseLabel.textAlignment = NSTextAlignmentCenter;
-    self.phraseLabel.font = [RBTheme fontOfSize:21.0 bold:YES];
+    self.phraseLabel.font = [RBTheme monospacedFontOfSize:18.0 bold:YES];
     self.phraseLabel.textColor = [RBTheme primaryTextColor];
     self.phraseLabel.numberOfLines = 3;
     self.phraseLabel.layer.cornerRadius = 8.0;
+    self.phraseLabel.layer.borderWidth = 1.0;
+    self.phraseLabel.layer.borderColor = [[RBTheme mistColor] CGColor];
     self.phraseLabel.layer.masksToBounds = YES;
     [self.view addSubview:self.phraseLabel];
 
@@ -113,8 +115,9 @@ typedef enum {
     self.spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleGray];
     [self.view addSubview:self.spinner];
 
-    self.primaryButton = [UIButton buttonWithType:UIButtonTypeRoundedRect];
-    self.primaryButton.titleLabel.font = [RBTheme fontOfSize:17.0 bold:YES];
+    self.primaryButton = [UIButton buttonWithType:UIButtonTypeCustom];
+    [RBTheme stylePrimaryButton:self.primaryButton];
+    self.primaryButton.titleLabel.font = [RBTheme displayFontOfSize:17.0];
     [self.primaryButton addTarget:self action:@selector(primaryTapped:) forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:self.primaryButton];
 
