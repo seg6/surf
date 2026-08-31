@@ -322,11 +322,15 @@ jobs:
 
           for arch in amd64 arm64; do
             binary="$RUNNER_TEMP/surf-darwin-$arch"
+            contents="$RUNNER_TEMP/surf-darwin-$arch.contents"
             tar -xOzf "dist/surf-${version}-darwin-$arch.tar.gz" \
               Surf.app/Contents/MacOS/surf > "$binary"
             (cd backend && go run ./tools/machoverify "$binary" "$arch" 12.0)
-            tar -tzf "dist/surf-${version}-darwin-$arch.tar.gz" | \
-              grep -qx 'Surf.app/Contents/Resources/Surf.icns'
+            # Do not pipe tar directly into grep under pipefail: grep may exit
+            # after its match while tar is still writing a large archive,
+            # turning a valid package into a SIGPIPE failure.
+            tar -tzf "dist/surf-${version}-darwin-$arch.tar.gz" > "$contents"
+            grep -qx 'Surf.app/Contents/Resources/Surf.icns' "$contents"
           done
 
           sha256sum dist/packages/*
