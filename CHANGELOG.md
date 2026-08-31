@@ -2,6 +2,25 @@
 
 This file records the user-visible changes in every Surf release.
 
+## 0.15.3 - 2026-08-31
+
+- Enabled the direct system compressed-video queue by runtime capability on
+  iOS 6 and 7, removing the artificial iOS 8 gate while retaining the same
+  simple H.264-to-system-renderer path used by newer releases.
+- Made the stream view renderer-neutral and create its VideoToolbox/OpenGL
+  compatibility path only when the system queue is unavailable or repeatedly
+  fails. Core-only iOS 6/7 queues now get bounded stall detection, layer
+  replacement, IDR recovery, and an automatic legacy fallback despite lacking
+  the status and failure-notification APIs added in iOS 8.
+- Avoided an iOS 6 UIKit use-after-free when opening the omnibox by preparing
+  editable text before the first-responder transition, keeping the classic
+  text-field path free of attributed backing stores, and deferring the iPad
+  omnibox resize until UIKit finishes the initiating touch event.
+- Added install-time OS selection for every canonical app-icon candidate:
+  iOS 6 receives transparent, plane-breaking artwork while iOS 7 and later
+  retain opaque system-masked artwork. Both deterministic sets come from the
+  pinned upstream Deta source and package checks exercise both selections.
+
 ## 0.15.2 - 2026-08-31
 
 - Replaced Surf's iOS 8+ per-frame VideoToolbox callback, UIKit handoff,

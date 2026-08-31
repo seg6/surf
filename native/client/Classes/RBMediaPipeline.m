@@ -35,19 +35,30 @@
     return self;
 }
 
+- (BOOL)configureLegacyDecoder {
+    if (![RBVideoDecoder available]) return NO;
+    if (!self.decoder) {
+        self.decoder = [[RBVideoDecoder alloc] init];
+        self.decoder.delegate = self;
+    }
+    if (!self.decoder) return NO;
+    self.decoder.codedWidth = self.codedWidth;
+    self.decoder.codedHeight = self.codedHeight;
+    [self.decoder reset];
+    return YES;
+}
+
 - (void)configureVideoWidth:(int)width height:(int)height {
     self.codedWidth = width > 0 ? width : 1024;
     self.codedHeight = height > 0 ? height : 768;
     if (self.sampleRenderer) {
         [self.sampleRenderer configureWidth:self.codedWidth height:self.codedHeight];
-    } else {
-      if (!self.decoder) {
-        self.decoder = [[RBVideoDecoder alloc] init];
-        self.decoder.delegate = self;
-      }
-      self.decoder.codedWidth = self.codedWidth;
-      self.decoder.codedHeight = self.codedHeight;
-      [self.decoder reset];
+    } else if (![self configureLegacyDecoder]) {
+        self.videoActive = NO;
+        RBLogEvent(@"media", @"error", @{@"lane": @"video"},
+                   @"No usable video renderer is available");
+        [self.delegate mediaPipelineDidFailVideo:self];
+        return;
     }
     self.videoAUs = 0;
     self.expectedAUSequence = 0;
@@ -144,8 +155,19 @@
 }
 
 - (void)sampleBufferRendererDidFail:(RBSampleBufferRenderer *)renderer {
-    self.videoActive = NO;
-    [self.delegate mediaPipelineDidFailVideo:self];
+    if (renderer != self.sampleRenderer) return;
+    [renderer stop];
+    renderer.delegate = nil;
+    self.sampleRenderer = nil;
+    [self.delegate mediaPipeline:self didReplaceSystemDisplayLayer:nil];
+    if (![self configureLegacyDecoder]) {
+        self.videoActive = NO;
+        [self.delegate mediaPipelineDidFailVideo:self];
+        return;
+    }
+    RBLogEvent(@"media", @"warn", @{@"renderer": @"legacy-gl"},
+               @"Fell back from the system renderer to VideoToolbox and OpenGL");
+    [self.delegate mediaPipelineNeedsKeyframe:self];
 }
 
 - (NSString *)rendererMode { return self.sampleRenderer ? @"system" : @"legacy-gl"; }

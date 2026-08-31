@@ -143,6 +143,15 @@
 }
 
 - (void)applyPlaceholderAppearance {
+    if ([RBTheme usesClassicAppearance]) {
+        // iOS 6's UITextField keeps pointers into its attributed backing store
+        // while it enters first-responder state. Replacing that store from the
+        // editing delegate can leave UIKit with a dangling text-layout object.
+        // Keep the classic path plain and style it through the field itself.
+        self.field.attributedPlaceholder = nil;
+        self.field.placeholder = @"Search or enter address";
+        return;
+    }
     self.field.attributedPlaceholder = [[NSAttributedString alloc]
         initWithString:@"Search or enter address"
             attributes:@{NSForegroundColorAttributeName: [RBTheme secondaryTextColor],
@@ -165,6 +174,24 @@
     if (![host length] || ![url length]) {
         self.field.attributedText = nil;
         self.field.text = url;
+        return;
+    }
+    if ([RBTheme usesClassicAppearance]) {
+        NSString *shown = url;
+        if (self.showsCompactURL) {
+            shown = host;
+            NSNumber *port = [parsed port];
+            if (port) {
+                BOOL IPv6 = [host rangeOfString:@":"].location != NSNotFound;
+                shown = IPv6
+                    ? [NSString stringWithFormat:@"[%@]:%@", host, port]
+                    : [NSString stringWithFormat:@"%@:%@", host, port];
+            }
+        }
+        self.field.attributedText = nil;
+        self.field.font = [RBTheme fontOfSize:14.0 bold:self.showsCompactURL];
+        self.field.textColor = [RBTheme primaryTextColor];
+        self.field.text = shown;
         return;
     }
     if (self.showsCompactURL) {
@@ -288,13 +315,22 @@
     [self.delegate omnibox:self textChanged:self.field.text ?: @""];
 }
 
-- (void)textFieldDidBeginEditing:(UITextField *)textField {
+- (BOOL)textFieldShouldBeginEditing:(UITextField *)textField {
+    // Prepare editable text before UIKit starts its responder transition. In
+    // particular, never replace attributedText from textFieldDidBeginEditing:
+    // on iOS 6; doing so reproducibly crashes inside UIKit's touch dispatcher.
     textField.attributedText = nil;
+    textField.font = [RBTheme fontOfSize:15.0 bold:NO];
+    textField.textColor = [RBTheme primaryTextColor];
+    textField.text = self.committedURL ?: @"";
+    return YES;
+}
+
+- (void)textFieldDidBeginEditing:(UITextField *)textField {
     textField.font = [RBTheme fontOfSize:15.0 bold:NO];
     textField.textColor = [RBTheme primaryTextColor];
     self.fieldBackground.layer.borderColor = [[RBTheme accentColor] CGColor];
     self.fieldBackground.layer.borderWidth = 1.5;
-    textField.text = self.committedURL ?: @"";
     [self setNeedsLayout];
     [self.delegate omniboxEditingBegan:self];
     [textField performSelector:@selector(selectAll:) withObject:nil afterDelay:0.05];

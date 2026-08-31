@@ -1,0 +1,20 @@
+#!/bin/sh
+set -e
+
+/usr/libexec/surf-select-icons
+
+for cache in /var/mobile/Library/Caches/com.apple.IconsCache/space.seg6.surf*; do
+  if [ -f "$cache" ]; then
+    rm -f "$cache"
+  fi
+done
+
+if [ -x /usr/bin/uicache ]; then
+  if [ -x /bin/su ]; then
+    /bin/su mobile -c /usr/bin/uicache >/dev/null 2>&1 || /usr/bin/uicache >/dev/null 2>&1 || true
+  else
+    /usr/bin/uicache >/dev/null 2>&1 || true
+  fi
+fi
+
+exit 0

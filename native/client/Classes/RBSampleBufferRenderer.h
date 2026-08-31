@@ -14,9 +14,11 @@
 - (void)sampleBufferRendererDidFail:(RBSampleBufferRenderer *)renderer;
 @end
 
-// iOS 8+ live H.264 renderer. Compressed samples go straight into
-// AVSampleBufferDisplayLayer; Surf never owns the decoded IOSurfaces and UIKit
-// never participates in the per-frame data path.
+// Live H.264 renderer backed by AVSampleBufferDisplayLayer. iOS 6.1 already
+// ships the core queue privately, while iOS 8 adds public failure reporting.
+// Runtime capability checks select either form without an OS-version guess.
+// Surf never owns the decoded IOSurfaces and UIKit never participates in the
+// per-frame data path.
 @interface RBSampleBufferRenderer : NSObject
 @property(nonatomic, weak) id<RBSampleBufferRendererDelegate> delegate;
 @property(nonatomic, strong, readonly) AVSampleBufferDisplayLayer *displayLayer;

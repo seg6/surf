@@ -9,42 +9,19 @@
   <key>CFBundleExecutable</key>
   <string>Surf</string>
   <key>CFBundleIconFile</key>
-  <string>icon-57.png</string>
+  <string>Icon.png</string>
   <key>CFBundleIconFiles</key>
   <array>
-    <string>icon-57</string>
-    <string>icon-60</string>
-    <string>icon-72</string>
-    <string>icon-76</string>
-    <string>icon-167</string>
+    <string>Icon.png</string>
+    <string>Icon@2x.png</string>
+    <string>Icon-72.png</string>
+    <string>Icon-72@2x.png</string>
+    <string>Icon-60</string>
+    <string>Icon-76</string>
+    <string>Icon-83.5</string>
   </array>
-  <key>CFBundleIcons</key>
-  <dict>
-    <key>CFBundlePrimaryIcon</key>
-    <dict>
-      <key>CFBundleIconFiles</key>
-      <array>
-        <string>icon-57</string>
-        <string>icon-60</string>
-      </array>
-      <key>UIPrerenderedIcon</key>
-      <true/>
-    </dict>
-  </dict>
-  <key>CFBundleIcons~ipad</key>
-  <dict>
-    <key>CFBundlePrimaryIcon</key>
-    <dict>
-      <key>CFBundleIconFiles</key>
-      <array>
-        <string>icon-72</string>
-        <string>icon-76</string>
-        <string>icon-167</string>
-      </array>
-      <key>UIPrerenderedIcon</key>
-      <true/>
-    </dict>
-  </dict>
+  <key>UIPrerenderedIcon</key>
+  <true/>
   <key>UIAppFonts</key>
   <array>
     <string>Lucide.ttf</string>
@@ -60,7 +37,7 @@
   <key>CFBundleShortVersionString</key>
   <string>@VERSION@</string>
   <key>CFBundleVersion</key>
-  <string>56</string>
+  <string>63</string>
   <key>CFBundleSupportedPlatforms</key>
   <array>
     <string>iPhoneOS</string>

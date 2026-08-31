@@ -14,6 +14,10 @@ enum {
     // composition converge on the newest decoded image. This is an emergency
     // fuse, not a target latency or an arbitrary-frame shedding policy.
     kRBSystemRendererPendingLimit = 18,
+    // The iOS 6/7 core-only layer has no status or error property. If three
+    // complete compressed cushions fill without one successful enqueue, a
+    // flush is not repairing the remote FigVideoQueue; replace the layer.
+    kRBSystemRendererCoreStallLimit = 3,
     kRBSystemRendererFailureLimit = 3,
 };
 
@@ -44,6 +48,8 @@ typedef NS_ENUM(NSInteger, RBRendererIngressState) {
     NSUInteger _generation;
     RBFrameMetadata *_pendingAcceptedMetadata;
     BOOL _metadataHandoffScheduled;
+    NSUInteger _consecutiveBackpressureRecoveries;
+    BOOL _layerFailureScheduled;
 }
 @property(nonatomic, strong) dispatch_queue_t queue;
 @property(nonatomic, strong) RBH264SampleBuilder *sampleBuilder;
@@ -62,8 +68,42 @@ typedef NS_ENUM(NSInteger, RBRendererIngressState) {
 @implementation RBSampleBufferRenderer
 
 + (BOOL)available {
-    return [[[UIDevice currentDevice] systemVersion] doubleValue] >= 8.0 &&
-        NSClassFromString(@"AVSampleBufferDisplayLayer") != Nil;
+    Class layerClass = NSClassFromString(@"AVSampleBufferDisplayLayer");
+    if (!layerClass || ![layerClass isSubclassOfClass:[CALayer class]]) return NO;
+    SEL required[] = {
+        @selector(enqueueSampleBuffer:),
+        @selector(flush),
+        @selector(flushAndRemoveImage),
+        @selector(isReadyForMoreMediaData),
+        @selector(requestMediaDataWhenReadyOnQueue:usingBlock:),
+        @selector(stopRequestingMediaData),
+        @selector(setVideoGravity:),
+    };
+    for (NSUInteger i = 0; i < sizeof(required) / sizeof(required[0]); i++) {
+        if (![layerClass instancesRespondToSelector:required[i]]) return NO;
+    }
+    return YES;
+}
+
+static NSString *RBDisplayLayerFailureNotification(void) {
+    // This data symbol is weak-imported by the iOS 6-targeted slice. Check its
+    // address before reading it: the private iOS 6/7 class has the complete
+    // render queue but does not export the later notification constant.
+    if (&AVSampleBufferDisplayLayerFailedToDecodeNotification == NULL) return nil;
+    return AVSampleBufferDisplayLayerFailedToDecodeNotification;
+}
+
+- (void)observeFailuresForLayer:(AVSampleBufferDisplayLayer *)layer {
+    NSString *name = RBDisplayLayerFailureNotification();
+    if (!layer || !name) return;
+    [[NSNotificationCenter defaultCenter] addObserver:self
+        selector:@selector(displayLayerFailedToDecode:) name:name object:layer];
+}
+
+- (void)stopObservingFailuresForLayer:(AVSampleBufferDisplayLayer *)layer {
+    NSString *name = RBDisplayLayerFailureNotification();
+    if (!layer || !name) return;
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:name object:layer];
 }
 
 - (AVSampleBufferDisplayLayer *)newDisplayLayer {
@@ -83,12 +123,8 @@ typedef NS_ENUM(NSInteger, RBRendererIngressState) {
         _pending = [NSMutableArray array];
         _ingressState = RBRendererIngressAwaitingIDR;
         self.displayLayer = [self newDisplayLayer];
-        if (self.displayLayer) {
-            [[NSNotificationCenter defaultCenter] addObserver:self
-                selector:@selector(displayLayerFailedToDecode:)
-                name:AVSampleBufferDisplayLayerFailedToDecodeNotification
-                object:self.displayLayer];
-        }
+        if (!self.displayLayer) return nil;
+        [self observeFailuresForLayer:self.displayLayer];
     }
     return self;
 }
@@ -118,6 +154,8 @@ typedef NS_ENUM(NSInteger, RBRendererIngressState) {
         _pumpScheduled = NO;
         _pendingAcceptedMetadata = nil;
         _metadataHandoffScheduled = NO;
+        _consecutiveBackpressureRecoveries = 0;
+        _layerFailureScheduled = NO;
     }
     dispatch_async(self.queue, ^{
         [self.displayLayer stopRequestingMediaData];
@@ -134,8 +172,10 @@ typedef NS_ENUM(NSInteger, RBRendererIngressState) {
         self.lastAcceptedAt = 0.0;
         self.failureWindowStart = 0.0;
         self.failureWindowCount = 0;
+        BOOL extendedFailureAPI = [self.displayLayer respondsToSelector:@selector(status)];
         RBLogEvent(@"renderer", @"info",
-            @{@"mode": @"system", @"coded_width": @(width), @"coded_height": @(height)},
+            @{@"mode": @"system", @"api": extendedFailureAPI ? @"extended" : @"core",
+              @"coded_width": @(width), @"coded_height": @(height)},
             @"System compressed-video renderer ready");
     });
 }
@@ -144,6 +184,8 @@ typedef NS_ENUM(NSInteger, RBRendererIngressState) {
     if (![au length]) return;
     BOOL requestKeyframe = NO;
     BOOL enqueuePacket = YES;
+    BOOL replaceStalledLayer = NO;
+    NSUInteger stalledGeneration = 0;
     @synchronized (self) {
         if (!_active || _failed) return;
         if (_ingressState == RBRendererIngressAwaitingIDR && !idr) {
@@ -163,6 +205,13 @@ typedef NS_ENUM(NSInteger, RBRendererIngressState) {
             [_pending removeAllObjects];
             _needsFlush = YES;
             self.recoveries++;
+            _consecutiveBackpressureRecoveries++;
+            if (_consecutiveBackpressureRecoveries >= kRBSystemRendererCoreStallLimit &&
+                !_layerFailureScheduled) {
+                _layerFailureScheduled = YES;
+                replaceStalledLayer = YES;
+                stalledGeneration = _generation;
+            }
             _ingressState = RBRendererIngressAwaitingIDR;
             if (idr) {
                 _ingressState = RBRendererIngressIDRQueued;
@@ -195,6 +244,22 @@ typedef NS_ENUM(NSInteger, RBRendererIngressState) {
             [self.delegate sampleBufferRendererNeedsKeyframe:self];
         });
     }
+    if (replaceStalledLayer) {
+        dispatch_async(self.queue, ^{
+            BOOL stillCurrent = NO;
+            @synchronized (self) {
+                stillCurrent = _active && !_failed && _layerFailureScheduled &&
+                    stalledGeneration == _generation;
+            }
+            if (stillCurrent) {
+                RBLogEvent(@"renderer", @"error",
+                    @{@"mode": @"system",
+                      @"stalled_cushions": @(kRBSystemRendererCoreStallLimit)},
+                    @"System renderer queue remained stalled after flush recovery");
+                [self handleTerminalLayerFailure];
+            }
+        });
+    }
 }
 
 - (void)waitForLayerReadiness {
@@ -202,10 +267,12 @@ typedef NS_ENUM(NSInteger, RBRendererIngressState) {
     _waitingForLayerReady = YES;
     self.backpressureEvents++;
     __weak RBSampleBufferRenderer *weakSelf = self;
-    [self.displayLayer requestMediaDataWhenReadyOnQueue:self.queue usingBlock:^{
+    AVSampleBufferDisplayLayer *waitingLayer = self.displayLayer;
+    [waitingLayer requestMediaDataWhenReadyOnQueue:self.queue usingBlock:^{
         RBSampleBufferRenderer *renderer = weakSelf;
-        if (!renderer || !renderer.displayLayer.readyForMoreMediaData) return;
-        [renderer.displayLayer stopRequestingMediaData];
+        if (!renderer || renderer.displayLayer != waitingLayer ||
+            !waitingLayer.readyForMoreMediaData) return;
+        [waitingLayer stopRequestingMediaData];
         renderer->_waitingForLayerReady = NO;
         @synchronized (renderer) {
             [renderer schedulePumpLocked];
@@ -286,6 +353,10 @@ typedef NS_ENUM(NSInteger, RBRendererIngressState) {
         self.lastAcceptedAt = CACurrentMediaTime();
         self.averageEnqueueMS = self.averageEnqueueMS <= 0.0 ? enqueueMS :
             self.averageEnqueueMS * 0.85 + enqueueMS * 0.15;
+        @synchronized (self) {
+            _consecutiveBackpressureRecoveries = 0;
+            _layerFailureScheduled = NO;
+        }
         if (packet.idr) {
             @synchronized (self) {
                 if (_ingressState == RBRendererIngressIDRQueued)
@@ -363,6 +434,7 @@ typedef NS_ENUM(NSInteger, RBRendererIngressState) {
 
 - (void)handleTerminalLayerFailure {
     @synchronized (self) {
+        _layerFailureScheduled = NO;
         if (!_active || _failed) return;
     }
     CFTimeInterval now = CACurrentMediaTime();
@@ -372,7 +444,9 @@ typedef NS_ENUM(NSInteger, RBRendererIngressState) {
     }
     self.failureWindowCount++;
     self.failures++;
-    NSError *error = self.displayLayer.error;
+    NSError *error = nil;
+    if ([self.displayLayer respondsToSelector:@selector(error)])
+        error = self.displayLayer.error;
     RBLogEvent(@"renderer", @"error",
         @{@"mode": @"system", @"failure_count": @(self.failureWindowCount),
           @"error": [error localizedDescription] ?: @"display layer failed"},
@@ -395,10 +469,7 @@ typedef NS_ENUM(NSInteger, RBRendererIngressState) {
     void (^replace)(void) = ^{
         replacement = [self newDisplayLayer];
         if (replacement) {
-            [[NSNotificationCenter defaultCenter] addObserver:self
-                selector:@selector(displayLayerFailedToDecode:)
-                name:AVSampleBufferDisplayLayerFailedToDecodeNotification
-                object:replacement];
+            [self observeFailuresForLayer:replacement];
             [self.delegate sampleBufferRenderer:self didReplaceDisplayLayer:replacement];
         }
     };
@@ -411,10 +482,13 @@ typedef NS_ENUM(NSInteger, RBRendererIngressState) {
         });
         return;
     }
-    [[NSNotificationCenter defaultCenter] removeObserver:self
-        name:AVSampleBufferDisplayLayerFailedToDecodeNotification
-        object:self.displayLayer];
+    [self stopObservingFailuresForLayer:self.displayLayer];
     self.displayLayer = replacement;
+    @synchronized (self) {
+        _consecutiveBackpressureRecoveries = 0;
+        _waitingForLayerReady = NO;
+        _pumpScheduled = NO;
+    }
     [self.sampleBuilder reset];
     [self beginRecoveryForReason:@"display-layer-replacement" status:noErr];
 }
@@ -432,6 +506,8 @@ typedef NS_ENUM(NSInteger, RBRendererIngressState) {
         _pumpScheduled = NO;
         _pendingAcceptedMetadata = nil;
         _metadataHandoffScheduled = NO;
+        _consecutiveBackpressureRecoveries = 0;
+        _layerFailureScheduled = NO;
     }
     dispatch_async(self.queue, ^{
         [self.displayLayer stopRequestingMediaData];
@@ -452,6 +528,8 @@ typedef NS_ENUM(NSInteger, RBRendererIngressState) {
         _pumpScheduled = NO;
         _pendingAcceptedMetadata = nil;
         _metadataHandoffScheduled = NO;
+        _consecutiveBackpressureRecoveries = 0;
+        _layerFailureScheduled = NO;
     }
     dispatch_async(self.queue, ^{
         [self.displayLayer stopRequestingMediaData];
@@ -461,7 +539,7 @@ typedef NS_ENUM(NSInteger, RBRendererIngressState) {
 }
 
 - (void)dealloc {
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [self stopObservingFailuresForLayer:self.displayLayer];
     [self.displayLayer stopRequestingMediaData];
 }
 

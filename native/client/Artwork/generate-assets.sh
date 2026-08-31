@@ -94,6 +94,12 @@ make_legacy_icon icon-57@2x.png 114
 make_legacy_icon icon-72.png 72
 make_legacy_icon icon-72@2x.png 144
 make_legacy_icon icon-144.png 144
+make_legacy_icon icon-classic-60.png 60
+make_legacy_icon icon-classic-60@2x.png 120
+make_legacy_icon icon-classic-60@3x.png 180
+make_legacy_icon icon-classic-76.png 76
+make_legacy_icon icon-classic-76@2x.png 152
+make_legacy_icon icon-classic-167.png 167
 make_modern_icon icon-60.png 60
 make_modern_icon icon-60@2x.png 120
 make_modern_icon icon-60@3x.png 180
@@ -109,4 +115,4 @@ make_launch Default-667h@2x.png 750 1334 230
 make_launch Default-736h@3x.png 1242 2208 370
 make_launch Default-Landscape-736h@3x.png 2208 1242 310
 
-echo "Generated legacy and modern Surf icons plus launch images from pinned artwork"
+echo "Generated OS-specific legacy and modern Surf icons plus launch images from pinned artwork"

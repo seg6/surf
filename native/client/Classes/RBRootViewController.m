@@ -1900,13 +1900,31 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
 }
 
 - (void)omniboxEditingBegan:(RBOmnibox *)omnibox {
-    [self.chromeBar setOmniboxExpanded:YES animated:YES];
+    BOOL classic = [RBTheme usesClassicAppearance];
+    RBLogEvent(@"omnibox", @"info", @{@"phase": @"begin", @"classic": @(classic)},
+               @"Address editing began");
+    if (!classic) {
+        [self.chromeBar setOmniboxExpanded:YES animated:YES];
+        return;
+    }
+    // iOS 6 is still assembling UITextField's responder graph when its begin
+    // delegate runs. Resizing the field in that callback corrupts UIKit's
+    // private selection/touch state, so cross the run-loop boundary first.
+    __weak RBRootViewController *weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        RBRootViewController *controller = weakSelf;
+        if (controller && omnibox.editing)
+            [controller.chromeBar setOmniboxExpanded:YES animated:NO];
+    });
 }
 
 - (void)omniboxEditingEnded:(RBOmnibox *)omnibox {
     [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(fireSuggest) object:nil];
     [self.suggestPanel hide];
-    [self.chromeBar setOmniboxExpanded:NO animated:YES];
+    BOOL classic = [RBTheme usesClassicAppearance];
+    RBLogEvent(@"omnibox", @"info", @{@"phase": @"end", @"classic": @(classic)},
+               @"Address editing ended");
+    [self.chromeBar setOmniboxExpanded:NO animated:!classic];
 }
 
 - (void)omniboxStarTapped:(RBOmnibox *)omnibox {

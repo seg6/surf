@@ -82,19 +82,23 @@ as unhealthy solely because its presentation FPS is zero.
 
 ## Video presentation
 
-On iOS 8 and later, Surf feeds compressed H.264 samples directly to
-`AVSampleBufferDisplayLayer`. The system owns decode scheduling, decoded
-IOSurfaces, display timing, and composition; Surf does not bounce every frame
-through a VideoToolbox callback, the UIKit main queue, a display link, and an
-OpenGL drawable. The stream view is a stable Core Animation container, so a
-keyboard transition can translate or cover it without reallocating the video
-surface or rebuilding the encoder generation.
+Surf feeds compressed H.264 samples directly to
+`AVSampleBufferDisplayLayer` whenever the required runtime methods exist. The
+core queue is present on iOS 6.1 and later even though Apple did not publish
+the class until iOS 8. The system owns decode scheduling, decoded IOSurfaces,
+display timing, and composition; Surf does not bounce every frame through a
+VideoToolbox callback, the UIKit main queue, a display link, and an OpenGL
+drawable. The stream view is a stable Core Animation container, so a keyboard
+transition can translate or cover it without reallocating the video surface or
+rebuilding the encoder generation.
 
-iOS 6 and 7 retain a compatibility path using runtime-resolved VideoToolbox,
-NV12 IOSurfaces, and OpenGL ES. That path keeps a small FIFO and recovers only
-at a complete IDR dependency boundary when overloaded. It never drops an
-arbitrary P-frame and then attempts to decode its dependants, and it never
-uses decode-without-output as a hidden catch-up mode.
+iOS 8 adds status, error, and failure-notification APIs around that queue. On
+iOS 6 and 7, Surf instead detects a persistently full compressed cushion,
+flushes and replaces the layer at complete IDR boundaries, and automatically
+falls back after repeated failures. The fallback uses runtime-resolved
+VideoToolbox, NV12 IOSurfaces, and a lazily created OpenGL ES layer. It keeps a
+small FIFO, never drops an arbitrary P-frame and then attempts to decode its
+dependants, and never uses decode-without-output as a hidden catch-up mode.
 
 Both renderers use the same bounds-checked Annex-B/AVCC and parameter-set
 builder. Diagnostics name the active renderer explicitly: the system path

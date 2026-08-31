@@ -30,6 +30,7 @@ enum {
     NSUInteger _uniquePresentationCursor;
 }
 @property(nonatomic, strong) CALayer *systemDisplayLayer;
+@property(nonatomic, strong) CAEAGLLayer *legacyGLLayer;
 @property(nonatomic, assign, readwrite) BOOL usesSystemRenderer;
 @property(nonatomic, strong) EAGLContext *glContext;
 @property(nonatomic, strong) CADisplayLink *videoDisplayLink;
@@ -45,6 +46,8 @@ enum {
 @property(nonatomic, assign) NSUInteger lastPresentedMotionEpoch;
 @property(nonatomic, assign) BOOL motionTracking;
 @property(nonatomic, assign) CFTimeInterval motionUntil;
+- (BOOL)setupGL;
+- (void)teardownGL;
 @end
 
 static GLuint RBCompileShader(GLenum type, const char *source) {
@@ -72,25 +75,29 @@ static BOOL RBNeedsSynchronousGLPresentation(void) {
 
 @implementation RBStreamView
 
-static BOOL RBUsesSystemVideoRenderer(void) {
-    return [[[UIDevice currentDevice] systemVersion] doubleValue] >= 8.0 &&
-        NSClassFromString(@"AVSampleBufferDisplayLayer") != Nil;
-}
-
 + (Class)layerClass {
-    // The iOS 8 path must never allocate an EAGL drawable: resizing that
-    // drawable while UIKit animates the keyboard is the coupling this renderer
-    // replacement removes. Legacy systems keep the proven EAGL backing.
-    return RBUsesSystemVideoRenderer() ? [CALayer class] : [CAEAGLLayer class];
+    // Keep the view itself renderer-neutral. The compressed system path never
+    // allocates an EAGL drawable, while the fallback can add one at runtime.
+    return [CALayer class];
 }
 
 - (BOOL)setupGL {
-    self.glContext = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES2];
-    if (!self.glContext || ![EAGLContext setCurrentContext:self.glContext]) return NO;
-    CAEAGLLayer *layer = (CAEAGLLayer *)self.layer;
+    if (self.glContext) return YES;
+    CAEAGLLayer *layer = [CAEAGLLayer layer];
+    layer.frame = self.bounds;
+    layer.contentsScale = self.contentScaleFactor;
+    layer.hidden = !self.videoActive;
     layer.opaque = YES;
     layer.drawableProperties = @{kEAGLDrawablePropertyRetainedBacking: @NO,
                                  kEAGLDrawablePropertyColorFormat: kEAGLColorFormatRGBA8};
+    self.legacyGLLayer = layer;
+    [self.layer insertSublayer:layer atIndex:0];
+
+    self.glContext = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES2];
+    if (!self.glContext || ![EAGLContext setCurrentContext:self.glContext]) {
+        [self teardownGL];
+        return NO;
+    }
     glGenFramebuffers(1, &_framebuffer);
     glGenRenderbuffers(1, &_renderbuffer);
     glBindFramebuffer(GL_FRAMEBUFFER, _framebuffer);
@@ -112,7 +119,12 @@ static BOOL RBUsesSystemVideoRenderer(void) {
         "1.1643*y+2.017*c.x,1.0); }";
     GLuint vs = RBCompileShader(GL_VERTEX_SHADER, vertex);
     GLuint fs = RBCompileShader(GL_FRAGMENT_SHADER, fragment);
-    if (!vs || !fs) return NO;
+    if (!vs || !fs) {
+        if (vs) glDeleteShader(vs);
+        if (fs) glDeleteShader(fs);
+        [self teardownGL];
+        return NO;
+    }
     _program = glCreateProgram();
     glAttachShader(_program, vs);
     glAttachShader(_program, fs);
@@ -121,13 +133,48 @@ static BOOL RBUsesSystemVideoRenderer(void) {
     glDeleteShader(fs);
     GLint linked = 0;
     glGetProgramiv(_program, GL_LINK_STATUS, &linked);
-    if (!linked) return NO;
+    if (!linked) {
+        [self teardownGL];
+        return NO;
+    }
     _positionSlot = glGetAttribLocation(_program, "position");
     _texCoordSlot = glGetAttribLocation(_program, "texCoord");
     CVReturn status = CVOpenGLESTextureCacheCreate(kCFAllocatorDefault, NULL,
                                                    self.glContext,
                                                    NULL, &_textureCache);
-    return status == kCVReturnSuccess;
+    if (status != kCVReturnSuccess) {
+        [self teardownGL];
+        return NO;
+    }
+    return YES;
+}
+
+- (void)teardownGL {
+    [self.videoDisplayLink invalidate];
+    self.videoDisplayLink = nil;
+    EAGLContext *context = self.glContext;
+    if (context) [EAGLContext setCurrentContext:context];
+    if (_textureCache) {
+        CVOpenGLESTextureCacheFlush(_textureCache, 0);
+        CFRelease(_textureCache);
+        _textureCache = NULL;
+    }
+    if (_program) {
+        glDeleteProgram(_program);
+        _program = 0;
+    }
+    if (_framebuffer) {
+        glDeleteFramebuffers(1, &_framebuffer);
+        _framebuffer = 0;
+    }
+    if (_renderbuffer) {
+        glDeleteRenderbuffers(1, &_renderbuffer);
+        _renderbuffer = 0;
+    }
+    if ([EAGLContext currentContext] == context) [EAGLContext setCurrentContext:nil];
+    self.glContext = nil;
+    [self.legacyGLLayer removeFromSuperlayer];
+    self.legacyGLLayer = nil;
 }
 
 - (id)initWithFrame:(CGRect)frame {
@@ -136,7 +183,6 @@ static BOOL RBUsesSystemVideoRenderer(void) {
         self.backgroundColor = [UIColor blackColor];
         self.opaque = YES;
         self.multipleTouchEnabled = YES;
-        if (!RBUsesSystemVideoRenderer()) [self setupGL];
     }
     return self;
 }
@@ -159,22 +205,23 @@ static BOOL RBUsesSystemVideoRenderer(void) {
 
 - (void)layoutSubviews {
     [super layoutSubviews];
-    if (self.systemDisplayLayer) {
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        self.systemDisplayLayer.frame = self.bounds;
-        [CATransaction commit];
-    }
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    self.systemDisplayLayer.frame = self.bounds;
+    self.legacyGLLayer.frame = self.bounds;
+    self.legacyGLLayer.contentsScale = self.contentScaleFactor;
+    [CATransaction commit];
     if (!self.glContext) return;
     [EAGLContext setCurrentContext:self.glContext];
     glBindRenderbuffer(GL_RENDERBUFFER, _renderbuffer);
-    [self.glContext renderbufferStorage:GL_RENDERBUFFER fromDrawable:(CAEAGLLayer *)self.layer];
+    [self.glContext renderbufferStorage:GL_RENDERBUFFER fromDrawable:self.legacyGLLayer];
     glBindFramebuffer(GL_FRAMEBUFFER, _framebuffer);
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, _renderbuffer);
 }
 
 - (void)startVideoDisplayLinkIfNeeded {
-    if (self.usesSystemRenderer || self.videoDisplayLink || !self.videoActive || !self.window) return;
+    if (self.usesSystemRenderer || !self.glContext || self.videoDisplayLink ||
+        !self.videoActive || !self.window) return;
     self.videoDisplayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(displayVideoTick:)];
     self.videoDisplayLink.frameInterval = 1;
     [self.videoDisplayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
@@ -193,6 +240,7 @@ static BOOL RBUsesSystemVideoRenderer(void) {
     if (_videoActive == videoActive) return;
     _videoActive = videoActive;
     self.systemDisplayLayer.hidden = !videoActive;
+    self.legacyGLLayer.hidden = !videoActive;
     if (videoActive) [self startVideoDisplayLinkIfNeeded];
     else {
         [self.videoDisplayLink invalidate];
@@ -214,11 +262,22 @@ static BOOL RBUsesSystemVideoRenderer(void) {
 }
 
 - (void)installSystemDisplayLayer:(CALayer *)displayLayer {
-    if (self.systemDisplayLayer == displayLayer) return;
+    if (self.systemDisplayLayer == displayLayer) {
+        if (!displayLayer && !self.glContext && ![self setupGL])
+            RBLogEvent(@"presentation", @"error", @{}, @"OpenGL fallback setup failed");
+        return;
+    }
     [self.systemDisplayLayer removeFromSuperlayer];
     self.systemDisplayLayer = displayLayer;
     self.usesSystemRenderer = displayLayer != nil;
-    if (!displayLayer) return;
+    if (!displayLayer) {
+        if (![self setupGL])
+            RBLogEvent(@"presentation", @"error", @{}, @"OpenGL fallback setup failed");
+        else
+            [self startVideoDisplayLinkIfNeeded];
+        return;
+    }
+    [self teardownGL];
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     displayLayer.frame = self.bounds;
@@ -509,15 +568,10 @@ static unsigned char RBClampByte(int value) {
 }
 
 - (void)dealloc {
-    [self.videoDisplayLink invalidate];
     if (_pendingBuffer) CVPixelBufferRelease(_pendingBuffer);
     if (_queuedBuffer) CVPixelBufferRelease(_queuedBuffer);
     if (_currentBuffer) CVPixelBufferRelease(_currentBuffer);
-    if (_textureCache) CFRelease(_textureCache);
-    if (_program) glDeleteProgram(_program);
-    if (_framebuffer) glDeleteFramebuffers(1, &_framebuffer);
-    if (_renderbuffer) glDeleteRenderbuffers(1, &_renderbuffer);
-    if ([EAGLContext currentContext] == self.glContext) [EAGLContext setCurrentContext:nil];
+    [self teardownGL];
 }
 
 @end

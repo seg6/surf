@@ -12,8 +12,9 @@
 - (void)streamView:(RBStreamView *)streamView touchesCancelled:(NSSet *)touches withEvent:(UIEvent *)event;
 @end
 
-// Stable browser-video container. iOS 8+ installs the system compressed-video
-// layer here; iOS 6/7 use the contained legacy OpenGL presentation path.
+// Stable browser-video container. A runtime-capable system compressed-video
+// layer is installed here on iOS 6.1 and later. The contained OpenGL path is
+// created lazily only when that layer is missing or must be abandoned.
 @interface RBStreamView : UIView
 @property(nonatomic, weak) id<RBStreamViewDelegate> presentationDelegate;
 @property(nonatomic, assign) BOOL videoActive;

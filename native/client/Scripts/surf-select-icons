@@ -1,0 +1,38 @@
+#!/bin/sh
+set -eu
+
+app_dir="${SURF_APP_DIR:-/Applications/Surf.app}"
+system_version="${SURF_SYSTEM_VERSION:-}"
+
+if [ -z "$system_version" ]; then
+  system_plist="${SURF_SYSTEM_VERSION_PLIST:-/System/Library/CoreServices/SystemVersion.plist}"
+  if [ -r "$system_plist" ]; then
+    system_version="$(
+      sed -n '/<key>ProductVersion<\/key>/{
+        n
+        s/.*<string>\([^<]*\)<\/string>.*/\1/p
+        q
+      }' "$system_plist"
+    )"
+  fi
+fi
+
+case "$system_version" in
+  6.*) icon_set=Classic ;;
+  *) icon_set=Modern ;;
+esac
+
+source_dir="$app_dir/IconSets/$icon_set"
+for resource in \
+  Icon-60.png Icon-60@2x.png Icon-60@3x.png \
+  Icon-76~ipad.png Icon-76@2x~ipad.png Icon-83.5@2x.png
+do
+  if [ ! -f "$source_dir/$resource" ]; then
+    echo "Surf icon selector: missing $source_dir/$resource" >&2
+    exit 1
+  fi
+  cp "$source_dir/$resource" "$app_dir/$resource"
+  chmod 0644 "$app_dir/$resource"
+done
+
+exit 0
