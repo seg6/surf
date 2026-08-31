@@ -69,6 +69,10 @@ static void scan_cb(const uint8_t *nal, size_t len, void *ctx) {
     default:
         break;
     }
+    if (type != 9 && type != 7 && type != 8 &&
+        info->avcc_len <= SIZE_MAX - 4 - len) {
+        info->avcc_len += 4 + len;
+    }
 }
 
 int rb_au_scan(const uint8_t *au, size_t len, rb_au_info *info) {

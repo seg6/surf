@@ -22,9 +22,21 @@ type VideoPipelineConfig struct {
 	CaptureW, CaptureH   int
 	ScaleMaxW, ScaleMaxH int
 	BitrateK             int
-	Start                func(width, height, bitrateK int) error
+	Quantizer            int
+	FrameRate            int
+	Start                func(VideoStartConfig) error
 	Stop                 func()
 	Keyframe             func()
+}
+
+// VideoStartConfig is one atomic encoder generation. Adaptive changes must
+// update every pressure lever together; restarting once for size and again for
+// cadence or quality creates visible gaps and gives the governor stale data.
+type VideoStartConfig struct {
+	Width, Height int
+	BitrateK      int
+	Quantizer     int
+	FrameRate     int
 }
 
 type AccessUnit struct {
@@ -69,6 +81,7 @@ type VideoPipeline struct {
 	seq             uint32
 	stopTimer       *time.Timer
 	startRetryTimer *time.Timer
+	keyframeTimer   *time.Timer
 	startFailures   int
 	lastKeyframeReq time.Time
 
@@ -79,6 +92,9 @@ type VideoPipeline struct {
 func NewVideoPipeline(cfg VideoPipelineConfig) *VideoPipeline {
 	if cfg.CaptureW == 0 || cfg.CaptureH == 0 {
 		cfg.CaptureW, cfg.CaptureH = cfg.W, cfg.H
+	}
+	if cfg.FrameRate <= 0 {
+		cfg.FrameRate = 60
 	}
 	cfg.W, cfg.H = cfg.codedSize(cfg.CaptureW, cfg.CaptureH)
 	return &VideoPipeline{cfg: cfg, subs: map[*VideoSubscription]struct{}{}}
@@ -303,18 +319,33 @@ func (s *VideoPipeline) SetViewport(width, height, maxWidth, maxHeight int) {
 
 func (s *VideoPipeline) SetScaleLimit(maxWidth, maxHeight int) {
 	s.mu.Lock()
+	bitrateK, quantizer, frameRate := s.cfg.BitrateK, s.cfg.Quantizer, s.cfg.FrameRate
+	s.mu.Unlock()
+	s.SetProfile(maxWidth, maxHeight, bitrateK, quantizer, frameRate)
+}
+
+// SetProfile changes the complete adaptive stream profile as one generation.
+// Capture dimensions remain the native viewport; coded dimensions may scale
+// down while Chromium continues to lay the page out at full resolution.
+func (s *VideoPipeline) SetProfile(maxWidth, maxHeight, bitrateK, quantizer, frameRate int) {
+	if bitrateK <= 0 || frameRate <= 0 {
+		return
+	}
+	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.cfg.ScaleMaxW == maxWidth && s.cfg.ScaleMaxH == maxHeight {
+	width, height := s.cfg.codedSize(s.cfg.CaptureW, s.cfg.CaptureH)
+	if s.cfg.ScaleMaxW == maxWidth && s.cfg.ScaleMaxH == maxHeight &&
+		s.cfg.BitrateK == bitrateK && s.cfg.Quantizer == quantizer &&
+		s.cfg.FrameRate == frameRate && width == s.cfg.W && height == s.cfg.H {
 		return
 	}
 	s.cfg.ScaleMaxW, s.cfg.ScaleMaxH = maxWidth, maxHeight
-	width, height := s.cfg.codedSize(s.cfg.CaptureW, s.cfg.CaptureH)
-	if width == s.cfg.W && height == s.cfg.H {
-		return
-	}
+	s.cfg.BitrateK, s.cfg.Quantizer, s.cfg.FrameRate = bitrateK, quantizer, frameRate
+	width, height = s.cfg.codedSize(s.cfg.CaptureW, s.cfg.CaptureH)
 	s.cfg.W, s.cfg.H = width, height
 	if s.running {
-		log.Printf("stream: adaptive tab encoder size %dx%d", width, height)
+		log.Printf("stream: adaptive tab encoder %dx%d@%dfps qp=%d fallback=%dkbit/s",
+			width, height, frameRate, quantizer, bitrateK)
 		s.stopLocked()
 		s.startLocked()
 	}
@@ -328,18 +359,42 @@ func (s *VideoPipeline) RequestKeyframe() {
 		return
 	}
 	now := time.Now()
-	if now.Sub(s.lastKeyframeReq) < keyframeCooldown {
+	remaining := keyframeCooldown - now.Sub(s.lastKeyframeReq)
+	if remaining > 0 {
+		// Recovery requests are coalesced, never discarded. With event-driven
+		// IDRs there may be no later keyframe to wake a decoder that asked during
+		// the cooldown, so guarantee one as soon as the rate limit expires.
+		if s.keyframeTimer == nil {
+			var timer *time.Timer
+			timer = time.AfterFunc(remaining, func() {
+				s.mu.Lock()
+				defer s.mu.Unlock()
+				if s.keyframeTimer != timer {
+					return
+				}
+				s.keyframeTimer = nil
+				s.requestKeyframeLocked()
+			})
+			s.keyframeTimer = timer
+		}
 		return
 	}
-	s.lastKeyframeReq = now
+	s.requestKeyframeLocked()
+}
+
+func (s *VideoPipeline) requestKeyframeLocked() {
+	if !s.running {
+		return
+	}
+	s.lastKeyframeReq = time.Now()
 	log.Printf("stream: keyframe requested from tab encoder")
 	if s.cfg.Keyframe != nil {
 		s.cfg.Keyframe()
 	}
 	for sub := range s.subs {
-		sub.mu.Lock()
-		sub.dropped = true
-		sub.mu.Unlock()
+		// Discard queued dependent frames so the requested IDR itself cannot be
+		// rejected merely because the subscriber channel was still full.
+		sub.resetForGen(s.gen)
 	}
 }
 
@@ -353,7 +408,11 @@ func (s *VideoPipeline) startLocked() {
 	s.gen++
 	gen := s.gen
 	s.running = true
-	if err := s.cfg.Start(s.cfg.W, s.cfg.H, s.cfg.BitrateK); err != nil {
+	settings := VideoStartConfig{
+		Width: s.cfg.W, Height: s.cfg.H, BitrateK: s.cfg.BitrateK,
+		Quantizer: s.cfg.Quantizer, FrameRate: s.cfg.FrameRate,
+	}
+	if err := s.cfg.Start(settings); err != nil {
 		s.running = false
 		s.startFailures++
 		log.Printf("stream: tab encoder start failed (attempt %d): %v", s.startFailures, err)
@@ -361,11 +420,13 @@ func (s *VideoPipeline) startLocked() {
 		return
 	}
 	s.startFailures = 0
-	log.Printf("stream: tab encoder started generation=%d %dx%d source-clocked-60fps", gen, s.cfg.W, s.cfg.H)
+	log.Printf("stream: tab encoder started generation=%d %dx%d@%dfps qp=%d",
+		gen, s.cfg.W, s.cfg.H, s.cfg.FrameRate, s.cfg.Quantizer)
 }
 
 func (s *VideoPipeline) stopLocked() {
 	s.cancelStartRetryLocked()
+	s.cancelKeyframeTimerLocked()
 	s.startFailures = 0
 	if !s.running {
 		return
@@ -381,6 +442,13 @@ func (s *VideoPipeline) cancelStartRetryLocked() {
 	if s.startRetryTimer != nil {
 		s.startRetryTimer.Stop()
 		s.startRetryTimer = nil
+	}
+}
+
+func (s *VideoPipeline) cancelKeyframeTimerLocked() {
+	if s.keyframeTimer != nil {
+		s.keyframeTimer.Stop()
+		s.keyframeTimer = nil
 	}
 }
 

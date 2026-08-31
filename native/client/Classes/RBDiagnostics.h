@@ -23,6 +23,11 @@ typedef enum {
 @property(nonatomic, readonly, copy) NSString *healthReason;
 @property(nonatomic, readonly, assign) double imageFPS;
 @property(nonatomic, readonly, assign) double AURate;
+@property(nonatomic, readonly, copy) NSString *rendererMode;
+@property(nonatomic, readonly, assign) double rendererMS;
+@property(nonatomic, readonly, assign) unsigned long long rendererBackpressure;
+@property(nonatomic, readonly, assign) unsigned long long rendererRecoveries;
+@property(nonatomic, readonly, assign) unsigned long long rendererFailures;
 @property(nonatomic, readonly, assign) double latencyMS;
 @property(nonatomic, readonly, assign) double RTTMS;
 @property(nonatomic, readonly, assign) double ageMS;
@@ -32,7 +37,7 @@ typedef enum {
 @property(nonatomic, readonly, assign) unsigned long long overwrittenFrames;
 @property(nonatomic, readonly, assign) double submitMS;
 @property(nonatomic, readonly, assign) double callbackMS;
-@property(nonatomic, readonly, assign) double wrapMS;
+@property(nonatomic, readonly, assign) double handoffMS;
 @property(nonatomic, readonly, assign) unsigned long long decodeErrors;
 @property(nonatomic, readonly, assign) unsigned long long droppedAUs;
 @property(nonatomic, readonly, assign) int audioQueuedBuffers;
@@ -41,7 +46,7 @@ typedef enum {
 @property(nonatomic, readonly, assign) unsigned long long audioRestarts;
 @end
 
-// One bounded five-second diagnostics sample. Rates are derived from
+// One bounded two-second diagnostics sample. Rates are derived from
 // cumulative media counters; the service never sits on the decode or display
 // path.
 @interface RBDiagnosticsReport : NSObject
@@ -49,12 +54,20 @@ typedef enum {
 @property(nonatomic, assign) double imageFPS;
 @property(nonatomic, assign) double AURate;
 @property(nonatomic, assign) double decodeRate;
+@property(nonatomic, copy) NSString *rendererMode;
+@property(nonatomic, assign) double rendererRate;
+@property(nonatomic, assign) double rendererMS;
+@property(nonatomic, assign) NSUInteger rendererBackpressure;
+@property(nonatomic, assign) NSUInteger rendererRecoveries;
+@property(nonatomic, assign) NSUInteger rendererFailures;
 @property(nonatomic, assign) NSUInteger dropDelta;
 @property(nonatomic, assign) NSUInteger errorDelta;
 @property(nonatomic, assign) double recentGapMS;
 @property(nonatomic, assign) double dropPercent;
 @property(nonatomic, assign) double callbackMS;
 @property(nonatomic, assign) double ageSeconds;
+@property(nonatomic, assign) double windowMS;
+@property(nonatomic, assign) int queueDepth;
 @property(nonatomic, assign) BOOL memoryWarning;
 - (NSDictionary *)mediaStatsMessage;
 @end
@@ -67,6 +80,7 @@ typedef enum {
 
 - (id)initWithMediaPipeline:(RBMediaPipeline *)pipeline streamView:(RBStreamView *)streamView;
 - (void)resetConnection;
+- (void)resetVideoWindow;
 - (void)noteMemoryWarning;
 - (NSDictionary *)clockProbeIfIdle;
 - (BOOL)consumeControlMessage:(NSDictionary *)message;

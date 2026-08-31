@@ -13,6 +13,7 @@ typedef struct {
     size_t sps_len;
     const uint8_t *pps;
     size_t pps_len;
+    size_t avcc_len; /* exact converted length after dropping AUD/SPS/PPS */
     int has_idr;  /* any NAL type 5 */
     int has_slice; /* any VCL NAL (type 1 or 5) */
 } rb_au_info;

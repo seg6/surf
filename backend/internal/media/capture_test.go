@@ -135,30 +135,28 @@ func TestVideoCaptureUsesSourceClockWithoutQueuesOrTimers(t *testing.T) {
 		t.Fatalf("read offscreen script: %v", err)
 	}
 	text := string(script)
-	if strings.Contains(text, "videoConfig.fps") ||
-		strings.Contains(text, "config.framerate") {
-		t.Fatal("offscreen capture still contains an application FPS ceiling")
-	}
 	for _, want := range []string{
+		"function configuredFrameRate()",
+		"videoConfig.frameRate",
 		"track.getCapabilities()",
-		"maxFrameRate: captureFrameRate",
-		"ideal: captureFrameRate",
-		"max: captureFrameRate",
+		"maxFrameRate: configuredFrameRate()",
+		"ideal: frameRate",
+		"max: frameRate",
+		"framerate: frameRate",
+		"requestedFPS: frameRate",
 		`type: "video-warning"`,
 		"width: constraints.width",
 		"height: constraints.height",
 		"width: videoConfig.height",
 		"height: videoConfig.width",
-		"const captureFrameRate = 60",
-		"const outputFrameRate = 60",
 		"maxWidth: Math.max(videoConfig.width, videoConfig.height)",
 		"maxHeight: Math.max(videoConfig.width, videoConfig.height)",
-		`["quantizer", "variable"]`,
+		`["variable", "quantizer"]`,
 		"bitrateMode: rateControl",
 		`["prefer-software"]`,
 		"encoderPreference: hardwareAcceleration",
 		"encodeOptions.avc = {quantizer}",
-		"frameTimestamp - videoLastKeyTimestamp >= 2000000",
+		"const keyFrame = videoNeedsKeyframe",
 		"maxBufferSize: 1",
 		"videoLatestFrame.clone()",
 		"const scheduleVideoEncode = () =>",
@@ -175,6 +173,9 @@ func TestVideoCaptureUsesSourceClockWithoutQueuesOrTimers(t *testing.T) {
 		}
 	}
 	for _, forbidden := range []string{
+		"const captureFrameRate",
+		"const outputFrameRate",
+		"frameTimestamp - videoLastKeyTimestamp",
 		"intervalMS",
 		"lastSubmitAt",
 		"setTimeout(() =>",

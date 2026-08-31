@@ -35,9 +35,9 @@ func TestTabEncoderFeedsFanout(t *testing.T) {
 	var starts, stops, keyframes atomic.Int64
 	s := NewVideoPipeline(VideoPipelineConfig{
 		W: 768, H: 950, BitrateK: 6000,
-		Start: func(width, height, bitrateK int) error {
-			if width != 768 || height != 950 || bitrateK != 6000 {
-				t.Fatalf("start config = %dx%d %dk", width, height, bitrateK)
+		Start: func(settings VideoStartConfig) error {
+			if settings.Width != 768 || settings.Height != 950 || settings.BitrateK != 6000 || settings.FrameRate != 60 {
+				t.Fatalf("start config = %+v", settings)
 			}
 			starts.Add(1)
 			return nil
@@ -72,11 +72,37 @@ func TestTabEncoderFeedsFanout(t *testing.T) {
 	}
 }
 
+func TestKeyframeRequestDuringCooldownIsDeferred(t *testing.T) {
+	var keyframes atomic.Int64
+	s := NewVideoPipeline(VideoPipelineConfig{
+		W: 64, H: 64,
+		Start:    func(VideoStartConfig) error { return nil },
+		Keyframe: func() { keyframes.Add(1) },
+	})
+	sub := s.Subscribe()
+	defer sub.Close()
+
+	s.mu.Lock()
+	s.lastKeyframeReq = time.Now().Add(-keyframeCooldown + 40*time.Millisecond)
+	s.mu.Unlock()
+	s.RequestKeyframe()
+	if keyframes.Load() != 0 {
+		t.Fatal("cooldown request fired immediately")
+	}
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for keyframes.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if keyframes.Load() != 1 {
+		t.Fatalf("deferred keyframes=%d, want 1", keyframes.Load())
+	}
+}
+
 func TestSubscribeRetriesTransientEncoderStartFailure(t *testing.T) {
 	var starts atomic.Int64
 	s := NewVideoPipeline(VideoPipelineConfig{
 		W: 64, H: 64,
-		Start: func(int, int, int) error {
+		Start: func(VideoStartConfig) error {
 			if starts.Add(1) == 1 {
 				return errors.New("reconfigure still draining")
 			}
@@ -130,8 +156,8 @@ func TestResizeRestartsAtClientDerivedSize(t *testing.T) {
 	stops := 0
 	s := NewVideoPipeline(VideoPipelineConfig{
 		W: 768, H: 950,
-		Start: func(width, height, bitrateK int) error {
-			starts = append(starts, [2]int{width, height})
+		Start: func(settings VideoStartConfig) error {
+			starts = append(starts, [2]int{settings.Width, settings.Height})
 			return nil
 		},
 		Stop: func() { stops++ },
@@ -152,8 +178,8 @@ func TestViewportAndScaleChangeUseOneEncoderGeneration(t *testing.T) {
 	stops := 0
 	s := NewVideoPipeline(VideoPipelineConfig{
 		W: 768, H: 950, CaptureW: 768, CaptureH: 950,
-		Start: func(width, height, bitrateK int) error {
-			starts = append(starts, [2]int{width, height})
+		Start: func(settings VideoStartConfig) error {
+			starts = append(starts, [2]int{settings.Width, settings.Height})
 			return nil
 		},
 		Stop: func() { stops++ },
@@ -169,11 +195,38 @@ func TestViewportAndScaleChangeUseOneEncoderGeneration(t *testing.T) {
 	}
 }
 
+func TestAdaptiveProfileRestartsOnceWithAtomicSettings(t *testing.T) {
+	var starts []VideoStartConfig
+	stops := 0
+	s := NewVideoPipeline(VideoPipelineConfig{
+		W: 768, H: 974, CaptureW: 768, CaptureH: 974,
+		BitrateK: 48000, Quantizer: 12, FrameRate: 60,
+		Start: func(settings VideoStartConfig) error {
+			starts = append(starts, settings)
+			return nil
+		},
+		Stop: func() { stops++ },
+	})
+	defer s.Shutdown()
+	s.Subscribe()
+	s.SetProfile(672, 852, 24000, 18, 30)
+	if len(starts) != 2 {
+		t.Fatalf("starts=%d, want initial start plus one profile restart", len(starts))
+	}
+	want := (VideoStartConfig{Width: 672, Height: 852, BitrateK: 24000, Quantizer: 18, FrameRate: 30})
+	if starts[1] != want {
+		t.Fatalf("adaptive settings = %+v, want %+v", starts[1], want)
+	}
+	if stops != 1 {
+		t.Fatalf("stops=%d, want one atomic restart", stops)
+	}
+}
+
 func TestResizeStartFailureKeepsSubscriberForAutomaticRetry(t *testing.T) {
 	var starts atomic.Int64
 	s := NewVideoPipeline(VideoPipelineConfig{
 		W: 768, H: 950,
-		Start: func(width, height, bitrateK int) error {
+		Start: func(settings VideoStartConfig) error {
 			if starts.Add(1) == 2 {
 				return errors.New("old capture is still stopping")
 			}
@@ -220,7 +273,7 @@ func TestExplicitRestartPreservesSubscriberAndRequiresNewIDR(t *testing.T) {
 	var starts, stops atomic.Int64
 	s := NewVideoPipeline(VideoPipelineConfig{
 		W: 64, H: 64,
-		Start: func(int, int, int) error {
+		Start: func(VideoStartConfig) error {
 			starts.Add(1)
 			return nil
 		},

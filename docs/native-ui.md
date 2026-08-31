@@ -73,10 +73,33 @@ breakdown. There is no explanatory status paragraph and no scrolling. Portrait
 uses one hierarchy; short landscape viewports place the signal and pipeline
 beside each other. The exact Surf client version remains fixed in the compact
 readout and expanded header in both arrangements.
+The expanded footer also names the active adaptive stream profile so a device
+test can distinguish crisp, motion, balanced, and recovery behavior directly.
 
 The inspector overlays the existing stream instead of resizing it. Health
 classification uses fresh pipeline deltas and never treats an idle static page
 as unhealthy solely because its presentation FPS is zero.
+
+## Video presentation
+
+On iOS 8 and later, Surf feeds compressed H.264 samples directly to
+`AVSampleBufferDisplayLayer`. The system owns decode scheduling, decoded
+IOSurfaces, display timing, and composition; Surf does not bounce every frame
+through a VideoToolbox callback, the UIKit main queue, a display link, and an
+OpenGL drawable. The stream view is a stable Core Animation container, so a
+keyboard transition can translate or cover it without reallocating the video
+surface or rebuilding the encoder generation.
+
+iOS 6 and 7 retain a compatibility path using runtime-resolved VideoToolbox,
+NV12 IOSurfaces, and OpenGL ES. That path keeps a small FIFO and recovers only
+at a complete IDR dependency boundary when overloaded. It never drops an
+arbitrary P-frame and then attempts to decode its dependants, and it never
+uses decode-without-output as a hidden catch-up mode.
+
+Both renderers use the same bounds-checked Annex-B/AVCC and parameter-set
+builder. Diagnostics name the active renderer explicitly: the system path
+reports accepted compressed frames, display-queue waits, recoveries, and
+failures; the legacy path reports submit, callback, and UIKit handoff timing.
 
 ## Acceptance
 
@@ -85,6 +108,10 @@ new-tab favorites, tab closing/switching, More dismissal and actions, Share,
 Reader night mode, QR pairing, Library, and Settings. Package verification must
 also pass so missing fonts, malformed PNGs, device-family regressions, or lost
 third-party notices fail the build before device testing.
+Media acceptance additionally covers continuous motion at the native surface,
+keyboard open/close during that motion, tab switching, foreground/background
+resume, rotation, and a forced IDR recovery. A keyboard transition must not
+create a new remote viewport or encoder generation.
 
 The supported deployment range remains iOS 6–14. Device feedback from one OS
 version is treated as a compatibility test case rather than a separate visual

@@ -65,6 +65,7 @@ type Controller struct {
 	resizeTimer         *time.Timer
 	resizeGen           uint64
 	resizeClosed        bool
+	adaptiveApplyMu     sync.Mutex
 	startupSession      browserSession
 	restorePending      map[string]struct{}
 	restoreOrder        map[string]int
@@ -88,11 +89,8 @@ type Controller struct {
 	videoSubs   map[*transport.Client]*media.VideoSubscription
 	audioSubs   map[*transport.Client]*media.AudioSubscription
 
-	startedAt          time.Time
-	adaptiveProfile    int
-	adaptiveLastChange time.Time
-	adaptiveHealthy    int
-	adaptiveUnhealthy  int
+	startedAt time.Time
+	governor  streamGovernor
 	// userAgent is populated from Browser.getVersion for full Chrome
 	// headless-new. Chrome still exposes a HeadlessChrome token even though
 	// this is the ordinary browser binary; normalize that single token while
@@ -172,11 +170,12 @@ func New(cfg *config.Config, hub *transport.Hub) (*Controller, error) {
 	audioCfg := media.AudioConfig{Capture: capture.OpenAudio}
 	videoCfg := videoPipelineConfig(cfg)
 	var b *Controller
-	videoCfg.Start = func(width, height, bitrateK int) error {
+	videoCfg.Start = func(settings media.VideoStartConfig) error {
 		return capture.StartVideo(media.EncoderConfig{
-			Codec: encoderCodec(width, height),
-			Width: width, Height: height, BitrateK: bitrateK,
-			Quantizer: cfg.StreamQuantizer,
+			Codec: encoderCodec(settings.Width, settings.Height, settings.FrameRate),
+			Width: settings.Width, Height: settings.Height,
+			BitrateK: settings.BitrateK, Quantizer: settings.Quantizer,
+			FrameRate: settings.FrameRate,
 		}, b.onVideoFrame)
 	}
 	videoCfg.Stop = capture.StopVideo
@@ -205,6 +204,7 @@ func New(cfg *config.Config, hub *transport.Hub) (*Controller, error) {
 		stop:           make(chan struct{}),
 		stopped:        make(chan struct{}),
 		startedAt:      time.Now(),
+		governor:       newStreamGovernor(),
 		widevineState:  "unknown",
 		alive:          true,
 	}

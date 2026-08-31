@@ -120,12 +120,24 @@ type SelectReplyCommand struct {
 }
 type MediaStatsCommand struct {
 	CommandBase
-	PresentedFPS float64 `json:"fps"`
-	AURate       float64 `json:"auRate"`
-	CallbackMS   float64 `json:"callbackMs"`
-	GapMS        float64 `json:"gapMs"`
-	DropPercent  float64 `json:"dropPct"`
-	MemoryWarn   bool    `json:"memoryWarn"`
+	ImageFPS             float64 `json:"fps"`
+	PresentedFPS         float64 `json:"presentedFps"`
+	DecodeFPS            float64 `json:"decodeFps"`
+	AURate               float64 `json:"auRate"`
+	Renderer             string  `json:"renderer"`
+	RendererFPS          float64 `json:"rendererFps"`
+	RendererMS           float64 `json:"rendererMs"`
+	RendererBackpressure int     `json:"rendererBackpressure"`
+	RendererRecoveries   int     `json:"rendererRecoveries"`
+	RendererFailures     int     `json:"rendererFailures"`
+	CallbackMS           float64 `json:"callbackMs"`
+	GapMS                float64 `json:"gapMs"`
+	FrameAgeMS           float64 `json:"frameAgeMs"`
+	WindowMS             float64 `json:"windowMs"`
+	DropPercent          float64 `json:"dropPct"`
+	QueueDepth           int     `json:"queue"`
+	DecodeErrors         int     `json:"decodeErrors"`
+	MemoryWarn           bool    `json:"memoryWarn"`
 }
 type VolumeCommand struct {
 	CommandBase

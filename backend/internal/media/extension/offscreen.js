@@ -23,11 +23,14 @@ let videoLatestFrameRawGapMS = 0;
 let videoPendingFrames = [];
 let videoPumpWake = null;
 
-// Capture and admit the newest fresh image at the iPad display ceiling. The
+// Capture and admit the newest fresh image at the active client profile. The
 // latest-only handoff absorbs compositor jitter without ever building a queue
 // of old pictures or making up a late tick with a burst.
-const captureFrameRate = 60;
-const outputFrameRate = 60;
+function configuredFrameRate() {
+  const requested = Number(videoConfig && videoConfig.frameRate);
+  return Number.isFinite(requested) ?
+    Math.max(15, Math.min(60, Math.round(requested))) : 60;
+}
 function stopVideoEncoder() {
   videoGeneration++;
   videoPumpWake = null;
@@ -229,9 +232,10 @@ async function startVideoEncoder(track) {
     track.getCapabilities() : {};
   const availableRate = capabilities && capabilities.frameRate ?
     capabilities.frameRate.max : 0;
+  const frameRate = configuredFrameRate();
   constraints.frameRate = {
-    ideal: captureFrameRate,
-    max: captureFrameRate,
+    ideal: frameRate,
+    max: frameRate,
   };
   try {
     await track.applyConstraints(constraints);
@@ -255,16 +259,15 @@ async function startVideoEncoder(track) {
     codec: videoConfig.codec,
     width: videoConfig.width,
     height: videoConfig.height,
-    framerate: outputFrameRate,
+    framerate: frameRate,
     latencyMode: "realtime",
     contentHint: "detail",
     avc: {format: "annexb"},
   };
-  // Constant-quantizer AVC gives text, icons and fine page edges a fixed
-  // quality floor instead of allowing a bitrate controller to blur them.
-  // QP 12 is effectively transparent for browser chrome at native size while
-  // remaining practical on old Wi-Fi. Fall back to a deliberately generous
-  // VBR target on encoders that do not implement WebCodecs quantizer mode.
+  // Native-resolution AVC under a bounded VBR target keeps text geometry and
+  // layout pixel-sharp while limiting the coefficient/bitstream work handed
+  // to legacy hardware decoders. Constant-QP remains a compatibility fallback
+  // for WebCodecs implementations without variable-rate control.
   const requestedQuantizer = Number(videoConfig.quantizer);
   const quantizer = Number.isInteger(requestedQuantizer) ?
     Math.max(0, Math.min(51, requestedQuantizer)) : 12;
@@ -275,7 +278,7 @@ async function startVideoEncoder(track) {
   // platform codec with different reference and buffering behavior.
   let selection = null;
   for (const hardwareAcceleration of ["prefer-software"]) {
-    for (const rateControl of ["quantizer", "variable"]) {
+    for (const rateControl of ["variable", "quantizer"]) {
       const candidate = {
         ...baseConfig,
         hardwareAcceleration,
@@ -357,12 +360,13 @@ async function startVideoEncoder(track) {
     sourceHeight: settings.height || 0,
     sourceFPS: settings.frameRate || 0,
     sourceCapabilityFPS: availableRate || 0,
+    requestedFPS: frameRate,
     encoderPreference: hardwareAcceleration,
     rateControl,
     quantizer: rateControl === "quantizer" ? quantizer : -1,
   });
 
-  // The constrained tab track is the 60 Hz clock. Keep exactly one latest raw
+  // The constrained tab track is the active profile clock. Keep one latest raw
   // image and at most one H.264 encode in flight instead of adding a second
   // timer whose wake-up slop lowers the effective rate. Static pages do not
   // consume encoder CPU: an unchanged image is encoded only when an explicit
@@ -393,10 +397,14 @@ async function startVideoEncoder(track) {
     }
     const sourceSequence = videoLatestSourceSequence;
     const frameTimestamp = now * 1000;
+    // Keep IDRs event-driven. A fixed-QP IDR is disproportionately expensive
+    // for legacy VideoToolbox decoders; forcing one every two seconds can use
+    // all of their timing margin and create a permanent catch-up cycle.
+    // Start, reconfigure, new-subscriber, and decoder-recovery paths already
+    // set videoNeedsKeyframe, so a healthy stream needs no periodic IDR.
     const keyFrame = videoNeedsKeyframe ||
       videoLastKeyTimestamp === null ||
-      frameTimestamp < videoLastKeyTimestamp ||
-      frameTimestamp - videoLastKeyTimestamp >= 2000000;
+      frameTimestamp < videoLastKeyTimestamp;
     if (videoFrameNumber === 0) {
       sendVideoJSON({
         type: "video-frame",
@@ -513,7 +521,7 @@ async function startCapture(streamId) {
           chromeMediaSourceId: streamId,
           maxWidth: Math.max(videoConfig.width, videoConfig.height),
           maxHeight: Math.max(videoConfig.width, videoConfig.height),
-          maxFrameRate: captureFrameRate,
+          maxFrameRate: configuredFrameRate(),
         },
       } : false,
     });

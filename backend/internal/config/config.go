@@ -60,8 +60,8 @@ type Config struct {
 
 	// H.264 lane. The encoder only runs while a native client is subscribed.
 	StreamScale     string // STREAM_SCALE, optional maximum; empty = client size
-	StreamBitrateK  int    // STREAM_BITRATE, fallback when constant-quality encoding is unavailable
-	StreamQuantizer int    // STREAM_QUANTIZER, H.264 QP 0..51; lower is sharper
+	StreamBitrateK  int    // STREAM_BITRATE, primary variable-rate H.264 target
+	StreamQuantizer int    // STREAM_QUANTIZER, fallback H.264 QP 0..51; lower is sharper
 }
 
 func envInt(key string, def int) int {
@@ -146,7 +146,7 @@ func load() (*Config, error) {
 		AdaptiveVideo:      envBool("SURF_ADAPTIVE_VIDEO", false),
 		BrowserIdleTimeout: envDuration("SURF_BROWSER_IDLE_TIMEOUT", 2*time.Minute),
 		StreamScale:        envStr("STREAM_SCALE", ""),
-		StreamBitrateK:     envInt("STREAM_BITRATE", 48000),
+		StreamBitrateK:     envInt("STREAM_BITRATE", 16000),
 		StreamQuantizer:    envInt("STREAM_QUANTIZER", 12),
 	}
 	return cfg, nil

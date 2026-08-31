@@ -192,6 +192,13 @@ fullscreen settle into one capture reconfiguration. A page entering or
 leaving the Fullscreen API, including YouTube's player, keeps native fullscreen
 synchronized without reconnecting the browser session.
 
+An optional adaptive governor can keep demanding motion smooth on legacy
+devices. When enabled, native decode and presentation health selects one
+coordinated capture profile, while Chromium still lays the page out at the
+device's full logical viewport. Static pages automatically return to 60 FPS,
+and every profile preserves full-quality native-size rendering so text and
+images remain sharp.
+
 Surf does not distribute Widevine. If the selected host browser supplies a
 working Widevine CDM, protected sites can use it, subject to that site's
 license and output-protection rules.

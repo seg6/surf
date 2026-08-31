@@ -174,12 +174,15 @@ static CGFloat RBEvenExtent(CGFloat value) {
 @property(nonatomic, strong) RBDiagnostics *diagnostics;
 @property(nonatomic, assign) BOOL videoActive;   // server confirmed video-config ok
 @property(nonatomic, assign) BOOL videoStarting; // server is starting the automatic video lane
+@property(nonatomic, copy) NSString *videoProfile;
+@property(nonatomic, assign) CGSize remoteViewportSize;
 // Keyboard avoidance (editable rect, viewport fractions)
 @property(nonatomic, assign) CGRect editableRect;
 @property(nonatomic, assign) BOOL editableHasRect;
 @property(nonatomic, assign) BOOL keyboardVisible;
 @property(nonatomic, assign) CGFloat keyboardTop;
 @property(nonatomic, assign) CGFloat keyboardShift;
+@property(nonatomic, assign) CFTimeInterval lastVideoLivenessRecoveryAt;
 @property(nonatomic, copy) NSString *previousHiddenText;
 @property(nonatomic, assign) BOOL inputCompositionActive;
 // JS dialogs (M2.1)
@@ -272,6 +275,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
     [self.view addSubview:self.browserStateView];
     self.mediaPipeline = [[RBMediaPipeline alloc] init];
     self.mediaPipeline.delegate = self;
+    [self.streamView installSystemDisplayLayer:self.mediaPipeline.systemDisplayLayer];
     self.diagnostics = [[RBDiagnostics alloc] initWithMediaPipeline:self.mediaPipeline
                                                          streamView:self.streamView];
 
@@ -506,6 +510,9 @@ static CGFloat RBEvenExtent(CGFloat value) {
         return;
     }
     if (self.session.state == RBSessionStateOpen && self.videoActive) {
+        // Frames are intentionally discarded while backgrounded. Re-enter at
+        // an IDR instead of handing dependent P-frames to stale decoder state.
+        [self.mediaPipeline recoverVideo];
         self.streamView.videoActive = YES;
         [self.session sendMessage:@{@"t": @"reqkeyframe"}];
     }
@@ -567,6 +574,10 @@ static CGFloat RBEvenExtent(CGFloat value) {
                 }
                 CGFloat chromeTop = shelfBottom - topBarHeight;
                 self.chromeBar.frame = CGRectMake(0.0, chromeTop, w, topBarHeight);
+                // Keep the remote viewport stable while the keyboard moves the
+                // browser shelf. Resizing it here restarts capture, WebCodecs,
+                // and VideoToolbox on every keyboard transition and creates a
+                // visible one-second media interruption.
                 contentBottom = h - topBarHeight;
                 if (self.findVisible) {
                     contentBottom -= kRBFindBarHeight;
@@ -600,6 +611,10 @@ static CGFloat RBEvenExtent(CGFloat value) {
     CGFloat streamW = RBEvenExtent(w);
     CGFloat streamH = RBEvenExtent(MAX(2.0, contentBottom - contentTop));
     CGFloat streamX = floor((w - streamW) / 2.0);
+    self.remoteViewportSize = CGSizeMake(streamW, streamH);
+    // The keyboard and omnibox shelf may cover this surface, but must never
+    // resize it. iOS's video compositor handles occlusion without restarting
+    // capture, rebuilding a decoder, or reallocating an EAGL drawable.
     self.streamView.bounds = CGRectMake(0.0, 0.0, streamW, streamH);
     self.streamView.center = CGPointMake(streamX + streamW / 2.0,
                                          contentTop + streamH / 2.0);
@@ -690,7 +705,8 @@ static CGFloat RBEvenExtent(CGFloat value) {
 }
 
 - (void)sendCurrentViewportSizeForced:(BOOL)force {
-    CGSize s = self.streamView.bounds.size;
+    CGSize s = self.remoteViewportSize;
+    if (s.width < 10.0 || s.height < 10.0) s = self.streamView.bounds.size;
     if (s.width < 10.0 || s.height < 10.0) return;
     [self.session updateViewportWidth:(NSInteger)(s.width + 0.5)
                                 height:(NSInteger)(s.height + 0.5)
@@ -1092,12 +1108,16 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
     if (!self.videoActive && !self.videoStarting) return;
     self.videoActive = NO;
     self.videoStarting = NO;
+    self.videoProfile = nil;
     self.streamView.videoActive = NO;
     [self.mediaPipeline stopVideo];
 }
 
 - (void)handleVideoConfig:(NSDictionary *)message {
     NSString *state = [message objectForKey:@"state"];
+    NSString *profile = [message objectForKey:@"profile"];
+    if ([profile isKindOfClass:[NSString class]] && [profile length] > 0)
+        self.videoProfile = profile;
     if ([state isEqualToString:@"starting"]) {
         self.videoStarting = YES;
         if (!self.currentURL || ![self.currentURL hasPrefix:@"about:blank#surf-new"])
@@ -1117,6 +1137,7 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
     }
     [self.mediaPipeline configureVideoWidth:[[message objectForKey:@"w"] intValue]
                                      height:[[message objectForKey:@"h"] intValue]];
+    [self.diagnostics resetVideoWindow];
     if (self.browserStateView.state == RBBrowserStateVideoUnavailable ||
         self.browserStateView.state == RBBrowserStateStartingVideo)
         [self.browserStateView showState:RBBrowserStateHidden detail:nil];
@@ -1128,6 +1149,17 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
              metadata:(RBFrameMetadata *)metadata {
     if (!self.videoActive) return;
     [self.streamView displayVideoPixelBuffer:pixelBuffer metadata:metadata];
+}
+
+- (void)mediaPipeline:(RBMediaPipeline *)pipeline
+ didAcceptSystemFrame:(RBFrameMetadata *)metadata {
+    if (!self.videoActive) return;
+    [self.streamView noteSystemFrameMetadata:metadata];
+}
+
+- (void)mediaPipeline:(RBMediaPipeline *)pipeline
+didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
+    [self.streamView installSystemDisplayLayer:displayLayer];
 }
 
 - (void)streamView:(RBStreamView *)streamView didPresentMetadata:(RBFrameMetadata *)metadata {
@@ -1401,7 +1433,8 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
 }
 
 - (NSDictionary *)wirePointForTouch:(UITouch *)touch identifier:(NSNumber *)identifier {
-    CGSize size = self.streamView.bounds.size;
+    CGSize size = self.remoteViewportSize;
+    if (size.width < 1.0 || size.height < 1.0) size = self.streamView.bounds.size;
     CGPoint point = [touch locationInView:self.streamView];
     CGFloat width = MAX(1.0, size.width), height = MAX(1.0, size.height);
     CGFloat radius = 1.0;
@@ -2872,7 +2905,9 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
 - (void)refreshDebugOverlayWithAge:(double)age {
     if (!self.debugVisible) return;
     NSString *state = self.session.state == RBSessionStateOpen ? @"open" : (self.session.state == RBSessionStateConnecting ? @"connecting" : @"idle");
-    NSString *lane = self.videoActive ? @"H.264 ready" : (self.videoStarting ? @"H.264 starting" : @"video idle");
+    NSString *lane = self.videoActive ?
+        [NSString stringWithFormat:@"H.264 %@", self.videoProfile ?: @"ready"] :
+        (self.videoStarting ? @"H.264 starting" : @"video idle");
     NSString *server = [self.currentServer objectForKey:@"name"];
     if (server.length == 0) server = self.session.baseURL.host;
     if (server.length == 0) server = @"Surf";
@@ -2903,7 +2938,8 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
     if (report) {
         int queued = self.mediaPipeline.queuedAUs;
         [self.session sendMessage:[report mediaStatsMessage]];
-        RBLogEvent(@"performance", report.recentGapMS >= 100.0 ? @"warn" : @"info",
+        BOOL rendererWarning = report.rendererRecoveries > 0 || report.rendererFailures > 0;
+        RBLogEvent(@"performance", report.recentGapMS >= 100.0 || rendererWarning ? @"warn" : @"info",
                    @{@"lane": self.videoActive ? @"video" : @"starting",
                      @"presented_fps": @(report.presentedFPS), @"image_fps": @(report.imageFPS),
                      @"au_rate": @(report.AURate), @"decode_rate": @(report.decodeRate),
@@ -2912,15 +2948,40 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
                      @"max_gap_ms": @(report.recentGapMS), @"rtt_ms": @(self.diagnostics.lastRTTMS),
                      @"decode_submit_ms": @(self.mediaPipeline.averageSubmitMS),
                      @"decode_callback_ms": @(self.mediaPipeline.averageCallbackMS),
-                     @"frame_wrap_ms": @(self.mediaPipeline.averageWrapMS),
+                     @"main_handoff_ms": @(self.mediaPipeline.averageHandoffMS),
                      @"error_delta": @(report.errorDelta),
                      @"audio_queue": @(self.mediaPipeline.audioQueuedBuffers),
                      @"audio_dropped_pcm": @(self.mediaPipeline.audioDroppedPCM),
                      @"audio_underruns": @(self.mediaPipeline.audioUnderruns),
                      @"audio_restarts": @(self.mediaPipeline.audioRestartCount),
                      @"frame_age_seconds": @(report.ageSeconds),
-                     @"view_width": @(self.streamView.bounds.size.width),
-                     @"view_height": @(self.streamView.bounds.size.height)}, @"Performance sample");
+                     @"stream_profile": self.videoProfile ?: @"unknown",
+                     @"renderer": self.mediaPipeline.rendererMode,
+                     @"renderer_ms": @(self.mediaPipeline.averageRendererMS),
+                     @"renderer_backpressure_delta": @(report.rendererBackpressure),
+                     @"renderer_recoveries_delta": @(report.rendererRecoveries),
+                     @"renderer_failures_delta": @(report.rendererFailures),
+                     @"view_width": @(self.remoteViewportSize.width),
+                     @"view_height": @(self.remoteViewportSize.height)}, @"Performance sample");
+
+        // VideoToolbox on legacy devices can accept AUs without an error yet
+        // stop issuing output callbacks. It can also leave the client waiting
+        // for an event-driven IDR after a congestion resync. Continuous input
+        // with no decode or presentation is therefore a real liveness fault,
+        // unlike an intentionally quiet/static capture source.
+        BOOL legacyRenderer = [self.mediaPipeline.rendererMode isEqualToString:@"legacy-gl"];
+        BOOL stalled = legacyRenderer && self.videoActive && report.AURate >= 10.0 &&
+            report.decodeRate < 1.0 && report.presentedFPS < 1.0 &&
+            (presentedAt <= 0.0 || age >= 1.5);
+        if (stalled && now - self.lastVideoLivenessRecoveryAt >= 2.0) {
+            self.lastVideoLivenessRecoveryAt = now;
+            RBLogEvent(@"decoder", @"warn", @{ @"frame_age_seconds": @(age),
+                @"au_rate": @(report.AURate), @"recovery": @"session_reset" },
+                @"Decoder liveness watchdog fired");
+            [self.mediaPipeline recoverVideo];
+            [self.diagnostics resetVideoWindow];
+            [self.session sendMessage:@{ @"t": @"reqkeyframe" }];
+        }
     }
     [self refreshDebugOverlayWithAge:age];
 }

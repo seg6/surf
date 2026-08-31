@@ -29,6 +29,8 @@ enum {
     NSUInteger _uniquePresentationCount;
     NSUInteger _uniquePresentationCursor;
 }
+@property(nonatomic, strong) CALayer *systemDisplayLayer;
+@property(nonatomic, assign, readwrite) BOOL usesSystemRenderer;
 @property(nonatomic, strong) EAGLContext *glContext;
 @property(nonatomic, strong) CADisplayLink *videoDisplayLink;
 @property(nonatomic, strong) RBFrameMetadata *pendingMetadata;
@@ -59,9 +61,28 @@ static GLuint RBCompileShader(GLenum type, const char *source) {
     return shader;
 }
 
+static BOOL RBNeedsSynchronousGLPresentation(void) {
+    static BOOL needed = NO;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        needed = [[[UIDevice currentDevice] systemVersion] doubleValue] < 7.0;
+    });
+    return needed;
+}
+
 @implementation RBStreamView
 
-+ (Class)layerClass { return [CAEAGLLayer class]; }
+static BOOL RBUsesSystemVideoRenderer(void) {
+    return [[[UIDevice currentDevice] systemVersion] doubleValue] >= 8.0 &&
+        NSClassFromString(@"AVSampleBufferDisplayLayer") != Nil;
+}
+
++ (Class)layerClass {
+    // The iOS 8 path must never allocate an EAGL drawable: resizing that
+    // drawable while UIKit animates the keyboard is the coupling this renderer
+    // replacement removes. Legacy systems keep the proven EAGL backing.
+    return RBUsesSystemVideoRenderer() ? [CALayer class] : [CAEAGLLayer class];
+}
 
 - (BOOL)setupGL {
     self.glContext = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES2];
@@ -115,7 +136,7 @@ static GLuint RBCompileShader(GLenum type, const char *source) {
         self.backgroundColor = [UIColor blackColor];
         self.opaque = YES;
         self.multipleTouchEnabled = YES;
-        [self setupGL];
+        if (!RBUsesSystemVideoRenderer()) [self setupGL];
     }
     return self;
 }
@@ -138,6 +159,12 @@ static GLuint RBCompileShader(GLenum type, const char *source) {
 
 - (void)layoutSubviews {
     [super layoutSubviews];
+    if (self.systemDisplayLayer) {
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        self.systemDisplayLayer.frame = self.bounds;
+        [CATransaction commit];
+    }
     if (!self.glContext) return;
     [EAGLContext setCurrentContext:self.glContext];
     glBindRenderbuffer(GL_RENDERBUFFER, _renderbuffer);
@@ -147,7 +174,7 @@ static GLuint RBCompileShader(GLenum type, const char *source) {
 }
 
 - (void)startVideoDisplayLinkIfNeeded {
-    if (self.videoDisplayLink || !self.videoActive || !self.window) return;
+    if (self.usesSystemRenderer || self.videoDisplayLink || !self.videoActive || !self.window) return;
     self.videoDisplayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(displayVideoTick:)];
     self.videoDisplayLink.frameInterval = 1;
     [self.videoDisplayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
@@ -165,6 +192,7 @@ static GLuint RBCompileShader(GLenum type, const char *source) {
 - (void)setVideoActive:(BOOL)videoActive {
     if (_videoActive == videoActive) return;
     _videoActive = videoActive;
+    self.systemDisplayLayer.hidden = !videoActive;
     if (videoActive) [self startVideoDisplayLinkIfNeeded];
     else {
         [self.videoDisplayLink invalidate];
@@ -183,6 +211,20 @@ static GLuint RBCompileShader(GLenum type, const char *source) {
         _uniquePresentationCount = 0;
         _uniquePresentationCursor = 0;
     }
+}
+
+- (void)installSystemDisplayLayer:(CALayer *)displayLayer {
+    if (self.systemDisplayLayer == displayLayer) return;
+    [self.systemDisplayLayer removeFromSuperlayer];
+    self.systemDisplayLayer = displayLayer;
+    self.usesSystemRenderer = displayLayer != nil;
+    if (!displayLayer) return;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    displayLayer.frame = self.bounds;
+    displayLayer.hidden = !self.videoActive;
+    [self.layer addSublayer:displayLayer];
+    [CATransaction commit];
 }
 
 - (void)beginMotionWindow {
@@ -208,7 +250,7 @@ static GLuint RBCompileShader(GLenum type, const char *source) {
 }
 
 - (void)displayVideoPixelBuffer:(CVPixelBufferRef)pixelBuffer metadata:(RBFrameMetadata *)metadata {
-    if (!pixelBuffer) return;
+    if (self.usesSystemRenderer || !pixelBuffer) return;
     CVPixelBufferRetain(pixelBuffer);
     if (!_pendingBuffer) {
         _pendingBuffer = pixelBuffer;
@@ -221,8 +263,9 @@ static GLuint RBCompileShader(GLenum type, const char *source) {
         return;
     }
     // Preserve the next frame already waiting for the display link and keep
-    // only the newest second frame. This absorbs callback/display phase jitter
-    // without allowing latency to grow beyond two refresh intervals.
+    // only the newest second frame. VideoToolbox callbacks can arrive in
+    // short pairs even when their average cadence is below the display rate;
+    // this absorbs that phase jitter without building an unbounded queue.
     self.overwrittenVideoFrames++;
     CVPixelBufferRelease(_queuedBuffer);
     _queuedBuffer = pixelBuffer;
@@ -234,6 +277,22 @@ static unsigned char RBClampByte(int value) {
 }
 
 - (UIImage *)snapshotImageWithMaximumSize:(CGSize)maximumSize {
+    if (self.usesSystemRenderer) {
+        if (maximumSize.width < 1.0 || maximumSize.height < 1.0 ||
+            self.bounds.size.width < 1.0 || self.bounds.size.height < 1.0 ||
+            ![self respondsToSelector:@selector(drawViewHierarchyInRect:afterScreenUpdates:)]) return nil;
+        CGFloat scale = MIN(1.0, MIN(maximumSize.width / self.bounds.size.width,
+                                     maximumSize.height / self.bounds.size.height));
+        CGSize size = CGSizeMake(MAX(1.0, floor(self.bounds.size.width * scale)),
+                                 MAX(1.0, floor(self.bounds.size.height * scale)));
+        UIGraphicsBeginImageContextWithOptions(size, YES, 1.0);
+        CGContextRef context = UIGraphicsGetCurrentContext();
+        CGContextScaleCTM(context, scale, scale);
+        BOOL drew = [self drawViewHierarchyInRect:self.bounds afterScreenUpdates:NO];
+        UIImage *image = drew ? UIGraphicsGetImageFromCurrentImageContext() : nil;
+        UIGraphicsEndImageContext();
+        return image;
+    }
     if (!_currentBuffer || maximumSize.width < 1.0 || maximumSize.height < 1.0 ||
         CVPixelBufferGetPlaneCount(_currentBuffer) < 2) return nil;
     CVPixelBufferRetain(_currentBuffer);
@@ -358,10 +417,14 @@ static unsigned char RBClampByte(int value) {
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     // iOS 6's SGX543 driver can return from present while it still consumes
     // CoreVideo-backed textures. Releasing and flushing that cache immediately
-    // afterward then produces a recurring crash in presentRenderbuffer. Finish
-    // the draw and unbind both planes before presentation so their lifetime is
-    // unambiguous even on the legacy driver.
-    glFinish();
+    // afterward then produces a recurring crash in presentRenderbuffer, so it
+    // needs a synchronous finish. iOS 7+ fixes that lifetime bug; serializing
+    // its GPU here needlessly competes with keyboard/window compositing and
+    // VideoToolbox sixty times per second.
+    if (RBNeedsSynchronousGLPresentation()) glFinish();
+    // presentRenderbuffer submits the command stream on iOS 7+. An explicit
+    // glFlush immediately before it is redundant and adds pressure while the
+    // system keyboard compositor is using the same SGX GPU.
     GLenum drawError = glGetError();
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -388,6 +451,15 @@ static unsigned char RBClampByte(int value) {
     _queuedBuffer = NULL;
     self.queuedMetadata = nil;
     if (![self drawPixelBuffer:_currentBuffer]) return;
+    [self recordPresentationMetadata:metadata];
+}
+
+- (void)noteSystemFrameMetadata:(RBFrameMetadata *)metadata {
+    if (!self.usesSystemRenderer || !self.videoActive || !metadata) return;
+    [self recordPresentationMetadata:metadata];
+}
+
+- (void)recordPresentationMetadata:(RBFrameMetadata *)metadata {
     CFTimeInterval now = CACurrentMediaTime();
     BOOL inMotionWindow = self.motionTracking || now <= self.motionUntil;
     BOOL uniqueSourceImage = !metadata || metadata.sourceSequence == 0 ||

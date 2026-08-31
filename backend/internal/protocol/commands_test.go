@@ -51,6 +51,7 @@ func TestDecodeEveryNativeCommand(t *testing.T) {
 		`{"t":"selectreply","id":"request","indices":[2]}`,
 		`{"t":"media-query"}`, `{"t":"media-playpause"}`, `{"t":"media-mute"}`,
 		`{"t":"media-volume","value":0.5}`, `{"t":"mobile","on":true}`,
+		`{"t":"media-stats","fps":59.5,"presentedFps":59.5,"decodeFps":59.5,"auRate":60,"renderer":"system","rendererFps":59.5,"rendererMs":0.2,"rendererBackpressure":1,"rendererRecoveries":0,"rendererFailures":0,"callbackMs":0,"gapMs":34,"frameAgeMs":20,"windowMs":2000,"dropPct":0.5,"queue":1,"decodeErrors":0,"memoryWarn":false}`,
 		`{"t":"dark","on":true}`,
 		`{"t":"fullscreen","on":true}`,
 		`{"t":"clipboard-result","id":"request","ok":true}`,

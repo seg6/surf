@@ -21,6 +21,7 @@ type EncoderConfig struct {
 	Height    int    `json:"height"`
 	BitrateK  int    `json:"bitrateK"`
 	Quantizer int    `json:"quantizer"`
+	FrameRate int    `json:"frameRate"`
 }
 
 type VideoFrame struct {
@@ -41,6 +42,9 @@ func (s *Capture) StartVideo(config EncoderConfig, handler func(VideoFrame)) err
 	}
 	if config.Codec == "" {
 		config.Codec = "avc1.42E01F"
+	}
+	if config.FrameRate <= 0 {
+		config.FrameRate = 60
 	}
 	s.mu.Lock()
 	if s.closed || s.client == nil {
@@ -179,6 +183,7 @@ func (s *Capture) sendVideoConfig() {
 		"type": "configure", "codec": config.Codec,
 		"width": config.Width, "height": config.Height,
 		"bitrateK": config.BitrateK, "quantizer": config.Quantizer,
+		"frameRate": config.FrameRate,
 	})
 }
 
@@ -277,6 +282,7 @@ func (s *Capture) handleVideoMessage(data []byte) {
 		SourceHeight      int     `json:"sourceHeight"`
 		SourceFPS         float64 `json:"sourceFPS"`
 		CapabilityFPS     float64 `json:"sourceCapabilityFPS"`
+		RequestedFPS      float64 `json:"requestedFPS"`
 		CodedWidth        int     `json:"codedWidth"`
 		CodedHeight       int     `json:"codedHeight"`
 		DisplayWidth      int     `json:"displayWidth"`
@@ -304,9 +310,9 @@ func (s *Capture) handleVideoMessage(data []byte) {
 			default:
 			}
 		}
-		log.Printf("video: tabCapture source %dx%d@%.1ffps capability=%.1ffps encoder-preference=%s quality=%s qp=%d",
+		log.Printf("video: tabCapture source %dx%d@%.1ffps requested=%.0ffps capability=%.1ffps encoder-preference=%s quality=%s qp=%d",
 			message.SourceWidth, message.SourceHeight,
-			message.SourceFPS, message.CapabilityFPS,
+			message.SourceFPS, message.RequestedFPS, message.CapabilityFPS,
 			message.EncoderPreference, message.RateControl, message.Quantizer)
 	case "video-error":
 		if message.Error == "" {

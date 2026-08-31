@@ -2,6 +2,29 @@
 
 This file records the user-visible changes in every Surf release.
 
+## 0.15.2 - 2026-08-31
+
+- Replaced Surf's iOS 8+ per-frame VideoToolbox callback, UIKit handoff,
+  display-link, and OpenGL presentation chain with the system compressed-video
+  display queue. Surf now submits H.264 access units directly and never owns
+  decoded IOSurfaces on that path, removing keyboard animation from the
+  frame-critical pipeline.
+- Kept one even-sized remote surface and encoder generation while the keyboard
+  opens, closes, or moves the bottom browser shelf. The video surface may be
+  translated or occluded locally, but it is not cropped, resized, or restarted.
+- Added one shared, bounds-checked Annex-B-to-AVCC sample builder, bounded
+  dependency-safe backpressure recovery, explicit display-layer replacement,
+  and a clean iOS 6/7 VideoToolbox/OpenGL fallback without arbitrary P-frame
+  skipping or decode-without-output catch-up.
+- Made diagnostics and optional adaptive feedback renderer-aware: iOS 8+
+  reports compressed frames accepted, display-queue pressure, recoveries, and
+  failures, while legacy systems retain decode callback and OpenGL handoff
+  measurements. Adaptive cadence remains off by default.
+- Kept the primary stream sharp at its native even-sized surface, 60 FPS, and
+  a detail-oriented 16 Mbit/s variable-rate target; removed the redundant
+  periodic IDR and coalesced ordinary UI control delivery away from media
+  intake. Bumped the exact native protocol to `20260831-1`.
+
 ## 0.14.0 - 2026-08-31
 
 - Rebuilt the native browser around one Oceanic Precision interface across

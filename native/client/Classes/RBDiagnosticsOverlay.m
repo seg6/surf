@@ -398,7 +398,7 @@ static UIColor *RBInspectorMutedColor(void) {
         [self.contentView addSubview:self.pipelineTitleLabel];
         self.pipelineRows = @[
             [[RBDiagnosticsPipelineRow alloc] initWithTitle:@"Video"],
-            [[RBDiagnosticsPipelineRow alloc] initWithTitle:@"Decoder"],
+            [[RBDiagnosticsPipelineRow alloc] initWithTitle:@"Renderer"],
             [[RBDiagnosticsPipelineRow alloc] initWithTitle:@"Continuity"],
             [[RBDiagnosticsPipelineRow alloc] initWithTitle:@"Audio"]
         ];
@@ -654,17 +654,21 @@ static UIColor *RBInspectorMutedColor(void) {
     }
     [self.signalView addSample:snapshot.RTTMS];
 
+    BOOL systemRenderer = [snapshot.rendererMode isEqualToString:@"system"];
     NSArray *values = @[
         [NSString stringWithFormat:@"%d queued", snapshot.queuedAUs],
-        [NSString stringWithFormat:@"%.1f ms", snapshot.callbackMS],
+        [NSString stringWithFormat:@"%.1f ms", systemRenderer ? snapshot.rendererMS : snapshot.callbackMS],
         [NSString stringWithFormat:@"%llu gaps", snapshot.sequenceGaps],
         [NSString stringWithFormat:@"%d queued", snapshot.audioQueuedBuffers]
     ];
     NSArray *details = @[
         [NSString stringWithFormat:@"%.1f AU/s · %.0f ms old · %.0f ms max gap",
             snapshot.AURate, snapshot.ageMS, snapshot.maxGapMS],
-        [NSString stringWithFormat:@"%.1f submit · %.1f wrap · %llu errors · %llu drops",
-            snapshot.submitMS, snapshot.wrapMS, snapshot.decodeErrors, snapshot.droppedAUs],
+        systemRenderer ?
+            [NSString stringWithFormat:@"system · %llu waits · %llu recoveries · %llu failures",
+                snapshot.rendererBackpressure, snapshot.rendererRecoveries, snapshot.rendererFailures] :
+            [NSString stringWithFormat:@"legacy GL · %.1f submit · %.1f handoff · %llu errors",
+                snapshot.submitMS, snapshot.handoffMS, snapshot.decodeErrors],
         [NSString stringWithFormat:@"%llu overwritten · %.0f ms largest pause",
             snapshot.overwrittenFrames, snapshot.maxGapMS],
         [NSString stringWithFormat:@"%llu drops · %llu underruns · %llu restarts",

@@ -86,11 +86,11 @@ Surf reads configuration from environment variables:
 | `DOWNLOADS` | `$SURF_HOME/downloads` | Browser downloads |
 | `UPLOADS` | `$SURF_HOME/uploads` | Temporary client uploads |
 | `VW`, `VH` | `768`, `934` | Initial viewport before the client reports its exact size |
-| `STREAM_BITRATE` | `48000` | H.264 variable-rate target in kbit/s |
-| `STREAM_QUANTIZER` | `12` | H.264 constant-quality QP (0–51; lower is sharper) |
+| `STREAM_BITRATE` | `16000` | H.264 variable-rate target in kbit/s |
+| `STREAM_QUANTIZER` | `12` | Fallback H.264 constant-quality QP (0–51; lower is sharper) |
 | `STREAM_SCALE` | empty | Optional maximum stream size |
 | `SURF_CONTENT_BLOCKER` | `1` | Manage uBlock Origin Lite |
-| `SURF_ADAPTIVE_VIDEO` | `0` | Experimental adaptive stream profile |
+| `SURF_ADAPTIVE_VIDEO` | `0` | Experimental adaptive cadence governor; set `1` to enable |
 | `SURF_BROWSER_IDLE_TIMEOUT` | `2m` | Stop Chromium after the final native client disconnects; `0` keeps it warm |
 | `CHROME_NO_SANDBOX` | automatic for root | Disable Chromium sandbox where required |
 
@@ -234,9 +234,26 @@ Surf strictly selects Chromium's software AVC encoder on every host. This does
 not disable GPU rendering or compositing inside Chromium; it only keeps the
 transmitted H.264 stream independent of platform encoders whose reference-frame
 and buffering choices may exceed older clients' real-time decode budget. Surf
-first requests constant-quality encoding with `STREAM_QUANTIZER`, then uses the
-`STREAM_BITRATE` variable-rate configuration when the software encoder does not
-support quantizer mode.
+first requests bounded variable-rate encoding with `STREAM_BITRATE`, then uses
+constant-quality `STREAM_QUANTIZER` encoding when the software encoder does not
+support variable-rate mode.
+
+Surf holds the native-size stream at 60 FPS by default. Every two seconds, each native
+client identifies its active renderer and reports the matching throughput,
+queue depth, frame age, drops, pressure/recovery signals, errors, and memory
+pressure for diagnostics. iOS 8+ reports frames accepted by its compressed
+system display queue instead of inventing decoder callback timing that the API
+does not expose. The
+experimental adaptive governor can be enabled with `SURF_ADAPTIVE_VIDEO=1`.
+It smooths that feedback and chooses the worst recent client in a shared session. It can move
+through crisp (60 FPS), motion (50 FPS), balanced (40 FPS), and recovery
+(30 FPS), always at the native stream size. Cadence and H.264 level change in
+one encoder generation. Startup and reconfiguration windows are excluded from
+control decisions; emergency faults then downshift immediately, moderate
+pressure requires consecutive current samples, healthy recovery is deliberately
+slow, and an idle static page returns to crisp without being classified as a
+low-FPS failure. Cadence fallback remains opt-in while its recovery behavior is
+being validated against the native 60 FPS target.
 
 The native client reports the exact even-sized stream surface left by its
 current chrome; the backend does not choose from hard-coded device profiles.

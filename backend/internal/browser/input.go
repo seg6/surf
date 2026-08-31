@@ -131,7 +131,7 @@ func (b *Controller) handleCommand(c *transport.Client, command protocol.Command
 		b.handleSelectReply(m)
 		return
 	case *protocol.MediaStatsCommand:
-		b.handleMediaStats(m)
+		b.handleMediaStats(c, m)
 		return
 	case *protocol.URLCommand:
 		if kind == "opennew" {
@@ -156,8 +156,8 @@ func (b *Controller) handleCommand(c *transport.Client, command protocol.Command
 		}
 		return
 	case "reqkeyframe":
-		// Client lost decode sync (VT session error / bad SPS-PPS) and wants an
-		// early IDR instead of waiting for the fixed 2s cadence.
+		// Client lost decode sync (renderer/VT session error or bad SPS/PPS) and
+		// needs a recovery IDR; healthy streams have no periodic keyframe cadence.
 		b.video.RequestKeyframe()
 		return
 	}
@@ -704,7 +704,7 @@ func (b *Controller) applySettledViewport(generation uint64) {
 
 	b.mu.Lock()
 	w, h := b.viewW, b.viewH
-	profile := adaptiveProfiles[b.adaptiveProfile]
+	profile := adaptiveProfiles[b.governor.profile]
 	b.mu.Unlock()
 	if tab := b.active(); tab != nil {
 		b.applyView(tab)

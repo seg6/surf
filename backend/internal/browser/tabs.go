@@ -558,6 +558,7 @@ func (b *Controller) switchActive(id int) {
 	}
 	b.activeID = id
 	b.activeGen++
+	b.governor.settleAfterDiscontinuity(time.Now())
 	generation := b.activeGen
 	url := next.URL
 	b.mu.Unlock()

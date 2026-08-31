@@ -49,14 +49,25 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.ChromeNoSandbox {
 		t.Fatal("ChromeNoSandbox=true")
 	}
-	if cfg.StreamBitrateK != 48000 {
-		t.Fatalf("StreamBitrateK=%d, want 48000", cfg.StreamBitrateK)
+	if cfg.StreamBitrateK != 16000 {
+		t.Fatalf("StreamBitrateK=%d, want 16000", cfg.StreamBitrateK)
 	}
 	if cfg.StreamQuantizer != 12 {
 		t.Fatalf("StreamQuantizer=%d, want 12", cfg.StreamQuantizer)
 	}
+	if cfg.AdaptiveVideo {
+		t.Fatal("AdaptiveVideo=true, want fixed native 60 FPS by default")
+	}
 	if cfg.BrowserIdleTimeout != 2*time.Minute {
 		t.Fatalf("BrowserIdleTimeout=%s, want 2m", cfg.BrowserIdleTimeout)
+	}
+}
+
+func TestAdaptiveVideoCanBeEnabled(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("SURF_ADAPTIVE_VIDEO", "1")
+	if !loadConfig(t).AdaptiveVideo {
+		t.Fatal("AdaptiveVideo=false after explicit enable")
 	}
 }
 

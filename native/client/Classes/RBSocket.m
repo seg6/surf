@@ -588,15 +588,21 @@ static OSStatus RBSocketTLSWrite(SSLConnectionRef connection, const void *data, 
 - (void)deliverPayload:(NSData *)payload opcode:(unsigned char)opcode {
     if (opcode == 0x1) {
         NSString *text = [[NSString alloc] initWithData:payload encoding:NSUTF8StringEncoding];
-        // Preserve WebSocket wire order across control and binary messages.
-        // In particular, video-config must finish configuring VideoToolbox
-        // before the immediately-following IDR reaches the media pipeline.
-        // The socket read loop is never the main thread, so this cannot
-        // self-deadlock. Binary payloads still bypass the main queue.
-        dispatch_sync(dispatch_get_main_queue(), ^{
+        NSDictionary *message = [NSJSONSerialization JSONObjectWithData:payload options:0 error:nil];
+        NSString *kind = [message isKindOfClass:[NSDictionary class]] ?
+            [message objectForKey:@"t"] : nil;
+        BOOL mediaBarrier = [kind isEqualToString:@"video-config"] ||
+            [kind isEqualToString:@"audio-config"];
+        void (^deliver)(void) = ^{
             id<RBSocketDelegate> delegate = self.delegate;
             if (self.running && [delegate respondsToSelector:@selector(socket:didReceiveText:)]) [delegate socket:self didReceiveText:text ?: @""];
-        });
+        };
+        // Only media configuration is a wire-order barrier: VideoToolbox and
+        // AudioQueue must be configured before the immediately following
+        // binary frame. Ordinary UI controls (especially omnibox suggestions)
+        // must never stop the socket reader behind a keyboard animation.
+        if (mediaBarrier) dispatch_sync(dispatch_get_main_queue(), deliver);
+        else dispatch_async(dispatch_get_main_queue(), deliver);
     } else if (opcode == 0x2) {
         // Media must never transit UIKit's main queue. At 30 video AUs plus
         // 50 audio packets per second, posting every packet there created a

@@ -102,12 +102,14 @@ func (b *Controller) onVideoFrame(frame media.VideoFrame) {
 	}
 }
 
-func encoderCodec(width, height int) string {
+func encoderCodec(width, height, frameRate int) string {
 	// Level selection is decoder compatibility metadata, not a frame-rate
-	// limit. Prefer Level 3.1 whenever the coded size at Surf's 60 FPS target
+	// limit. Prefer Level 3.1 whenever the coded size at the active FPS target
 	// fits its macroblock rate.
-	const assumedSourceFPS = 60
-	if ((width+15)/16)*((height+15)/16)*assumedSourceFPS > 108000 {
+	if frameRate <= 0 {
+		frameRate = 60
+	}
+	if ((width+15)/16)*((height+15)/16)*frameRate > 108000 {
 		return "avc1.42E029" // constrained baseline, level 4.1
 	}
 	return "avc1.42E01F" // constrained baseline, level 3.1
@@ -163,9 +165,9 @@ func (b *Controller) deliverAU(c *transport.Client, sub *media.VideoSubscription
 	}
 	if err := c.SendBinary(protocol.EncodeVideo(meta, au.IDR, au.Data)); err != nil {
 		// Outbox dropped the AU — every P-frame after it is garbage, so make
-		// the subscription resume at an immediate IDR. Waiting for the normal
-		// two-second GOP boundary is the visible freeze this recovery path is
-		// specifically meant to avoid; VideoPipeline applies its own cooldown.
+		// the subscription resume at an immediate IDR. Healthy streams do not
+		// carry periodic IDRs, so this request is the dependency boundary;
+		// VideoPipeline applies its own cooldown.
 		sub.ForceResync()
 		go b.video.RequestKeyframe()
 	}
@@ -193,6 +195,9 @@ func (b *Controller) stopVideo(c *transport.Client) {
 // ClientDisconnected implements transport.Handler and releases media subscriptions.
 func (b *Controller) ClientDisconnected(c *transport.Client) {
 	b.touch.cancelClient(c)
+	b.mu.Lock()
+	b.governor.remove(governorClientID(c))
+	b.mu.Unlock()
 	b.mediaMu.Lock()
 	sub := b.videoSubs[c]
 	delete(b.videoSubs, c)
@@ -228,7 +233,9 @@ func videoPipelineConfig(cfg *config.Config) media.VideoPipelineConfig {
 		W: cfg.ViewW, H: cfg.ViewH,
 		CaptureW: cfg.ViewW, CaptureH: cfg.ViewH,
 		ScaleMaxW: maxW, ScaleMaxH: maxH,
-		BitrateK: cfg.StreamBitrateK,
+		BitrateK:  cfg.StreamBitrateK,
+		Quantizer: cfg.StreamQuantizer,
+		FrameRate: 60,
 	}
 }
 

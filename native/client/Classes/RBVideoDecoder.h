@@ -15,9 +15,8 @@
 - (void)videoDecoderDidFail:(RBVideoDecoder *)decoder;
 // Main thread. A real decode-error resync just happened (VT session loss,
 // bad SPS/PPS) — not a client-side queue-congestion drop, which already
-// waits on its own. The caller should ask the server for an early IDR
-// ({"t":"reqkeyframe"}) instead of waiting up to 2s for the next scheduled
-// one.
+// waits on its own. The caller should ask the server for a recovery IDR
+// ({"t":"reqkeyframe"}); healthy streams have no periodic IDR.
 - (void)videoDecoderNeedsKeyframe:(RBVideoDecoder *)decoder;
 @end
 
@@ -39,8 +38,8 @@
 @property(nonatomic, readonly) double averageSubmitMS;
 @property(nonatomic, readonly) double lastCallbackMS;
 @property(nonatomic, readonly) double averageCallbackMS;
-@property(nonatomic, readonly) double lastWrapMS;
-@property(nonatomic, readonly) double averageWrapMS;
+@property(nonatomic, readonly) double lastHandoffMS;
+@property(nonatomic, readonly) double averageHandoffMS;
 
 // Whether VideoToolbox resolved — safe to call any time, caches its answer.
 + (BOOL)available;

@@ -37,6 +37,7 @@ int main(void) {
     rb_au_info info;
     assert(rb_au_scan(au, n, &info) == 0);
     assert(info.has_idr && info.has_slice);
+    assert(info.avcc_len == 4 + (1 + sizeof sei_p) + 4 + (1 + sizeof idr_p));
     assert(info.sps && info.sps_len == 1 + sizeof sps_p && (info.sps[0] & 0x1F) == 7);
     assert(info.pps && info.pps_len == 1 + sizeof pps_p && (info.pps[0] & 0x1F) == 8);
     assert(memcmp(info.sps + 1, sps_p, sizeof sps_p) == 0);
@@ -81,6 +82,7 @@ int main(void) {
     pn += put_nal(pau + pn, 0, 0x41, p_p, sizeof p_p);
     assert(rb_au_scan(pau, pn, &info) == 0);
     assert(!info.has_idr && info.has_slice && !info.sps && !info.pps);
+    assert(info.avcc_len == 4 + 1 + sizeof p_p);
     clen = rb_au_to_avcc(pau, pn, conv, sizeof conv);
     assert(clen == 4 + 1 + sizeof p_p && (conv[4] & 0x1F) == 1);
 

@@ -1,11 +1,10 @@
 #import "RBVideoDecoder.h"
+#import "RBH264SampleBuilder.h"
 #import "RBLog.h"
 #import "RBProtocol.h"
 #import "RBVTPrivate.h"
 
 #import <QuartzCore/QuartzCore.h>
-
-#include "rb_h264.h"
 
 #include <dlfcn.h>
 #include <libkern/OSAtomic.h>
@@ -53,21 +52,25 @@ static BOOL RBResolveVT(void) {
 
 // ---- decoder ----------------------------------------------------------------
 
-// Above this many queued-but-undecoded AUs we drop to the next IDR: the A5
-// fell behind and P-frames only pile onto stale state.
+// Legacy iOS 6/7 only: once more than three AUs are outstanding, latency is
+// already outside the useful live window. Discard the complete dependency
+// chain and resume at one requested IDR; never suppress arbitrary P outputs.
 static const int kRBMaxQueuedAUs = 3;
 // This many resyncs inside 30s means the lane is hurting more than helping.
 static const int kRBMaxResyncs = 3;
 
 @interface RBVideoDecoder () {
     VTDecompressionSessionRef _session;
-    CMVideoFormatDescriptionRef _format;
+    CVPixelBufferRef _pendingOutput;
+    RBFrameMetadata *_pendingOutputMetadata;
+    CFTimeInterval _pendingOutputCallbackAt;
+    BOOL _outputHandoffScheduled;
     int32_t _inFlight;
+    volatile int32_t _resyncPending;
     unsigned int _generation;
 }
 @property(nonatomic, strong) dispatch_queue_t queue;
-@property(nonatomic, strong) NSData *currentSPS;
-@property(nonatomic, strong) NSData *currentPPS;
+@property(nonatomic, strong) RBH264SampleBuilder *sampleBuilder;
 @property(nonatomic, assign) BOOL waitingForIDR;
 @property(nonatomic, assign) int32_t queued;
 @property(nonatomic, assign) NSUInteger decodedFrames;
@@ -79,15 +82,20 @@ static const int kRBMaxResyncs = 3;
 @property(nonatomic, assign) double averageSubmitMS;
 @property(nonatomic, assign) double lastCallbackMS;
 @property(nonatomic, assign) double averageCallbackMS;
-@property(nonatomic, assign) double lastWrapMS;
-@property(nonatomic, assign) double averageWrapMS;
+@property(nonatomic, assign) double lastHandoffMS;
+@property(nonatomic, assign) double averageHandoffMS;
 @property(nonatomic, assign) int resyncs;
 @property(nonatomic, assign) CFTimeInterval resyncWindowStart;
 @property(nonatomic, assign) BOOL failed;
 - (BOOL)completeFrameForGeneration:(unsigned int)generation;
+- (void)enqueueOutputPixelBuffer:(CVPixelBufferRef)pixelBuffer
+                        metadata:(RBFrameMetadata *)metadata
+                      callbackAt:(CFTimeInterval)callbackAt;
+- (void)drainPendingOutput;
+- (void)clearPendingOutput;
 @end
 
-// VT output callback (VT's thread): wrap + hand the frame to the main thread.
+// VT output callback (VT's thread): retain + hand the frame to the main thread.
 static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
                              VTDecodeInfoFlags flags, CVImageBufferRef imageBuffer,
                              CMTime pts, CMTime duration) {
@@ -109,18 +117,13 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
     }
     if (timing) free(timing);
     if (status != noErr || !imageBuffer || !currentGeneration) return;
-    CVPixelBufferRetain((CVPixelBufferRef)imageBuffer);
-    double wrapMS = 0.0;
+    CFTimeInterval callbackAt = now;
     decoder.callbackFrames++;
     decoder.decodedFrames++;
     decoder.lastCallbackMS = callbackMS;
     decoder.averageCallbackMS = decoder.averageCallbackMS <= 0.0 ? callbackMS : decoder.averageCallbackMS * 0.85 + callbackMS * 0.15;
-    decoder.lastWrapMS = wrapMS;
-    decoder.averageWrapMS = decoder.averageWrapMS <= 0.0 ? wrapMS : decoder.averageWrapMS * 0.85 + wrapMS * 0.15;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [decoder.delegate videoDecoder:decoder didDecodePixelBuffer:(CVPixelBufferRef)imageBuffer metadata:metadata];
-        CVPixelBufferRelease((CVPixelBufferRef)imageBuffer);
-    });
+    [decoder enqueueOutputPixelBuffer:(CVPixelBufferRef)imageBuffer
+                             metadata:metadata callbackAt:callbackAt];
 }
 
 @implementation RBVideoDecoder
@@ -129,6 +132,70 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
     if (generation != _generation) return NO;
     OSAtomicDecrement32(&_inFlight);
     return YES;
+}
+
+// VideoToolbox callbacks are not allowed to create an unbounded main-queue
+// backlog. Keyboard and popover animations can briefly occupy UIKit; retaining
+// every decoded IOSurface behind them exhausts the decoder's output pool and
+// turns that short UI stall into a multi-second media stall. Keep only the
+// newest completed surface and schedule at most one main-thread handoff.
+- (void)enqueueOutputPixelBuffer:(CVPixelBufferRef)pixelBuffer
+                        metadata:(RBFrameMetadata *)metadata
+                      callbackAt:(CFTimeInterval)callbackAt {
+    if (!pixelBuffer) return;
+    CVPixelBufferRetain(pixelBuffer);
+    BOOL schedule = NO;
+    @synchronized (self) {
+        if (_pendingOutput) {
+            CVPixelBufferRelease(_pendingOutput);
+            self.droppedAUs++;
+        }
+        _pendingOutput = pixelBuffer;
+        _pendingOutputMetadata = metadata;
+        _pendingOutputCallbackAt = callbackAt;
+        if (!_outputHandoffScheduled) {
+            _outputHandoffScheduled = YES;
+            schedule = YES;
+        }
+    }
+    if (schedule) {
+        dispatch_async(dispatch_get_main_queue(), ^{ [self drainPendingOutput]; });
+    }
+}
+
+- (void)drainPendingOutput {
+    CVPixelBufferRef pixelBuffer = NULL;
+    RBFrameMetadata *metadata = nil;
+    CFTimeInterval callbackAt = 0.0;
+    @synchronized (self) {
+        pixelBuffer = _pendingOutput;
+        _pendingOutput = NULL;
+        metadata = _pendingOutputMetadata;
+        _pendingOutputMetadata = nil;
+        callbackAt = _pendingOutputCallbackAt;
+        _pendingOutputCallbackAt = 0.0;
+        _outputHandoffScheduled = NO;
+    }
+    if (!pixelBuffer) return;
+    double handoffMS = callbackAt > 0.0 ?
+        (CACurrentMediaTime() - callbackAt) * 1000.0 : 0.0;
+    self.lastHandoffMS = handoffMS;
+    self.averageHandoffMS = self.averageHandoffMS <= 0.0 ? handoffMS :
+        self.averageHandoffMS * 0.85 + handoffMS * 0.15;
+    [self.delegate videoDecoder:self didDecodePixelBuffer:pixelBuffer metadata:metadata];
+    CVPixelBufferRelease(pixelBuffer);
+}
+
+- (void)clearPendingOutput {
+    @synchronized (self) {
+        if (_pendingOutput) {
+            CVPixelBufferRelease(_pendingOutput);
+            _pendingOutput = NULL;
+        }
+        _pendingOutputMetadata = nil;
+        _pendingOutputCallbackAt = 0.0;
+        _outputHandoffScheduled = NO;
+    }
 }
 
 - (int)queuedAUs {
@@ -149,24 +216,43 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
 }
 
 - (void)dealloc {
+    [self clearPendingOutput];
     [self teardownSession];
 }
 
 - (void)feedAU:(NSData *)au idr:(BOOL)idr metadata:(RBFrameMetadata *)metadata {
     if (self.failed || ![RBVideoDecoder available]) return;
+    // Once one dependent frame has been shed, no later P-frame is decodable.
+    // Reject it before it enters the serial queue and let exactly one IDR
+    // request represent the whole recovery episode.
+    int32_t resyncState = OSAtomicAdd32Barrier(0, &_resyncPending);
+    if (!idr && resyncState == 1) {
+        self.droppedAUs++;
+        return;
+    }
+    // State 2 means the recovery IDR is already queued. P-frames arriving
+    // after it are valid dependencies and must remain behind it in FIFO order.
+    if (idr && resyncState == 1)
+        OSAtomicCompareAndSwap32Barrier(1, 2, &_resyncPending);
     // Latest-wins is illegal for P-frames; when the queue backs up we drop
     // whole GOPs instead: skip until the next IDR drains through.
-    if (OSAtomicIncrement32(&_queued) + _inFlight > kRBMaxQueuedAUs) {
+    int32_t depth = OSAtomicIncrement32Barrier(&_queued) +
+        OSAtomicAdd32Barrier(0, &_inFlight);
+    if (depth > kRBMaxQueuedAUs) {
         if (!idr) {
-            OSAtomicDecrement32(&_queued);
+            OSAtomicDecrement32Barrier(&_queued);
             self.droppedAUs++;
-            dispatch_async(self.queue, ^{ self.waitingForIDR = YES; });
-            // Do not wait up to the normal two-second GOP after shedding a
-            // dependent frame. The backend coalesces repeated requests behind
-            // its restart cooldown.
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [self.delegate videoDecoderNeedsKeyframe:self];
-            });
+            BOOL beganResync = OSAtomicCompareAndSwap32Barrier(0, 1, &_resyncPending);
+            if (beganResync) {
+                RBLogEvent(@"decoder", @"warn", @{ @"queue_depth": @(depth),
+                    @"recovery": @"next_idr" }, @"Legacy decoder queue overflowed");
+                dispatch_async(self.queue, ^{
+                    self.waitingForIDR = YES;
+                });
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self.delegate videoDecoderNeedsKeyframe:self];
+                });
+            }
             return;
         }
         // Keep an overflowing IDR: it is the recovery boundary needed by all
@@ -181,11 +267,13 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
 
 - (void)reset {
     dispatch_async(self.queue, ^{
-        [self teardownSession];
         self->_generation++;
+        [self teardownSession];
+        [self clearPendingOutput];
         self->_inFlight = 0;
-        self.currentSPS = nil;
-        self.currentPPS = nil;
+        self->_resyncPending = 0;
+        self.sampleBuilder = [[RBH264SampleBuilder alloc]
+            initWithWidth:MAX(2, self.codedWidth) height:MAX(2, self.codedHeight)];
         self.waitingForIDR = YES;
         self.resyncs = 0;
         self.failed = NO;
@@ -196,8 +284,8 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
         self.averageSubmitMS = 0.0;
         self.lastCallbackMS = 0.0;
         self.averageCallbackMS = 0.0;
-        self.lastWrapMS = 0.0;
-        self.averageWrapMS = 0.0;
+        self.lastHandoffMS = 0.0;
+        self.averageHandoffMS = 0.0;
     });
 }
 
@@ -209,10 +297,6 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
         CFRelease(_session);
         _session = NULL;
     }
-    if (_format) {
-        CFRelease(_format);
-        _format = NULL;
-    }
 }
 
 - (void)noteResync {
@@ -223,6 +307,7 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
     }
     self.resyncs++;
     self.waitingForIDR = YES;
+    OSAtomicCompareAndSwap32Barrier(0, 1, &_resyncPending);
     if (self.resyncs > kRBMaxResyncs) {
         RBLogEvent(@"decoder", @"error", @{@"resyncs": @(self.resyncs), @"window_seconds": @30}, @"Decoder resync budget exhausted");
         self.failed = YES;
@@ -230,53 +315,32 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
         dispatch_async(dispatch_get_main_queue(), ^{ [self.delegate videoDecoderDidFail:self]; });
         return;
     }
-    // Ask the server for an early IDR rather than wait up to 2s for the next
-    // scheduled one. Skipped on the give-up path above because recovery then
-    // requires the user's explicit retry.
+    // Ask the server for a recovery IDR; healthy streams intentionally have
+    // no periodic IDR. Skipped on the give-up path above because recovery
+    // then requires the user's explicit retry.
     dispatch_async(dispatch_get_main_queue(), ^{ [self.delegate videoDecoderNeedsKeyframe:self]; });
 }
 
-- (BOOL)ensureSessionForAU:(const uint8_t *)bytes length:(size_t)len info:(rb_au_info *)info {
-    if (!info->sps || !info->pps) return _session != NULL;
-    NSData *sps = [NSData dataWithBytes:info->sps length:info->sps_len];
-    NSData *pps = [NSData dataWithBytes:info->pps length:info->pps_len];
-    if (_session && [sps isEqualToData:self.currentSPS] && [pps isEqualToData:self.currentPPS]) {
-        return YES; // repeat-headers=1 resends identical sets every IDR
-    }
+- (BOOL)ensureSessionForFormat:(CMVideoFormatDescriptionRef)format changed:(BOOL)changed {
+    if (_session && !changed) return YES;
+    if (!format) return NO;
     [self teardownSession];
-
-    uint8_t avcc[512];
-    size_t avccLen = rb_avcc_build(info->sps, info->sps_len, info->pps, info->pps_len, avcc, sizeof avcc);
-    if (!avccLen) return NO;
-
-    // Dimensions from the wire header would work too, but the caller passes
-    // them per-AU; use what the stream itself declares via the server config.
-    // (w/h only affect CGImage metadata; the decoder reads the SPS.)
-    CFDataRef avccData = CFDataCreate(NULL, avcc, (CFIndex)avccLen);
-    CFStringRef avcCKey = CFSTR("avcC");
-    CFDictionaryRef atoms = CFDictionaryCreate(NULL, (const void **)&avcCKey, (const void **)&avccData, 1,
-                                               &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-    CFStringRef extKey = kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms;
-    CFDictionaryRef extensions = CFDictionaryCreate(NULL, (const void **)&extKey, (const void **)&atoms, 1,
-                                                    &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-    OSStatus status = CMVideoFormatDescriptionCreate(NULL, kCMVideoCodecType_H264,
-                                                     self.codedWidth, self.codedHeight, extensions, &_format);
-    CFRelease(extensions);
-    CFRelease(atoms);
-    CFRelease(avccData);
-    if (status != noErr || !_format) {
-        RBLogEvent(@"decoder", @"error", @{@"operation": @"create_format", @"status": @(status)}, @"Video format creation failed");
-        return NO;
-    }
-
     // Keep the hardware decoder's native bi-planar YUV surface. Converting
     // every frame to BGRA inside VideoToolbox consumed most of one A5 frame
     // budget and retained several 2.8MiB RGB buffers.
     int32_t nv12 = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
     CFNumberRef pixfmt = CFNumberCreate(NULL, kCFNumberSInt32Type, &nv12);
-    CFStringRef pixfmtKey = kCVPixelBufferPixelFormatTypeKey;
-    CFDictionaryRef destAttrs = CFDictionaryCreate(NULL, (const void **)&pixfmtKey, (const void **)&pixfmt, 1,
-                                                   &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CFDictionaryRef ioSurfaceAttrs = CFDictionaryCreate(NULL, NULL, NULL, 0,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    const void *destKeys[] = {
+        kCVPixelBufferPixelFormatTypeKey,
+        kCVPixelBufferOpenGLESCompatibilityKey,
+        kCVPixelBufferIOSurfacePropertiesKey,
+    };
+    const void *destValues[] = {pixfmt, kCFBooleanTrue, ioSurfaceAttrs};
+    CFDictionaryRef destAttrs = CFDictionaryCreate(NULL, destKeys, destValues, 3,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CFRelease(ioSurfaceAttrs);
     CFRelease(pixfmt);
 
     VTDecompressionOutputCallbackRecord record;
@@ -284,18 +348,16 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
     record.decompressionOutputRefCon = (__bridge void *)self;
 
     VTDecompressionSessionRef session = NULL;
-    status = rbVTCreate(NULL, _format, NULL, destAttrs, &record, &session);
+    OSStatus status = rbVTCreate(NULL, format, NULL, destAttrs, &record, &session);
     CFRelease(destAttrs);
     if (status != noErr || !session) {
         RBLogEvent(@"decoder", @"error", @{@"operation": @"create_session", @"status": @(status)}, @"VideoToolbox session creation failed");
-        CFRelease(_format);
-        _format = NULL;
         return NO;
     }
     _session = session;
-    self.currentSPS = sps;
-    self.currentPPS = pps;
-    RBLogEvent(@"decoder", @"info", @{@"sps_bytes": @(info->sps_len), @"pps_bytes": @(info->pps_len)}, @"VideoToolbox session ready");
+    RBLogEvent(@"decoder", @"info",
+        @{@"renderer": @"legacy-gl", @"coded_width": @(self.codedWidth),
+          @"coded_height": @(self.codedHeight)}, @"Legacy VideoToolbox session ready");
     return YES;
 }
 
@@ -303,43 +365,19 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
     if (self.failed) return;
     if (self.waitingForIDR && !idr) return;
 
-    const uint8_t *bytes = (const uint8_t *)[au bytes];
-    size_t len = [au length];
-    rb_au_info info;
-    if (rb_au_scan(bytes, len, &info) != 0 || !info.has_slice) return;
-
-    if (![self ensureSessionForAU:bytes length:len info:&info]) {
+    if (!self.sampleBuilder) {
+        self.sampleBuilder = [[RBH264SampleBuilder alloc]
+            initWithWidth:MAX(2, self.codedWidth) height:MAX(2, self.codedHeight)];
+    }
+    BOOL formatChanged = NO;
+    OSStatus status = noErr;
+    CMSampleBufferRef sample = [self.sampleBuilder createSampleForAU:au idr:idr
+        formatChanged:&formatChanged status:&status];
+    if (!sample || ![self ensureSessionForFormat:self.sampleBuilder.formatDescription
+                                          changed:formatChanged]) {
+        if (sample) CFRelease(sample);
         self.decodeErrors++;
         [self noteResync];
-        return;
-    }
-
-    // Annex-B → AVCC in a malloc'd block whose ownership transfers to the
-    // CMBlockBuffer (no copy).
-    size_t cap = len + 64;
-    uint8_t *avccBuf = malloc(cap);
-    if (!avccBuf) return;
-    size_t avccLen = rb_au_to_avcc(bytes, len, avccBuf, cap);
-    if (!avccLen) {
-        free(avccBuf);
-        return;
-    }
-
-    CMBlockBufferRef block = NULL;
-    OSStatus status = CMBlockBufferCreateWithMemoryBlock(NULL, avccBuf, avccLen, kCFAllocatorMalloc,
-                                                         NULL, 0, avccLen, 0, &block);
-    if (status != noErr) {
-        free(avccBuf);
-        self.decodeErrors++;
-        return;
-    }
-    CMSampleBufferRef sample = NULL;
-    size_t sampleSize = avccLen;
-    status = CMSampleBufferCreate(NULL, block, true, NULL, NULL, _format,
-                                  1, 0, NULL, 1, &sampleSize, &sample);
-    CFRelease(block);
-    if (status != noErr || !sample) {
-        self.decodeErrors++;
         return;
     }
 
@@ -378,8 +416,7 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
         // next IDR (repeat-headers guarantees fresh SPS/PPS there).
         RBLogEvent(@"decoder", @"warn", @{@"recovery": @"next_idr"}, @"VideoToolbox session invalidated");
         [self teardownSession];
-        self.currentSPS = nil;
-        self.currentPPS = nil;
+        [self.sampleBuilder reset];
         self.decodeErrors++;
         [self noteResync];
         return;
@@ -390,6 +427,7 @@ static void RBDecodeCallback(void *refcon, void *frameRefcon, OSStatus status,
         return;
     }
     self.waitingForIDR = NO;
+    if (idr) OSAtomicCompareAndSwap32Barrier(2, 0, &_resyncPending);
     self.submittedAUs++;
     self.lastSubmitMS = submitMS;
     self.averageSubmitMS = self.averageSubmitMS <= 0.0 ? submitMS : self.averageSubmitMS * 0.85 + submitMS * 0.15;
