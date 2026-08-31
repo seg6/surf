@@ -5,14 +5,14 @@ Maintainer: seg6 <hi@seg6.space>
 Author: null <null@example.invalid>
 Section: Applications
 Architecture: iphoneos-arm
-Version: 0.15.2-1
-Installed-Size: 3412
+Version: 0.15.3-1
+Installed-Size: 3632
 Homepage: https://seg6.space/surf/
 Icon: https://seg6.space/surf/CydiaIcon.png
-Filename: debs/space.seg6.surf_0.15.2-1_iphoneos-arm.deb
-Size: 1455784
-MD5sum: 633524d67240c9fd1eb28567a68d96aa
-SHA1: 4256b64dbfa4277aa50629f165f4993caba2a3dd
-SHA256: 68da261697bd81dd28b52db45c66aa90b2ca6c33293799bb4e2b7cef851c2641
-SHA512: ad935c2af4f574dfe7785bde882d9d9afd8a5e2ae85dded059e1a66402d25c7177606db4ec85ce8e230088852550b2663d342415f94b3169d501657227912204
+Filename: debs/space.seg6.surf_0.15.3-1_iphoneos-arm.deb
+Size: 1633014
+MD5sum: 06af40f1ce2c2db2f0564b94f839bf62
+SHA1: 136163d46917ae3daf69ec3dd01b60bc904f57a2
+SHA256: 4d2da2e1bd221864a4ddd04449fce18adfb138f13b00e849aa90c914b44f255b
+SHA512: 5c47a3d4942d4aa274738e7b5092e857718b1563dcb0cc812178bb818e648b03dfff969b889612fbe6a1d91f1ebd268bffb425299dcf20d4c00dd609e51af00b
 
