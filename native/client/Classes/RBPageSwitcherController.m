@@ -176,7 +176,7 @@
         NSInteger tabID = [[tab objectForKey:@"id"] integerValue];
         RBPageCard *card = [[RBPageCard alloc] initWithFrame:CGRectZero];
         card.tabID = tabID;
-        card.backgroundColor = [UIColor whiteColor];
+        card.backgroundColor = [RBTheme surfaceColor];
         card.layer.cornerRadius = 12.0;
         card.layer.borderWidth = 1.0;
         card.layer.borderColor = [[RBTheme mistColor] CGColor];
@@ -186,7 +186,7 @@
         card.layer.shadowOffset = CGSizeMake(0.0, 4.0);
 
         UIView *header = [[UIView alloc] initWithFrame:CGRectZero];
-        header.backgroundColor = [UIColor whiteColor];
+        header.backgroundColor = [RBTheme surfaceColor];
         [card addSubview:header];
         card.headerView = header;
 

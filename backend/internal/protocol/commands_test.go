@@ -51,6 +51,7 @@ func TestDecodeEveryNativeCommand(t *testing.T) {
 		`{"t":"selectreply","id":"request","indices":[2]}`,
 		`{"t":"media-query"}`, `{"t":"media-playpause"}`, `{"t":"media-mute"}`,
 		`{"t":"media-volume","value":0.5}`, `{"t":"mobile","on":true}`,
+		`{"t":"dark","on":true}`,
 		`{"t":"fullscreen","on":true}`,
 		`{"t":"clipboard-result","id":"request","ok":true}`,
 		`{"t":"clipboard-change","text":"device clipboard"}`,

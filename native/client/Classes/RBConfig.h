@@ -18,3 +18,5 @@
 #define RBDefaultsDiagnosticsKey @"RBDiagnosticsOverlay" // NSNumber bool; live performance panel
 #define RBDefaultsMobileLayoutKey @"RBMobileLayout" // NSNumber bool; request mobile sites and viewport behavior
 #define RBDefaultsOfferCopiedLinksKey @"RBOfferCopiedLinks" // NSNumber bool; prompt for clipboard URLs
+#define RBDefaultsDarkModeKey @"RBDarkMode" // NSNumber bool; native UI and remote Chromium appearance
+#define RBDefaultsBottomBrowserBarKey @"RBBottomBrowserBar" // NSNumber bool; iPad browser rail edge

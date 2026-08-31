@@ -4,6 +4,7 @@
 #import <QuartzCore/QuartzCore.h>
 
 @interface RBHorizonView : UIView
+- (void)applyAppearance;
 @end
 
 @implementation RBHorizonView
@@ -12,14 +13,19 @@
     self = [super initWithFrame:frame];
     if (self) {
         CAGradientLayer *layer = (CAGradientLayer *)self.layer;
-        layer.colors = @[(id)[[RBTheme accentColor] colorWithAlphaComponent:0.08].CGColor,
-                         (id)[[RBTheme seaGlassColor] colorWithAlphaComponent:0.82].CGColor,
-                         (id)[[RBTheme accentColor] colorWithAlphaComponent:0.08].CGColor];
         layer.startPoint = CGPointMake(0.0, 0.5);
         layer.endPoint = CGPointMake(1.0, 0.5);
         layer.cornerRadius = 1.0;
+        [self applyAppearance];
     }
     return self;
+}
+
+- (void)applyAppearance {
+    CAGradientLayer *layer = (CAGradientLayer *)self.layer;
+    layer.colors = @[(id)[[RBTheme accentColor] colorWithAlphaComponent:0.08].CGColor,
+                     (id)[[RBTheme seaGlassColor] colorWithAlphaComponent:0.82].CGColor,
+                     (id)[[RBTheme accentColor] colorWithAlphaComponent:0.08].CGColor];
 }
 @end
 
@@ -27,6 +33,7 @@
 @property(nonatomic, strong) UILabel *monogramLabel;
 @property(nonatomic, strong) UILabel *nameLabel;
 - (void)setName:(NSString *)name index:(NSUInteger)index;
+- (void)applyAppearance;
 @end
 
 @implementation RBFavoriteButton
@@ -34,7 +41,7 @@
 - (id)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
-        self.backgroundColor = [UIColor whiteColor];
+        self.backgroundColor = [RBTheme surfaceColor];
         self.layer.cornerRadius = 9.0;
         self.layer.borderWidth = 1.0;
         self.layer.borderColor = [[RBTheme mistColor] CGColor];
@@ -69,8 +76,14 @@
 - (void)setHighlighted:(BOOL)highlighted {
     [super setHighlighted:highlighted];
     self.backgroundColor = highlighted ? [[RBTheme accentColor] colorWithAlphaComponent:0.08]
-                                       : [UIColor whiteColor];
+                                       : [RBTheme surfaceColor];
     self.transform = highlighted ? CGAffineTransformMakeScale(0.985, 0.985) : CGAffineTransformIdentity;
+}
+
+- (void)applyAppearance {
+    self.backgroundColor = [RBTheme surfaceColor];
+    self.layer.borderColor = [[RBTheme mistColor] CGColor];
+    self.nameLabel.textColor = [RBTheme primaryTextColor];
 }
 
 - (void)layoutSubviews {
@@ -117,7 +130,7 @@
         [self addSubview:self.titleLabel];
 
         self.searchButton = [UIButton buttonWithType:UIButtonTypeCustom];
-        self.searchButton.backgroundColor = [UIColor whiteColor];
+        self.searchButton.backgroundColor = [RBTheme surfaceColor];
         self.searchButton.layer.cornerRadius = 10.0;
         self.searchButton.layer.borderWidth = 1.0;
         self.searchButton.layer.borderColor = [[RBTheme mistColor] CGColor];
@@ -172,6 +185,23 @@
     }
     self.favoritesLabel.hidden = count == 0;
     [self setNeedsLayout];
+}
+
+- (void)applyAppearance {
+    self.backgroundColor = [RBTheme pageBackgroundColor];
+    [self.horizonView applyAppearance];
+    self.markView.layer.shadowColor = [[RBTheme deepTideColor] CGColor];
+    self.titleLabel.textColor = [RBTheme primaryTextColor];
+    self.searchButton.backgroundColor = [RBTheme surfaceColor];
+    self.searchButton.layer.borderColor = [[RBTheme mistColor] CGColor];
+    [self.searchButton setImage:[RBTheme icon:RBIconSearch size:18.0 color:[RBTheme accentColor]]
+                       forState:UIControlStateNormal];
+    [self.searchButton setTitleColor:[RBTheme secondaryTextColor] forState:UIControlStateNormal];
+    self.favoritesLabel.textColor = [RBTheme primaryTextColor];
+    for (RBFavoriteButton *button in self.favoritesView.subviews) [button applyAppearance];
+    [self.libraryButton setImage:[RBTheme icon:RBIconBook size:17.0 color:[RBTheme accentColor]]
+                        forState:UIControlStateNormal];
+    [RBTheme styleSecondaryButton:self.libraryButton];
 }
 
 - (void)layoutSubviews {

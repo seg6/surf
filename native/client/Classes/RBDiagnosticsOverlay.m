@@ -9,15 +9,15 @@ static const CGFloat kRBInspectorContentHeight = 374.0;
 static const CGFloat kRBInspectorLandscapeContentHeight = 190.0;
 
 static UIColor *RBInspectorPaperColor(void) {
-    return [UIColor colorWithRed:0.985 green:0.994 blue:0.997 alpha:0.84];
+    return [[RBTheme surfaceColor] colorWithAlphaComponent:[RBTheme isDarkMode] ? 0.94 : 0.84];
 }
 
 static UIColor *RBInspectorRuleColor(void) {
-    return [UIColor colorWithRed:0.847 green:0.902 blue:0.922 alpha:1.0];
+    return [RBTheme mistColor];
 }
 
 static UIColor *RBInspectorMutedColor(void) {
-    return [UIColor colorWithRed:0.337 green:0.431 blue:0.475 alpha:1.0];
+    return [RBTheme secondaryTextColor];
 }
 
 @interface RBDiagnosticsSignalView : UIView {
@@ -115,6 +115,7 @@ static UIColor *RBInspectorMutedColor(void) {
 @property(nonatomic, strong) UILabel *titleLabel;
 @property(nonatomic, strong) UILabel *valueLabel;
 - (id)initWithTitle:(NSString *)title;
+- (void)applyAppearance;
 @end
 
 @implementation RBDiagnosticsReadout
@@ -132,7 +133,7 @@ static UIColor *RBInspectorMutedColor(void) {
 
         self.valueLabel = [[UILabel alloc] initWithFrame:CGRectZero];
         self.valueLabel.backgroundColor = [UIColor clearColor];
-        self.valueLabel.textColor = [RBTheme deepTideColor];
+        self.valueLabel.textColor = [RBTheme primaryTextColor];
         self.valueLabel.font = [RBTheme monospacedFontOfSize:19.0 bold:YES];
         self.valueLabel.adjustsFontSizeToFitWidth = YES;
         self.valueLabel.minimumFontSize = 13.0;
@@ -140,6 +141,11 @@ static UIColor *RBInspectorMutedColor(void) {
         self.isAccessibilityElement = YES;
     }
     return self;
+}
+
+- (void)applyAppearance {
+    self.titleLabel.textColor = RBInspectorMutedColor();
+    self.valueLabel.textColor = [RBTheme primaryTextColor];
 }
 
 - (void)layoutSubviews {
@@ -156,6 +162,7 @@ static UIColor *RBInspectorMutedColor(void) {
 @property(nonatomic, strong) UILabel *detailLabel;
 @property(nonatomic, strong) UIView *separator;
 - (id)initWithTitle:(NSString *)title;
+- (void)applyAppearance;
 @end
 
 @implementation RBDiagnosticsPipelineRow
@@ -173,7 +180,7 @@ static UIColor *RBInspectorMutedColor(void) {
 
         self.valueLabel = [[UILabel alloc] initWithFrame:CGRectZero];
         self.valueLabel.backgroundColor = [UIColor clearColor];
-        self.valueLabel.textColor = [RBTheme deepTideColor];
+        self.valueLabel.textColor = [RBTheme primaryTextColor];
         self.valueLabel.font = [RBTheme monospacedFontOfSize:12.0 bold:YES];
         self.valueLabel.textAlignment = NSTextAlignmentRight;
         self.valueLabel.adjustsFontSizeToFitWidth = YES;
@@ -194,6 +201,13 @@ static UIColor *RBInspectorMutedColor(void) {
         self.isAccessibilityElement = YES;
     }
     return self;
+}
+
+- (void)applyAppearance {
+    self.titleLabel.textColor = [RBTheme primaryTextColor];
+    self.valueLabel.textColor = [RBTheme primaryTextColor];
+    self.detailLabel.textColor = RBInspectorMutedColor();
+    self.separator.backgroundColor = RBInspectorRuleColor();
 }
 
 - (void)layoutSubviews {
@@ -422,6 +436,41 @@ static UIColor *RBInspectorMutedColor(void) {
     if ([self.delegate respondsToSelector:@selector(diagnosticsOverlayDidChangeMode:)]) {
         [self.delegate diagnosticsOverlayDidChangeMode:self];
     }
+}
+
+- (void)applyAppearance {
+    self.surfaceView.backgroundColor = RBInspectorPaperColor();
+    self.surfaceView.layer.borderColor = RBInspectorRuleColor().CGColor;
+    self.compactStatusLabel.textColor = [RBTheme primaryTextColor];
+    self.compactMetricsLabel.textColor = RBInspectorMutedColor();
+    self.compactVersionLabel.textColor = RBInspectorMutedColor();
+    self.compactInstrumentIcon.image = [RBTheme icon:RBIconGauge size:15.0
+                                                    color:[RBTheme accentColor]];
+    self.headingLabel.textColor = [RBTheme primaryTextColor];
+    self.headerVersionLabel.textColor = RBInspectorMutedColor();
+    self.headerStatusLabel.textColor = [RBTheme secondaryTextColor];
+    [self.collapseButton setImage:[RBTheme icon:RBIconChevronDown size:16.0
+                                                   color:[RBTheme secondaryTextColor]]
+                          forState:UIControlStateNormal];
+    [self.collapseButton setImage:[RBTheme icon:RBIconChevronDown size:16.0
+                                                   color:[RBTheme primaryTextColor]]
+                          forState:UIControlStateHighlighted];
+    [self.closeButton setImage:[RBTheme icon:RBIconClose size:16.0
+                                                color:[RBTheme secondaryTextColor]]
+                       forState:UIControlStateNormal];
+    [self.closeButton setImage:[RBTheme icon:RBIconClose size:16.0
+                                                color:[RBTheme primaryTextColor]]
+                       forState:UIControlStateHighlighted];
+    self.headerRule.backgroundColor = RBInspectorRuleColor();
+    for (RBDiagnosticsReadout *readout in self.readouts) [readout applyAppearance];
+    for (UIView *rule in self.readoutRules) rule.backgroundColor = RBInspectorRuleColor();
+    self.signalTitleLabel.textColor = [RBTheme primaryTextColor];
+    self.signalRangeLabel.textColor = RBInspectorMutedColor();
+    self.signalView.lineColor = [RBTheme accentColor];
+    [self.signalView setNeedsDisplay];
+    self.pipelineTitleLabel.textColor = [RBTheme primaryTextColor];
+    for (RBDiagnosticsPipelineRow *row in self.pipelineRows) [row applyAppearance];
+    self.footerLabel.textColor = RBInspectorMutedColor();
 }
 
 - (void)updateVisibility {

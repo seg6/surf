@@ -20,4 +20,5 @@
 
 - (void)setCanGoBack:(BOOL)back forward:(BOOL)forward;
 - (void)setTabCount:(NSUInteger)count;
+- (void)applyAppearance;
 @end

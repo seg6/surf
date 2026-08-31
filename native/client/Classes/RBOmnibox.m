@@ -14,11 +14,15 @@
 @property(nonatomic, assign) BOOL loading;
 @property(nonatomic, assign) BOOL progressVisible;
 @property(nonatomic, copy) NSString *committedURL;
+@property(nonatomic, copy) NSString *securityState;
+@property(nonatomic, assign) BOOL starred;
+- (void)applyPlaceholderAppearance;
 @end
 
 @implementation RBOmnibox
 
 @synthesize showsBookmarkButton = _showsBookmarkButton;
+@synthesize showsCompactURL = _showsCompactURL;
 
 - (id)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
@@ -27,7 +31,7 @@
         self.backgroundColor = [UIColor clearColor];
 
         self.fieldBackground = [[UIView alloc] initWithFrame:CGRectZero];
-        self.fieldBackground.backgroundColor = [UIColor whiteColor];
+        self.fieldBackground.backgroundColor = [RBTheme surfaceColor];
         self.fieldBackground.layer.cornerRadius = 10.0;
         self.fieldBackground.layer.borderWidth = 1.0;
         self.fieldBackground.layer.borderColor = [[RBTheme mistColor] CGColor];
@@ -50,7 +54,7 @@
         self.field.backgroundColor = [UIColor clearColor];
         self.field.font = [RBTheme fontOfSize:14.0 bold:NO];
         self.field.textColor = [RBTheme primaryTextColor];
-        self.field.placeholder = @"Search or enter address";
+        [self applyPlaceholderAppearance];
         self.field.autocorrectionType = UITextAutocorrectionTypeNo;
         self.field.autocapitalizationType = UITextAutocapitalizationTypeNone;
         // This is an omnibox, not a URL-only field: ordinary text is sent to
@@ -119,17 +123,30 @@
     [self setNeedsLayout];
 }
 
+- (void)setShowsCompactURL:(BOOL)showsCompactURL {
+    if (_showsCompactURL == showsCompactURL) return;
+    _showsCompactURL = showsCompactURL;
+    if (![self.field isFirstResponder]) [self displayCommittedURL];
+}
+
 - (void)styleStar:(BOOL)starred {
     UIColor *color = starred ? [UIColor colorWithRed:0.85 green:0.66 blue:0.14 alpha:1.0]
-                             : [UIColor colorWithWhite:0.55 alpha:1.0];
+                             : [RBTheme secondaryTextColor];
     UIImage *icon = [RBTheme icon:(starred ? RBIconStarFill : RBIconStar) size:17.0 color:color];
     [self.starButton setImage:icon forState:UIControlStateNormal];
 }
 
 - (void)styleReload {
     RBIcon which = self.loading ? RBIconStop : RBIconReload;
-    UIImage *icon = [RBTheme icon:which size:15.0 color:[UIColor colorWithWhite:0.45 alpha:1.0]];
+    UIImage *icon = [RBTheme icon:which size:15.0 color:[RBTheme secondaryTextColor]];
     [self.reloadButton setImage:icon forState:UIControlStateNormal];
+}
+
+- (void)applyPlaceholderAppearance {
+    self.field.attributedPlaceholder = [[NSAttributedString alloc]
+        initWithString:@"Search or enter address"
+            attributes:@{NSForegroundColorAttributeName: [RBTheme secondaryTextColor],
+                         NSFontAttributeName: [RBTheme fontOfSize:14.0 bold:NO]}];
 }
 
 - (BOOL)editing {
@@ -150,6 +167,20 @@
         self.field.text = url;
         return;
     }
+    if (self.showsCompactURL) {
+        NSString *displayHost = host;
+        NSNumber *port = [parsed port];
+        if (port) {
+            BOOL IPv6 = [host rangeOfString:@":"].location != NSNotFound;
+            displayHost = IPv6
+                ? [NSString stringWithFormat:@"[%@]:%@", host, port]
+                : [NSString stringWithFormat:@"%@:%@", host, port];
+        }
+        self.field.attributedText = [[NSAttributedString alloc] initWithString:displayHost
+            attributes:@{NSForegroundColorAttributeName: [RBTheme primaryTextColor],
+                         NSFontAttributeName: [RBTheme fontOfSize:14.0 bold:YES]}];
+        return;
+    }
     NSMutableAttributedString *shown = [[NSMutableAttributedString alloc] initWithString:url
         attributes:@{NSForegroundColorAttributeName: [RBTheme secondaryTextColor],
                      NSFontAttributeName: [RBTheme fontOfSize:14.0 bold:NO]}];
@@ -163,14 +194,17 @@
 }
 
 - (NSString *)currentText {
-    return self.field.text ?: @"";
+    if ([self.field isFirstResponder]) return self.field.text ?: @"";
+    return self.committedURL ?: self.field.text ?: @"";
 }
 
 - (void)setStarred:(BOOL)starred {
+    _starred = starred;
     [self styleStar:starred];
 }
 
 - (void)setSecurityState:(NSString *)state {
+    _securityState = [state copy];
     if ([state isEqualToString:@"secure"]) {
         self.securityView.image = [RBTheme icon:RBIconLock size:13.0 color:[RBTheme seaGlassColor]];
         self.securityView.accessibilityLabel = @"Secure connection";
@@ -184,6 +218,21 @@
         self.lockVisible = NO;
     }
     [self setNeedsLayout];
+}
+
+- (void)applyAppearance {
+    self.fieldBackground.backgroundColor = [RBTheme surfaceColor];
+    self.fieldBackground.layer.borderColor = [[RBTheme mistColor] CGColor];
+    self.field.textColor = [RBTheme primaryTextColor];
+    [self applyPlaceholderAppearance];
+    self.field.keyboardAppearance = [RBTheme isDarkMode] ? UIKeyboardAppearanceDark
+                                                         : UIKeyboardAppearanceDefault;
+    ((CAGradientLayer *)self.progressLayer).colors = @[(id)[[RBTheme accentColor] CGColor],
+                                                       (id)[[RBTheme seaGlassColor] CGColor]];
+    [self styleStar:self.starred];
+    [self styleReload];
+    [self setSecurityState:self.securityState];
+    if (![self.field isFirstResponder]) [self displayCommittedURL];
 }
 
 - (void)dismissKeyboard {

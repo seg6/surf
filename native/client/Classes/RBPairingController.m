@@ -90,7 +90,7 @@ typedef enum {
     [self.view addSubview:self.detailLabel];
 
     self.phraseLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    self.phraseLabel.backgroundColor = [UIColor whiteColor];
+    self.phraseLabel.backgroundColor = [RBTheme surfaceColor];
     self.phraseLabel.textAlignment = NSTextAlignmentCenter;
     self.phraseLabel.font = [RBTheme monospacedFontOfSize:18.0 bold:YES];
     self.phraseLabel.textColor = [RBTheme primaryTextColor];
@@ -103,7 +103,10 @@ typedef enum {
 
     self.codeField = [[RBPairingCodeField alloc] initWithFrame:CGRectZero];
     self.codeField.borderStyle = UITextBorderStyleRoundedRect;
-    self.codeField.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.92];
+    self.codeField.backgroundColor = [RBTheme surfaceColor];
+    self.codeField.textColor = [RBTheme primaryTextColor];
+    self.codeField.keyboardAppearance = [RBTheme isDarkMode] ? UIKeyboardAppearanceDark
+                                                             : UIKeyboardAppearanceDefault;
     self.codeField.textAlignment = NSTextAlignmentCenter;
     self.codeField.font = [RBTheme fontOfSize:23.0 bold:YES];
     self.codeField.contentVerticalAlignment = UIControlContentVerticalAlignmentCenter;

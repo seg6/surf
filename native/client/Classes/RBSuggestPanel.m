@@ -15,7 +15,7 @@ static const CGFloat kRBSuggestRowHeight = 48.0;
 - (id)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
-        self.backgroundColor = [UIColor whiteColor];
+        self.backgroundColor = [RBTheme surfaceColor];
         self.layer.borderWidth = 1.0;
         self.layer.borderColor = [[RBTheme mistColor] CGColor];
         self.layer.cornerRadius = 10.0;
@@ -31,6 +31,7 @@ static const CGFloat kRBSuggestRowHeight = 48.0;
         self.table.delegate = self;
         self.table.rowHeight = kRBSuggestRowHeight;
         self.table.separatorColor = [RBTheme mistColor];
+        self.table.backgroundColor = [RBTheme surfaceColor];
         self.table.layer.cornerRadius = 10.0;
         self.table.layer.masksToBounds = YES;
         [self addSubview:self.table];
@@ -57,6 +58,17 @@ static const CGFloat kRBSuggestRowHeight = 48.0;
     return MIN(6, (NSInteger)[self.items count]) * kRBSuggestRowHeight;
 }
 
+- (void)applyAppearance {
+    self.backgroundColor = [RBTheme surfaceColor];
+    self.layer.borderColor = [[RBTheme mistColor] CGColor];
+    self.layer.shadowColor = [[RBTheme deepTideColor] CGColor];
+    self.table.backgroundColor = [RBTheme surfaceColor];
+    self.table.separatorColor = [RBTheme mistColor];
+    self.table.indicatorStyle = [RBTheme isDarkMode] ? UIScrollViewIndicatorStyleWhite
+                                                     : UIScrollViewIndicatorStyleDefault;
+    [self.table reloadData];
+}
+
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     return (NSInteger)[self.items count];
 }
@@ -67,9 +79,10 @@ static const CGFloat kRBSuggestRowHeight = 48.0;
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"sugg"];
         cell.textLabel.font = [RBTheme fontOfSize:15.0 bold:YES];
         cell.detailTextLabel.font = [RBTheme fontOfSize:12.0 bold:NO];
-        cell.detailTextLabel.textColor = [RBTheme secondaryTextColor];
-        cell.textLabel.textColor = [RBTheme primaryTextColor];
     }
+    cell.backgroundColor = [RBTheme surfaceColor];
+    cell.detailTextLabel.textColor = [RBTheme secondaryTextColor];
+    cell.textLabel.textColor = [RBTheme primaryTextColor];
     NSDictionary *item = [self.items objectAtIndex:(NSUInteger)indexPath.row];
     NSString *title = [item objectForKey:@"title"];
     NSString *url = [item objectForKey:@"url"] ?: @"";

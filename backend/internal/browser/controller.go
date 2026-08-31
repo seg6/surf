@@ -30,7 +30,9 @@ type Tab struct {
 	URL      string
 
 	loading           bool
+	loadingGeneration uint64
 	awaitingPageFrame bool
+	mainFrameID       string
 
 	IconKey    string // favicon cache key (origin), "" when unknown
 	Security   string // last Security.securityStateChanged state, "" unknown
@@ -58,6 +60,7 @@ type Controller struct {
 	viewW               int
 	viewH               int
 	mobile              bool
+	dark                bool
 	resizeMu            sync.Mutex
 	resizeTimer         *time.Timer
 	resizeGen           uint64
@@ -207,6 +210,7 @@ func New(cfg *config.Config, hub *transport.Hub) (*Controller, error) {
 	}
 	b.startupSession = loadBrowserSession(cfg.SurfHome)
 	b.mobile = b.startupSession.Mobile
+	b.dark = b.startupSession.Dark
 	b.touch = newTouchInput(b)
 	go b.runController()
 	return b, nil
@@ -536,48 +540,62 @@ func (b *Controller) onEvent(ev cdp.Event) {
 	case "Page.frameNavigated":
 		var p struct {
 			Frame struct {
+				ID       string `json:"id"`
 				ParentID string `json:"parentId"`
 				URL      string `json:"url"`
 			} `json:"frame"`
 		}
-		if json.Unmarshal(ev.Params, &p) == nil && p.Frame.ParentID == "" {
+		if json.Unmarshal(ev.Params, &p) == nil && p.Frame.ParentID == "" &&
+			b.rememberMainFrame(ev.SessionID, p.Frame.ID) {
 			b.tabNavigated(ev.SessionID, p.Frame.URL)
 		}
 	case "Page.navigatedWithinDocument":
 		var p struct {
-			URL string `json:"url"`
+			FrameID string `json:"frameId"`
+			URL     string `json:"url"`
 		}
-		if json.Unmarshal(ev.Params, &p) == nil {
+		if json.Unmarshal(ev.Params, &p) == nil && b.isMainFrameEvent(ev.SessionID, p.FrameID) {
 			b.tabNavigated(ev.SessionID, p.URL)
 		}
 	case "Page.frameStartedLoading":
-		if t, active := b.tabBySession(ev.SessionID); t != nil && active {
-			b.mu.Lock()
-			t.loading = true
-			b.mu.Unlock()
-			b.broadcast(protocol.BoolEvent{Type: "loading", On: true})
+		var p struct {
+			FrameID string `json:"frameId"`
+		}
+		if json.Unmarshal(ev.Params, &p) == nil {
+			if t, _ := b.tabByMainFrame(ev.SessionID, p.FrameID); t != nil {
+				b.setTabLoading(t, true)
+			}
 		}
 	case "Page.frameStoppedLoading":
-		if t, active := b.tabBySession(ev.SessionID); t != nil {
-			b.mu.Lock()
-			t.loading = false
-			b.mu.Unlock()
-			if active {
-				b.broadcast(protocol.BoolEvent{Type: "loading"})
-				b.pushNavState()
+		var p struct {
+			FrameID string `json:"frameId"`
+		}
+		if json.Unmarshal(ev.Params, &p) == nil {
+			if t, active := b.tabByMainFrame(ev.SessionID, p.FrameID); t != nil {
+				b.setTabLoading(t, false)
+				if active {
+					b.pushNavState()
+				}
+				go b.refreshFavicon(t) // Runtime.evaluate inside; must not block dispatch
+				go b.refreshTabTitle(t)
 			}
-			go b.refreshFavicon(t) // Runtime.evaluate inside; must not block dispatch
+		}
+	case "Page.domContentEventFired":
+		if t, _ := b.tabByPrimarySession(ev.SessionID); t != nil {
+			b.scheduleTabLoadingCompletion(t, loadingDOMGracePeriod)
+			go b.refreshTabTitle(t)
 		}
 	case "Page.loadEventFired":
 		// Some modern pages keep subresources active indefinitely and never
-		// produce frameStoppedLoading.
-		if t, active := b.tabBySession(ev.SessionID); t != nil && active {
-			b.mu.Lock()
-			t.loading = false
-			b.mu.Unlock()
-		}
-		if t, _ := b.tabBySession(ev.SessionID); t != nil {
+		// produce frameStoppedLoading. Treat this as the fallback completion
+		// signal and notify the native client, not just the internal tab state.
+		if t, active := b.tabByPrimarySession(ev.SessionID); t != nil {
+			b.setTabLoading(t, false)
+			if active {
+				b.pushNavState()
+			}
 			go b.refreshFavicon(t)
+			go b.refreshTabTitle(t)
 		}
 		go b.probeWidevine(ev.SessionID)
 	case "Controller.downloadWillBegin":

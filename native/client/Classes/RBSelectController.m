@@ -32,15 +32,26 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     [RBTheme styleTableView:self.tableView];
+    [RBTheme styleNavigationBar:self.navigationController.navigationBar];
+    self.view.backgroundColor = [RBTheme pageBackgroundColor];
     self.tableView.backgroundColor = [RBTheme pageBackgroundColor];
     self.tableView.separatorColor = [RBTheme separatorColor];
     self.tableView.rowHeight = 44.0;
+    self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc]
         initWithBarButtonSystemItem:UIBarButtonSystemItemCancel target:self action:@selector(cancelTapped:)];
     if (self.multiple) {
         self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
             initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(doneTapped:)];
     }
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [RBTheme styleTableView:self.tableView];
+    [RBTheme styleNavigationBar:self.navigationController.navigationBar];
+    self.view.backgroundColor = [RBTheme pageBackgroundColor];
+    [self.tableView reloadData];
 }
 
 - (CGSize)preferredPopoverSize {
@@ -62,8 +73,13 @@
     BOOL disabled = [[option objectForKey:@"disabled"] boolValue];
     cell.textLabel.text = [option objectForKey:@"label"] ?: @"";
     cell.textLabel.textColor = disabled ? [RBTheme secondaryTextColor] : [RBTheme primaryTextColor];
-    cell.backgroundColor = [RBTheme pageBackgroundColor];
+    cell.backgroundColor = [RBTheme surfaceColor];
+    if (!cell.selectedBackgroundView) {
+        cell.selectedBackgroundView = [[UIView alloc] initWithFrame:CGRectZero];
+    }
+    cell.selectedBackgroundView.backgroundColor = [[RBTheme separatorColor] colorWithAlphaComponent:0.62];
     cell.selectionStyle = disabled ? UITableViewCellSelectionStyleNone : UITableViewCellSelectionStyleBlue;
+    if ([cell respondsToSelector:@selector(setTintColor:)]) cell.tintColor = [RBTheme accentColor];
     cell.accessoryType = [self.selectedIndices containsIndex:(NSUInteger)indexPath.row]
         ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
     return cell;

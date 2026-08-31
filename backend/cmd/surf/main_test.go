@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"image/png"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -208,6 +209,30 @@ func TestTrayIconHasNativeFormat(t *testing.T) {
 	if !bytes.Equal(icon[:4], []byte{0x89, 'P', 'N', 'G'}) {
 		t.Fatalf("bad PNG header: %x", icon[:min(8, len(icon))])
 	}
+	config, err := png.DecodeConfig(bytes.NewReader(icon))
+	if err != nil || config.Width != 32 || config.Height != 32 {
+		t.Fatalf("tray icon config=%+v err=%v", config, err)
+	}
+}
+
+func TestManagementIconUsesCurrentSurfArtwork(t *testing.T) {
+	app := &desktopApp{}
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/icon.png", nil)
+	request.RemoteAddr = "127.0.0.1:12345"
+	app.managementHandler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "image/png" {
+		t.Fatalf("icon response code=%d type=%q", response.Code, response.Header().Get("Content-Type"))
+	}
+	config, err := png.DecodeConfig(bytes.NewReader(response.Body.Bytes()))
+	if err != nil || config.Width != 1024 || config.Height != 1024 {
+		t.Fatalf("icon config=%+v err=%v", config, err)
+	}
+	wantSHA256, _ := hex.DecodeString("a7fe7713e95bb66a476e9f65cbff4fae4441c52dfd12f284548f321382e9f594")
+	actualSHA256 := sha256.Sum256(response.Body.Bytes())
+	if !bytes.Equal(actualSHA256[:], wantSHA256) {
+		t.Fatalf("desktop icon sha256=%x", actualSHA256)
+	}
 }
 
 func TestManagementSettingsPersistAndUpdateRuntime(t *testing.T) {
@@ -271,6 +296,12 @@ func TestManagementHomeIsSinglePageUtility(t *testing.T) {
 		`== ${source.label} ==`, `white-space: pre-wrap`} {
 		if strings.Contains(body, removed) {
 			t.Errorf("management page still contains %s", removed)
+		}
+	}
+	for _, iconMarkup := range []string{`rel="icon" type="image/png" sizes="1024x1024"`,
+		`rel="apple-touch-icon" href="/icon.png"`} {
+		if !strings.Contains(body, iconMarkup) {
+			t.Errorf("management page is missing %s", iconMarkup)
 		}
 	}
 	if strings.Contains(strings.ToLower(body), "shared password") {

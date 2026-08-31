@@ -19,6 +19,7 @@
 @property(nonatomic, strong) UIImageView *iconView;
 @property(nonatomic, strong) UILabel *titleLabel;
 @property(nonatomic, strong) RBActionMenuItem *item;
+@property(nonatomic, assign) BOOL compactLayout;
 @end
 
 @implementation RBActionTile
@@ -45,7 +46,8 @@
     _item = item;
     self.titleLabel.text = item.title;
     UIColor *color = item.enabled ? [RBTheme accentColor] : [[RBTheme slateColor] colorWithAlphaComponent:0.30];
-    self.iconView.image = [RBTheme icon:item.icon size:26.0 color:color];
+    self.iconView.image = [RBTheme icon:item.icon size:(self.compactLayout ? 22.0 : 26.0)
+                                      color:color];
     self.enabled = item.enabled;
     self.accessibilityLabel = item.title;
     self.isAccessibilityElement = YES;
@@ -60,6 +62,12 @@
 
 - (void)layoutSubviews {
     [super layoutSubviews];
+    if (self.compactLayout) {
+        self.iconView.frame = CGRectMake(0.0, 1.0, self.bounds.size.width, 24.0);
+        self.titleLabel.frame = CGRectMake(4.0, 25.0, self.bounds.size.width - 8.0,
+                                           MAX(20.0, self.bounds.size.height - 27.0));
+        return;
+    }
     self.iconView.frame = CGRectMake(0.0, 8.0, self.bounds.size.width, 32.0);
     self.titleLabel.frame = CGRectMake(4.0, 43.0, self.bounds.size.width - 8.0,
                                        MAX(18.0, self.bounds.size.height - 47.0));
@@ -89,7 +97,7 @@
     return self;
 }
 
-- (CGSize)preferredSize { return CGSizeMake(330.0, 226.0); }
+- (CGSize)preferredSize { return CGSizeMake(330.0, self.phoneLayout ? 226.0 : 116.0); }
 
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -126,11 +134,13 @@
     self.heading.font = [RBTheme displayFontOfSize:14.0];
     self.heading.textColor = [RBTheme primaryTextColor];
     self.heading.textAlignment = NSTextAlignmentCenter;
+    self.heading.hidden = !self.phoneLayout;
     [self.card addSubview:self.heading];
 
     NSMutableArray *tiles = [NSMutableArray array];
     for (RBActionMenuItem *item in self.items) {
         RBActionTile *tile = [[RBActionTile alloc] initWithFrame:CGRectZero];
+        tile.compactLayout = !self.phoneLayout;
         tile.item = item;
         [tile addTarget:self action:@selector(tileTapped:) forControlEvents:UIControlEventTouchUpInside];
         [self.card addSubview:tile];
@@ -144,16 +154,19 @@
     CGFloat w = self.view.bounds.size.width;
     CGFloat h = self.view.bounds.size.height;
     self.backdrop.frame = self.view.bounds;
-    CGFloat cardH = MIN(236.0, h);
+    CGFloat cardH = MIN(self.phoneLayout ? 236.0 : 116.0, h);
     self.card.frame = self.phoneLayout ? CGRectMake(0.0, h - cardH, w, cardH) : self.view.bounds;
     CGFloat cardW = self.card.bounds.size.width;
     self.handle.frame = CGRectMake(floorf((cardW - 38.0) / 2.0), 8.0, 38.0, 4.0);
-    self.heading.frame = CGRectMake(16.0, self.phoneLayout ? 17.0 : 10.0, cardW - 32.0, 24.0);
-    CGFloat top = self.phoneLayout ? 45.0 : 38.0;
-    CGFloat inset = self.phoneLayout ? 10.0 : 8.0;
+    self.heading.frame = self.phoneLayout
+        ? CGRectMake(16.0, 17.0, cardW - 32.0, 24.0)
+        : CGRectZero;
+    CGFloat top = self.phoneLayout ? 45.0 : 4.0;
+    CGFloat inset = self.phoneLayout ? 10.0 : 4.0;
     CGFloat gap = 4.0;
     CGFloat tileW = floorf((cardW - inset * 2.0 - gap * 2.0) / 3.0);
-    CGFloat tileH = floorf((cardH - top - 10.0 - gap) / 2.0);
+    CGFloat bottomInset = self.phoneLayout ? 10.0 : 4.0;
+    CGFloat tileH = floorf((cardH - top - bottomInset - gap) / 2.0);
     for (NSUInteger i = 0; i < [self.tiles count]; i++) {
         CGFloat x = inset + (i % 3) * (tileW + gap);
         CGFloat y = top + (i / 3) * (tileH + gap);

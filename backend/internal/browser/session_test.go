@@ -19,12 +19,13 @@ func TestBrowserSessionRoundTrip(t *testing.T) {
 		},
 		activeID: 3,
 		mobile:   true,
+		dark:     true,
 	}
 	if err := controller.SaveSession(); err != nil {
 		t.Fatal(err)
 	}
 	session := loadBrowserSession(home)
-	if session.Version != browserSessionVersion || !session.Mobile || session.Active != 1 {
+	if session.Version != browserSessionVersion || !session.Mobile || !session.Dark || session.Active != 1 {
 		t.Fatalf("unexpected session metadata: %#v", session)
 	}
 	if len(session.Tabs) != 2 || session.Tabs[0] != "https://example.com" || session.Tabs[1] != "https://example.org" {

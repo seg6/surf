@@ -19,6 +19,9 @@
 @property(nonatomic, assign) id<RBOmniboxDelegate> delegate;
 @property(nonatomic, readonly) BOOL editing;
 @property(nonatomic, assign) BOOL showsBookmarkButton;
+// iPad's resting rail shows only the complete hostname (and non-default port)
+// while editing always exposes the exact committed URL.
+@property(nonatomic, assign) BOOL showsCompactURL;
 
 - (void)setURLText:(NSString *)url;
 - (NSString *)currentText;
@@ -29,4 +32,5 @@
 - (void)setSecurityState:(NSString *)state;
 - (void)focus;
 - (void)dismissKeyboard;
+- (void)applyAppearance;
 @end

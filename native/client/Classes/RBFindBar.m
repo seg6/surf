@@ -20,6 +20,7 @@
     self = [super initWithFrame:frame];
     if (self) {
         self.background = [[RBGradientBar alloc] initWithFrame:self.bounds];
+        [self.background setHairlineAtTop:(UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad)];
         self.background.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         self.background.userInteractionEnabled = NO;
         [self addSubview:self.background];
@@ -27,11 +28,12 @@
         self.field = [[UITextField alloc] initWithFrame:CGRectZero];
         self.field.delegate = self;
         self.field.borderStyle = UITextBorderStyleNone;
-        self.field.backgroundColor = [UIColor whiteColor];
+        self.field.backgroundColor = [RBTheme surfaceColor];
         self.field.layer.cornerRadius = 8.0;
         self.field.layer.borderWidth = 1.0;
         self.field.layer.borderColor = [[RBTheme mistColor] CGColor];
         self.field.font = [RBTheme fontOfSize:14.0 bold:NO];
+        self.field.textColor = [RBTheme primaryTextColor];
         self.field.placeholder = @"Find on page";
         self.field.autocorrectionType = UITextAutocorrectionTypeNo;
         self.field.autocapitalizationType = UITextAutocapitalizationTypeNone;
@@ -89,8 +91,32 @@
     [self.field selectAll:nil];
 }
 
+- (void)setPageBoundaryAtTop:(BOOL)top {
+    [self.background setHairlineAtTop:top];
+}
+
+- (BOOL)editing {
+    return [self.field isFirstResponder];
+}
+
 - (void)setFound:(BOOL)found {
     self.stateLabel.text = found ? @"" : @"Not found";
+}
+
+- (void)applyAppearance {
+    [self.background setTopColor:[RBTheme barTopColor]
+                     bottomColor:[RBTheme barBottomColor]
+                       lineColor:[RBTheme barLineColor]];
+    self.field.backgroundColor = [RBTheme surfaceColor];
+    self.field.textColor = [RBTheme primaryTextColor];
+    self.field.keyboardAppearance = [RBTheme isDarkMode] ? UIKeyboardAppearanceDark
+                                                         : UIKeyboardAppearanceDefault;
+    self.field.layer.borderColor = [[RBTheme mistColor] CGColor];
+    [RBTheme styleBarButton:self.prevButton icon:RBIconChevronUp];
+    [RBTheme styleBarButton:self.nextButton icon:RBIconChevronDown];
+    [self.doneButton setTitleColor:[RBTheme iconColor] forState:UIControlStateNormal];
+    [self.doneButton setTitleColor:[[RBTheme iconColor] colorWithAlphaComponent:0.4]
+                           forState:UIControlStateHighlighted];
 }
 
 - (void)searchDirection:(NSInteger)direction {

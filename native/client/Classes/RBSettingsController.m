@@ -4,241 +4,154 @@
 #import "RBServerStore.h"
 #import "RBTheme.h"
 
-#import <QuartzCore/QuartzCore.h>
+enum {
+    RBSettingsServerSection = 0,
+    RBSettingsAppearanceSection,
+    RBSettingsBrowsingSection,
+    RBSettingsPerformanceSection,
+    RBSettingsDataSection,
+    RBSettingsAboutSection,
+    RBSettingsSectionCount
+};
+
+enum {
+    RBSettingsAppearanceDarkModeRow = 0,
+    RBSettingsAppearanceBottomBarRow
+};
+
+enum {
+    RBSettingsBrowsingMobileRow = 0,
+    RBSettingsBrowsingCopiedLinksRow,
+    RBSettingsBrowsingMediaRow
+};
+
+enum {
+    RBSettingsPerformanceOverlayRow = 0,
+    RBSettingsPerformanceInspectorRow,
+    RBSettingsPerformanceLogRow
+};
+
+enum {
+    RBSettingsAboutClientRow = 0,
+    RBSettingsAboutProtocolRow,
+    RBSettingsAboutLicensesRow
+};
 
 static const NSInteger kRBClearDataAlert = 4101;
-static const CGFloat kRBSettingsInset = 14.0;
-static const CGFloat kRBSettingsRowHeight = 62.0;
+static const CGFloat kRBSettingsRowHeight = 66.0;
 
-@interface RBSettingsActionRow : UIControl
-@property(nonatomic, strong) UIImageView *iconView;
-@property(nonatomic, strong) UILabel *titleLabel;
-@property(nonatomic, strong) UILabel *detailLabel;
-@property(nonatomic, strong) UIImageView *chevronView;
-@property(nonatomic, strong) UISwitch *toggle;
-@property(nonatomic, strong) UIView *separator;
-- (id)initWithTitle:(NSString *)title detail:(NSString *)detail icon:(RBIcon)icon;
-- (void)setShowsChevron:(BOOL)showsChevron;
-- (UISwitch *)installSwitchOn:(BOOL)on target:(id)target action:(SEL)action;
-- (void)setDestructive:(BOOL)destructive;
-- (void)setEmphasized:(BOOL)emphasized;
+@interface RBSettingsCell : UITableViewCell
+@property(nonatomic, strong) UIImageView *settingIconView;
+@property(nonatomic, strong) UILabel *settingTitleLabel;
+@property(nonatomic, strong) UILabel *settingDetailLabel;
+- (void)configureWithTitle:(NSString *)title
+                    detail:(NSString *)detail
+                      icon:(RBIcon)icon
+                 iconColor:(UIColor *)iconColor
+                   enabled:(BOOL)enabled;
 @end
 
-@implementation RBSettingsActionRow
+@implementation RBSettingsCell
 
-- (id)initWithTitle:(NSString *)title detail:(NSString *)detail icon:(RBIcon)icon {
-    self = [super initWithFrame:CGRectZero];
+- (id)initWithReuseIdentifier:(NSString *)reuseIdentifier {
+    self = [super initWithStyle:UITableViewCellStyleDefault reuseIdentifier:reuseIdentifier];
     if (self) {
-        self.backgroundColor = [UIColor whiteColor];
-        self.accessibilityTraits = UIAccessibilityTraitButton;
+        self.backgroundColor = [RBTheme surfaceColor];
+        self.backgroundView = [[UIView alloc] initWithFrame:CGRectZero];
+        self.backgroundView.backgroundColor = [RBTheme surfaceColor];
 
-        self.iconView = [[UIImageView alloc] initWithImage:
-            [RBTheme icon:icon size:21.0 color:[RBTheme accentColor]]];
-        self.iconView.contentMode = UIViewContentModeCenter;
-        self.iconView.userInteractionEnabled = NO;
-        [self addSubview:self.iconView];
+        UIView *selectedBackground = [[UIView alloc] initWithFrame:CGRectZero];
+        selectedBackground.backgroundColor = [[RBTheme seaGlassColor] colorWithAlphaComponent:0.16];
+        self.selectedBackgroundView = selectedBackground;
 
-        self.titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-        self.titleLabel.backgroundColor = [UIColor clearColor];
-        self.titleLabel.font = [RBTheme fontOfSize:15.0 bold:NO];
-        self.titleLabel.textColor = [RBTheme primaryTextColor];
-        self.titleLabel.text = title;
-        self.titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
-        [self addSubview:self.titleLabel];
+        self.settingIconView = [[UIImageView alloc] initWithFrame:CGRectZero];
+        self.settingIconView.contentMode = UIViewContentModeCenter;
+        [self.contentView addSubview:self.settingIconView];
 
-        self.detailLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-        self.detailLabel.backgroundColor = [UIColor clearColor];
-        self.detailLabel.font = [RBTheme fontOfSize:12.0 bold:NO];
-        self.detailLabel.textColor = [RBTheme secondaryTextColor];
-        self.detailLabel.text = detail;
-        self.detailLabel.lineBreakMode = NSLineBreakByTruncatingTail;
-        [self addSubview:self.detailLabel];
+        self.settingTitleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+        self.settingTitleLabel.backgroundColor = [UIColor clearColor];
+        self.settingTitleLabel.font = [RBTheme fontOfSize:15.0 bold:NO];
+        self.settingTitleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+        [self.contentView addSubview:self.settingTitleLabel];
 
-        self.chevronView = [[UIImageView alloc] initWithImage:
-            [RBTheme icon:RBIconForward size:15.0 color:[RBTheme secondaryTextColor]]];
-        self.chevronView.contentMode = UIViewContentModeCenter;
-        self.chevronView.hidden = YES;
-        [self addSubview:self.chevronView];
-
-        self.separator = [[UIView alloc] initWithFrame:CGRectZero];
-        self.separator.backgroundColor = [RBTheme separatorColor];
-        self.separator.userInteractionEnabled = NO;
-        [self addSubview:self.separator];
-
-        self.isAccessibilityElement = YES;
-        self.accessibilityLabel = title;
-        self.accessibilityValue = detail;
+        self.settingDetailLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+        self.settingDetailLabel.backgroundColor = [UIColor clearColor];
+        self.settingDetailLabel.font = [RBTheme fontOfSize:12.0 bold:NO];
+        self.settingDetailLabel.lineBreakMode = NSLineBreakByWordWrapping;
+        self.settingDetailLabel.numberOfLines = 2;
+        [self.contentView addSubview:self.settingDetailLabel];
     }
     return self;
 }
 
-- (void)setShowsChevron:(BOOL)showsChevron {
-    self.chevronView.hidden = !showsChevron;
-    self.accessibilityTraits = showsChevron ? UIAccessibilityTraitButton : UIAccessibilityTraitNone;
+- (void)prepareForReuse {
+    [super prepareForReuse];
+    self.accessoryType = UITableViewCellAccessoryNone;
+    self.accessoryView = nil;
+    self.selectionStyle = UITableViewCellSelectionStyleBlue;
+    self.userInteractionEnabled = YES;
+    self.alpha = 1.0;
+    self.isAccessibilityElement = YES;
+    self.accessibilityTraits = UIAccessibilityTraitNone;
+}
+
+- (void)configureWithTitle:(NSString *)title
+                    detail:(NSString *)detail
+                      icon:(RBIcon)icon
+                 iconColor:(UIColor *)iconColor
+                   enabled:(BOOL)enabled {
+    self.settingTitleLabel.text = title;
+    self.backgroundColor = [RBTheme surfaceColor];
+    self.backgroundView.backgroundColor = [RBTheme surfaceColor];
+    self.selectedBackgroundView.backgroundColor = [[RBTheme seaGlassColor] colorWithAlphaComponent:0.16];
+    self.settingTitleLabel.textColor = enabled ? [RBTheme primaryTextColor]
+                                               : [[RBTheme secondaryTextColor] colorWithAlphaComponent:0.72];
+    self.settingDetailLabel.text = detail;
+    self.settingDetailLabel.textColor = enabled ? [RBTheme secondaryTextColor]
+                                                : [[RBTheme secondaryTextColor] colorWithAlphaComponent:0.64];
+    self.settingIconView.image = [RBTheme icon:icon size:21.0
+                                      color:enabled ? iconColor
+                                                    : [[RBTheme secondaryTextColor] colorWithAlphaComponent:0.55]];
+    self.userInteractionEnabled = enabled;
+    self.selectionStyle = enabled ? UITableViewCellSelectionStyleBlue
+                                  : UITableViewCellSelectionStyleNone;
+    self.accessibilityLabel = title;
+    self.accessibilityValue = detail;
     [self setNeedsLayout];
-}
-
-- (UISwitch *)installSwitchOn:(BOOL)on target:(id)target action:(SEL)action {
-    [self.toggle removeFromSuperview];
-    self.toggle = [[UISwitch alloc] initWithFrame:CGRectZero];
-    self.toggle.on = on;
-    if ([self.toggle respondsToSelector:@selector(setOnTintColor:)]) {
-        self.toggle.onTintColor = [RBTheme accentColor];
-    }
-    [self.toggle addTarget:target action:action forControlEvents:UIControlEventValueChanged];
-    [self addSubview:self.toggle];
-    self.chevronView.hidden = YES;
-    self.isAccessibilityElement = NO;
-    [self setNeedsLayout];
-    return self.toggle;
-}
-
-- (void)setDestructive:(BOOL)destructive {
-    UIColor *color = destructive ? [UIColor colorWithRed:0.68 green:0.18 blue:0.20 alpha:1.0]
-                                 : [RBTheme primaryTextColor];
-    self.titleLabel.textColor = color;
-    if (destructive) {
-        self.iconView.image = [RBTheme icon:RBIconWarning size:21.0 color:color];
-    }
-}
-
-- (void)setEmphasized:(BOOL)emphasized {
-    self.titleLabel.font = emphasized ? [RBTheme displayFontOfSize:17.0]
-                                      : [RBTheme fontOfSize:15.0 bold:NO];
-}
-
-- (void)setEnabled:(BOOL)enabled {
-    [super setEnabled:enabled];
-    self.alpha = enabled ? 1.0 : 0.42;
-}
-
-- (void)setHighlighted:(BOOL)highlighted {
-    [super setHighlighted:highlighted];
-    if (!self.enabled || self.toggle) return;
-    self.backgroundColor = highlighted ? [[RBTheme seaGlassColor] colorWithAlphaComponent:0.12]
-                                       : [UIColor whiteColor];
 }
 
 - (void)layoutSubviews {
     [super layoutSubviews];
-    CGFloat width = self.bounds.size.width;
-    CGFloat height = self.bounds.size.height;
-    CGFloat accessoryWidth = self.toggle ? 66.0 : (self.chevronView.hidden ? 12.0 : 30.0);
-    self.iconView.frame = CGRectMake(10.0, floorf((height - 34.0) / 2.0), 34.0, 34.0);
+    CGRect bounds = self.contentView.bounds;
+    CGFloat iconX = 12.0;
     CGFloat textX = 50.0;
-    CGFloat textWidth = MAX(20.0, width - textX - accessoryWidth - 8.0);
-    BOOL hasDetail = [self.detailLabel.text length] > 0;
-    self.titleLabel.frame = CGRectMake(textX, hasDetail ? 10.0 : 0.0,
-                                       textWidth, hasDetail ? 22.0 : height);
-    self.detailLabel.frame = CGRectMake(textX, 31.0, textWidth, 19.0);
-    self.chevronView.frame = CGRectMake(MAX(0.0, width - 28.0),
-                                        floorf((height - 28.0) / 2.0), 20.0, 28.0);
-    if (self.toggle) {
-        CGSize switchSize = self.toggle.bounds.size;
-        self.toggle.frame = CGRectMake(width - switchSize.width - 10.0,
-                                       floorf((height - switchSize.height) / 2.0),
-                                       switchSize.width, switchSize.height);
-    }
-    self.separator.frame = CGRectMake(textX, MAX(0.0, height - 1.0),
-                                      MAX(0.0, width - textX), 1.0);
-}
+    CGFloat textWidth = MAX(24.0, bounds.size.width - textX - 10.0);
+    BOOL hasDetail = [self.settingDetailLabel.text length] > 0;
 
-@end
-
-@interface RBSettingsCard : UIView
-@property(nonatomic, strong) NSArray *rows;
-- (void)setRows:(NSArray *)rows;
-- (CGFloat)desiredHeight;
-@end
-
-@implementation RBSettingsCard
-
-- (id)initWithFrame:(CGRect)frame {
-    self = [super initWithFrame:frame];
-    if (self) {
-        self.backgroundColor = [UIColor whiteColor];
-        self.layer.cornerRadius = 11.0;
-        self.layer.borderWidth = 1.0;
-        self.layer.borderColor = [[RBTheme mistColor] CGColor];
-        self.layer.masksToBounds = YES;
-    }
-    return self;
-}
-
-- (void)setRows:(NSArray *)rows {
-    for (UIView *view in _rows) [view removeFromSuperview];
-    _rows = rows;
-    for (UIView *view in rows) [self addSubview:view];
-    [self setNeedsLayout];
-}
-
-- (CGFloat)desiredHeight { return kRBSettingsRowHeight * [self.rows count]; }
-
-- (void)layoutSubviews {
-    [super layoutSubviews];
-    CGFloat rowHeight = [self.rows count] ? self.bounds.size.height / [self.rows count] : 0.0;
-    for (NSUInteger i = 0; i < [self.rows count]; i++) {
-        RBSettingsActionRow *row = [self.rows objectAtIndex:i];
-        row.frame = CGRectMake(0.0, floorf(i * rowHeight), self.bounds.size.width,
-                               ceilf(rowHeight));
-        row.separator.hidden = i + 1 == [self.rows count];
+    self.settingIconView.frame = CGRectMake(iconX, floorf((bounds.size.height - 34.0) / 2.0),
+                                            30.0, 34.0);
+    if (hasDetail) {
+        self.settingTitleLabel.frame = CGRectMake(textX, 8.0, textWidth, 21.0);
+        self.settingDetailLabel.frame = CGRectMake(textX, 29.0, textWidth,
+                                                   MAX(20.0, bounds.size.height - 34.0));
+    } else {
+        self.settingTitleLabel.frame = CGRectMake(textX, 0.0, textWidth, bounds.size.height);
+        self.settingDetailLabel.frame = CGRectZero;
     }
 }
 
 @end
-
-static UILabel *RBSettingsSectionTitle(NSString *text) {
-    UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
-    label.backgroundColor = [UIColor clearColor];
-    label.font = [RBTheme fontOfSize:12.0 bold:YES];
-    label.textColor = [RBTheme accentColor];
-    label.text = [text uppercaseString];
-    return label;
-}
-
-typedef enum {
-    RBSettingsPageBrowsing,
-    RBSettingsPageDiagnostics,
-    RBSettingsPageData,
-    RBSettingsPageAbout
-} RBSettingsPage;
-
-@class RBSettingsDetailController;
 
 @interface RBSettingsController () <UIAlertViewDelegate>
 @property(nonatomic, copy) NSString *selectedServerID;
 @property(nonatomic, strong) NSDictionary *selectedServer;
 @property(nonatomic, copy) NSString *pendingClearData;
-@property(nonatomic, strong) UIScrollView *scrollView;
-@property(nonatomic, strong) UILabel *serverSectionLabel;
-@property(nonatomic, strong) UILabel *quickSectionLabel;
-@property(nonatomic, strong) UILabel *manageSectionLabel;
-@property(nonatomic, strong) RBSettingsCard *serverCard;
-@property(nonatomic, strong) RBSettingsCard *quickCard;
-@property(nonatomic, strong) RBSettingsCard *manageCard;
-@property(nonatomic, strong) RBSettingsActionRow *serverRow;
-@property(nonatomic, strong) UIView *serverStatusBar;
-@property(nonatomic, strong) UISwitch *mobileSwitch;
-@property(nonatomic, strong) UISwitch *diagnosticsSwitch;
 - (void)mobileChanged:(UISwitch *)sender;
 - (void)copiedLinksChanged:(UISwitch *)sender;
 - (void)diagnosticsChanged:(UISwitch *)sender;
-- (void)openMediaControls;
-- (void)openDiagnosticsInspector;
-- (void)openEventLog;
-- (void)requestClearData:(NSString *)what;
+- (void)darkModeChanged:(UISwitch *)sender;
+- (void)requestClearDataAtRow:(NSInteger)row;
 - (void)showLicenses;
-@end
-
-@interface RBSettingsDetailController : UIViewController
-@property(nonatomic, assign) RBSettingsController *owner;
-@property(nonatomic, assign) RBSettingsPage page;
-@property(nonatomic, strong) UIScrollView *scrollView;
-@property(nonatomic, strong) UILabel *introLabel;
-@property(nonatomic, strong) NSArray *cards;
-@property(nonatomic, strong) UIView *brandHeader;
-@property(nonatomic, strong) UISwitch *copiedLinksSwitch;
-- (id)initWithPage:(RBSettingsPage)page owner:(RBSettingsController *)owner;
 @end
 
 @interface RBLicensesController : UIViewController
@@ -248,7 +161,7 @@ typedef enum {
 @implementation RBSettingsController
 
 - (id)initWithSelectedServerID:(NSString *)serverID {
-    self = [super initWithNibName:nil bundle:nil];
+    self = [super initWithStyle:UITableViewStyleGrouped];
     if (self) {
         self.selectedServerID = serverID;
         self.title = @"Settings";
@@ -258,159 +171,40 @@ typedef enum {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.view.backgroundColor = [RBTheme pageBackgroundColor];
+    [RBTheme styleTableView:self.tableView];
+    self.tableView.rowHeight = kRBSettingsRowHeight;
     self.navigationItem.rightBarButtonItem =
         [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
                                                      target:self action:@selector(doneTapped:)];
-
-    self.scrollView = [[UIScrollView alloc] initWithFrame:self.view.bounds];
-    self.scrollView.backgroundColor = [UIColor clearColor];
-    self.scrollView.alwaysBounceVertical = YES;
-    self.scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    [self.view addSubview:self.scrollView];
-
-    self.serverSectionLabel = RBSettingsSectionTitle(@"Current server");
-    self.quickSectionLabel = RBSettingsSectionTitle(@"Quick controls");
-    self.manageSectionLabel = RBSettingsSectionTitle(@"Manage");
-    [self.scrollView addSubview:self.serverSectionLabel];
-    [self.scrollView addSubview:self.quickSectionLabel];
-    [self.scrollView addSubview:self.manageSectionLabel];
-
-    self.serverRow = [[RBSettingsActionRow alloc] initWithTitle:@"Choose a server"
-                                                         detail:@"Add or select a Surf server"
-                                                           icon:RBIconServer];
-    [self.serverRow setShowsChevron:YES];
-    [self.serverRow setEmphasized:YES];
-    [self.serverRow addTarget:self action:@selector(serverTapped:) forControlEvents:UIControlEventTouchUpInside];
-    self.serverCard = [[RBSettingsCard alloc] initWithFrame:CGRectZero];
-    [self.serverCard setRows:@[self.serverRow]];
-    [self.scrollView addSubview:self.serverCard];
-    self.serverStatusBar = [[UIView alloc] initWithFrame:CGRectZero];
-    [self.serverCard addSubview:self.serverStatusBar];
-
-    BOOL mobile = [[NSUserDefaults standardUserDefaults] boolForKey:RBDefaultsMobileLayoutKey];
-    RBSettingsActionRow *mobileRow = [[RBSettingsActionRow alloc]
-        initWithTitle:@"Request Mobile Sites" detail:@"Identify as mobile Chrome" icon:RBIconSliders];
-    self.mobileSwitch = [mobileRow installSwitchOn:mobile target:self action:@selector(mobileChanged:)];
-    RBSettingsActionRow *diagnosticsRow = [[RBSettingsActionRow alloc]
-        initWithTitle:@"Performance Monitor"
-               detail:@"Show connection and stream health over the page" icon:RBIconGauge];
-    self.diagnosticsSwitch = [diagnosticsRow installSwitchOn:self.diagnosticsVisible
-                                                      target:self action:@selector(diagnosticsChanged:)];
-    self.quickCard = [[RBSettingsCard alloc] initWithFrame:CGRectZero];
-    [self.quickCard setRows:@[mobileRow, diagnosticsRow]];
-    [self.scrollView addSubview:self.quickCard];
-
-    NSArray *manageInfo = @[
-        @[@"Browsing & Links", @"Media controls and copied addresses", @(RBIconShare)],
-        @[@"Diagnostics & Logs", @"Live inspector and application events", @(RBIconGauge)],
-        @[@"Data & Privacy", @"History, cookies, and cache", @(RBIconHistory)],
-        @[@"About Surf", @"Version, protocol, and licenses", @(RBIconGear)]
-    ];
-    NSMutableArray *manageRows = [NSMutableArray array];
-    for (NSUInteger i = 0; i < [manageInfo count]; i++) {
-        NSArray *info = [manageInfo objectAtIndex:i];
-        RBSettingsActionRow *row = [[RBSettingsActionRow alloc]
-            initWithTitle:[info objectAtIndex:0] detail:[info objectAtIndex:1]
-                     icon:(RBIcon)[[info objectAtIndex:2] integerValue]];
-        row.tag = (NSInteger)i;
-        [row setShowsChevron:YES];
-        [row addTarget:self action:@selector(manageTapped:) forControlEvents:UIControlEventTouchUpInside];
-        [manageRows addObject:row];
-    }
-    self.manageCard = [[RBSettingsCard alloc] initWithFrame:CGRectZero];
-    [self.manageCard setRows:manageRows];
-    [self.scrollView addSubview:self.manageCard];
     [self reloadServers];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
+    [RBTheme styleTableView:self.tableView];
+    [RBTheme styleNavigationBar:self.navigationController.navigationBar];
+    self.navigationController.view.backgroundColor = [RBTheme pageBackgroundColor];
     [self reloadServers];
-    self.mobileSwitch.on = [[NSUserDefaults standardUserDefaults] boolForKey:RBDefaultsMobileLayoutKey];
-    self.diagnosticsSwitch.on = self.diagnosticsVisible;
-}
-
-- (void)viewDidLayoutSubviews {
-    [super viewDidLayoutSubviews];
-    CGFloat width = self.scrollView.bounds.size.width;
-    CGFloat contentWidth = MAX(1.0, width - kRBSettingsInset * 2.0);
-    CGFloat y = 12.0;
-    self.serverSectionLabel.frame = CGRectMake(kRBSettingsInset + 4.0, y, contentWidth - 8.0, 18.0);
-    y += 23.0;
-    self.serverCard.frame = CGRectMake(kRBSettingsInset, y, contentWidth, 78.0);
-    self.serverStatusBar.frame = CGRectMake(0.0, 0.0, 4.0, self.serverCard.bounds.size.height);
-    y += 92.0;
-
-    CGFloat quickHeight = [self.quickCard desiredHeight];
-    CGFloat manageHeight = [self.manageCard desiredHeight];
-    if (width >= 520.0) {
-        CGFloat gap = 14.0;
-        CGFloat columnWidth = floorf((contentWidth - gap) / 2.0);
-        self.quickSectionLabel.frame = CGRectMake(kRBSettingsInset + 4.0, y, columnWidth - 8.0, 18.0);
-        self.manageSectionLabel.frame = CGRectMake(kRBSettingsInset + columnWidth + gap + 4.0,
-                                                   y, columnWidth - 8.0, 18.0);
-        y += 23.0;
-        self.quickCard.frame = CGRectMake(kRBSettingsInset, y, columnWidth, quickHeight);
-        self.manageCard.frame = CGRectMake(kRBSettingsInset + columnWidth + gap, y,
-                                           columnWidth, manageHeight);
-        y += MAX(quickHeight, manageHeight) + 20.0;
-    } else {
-        self.quickSectionLabel.frame = CGRectMake(kRBSettingsInset + 4.0, y, contentWidth - 8.0, 18.0);
-        y += 23.0;
-        self.quickCard.frame = CGRectMake(kRBSettingsInset, y, contentWidth, quickHeight);
-        y += quickHeight + 16.0;
-        self.manageSectionLabel.frame = CGRectMake(kRBSettingsInset + 4.0, y, contentWidth - 8.0, 18.0);
-        y += 23.0;
-        self.manageCard.frame = CGRectMake(kRBSettingsInset, y, contentWidth, manageHeight);
-        y += manageHeight + 20.0;
-    }
-    self.scrollView.contentSize = CGSizeMake(width, MAX(y, self.scrollView.bounds.size.height + 1.0));
-}
-
-- (void)updateServerCard {
-    NSString *name = [self.selectedServer objectForKey:@"name"];
-    if ([name length]) {
-        self.serverRow.titleLabel.text = name;
-        self.serverRow.detailLabel.text = self.connected ? @"Connected — manage server"
-                                                         : @"Selected — tap to connect or manage";
-    } else {
-        self.serverRow.titleLabel.text = @"Choose a server";
-        self.serverRow.detailLabel.text = @"Add or select a Surf server";
-    }
-    self.serverRow.accessibilityLabel = self.serverRow.titleLabel.text;
-    self.serverRow.accessibilityValue = self.serverRow.detailLabel.text;
-    self.serverRow.detailLabel.textColor = self.connected ? [RBTheme accentColor]
-                                                          : [RBTheme secondaryTextColor];
-    self.serverStatusBar.backgroundColor = self.connected ? [RBTheme seaGlassColor]
-                                                           : [RBTheme mistColor];
 }
 
 - (void)setConnected:(BOOL)connected {
     _connected = connected;
-    if ([self isViewLoaded]) [self updateServerCard];
+    if ([self isViewLoaded]) [self.tableView reloadData];
 }
 
 - (void)setDiagnosticsVisible:(BOOL)diagnosticsVisible {
     _diagnosticsVisible = diagnosticsVisible;
-    if ([self isViewLoaded]) self.diagnosticsSwitch.on = diagnosticsVisible;
+    if ([self isViewLoaded]) [self.tableView reloadData];
 }
 
 - (void)reloadServers {
     self.selectedServer = [RBServerStore serverWithID:self.selectedServerID] ?:
         [RBServerStore lastSelectedServer];
     self.selectedServerID = [self.selectedServer objectForKey:@"serverID"];
-    if ([self isViewLoaded]) [self updateServerCard];
+    if ([self isViewLoaded]) [self.tableView reloadData];
 }
 
 - (void)doneTapped:(id)sender { [self.delegate settingsDismissed:self]; }
-- (void)serverTapped:(id)sender { [self.delegate settingsWantsServers:self]; }
-
-- (void)manageTapped:(RBSettingsActionRow *)row {
-    RBSettingsDetailController *controller = [[RBSettingsDetailController alloc]
-        initWithPage:(RBSettingsPage)row.tag owner:self];
-    [self.navigationController pushViewController:controller animated:YES];
-}
 
 - (void)mobileChanged:(UISwitch *)sender {
     [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:RBDefaultsMobileLayoutKey];
@@ -437,35 +231,284 @@ typedef enum {
     }
 }
 
-- (void)openMediaControls {
-    if (!self.connected) return;
-    if ([self.delegate respondsToSelector:@selector(settingsWantsMediaControls:)]) {
-        [self.delegate settingsWantsMediaControls:self];
-    }
-}
-
-- (void)openDiagnosticsInspector {
-    self.diagnosticsVisible = YES;
-    [[NSUserDefaults standardUserDefaults] setBool:YES forKey:RBDefaultsDiagnosticsKey];
+- (void)darkModeChanged:(UISwitch *)sender {
+    [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:RBDefaultsDarkModeKey];
     [[NSUserDefaults standardUserDefaults] synchronize];
-    if ([self.delegate respondsToSelector:@selector(settings:diagnosticsVisible:)]) {
-        [self.delegate settings:self diagnosticsVisible:YES];
-    }
-    if ([self.delegate respondsToSelector:@selector(settingsWantsDiagnosticsInspector:)]) {
-        [self.delegate settingsWantsDiagnosticsInspector:self];
+    [RBTheme styleNavigationBar:self.navigationController.navigationBar];
+    self.navigationController.view.backgroundColor = [RBTheme pageBackgroundColor];
+    [RBTheme styleTableView:self.tableView];
+    [self.tableView reloadData];
+    if ([self.delegate respondsToSelector:@selector(settings:preference:enabled:)]) {
+        [self.delegate settings:self preference:RBDefaultsDarkModeKey enabled:sender.on];
     }
 }
 
-- (void)openEventLog {
-    [self.navigationController pushViewController:[[RBLogViewController alloc] init] animated:YES];
+- (void)bottomBrowserBarChanged:(UISwitch *)sender {
+    [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:RBDefaultsBottomBrowserBarKey];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+    if ([self.delegate respondsToSelector:@selector(settings:preference:enabled:)]) {
+        [self.delegate settings:self preference:RBDefaultsBottomBrowserBarKey enabled:sender.on];
+    }
 }
 
-- (void)requestClearData:(NSString *)what {
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    return RBSettingsSectionCount;
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    if (section == RBSettingsServerSection) return 1;
+    if (section == RBSettingsAppearanceSection) {
+        return UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad ? 2 : 1;
+    }
+    return 3;
+}
+
+- (NSString *)titleForSection:(NSInteger)section {
+    static NSString *const titles[] = {
+        @"Current Server", @"Appearance", @"Browsing", @"Performance", @"Data & Privacy", @"About"
+    };
+    return titles[section];
+}
+
+- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
+    return section == RBSettingsServerSection ? 38.0 : 34.0;
+}
+
+- (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
+    UIView *header = [[UIView alloc] initWithFrame:CGRectZero];
+    header.backgroundColor = [UIColor clearColor];
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
+    label.tag = 1;
+    label.backgroundColor = [UIColor clearColor];
+    label.font = [RBTheme fontOfSize:12.0 bold:YES];
+    label.textColor = [RBTheme accentColor];
+    label.text = [[self titleForSection:section] uppercaseString];
+    [header addSubview:label];
+    return header;
+}
+
+- (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view
+       forSection:(NSInteger)section {
+    UILabel *label = (UILabel *)[view viewWithTag:1];
+    CGFloat top = section == RBSettingsServerSection ? 14.0 : 10.0;
+    label.frame = CGRectMake(16.0, top, MAX(1.0, view.bounds.size.width - 32.0), 18.0);
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    if (section == RBSettingsDataSection && !self.connected) {
+        return @"Connect to a Surf server to manage its browsing data.";
+    }
+    return nil;
+}
+
+- (RBSettingsCell *)cellWithIdentifier:(NSString *)identifier
+                                  title:(NSString *)title
+                                 detail:(NSString *)detail
+                                   icon:(RBIcon)icon
+                              iconColor:(UIColor *)iconColor
+                                enabled:(BOOL)enabled {
+    RBSettingsCell *cell = (RBSettingsCell *)[self.tableView dequeueReusableCellWithIdentifier:identifier];
+    if (!cell) cell = [[RBSettingsCell alloc] initWithReuseIdentifier:identifier];
+    cell.accessoryType = UITableViewCellAccessoryNone;
+    cell.accessoryView = nil;
+    cell.selectionStyle = UITableViewCellSelectionStyleBlue;
+    cell.isAccessibilityElement = YES;
+    cell.accessibilityTraits = UIAccessibilityTraitNone;
+    [cell configureWithTitle:title detail:detail icon:icon iconColor:iconColor enabled:enabled];
+    return cell;
+}
+
+- (UISwitch *)switchOn:(BOOL)on target:(SEL)action label:(NSString *)label {
+    UISwitch *toggle = [[UISwitch alloc] initWithFrame:CGRectZero];
+    toggle.on = on;
+    toggle.accessibilityLabel = label;
+    if ([toggle respondsToSelector:@selector(setOnTintColor:)]) {
+        toggle.onTintColor = [RBTheme accentColor];
+    }
+    [toggle addTarget:self action:action forControlEvents:UIControlEventValueChanged];
+    return toggle;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView
+         cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    NSInteger section = indexPath.section;
+    NSInteger row = indexPath.row;
+    UIColor *accent = [RBTheme accentColor];
+    RBSettingsCell *cell = nil;
+
+    if (section == RBSettingsServerSection) {
+        NSString *name = [self.selectedServer objectForKey:@"name"];
+        NSString *title = [name length] ? name : @"Choose a Server";
+        NSString *detail = ![name length] ? @"Add or select a Surf server" :
+            (self.connected ? @"Connected" : @"Selected — tap to connect or manage");
+        cell = [self cellWithIdentifier:@"server" title:title detail:detail icon:RBIconServer
+                              iconColor:self.connected ? [RBTheme seaGlassColor] : accent enabled:YES];
+        cell.settingTitleLabel.font = [RBTheme fontOfSize:16.0 bold:YES];
+        cell.settingDetailLabel.textColor = self.connected ? [RBTheme accentColor]
+                                                          : [RBTheme secondaryTextColor];
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        cell.accessibilityTraits = UIAccessibilityTraitButton;
+        return cell;
+    }
+
+    if (section == RBSettingsAppearanceSection) {
+        if (row == RBSettingsAppearanceDarkModeRow) {
+            cell = [self cellWithIdentifier:@"toggle" title:@"Dark Mode"
+                detail:@"Use dark surfaces in Surf and websites" icon:RBIconMoon
+                iconColor:accent enabled:YES];
+            BOOL on = [[NSUserDefaults standardUserDefaults] boolForKey:RBDefaultsDarkModeKey];
+            cell.accessoryView = [self switchOn:on target:@selector(darkModeChanged:) label:@"Dark Mode"];
+        } else {
+            cell = [self cellWithIdentifier:@"toggle" title:@"Bottom Browser Bar"
+                detail:@"Keep the address, tabs, and actions near the bottom" icon:RBIconSliders
+                iconColor:accent enabled:YES];
+            BOOL on = [[NSUserDefaults standardUserDefaults] boolForKey:RBDefaultsBottomBrowserBarKey];
+            cell.accessoryView = [self switchOn:on target:@selector(bottomBrowserBarChanged:)
+                                              label:@"Bottom Browser Bar"];
+        }
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        return cell;
+    }
+
+    if (section == RBSettingsBrowsingSection) {
+        if (row == RBSettingsBrowsingMobileRow) {
+            cell = [self cellWithIdentifier:@"toggle" title:@"Request Mobile Sites"
+                detail:@"Identify Surf as mobile Chrome" icon:RBIconSliders
+                iconColor:accent enabled:YES];
+            BOOL on = [[NSUserDefaults standardUserDefaults] boolForKey:RBDefaultsMobileLayoutKey];
+            cell.accessoryView = [self switchOn:on target:@selector(mobileChanged:)
+                                          label:@"Request Mobile Sites"];
+        } else if (row == RBSettingsBrowsingCopiedLinksRow) {
+            cell = [self cellWithIdentifier:@"toggle" title:@"Offer Copied Links"
+                detail:@"Ask before opening copied web addresses" icon:RBIconShare
+                iconColor:accent enabled:YES];
+            BOOL on = [[NSUserDefaults standardUserDefaults] boolForKey:RBDefaultsOfferCopiedLinksKey];
+            cell.accessoryView = [self switchOn:on target:@selector(copiedLinksChanged:)
+                                          label:@"Offer Copied Links"];
+        } else {
+            cell = [self cellWithIdentifier:@"action" title:@"Page Media Controls"
+                detail:@"Playback, mute, and page volume" icon:RBIconMedia
+                iconColor:accent enabled:self.connected];
+            if (self.connected) cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        }
+        if (row != RBSettingsBrowsingMediaRow) cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        return cell;
+    }
+
+    if (section == RBSettingsPerformanceSection) {
+        if (row == RBSettingsPerformanceOverlayRow) {
+            cell = [self cellWithIdentifier:@"toggle" title:@"Performance Overlay"
+                detail:@"Show live stream health over the page" icon:RBIconGauge
+                iconColor:accent enabled:YES];
+            cell.accessoryView = [self switchOn:self.diagnosticsVisible
+                                         target:@selector(diagnosticsChanged:)
+                                          label:@"Performance Overlay"];
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        } else if (row == RBSettingsPerformanceInspectorRow) {
+            cell = [self cellWithIdentifier:@"action" title:@"Live Inspector"
+                detail:@"Open the expanded performance panel" icon:RBIconGauge
+                iconColor:accent enabled:YES];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else {
+            cell = [self cellWithIdentifier:@"action" title:@"Event Log"
+                detail:@"Application events, warnings, and errors" icon:RBIconReader
+                iconColor:accent enabled:YES];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        }
+        return cell;
+    }
+
+    if (section == RBSettingsDataSection) {
+        static NSString *const titles[] = {@"Clear History", @"Clear Cookies", @"Clear Cache"};
+        static NSString *const details[] = {
+            @"Remove visited-page records from this server",
+            @"Sign out of websites on this server",
+            @"Remove temporary website files from this server"
+        };
+        UIColor *destructive = [RBTheme isDarkMode]
+            ? [UIColor colorWithRed:0.96 green:0.39 blue:0.42 alpha:1.0]
+            : [UIColor colorWithRed:0.68 green:0.18 blue:0.20 alpha:1.0];
+        cell = [self cellWithIdentifier:@"data" title:titles[row] detail:details[row]
+                                  icon:RBIconWarning iconColor:destructive enabled:self.connected];
+        if (self.connected) cell.settingTitleLabel.textColor = destructive;
+        return cell;
+    }
+
+    if (row == RBSettingsAboutClientRow) {
+        cell = [self cellWithIdentifier:@"about" title:@"Surf Client" detail:RBAppVersion
+                                  icon:RBIconGear iconColor:accent enabled:YES];
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    } else if (row == RBSettingsAboutProtocolRow) {
+        cell = [self cellWithIdentifier:@"about" title:@"Native Protocol" detail:RBNativeVersion
+                                  icon:RBIconServer iconColor:accent enabled:YES];
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    } else {
+        cell = [self cellWithIdentifier:@"action" title:@"Third-Party Licenses"
+            detail:@"Deta Surf artwork and Lucide icons" icon:RBIconBook
+            iconColor:accent enabled:YES];
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    }
+    return cell;
+}
+
+- (NSIndexPath *)tableView:(UITableView *)tableView willSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (indexPath.section == RBSettingsAppearanceSection) return nil;
+    if (indexPath.section == RBSettingsBrowsingSection &&
+        indexPath.row != RBSettingsBrowsingMediaRow) return nil;
+    if (indexPath.section == RBSettingsBrowsingSection && !self.connected) return nil;
+    if (indexPath.section == RBSettingsPerformanceSection &&
+        indexPath.row == RBSettingsPerformanceOverlayRow) return nil;
+    if (indexPath.section == RBSettingsDataSection && !self.connected) return nil;
+    if (indexPath.section == RBSettingsAboutSection &&
+        indexPath.row != RBSettingsAboutLicensesRow) return nil;
+    return indexPath;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (indexPath.section == RBSettingsServerSection) {
+        [self.delegate settingsWantsServers:self];
+        return;
+    }
+    if (indexPath.section == RBSettingsBrowsingSection &&
+        indexPath.row == RBSettingsBrowsingMediaRow &&
+        [self.delegate respondsToSelector:@selector(settingsWantsMediaControls:)]) {
+        [self.delegate settingsWantsMediaControls:self];
+        return;
+    }
+    if (indexPath.section == RBSettingsPerformanceSection) {
+        if (indexPath.row == RBSettingsPerformanceInspectorRow) {
+            self.diagnosticsVisible = YES;
+            [[NSUserDefaults standardUserDefaults] setBool:YES forKey:RBDefaultsDiagnosticsKey];
+            [[NSUserDefaults standardUserDefaults] synchronize];
+            if ([self.delegate respondsToSelector:@selector(settings:diagnosticsVisible:)]) {
+                [self.delegate settings:self diagnosticsVisible:YES];
+            }
+            if ([self.delegate respondsToSelector:@selector(settingsWantsDiagnosticsInspector:)]) {
+                [self.delegate settingsWantsDiagnosticsInspector:self];
+            }
+        } else if (indexPath.row == RBSettingsPerformanceLogRow) {
+            [self.navigationController pushViewController:[[RBLogViewController alloc] init]
+                                                 animated:YES];
+        }
+        return;
+    }
+    if (indexPath.section == RBSettingsDataSection) {
+        [self requestClearDataAtRow:indexPath.row];
+        return;
+    }
+    if (indexPath.section == RBSettingsAboutSection &&
+        indexPath.row == RBSettingsAboutLicensesRow) {
+        [self showLicenses];
+    }
+}
+
+- (void)requestClearDataAtRow:(NSInteger)row {
     if (!self.connected) return;
-    NSDictionary *titles = @{@"history": @"Clear History?", @"cookies": @"Clear Cookies?",
-                             @"cache": @"Clear Cache?"};
-    self.pendingClearData = what;
-    UIAlertView *alert = [[UIAlertView alloc] initWithTitle:[titles objectForKey:what]
+    static NSString *const values[] = {@"history", @"cookies", @"cache"};
+    static NSString *const titles[] = {@"Clear History?", @"Clear Cookies?", @"Clear Cache?"};
+    self.pendingClearData = values[row];
+    UIAlertView *alert = [[UIAlertView alloc] initWithTitle:titles[row]
                                                    message:@"This affects only the connected Surf server."
                                                   delegate:self cancelButtonTitle:@"Cancel"
                                          otherButtonTitles:@"Clear", nil];
@@ -483,164 +526,6 @@ typedef enum {
 
 - (void)showLicenses {
     [self.navigationController pushViewController:[[RBLicensesController alloc] init] animated:YES];
-}
-
-@end
-
-@implementation RBSettingsDetailController
-
-- (id)initWithPage:(RBSettingsPage)page owner:(RBSettingsController *)owner {
-    self = [super initWithNibName:nil bundle:nil];
-    if (self) {
-        self.page = page;
-        self.owner = owner;
-        static NSString *const titles[] = {@"Browsing & Links", @"Diagnostics & Logs",
-                                           @"Data & Privacy", @"About Surf"};
-        self.title = titles[page];
-    }
-    return self;
-}
-
-- (RBSettingsActionRow *)row:(NSString *)title detail:(NSString *)detail icon:(RBIcon)icon
-                       action:(SEL)action {
-    RBSettingsActionRow *row = [[RBSettingsActionRow alloc] initWithTitle:title detail:detail icon:icon];
-    if (action) {
-        [row setShowsChevron:YES];
-        [row addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
-    }
-    return row;
-}
-
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    self.view.backgroundColor = [RBTheme pageBackgroundColor];
-    self.scrollView = [[UIScrollView alloc] initWithFrame:self.view.bounds];
-    self.scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    self.scrollView.alwaysBounceVertical = YES;
-    [self.view addSubview:self.scrollView];
-    self.introLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    self.introLabel.backgroundColor = [UIColor clearColor];
-    self.introLabel.font = [RBTheme fontOfSize:14.0 bold:NO];
-    self.introLabel.textColor = [RBTheme secondaryTextColor];
-    self.introLabel.numberOfLines = 0;
-    [self.scrollView addSubview:self.introLabel];
-
-    NSMutableArray *cards = [NSMutableArray array];
-    if (self.page == RBSettingsPageBrowsing) {
-        self.introLabel.text = @"Control how remote pages identify themselves and hand links or media back to Surf.";
-        RBSettingsActionRow *media = [self row:@"Media Controls"
-            detail:@"Playback, mute, and page volume" icon:RBIconMedia action:@selector(mediaTapped:)];
-        media.enabled = self.owner.connected;
-        RBSettingsActionRow *links = [self row:@"Offer Copied Links"
-            detail:@"Ask before opening copied web addresses" icon:RBIconShare action:nil];
-        BOOL on = [[NSUserDefaults standardUserDefaults] boolForKey:RBDefaultsOfferCopiedLinksKey];
-        self.copiedLinksSwitch = [links installSwitchOn:on target:self.owner
-                                                 action:@selector(copiedLinksChanged:)];
-        RBSettingsCard *card = [[RBSettingsCard alloc] initWithFrame:CGRectZero];
-        [card setRows:@[media, links]];
-        [cards addObject:card];
-    } else if (self.page == RBSettingsPageDiagnostics) {
-        self.introLabel.text = @"Inspect live browser health or review structured events when something feels wrong.";
-        RBSettingsActionRow *live = [self row:@"Open Live Inspector"
-            detail:@"Return to the browser with performance details expanded"
-              icon:RBIconGauge action:@selector(inspectorTapped:)];
-        RBSettingsActionRow *events = [self row:@"Event Log"
-            detail:@"Application events, warnings, and errors"
-              icon:RBIconReader action:@selector(eventsTapped:)];
-        RBSettingsCard *card = [[RBSettingsCard alloc] initWithFrame:CGRectZero];
-        [card setRows:@[live, events]];
-        [cards addObject:card];
-    } else if (self.page == RBSettingsPageData) {
-        self.introLabel.text = self.owner.connected ?
-            @"Remove browsing data from the connected Surf server. Each action asks before it runs." :
-            @"Connect to a Surf server before managing its browsing data.";
-        NSArray *titles = @[@"Clear History", @"Clear Cookies", @"Clear Cache"];
-        NSArray *details = @[@"Remove visited-page records", @"Sign out of websites",
-                             @"Remove temporary website files"];
-        NSMutableArray *rows = [NSMutableArray array];
-        for (NSUInteger i = 0; i < [titles count]; i++) {
-            RBSettingsActionRow *row = [self row:[titles objectAtIndex:i]
-                detail:[details objectAtIndex:i] icon:RBIconWarning action:@selector(clearTapped:)];
-            row.tag = (NSInteger)i;
-            [row setDestructive:YES];
-            row.enabled = self.owner.connected;
-            [rows addObject:row];
-        }
-        RBSettingsCard *card = [[RBSettingsCard alloc] initWithFrame:CGRectZero];
-        [card setRows:rows];
-        [cards addObject:card];
-    } else {
-        self.introLabel.text = @"A native remote browser built for the devices that still deserve excellent software.";
-        self.brandHeader = [[UIView alloc] initWithFrame:CGRectZero];
-        self.brandHeader.backgroundColor = [UIColor whiteColor];
-        self.brandHeader.layer.cornerRadius = 11.0;
-        self.brandHeader.layer.borderWidth = 1.0;
-        self.brandHeader.layer.borderColor = [[RBTheme mistColor] CGColor];
-        UIImageView *mark = [[UIImageView alloc] initWithImage:[UIImage imageNamed:@"brand-mark.png"]];
-        mark.tag = 1;
-        mark.contentMode = UIViewContentModeScaleAspectFit;
-        [self.brandHeader addSubview:mark];
-        UILabel *name = [[UILabel alloc] initWithFrame:CGRectZero];
-        name.tag = 2;
-        name.backgroundColor = [UIColor clearColor];
-        name.font = [RBTheme displayFontOfSize:22.0];
-        name.textColor = [RBTheme primaryTextColor];
-        name.text = @"Surf";
-        [self.brandHeader addSubview:name];
-        UILabel *version = [[UILabel alloc] initWithFrame:CGRectZero];
-        version.tag = 3;
-        version.backgroundColor = [UIColor clearColor];
-        version.font = [RBTheme fontOfSize:13.0 bold:NO];
-        version.textColor = [RBTheme secondaryTextColor];
-        version.text = [NSString stringWithFormat:@"Version %@ · protocol %@", RBAppVersion, RBNativeVersion];
-        [self.brandHeader addSubview:version];
-        [self.scrollView addSubview:self.brandHeader];
-
-        RBSettingsActionRow *licenses = [self row:@"Third-Party Licenses"
-            detail:@"Deta Surf artwork and Lucide icons" icon:RBIconBook action:@selector(licensesTapped:)];
-        RBSettingsCard *card = [[RBSettingsCard alloc] initWithFrame:CGRectZero];
-        [card setRows:@[licenses]];
-        [cards addObject:card];
-    }
-    self.cards = cards;
-    for (UIView *card in cards) [self.scrollView addSubview:card];
-}
-
-- (void)viewDidLayoutSubviews {
-    [super viewDidLayoutSubviews];
-    CGFloat width = self.scrollView.bounds.size.width;
-    CGFloat contentWidth = MAX(1.0, MIN(620.0, width - kRBSettingsInset * 2.0));
-    CGFloat x = floorf((width - contentWidth) / 2.0);
-    CGFloat y = 14.0;
-    CGSize introSize = [self.introLabel.text sizeWithFont:self.introLabel.font
-                                       constrainedToSize:CGSizeMake(contentWidth - 8.0, 1000.0)
-                                           lineBreakMode:NSLineBreakByWordWrapping];
-    self.introLabel.frame = CGRectMake(x + 4.0, y, contentWidth - 8.0, ceilf(introSize.height));
-    y += ceilf(introSize.height) + 16.0;
-    if (self.brandHeader) {
-        self.brandHeader.frame = CGRectMake(x, y, contentWidth, 104.0);
-        ((UIView *)[self.brandHeader viewWithTag:1]).frame = CGRectMake(12.0, 10.0, 84.0, 84.0);
-        ((UIView *)[self.brandHeader viewWithTag:2]).frame = CGRectMake(108.0, 24.0,
-                                                                      contentWidth - 120.0, 28.0);
-        ((UIView *)[self.brandHeader viewWithTag:3]).frame = CGRectMake(108.0, 52.0,
-                                                                      contentWidth - 120.0, 24.0);
-        y += 118.0;
-    }
-    for (RBSettingsCard *card in self.cards) {
-        CGFloat height = [card desiredHeight];
-        card.frame = CGRectMake(x, y, contentWidth, height);
-        y += height + 14.0;
-    }
-    self.scrollView.contentSize = CGSizeMake(width, MAX(y, self.scrollView.bounds.size.height + 1.0));
-}
-
-- (void)mediaTapped:(id)sender { [self.owner openMediaControls]; }
-- (void)inspectorTapped:(id)sender { [self.owner openDiagnosticsInspector]; }
-- (void)eventsTapped:(id)sender { [self.owner openEventLog]; }
-- (void)licensesTapped:(id)sender { [self.owner showLicenses]; }
-- (void)clearTapped:(RBSettingsActionRow *)row {
-    static NSString *const values[] = {@"history", @"cookies", @"cache"};
-    [self.owner requestClearData:values[row.tag]];
 }
 
 @end
@@ -665,7 +550,7 @@ typedef enum {
     self.view.backgroundColor = [RBTheme pageBackgroundColor];
     self.textView = [[UITextView alloc] initWithFrame:self.view.bounds];
     self.textView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    self.textView.backgroundColor = [UIColor whiteColor];
+    self.textView.backgroundColor = [RBTheme surfaceColor];
     self.textView.textColor = [RBTheme primaryTextColor];
     self.textView.font = [RBTheme fontOfSize:12.0 bold:NO];
     self.textView.editable = NO;

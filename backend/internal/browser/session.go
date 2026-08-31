@@ -18,6 +18,7 @@ type browserSession struct {
 	Tabs    []string `json:"tabs"`
 	Active  int      `json:"active"`
 	Mobile  bool     `json:"mobile"`
+	Dark    bool     `json:"dark"`
 }
 
 func browserSessionPath(home string) string {
@@ -49,7 +50,7 @@ func (b *Controller) SaveSession() error {
 		ids = append(ids, id)
 	}
 	sort.Ints(ids)
-	session := browserSession{Version: browserSessionVersion, Mobile: b.mobile}
+	session := browserSession{Version: browserSessionVersion, Mobile: b.mobile, Dark: b.dark}
 	for _, id := range ids {
 		tab := b.tabs[id]
 		if tab == nil || !restorableURL(tab.URL) {

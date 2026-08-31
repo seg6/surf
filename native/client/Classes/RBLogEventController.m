@@ -50,6 +50,7 @@ enum {
 - (UITableViewCell *)valueCell:(UITableView *)tableView {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"value"];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"value"];
+    cell.backgroundColor = [RBTheme surfaceColor];
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
     cell.textLabel.font = [RBTheme fontOfSize:13.0 bold:NO];
     cell.detailTextLabel.font = [RBTheme monospacedFontOfSize:11.0 bold:NO];
@@ -81,6 +82,7 @@ enum {
     }
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"text"];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"text"];
+    cell.backgroundColor = [RBTheme surfaceColor];
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
     cell.textLabel.numberOfLines = 0;
     cell.textLabel.font = indexPath.section == RBLogEventRawSection

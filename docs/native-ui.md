@@ -1,11 +1,14 @@
 # Native UI system
 
 Surf's native client uses one deliberately compact visual language across
-iOS 6–14. The design is called **Oceanic Precision**: quiet Foam surfaces,
-Deep Tide text and navigation, a restrained Surf Blue accent, and Sea Glass
-for focus and progress. Display and body copy use the device's native system
-font family at deliberately different weights, avoiding family mismatches on
-older releases while following each system's own typography metrics.
+iOS 6–14. The light appearance uses quiet Foam surfaces, Deep Tide text and
+navigation, a restrained Surf Blue accent, and Sea Glass for focus and
+progress. Its explicit dark appearance uses neutral Carbon and Graphite
+surfaces, reserving Surf Blue for interactive controls instead of tinting the
+entire shell navy; it does not depend on newer system trait APIs. Display and body copy
+use the device's native system font family at deliberately different weights,
+avoiding family mismatches on older releases while following each system's own
+typography metrics.
 
 ## Browser chrome
 
@@ -14,14 +17,21 @@ older releases while following each system's own typography metrics.
 - Phone chrome has five evenly spaced actions: Back, Forward, Share, Tabs, and
   More. Library remains immediately available on every new-tab page and as the
   first action in More.
-- iPad chrome keeps persistent tabs and an anchored action layout. Active tabs
-  read as white cards above a light ocean strip rather than inherited system
-  chrome. New Tab is a direct plus glyph in that strip, not a nested circular
-  badge.
-- More is a Surf-owned six-tile surface for Library, Reader, Find, Media,
-  Fullscreen, and Settings. It never uses the system share controller, so it
+- iPad chrome keeps persistent tabs and an anchored action layout at the top or
+  bottom edge, controlled by the persistent Bottom Browser Bar setting. The
+  compact address field remains the primary rounded control, while scrollable tab cells
+  sit directly on the transparent browser rail without an enclosing box. Only
+  the active tab receives a fully outlined Surf-tinted selection—never a colored
+  cap or raised desktop-style card. New Tab remains a direct, unboxed plus glyph
+  beside the rail, keeping actions and tab selection visually distinct.
+- More is a content-height Surf-owned six-tile surface for Library, Reader,
+  Find, Media, Fullscreen, and Settings. It never uses the system share controller, so it
   cannot accidentally expose AirDrop. Share remains a separate action and is
   the only entry point to system destinations.
+- Surf-owned popovers use one Carbon outer surface for their body and anchor
+  arrow. System-owned Share, AirDrop, mail, and photo panels retain UIKit's
+  native light presentation because their legacy icons and labels do not adapt
+  reliably to a custom dark background.
 
 ## Icons and brand asset
 
@@ -45,11 +55,13 @@ every derived PNG from the pinned master.
 
 ## Settings and diagnostics
 
-Settings is a task dashboard rather than a themed system preferences table.
-It leads with the selected server and the frequently changed Mobile Sites and
-Performance Monitor controls, then routes Browsing, Diagnostics, server data, and
-About into focused destinations. Compact devices use one column; wide form
-sheets use two without changing the information hierarchy.
+Settings is a readable, single-column grouped list in both iPad form sheets and
+narrow iPhone layouts. Server, Appearance, Browsing, Performance, Data &
+Privacy, and About controls remain on the main page; descriptions may wrap and
+the Surf client and protocol versions are always visible. Dark Mode immediately
+rethemes the live native interface and tells every current and future Chromium
+tab to advertise the standard `prefers-color-scheme: dark` preference. Sites
+which do not author a dark appearance are left unchanged.
 
 Diagnostics has three visibility states in practice: hidden, visible as a slim
 health instrument, and temporarily expanded to its intrinsic content height.

@@ -21,4 +21,5 @@ typedef enum {
 @property(nonatomic, assign) id<RBBrowserStateViewDelegate> delegate;
 @property(nonatomic, assign) RBBrowserState state;
 - (void)showState:(RBBrowserState)state detail:(NSString *)detail;
+- (void)applyAppearance;
 @end

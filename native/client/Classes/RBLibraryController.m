@@ -7,6 +7,15 @@ typedef enum {
     RBLibraryTabDownloads = 2
 } RBLibraryTab;
 
+static UITextField *RBLibrarySearchTextField(UIView *view) {
+    if ([view isKindOfClass:[UITextField class]]) return (UITextField *)view;
+    for (UIView *subview in view.subviews) {
+        UITextField *field = RBLibrarySearchTextField(subview);
+        if (field) return field;
+    }
+    return nil;
+}
+
 @interface RBLibraryController () <UISearchBarDelegate, UIAlertViewDelegate>
 @property(nonatomic, strong) UISegmentedControl *segments;
 @property(nonatomic, strong) UISearchBar *searchBar;
@@ -24,6 +33,7 @@ typedef enum {
 @property(nonatomic, assign) BOOL downloadsLoaded;
 @property(nonatomic, strong) NSMutableDictionary *dlProgress; // name -> pct NSNumber
 @property(nonatomic, strong) UILabel *emptyLabel;
+- (void)applyAppearance;
 @end
 
 @implementation RBLibraryController
@@ -42,6 +52,42 @@ typedef enum {
 
 - (RBLibraryTab)tab {
     return (RBLibraryTab)self.segments.selectedSegmentIndex;
+}
+
+- (void)applyAppearance {
+    [RBTheme styleTableView:self.tableView];
+    [RBTheme styleNavigationBar:self.navigationController.navigationBar];
+    self.view.backgroundColor = [RBTheme pageBackgroundColor];
+    self.libraryHeader.backgroundColor = [RBTheme pageBackgroundColor];
+    self.emptyLabel.textColor = [RBTheme secondaryTextColor];
+
+    UIColor *segmentTint = [RBTheme isDarkMode] ? [RBTheme separatorColor]
+                                                 : [RBTheme accentColor];
+    self.segments.tintColor = segmentTint;
+    [self.segments setTitleTextAttributes:@{
+        UITextAttributeTextColor: [RBTheme primaryTextColor],
+        UITextAttributeFont: [RBTheme fontOfSize:12.0 bold:YES]
+    } forState:UIControlStateNormal];
+    [self.segments setTitleTextAttributes:@{
+        UITextAttributeTextColor: [UIColor whiteColor],
+        UITextAttributeFont: [RBTheme fontOfSize:12.0 bold:YES]
+    } forState:UIControlStateSelected];
+
+    self.searchBar.barStyle = [RBTheme isDarkMode] ? UIBarStyleBlack : UIBarStyleDefault;
+    self.searchBar.translucent = NO;
+    self.searchBar.tintColor = [RBTheme accentColor];
+    self.searchBar.backgroundColor = [RBTheme pageBackgroundColor];
+    [self.searchBar setBackgroundImage:[RBTheme solidImage:[RBTheme pageBackgroundColor]
+                                                 cornerRadius:0.0]];
+    UITextField *field = RBLibrarySearchTextField(self.searchBar);
+    field.backgroundColor = [RBTheme surfaceColor];
+    field.textColor = [RBTheme primaryTextColor];
+    if ([field respondsToSelector:@selector(setTintColor:)]) field.tintColor = [RBTheme accentColor];
+    field.keyboardAppearance = [RBTheme isDarkMode] ? UIKeyboardAppearanceDark
+                                                     : UIKeyboardAppearanceDefault;
+    field.layer.cornerRadius = 7.0;
+    field.layer.masksToBounds = YES;
+    [self.tableView reloadData];
 }
 
 - (void)viewDidLoad {
@@ -74,6 +120,8 @@ typedef enum {
     self.emptyLabel.numberOfLines = 2;
     self.emptyLabel.textColor = [RBTheme secondaryTextColor];
     self.emptyLabel.font = [RBTheme fontOfSize:15.0 bold:NO];
+    self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
+    [self applyAppearance];
 }
 
 - (void)viewDidLayoutSubviews {
@@ -87,6 +135,11 @@ typedef enum {
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
     if (!self.bookmarksLoaded && self.onNeedsData) self.onNeedsData(@"bookmarks");
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self applyAppearance];
 }
 
 - (void)doneTapped:(id)sender {
@@ -276,9 +329,10 @@ static NSString *RBLibFormatDate(long long timestamp) {
         if (!cell) {
             cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"more"];
             cell.textLabel.textAlignment = NSTextAlignmentCenter;
-            cell.textLabel.textColor = [UIColor colorWithWhite:0.45 alpha:1.0];
             cell.textLabel.font = [RBTheme fontOfSize:14.0 bold:NO];
         }
+        cell.backgroundColor = [RBTheme surfaceColor];
+        cell.textLabel.textColor = [RBTheme secondaryTextColor];
         cell.textLabel.text = [NSString stringWithFormat:@"Load more (%ld of %ld)…",
                                (long)[rows count], (long)self.historyTotal];
         return cell;
@@ -288,8 +342,14 @@ static NSString *RBLibFormatDate(long long timestamp) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"row"];
         cell.textLabel.font = [RBTheme fontOfSize:15.0 bold:NO];
         cell.detailTextLabel.font = [RBTheme fontOfSize:12.0 bold:NO];
-        cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
     }
+    cell.backgroundColor = [RBTheme surfaceColor];
+    cell.textLabel.textColor = [RBTheme primaryTextColor];
+    cell.detailTextLabel.textColor = [RBTheme secondaryTextColor];
+    if (!cell.selectedBackgroundView) {
+        cell.selectedBackgroundView = [[UIView alloc] initWithFrame:CGRectZero];
+    }
+    cell.selectedBackgroundView.backgroundColor = [[RBTheme separatorColor] colorWithAlphaComponent:0.62];
     NSDictionary *entry = [rows objectAtIndex:(NSUInteger)indexPath.row];
     if ([self tab] == RBLibraryTabDownloads) {
         NSString *name = [entry objectForKey:@"name"] ?: @"download";

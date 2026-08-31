@@ -106,6 +106,16 @@
     [self setNeedsLayout];
 }
 
+- (void)applyAppearance {
+    self.backgroundColor = [RBTheme pageBackgroundColor];
+    self.titleLabel.textColor = [RBTheme primaryTextColor];
+    self.detailLabel.textColor = [RBTheme secondaryTextColor];
+    [RBTheme stylePrimaryButton:self.primaryButton];
+    [RBTheme styleSecondaryButton:self.secondaryButton];
+    self.spinner.activityIndicatorViewStyle = [RBTheme isDarkMode]
+        ? UIActivityIndicatorViewStyleWhite : UIActivityIndicatorViewStyleGray;
+}
+
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGFloat w = self.bounds.size.width, h = self.bounds.size.height;

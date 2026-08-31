@@ -7,93 +7,51 @@
 
 @class RBTabStrip;
 
-static UIColor *RBTabRowTopColor(void) {
-    return [RBTheme stripTopColor];
-}
-
-static UIColor *RBTabRowBottomColor(void) {
-    return [RBTheme stripBottomColor];
-}
-
 static UIColor *RBTabBorderColor(void) {
     return [RBTheme barLineColor];
 }
 
 static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
-    UIColor *top = nil;
-    UIColor *bottom = nil;
-    top = active ? [UIColor whiteColor] : [UIColor colorWithRed:0.91 green:0.95 blue:0.97 alpha:1.0];
-    bottom = active ? [RBTheme foamColor] : [UIColor colorWithRed:0.86 green:0.91 blue:0.94 alpha:1.0];
-    if (highlighted) {
-        top = [top colorWithAlphaComponent:0.72];
-        bottom = [bottom colorWithAlphaComponent:0.72];
+    UIColor *activeFill = [[RBTheme accentColor]
+        colorWithAlphaComponent:[RBTheme isDarkMode] ? 0.24 : 0.14];
+    UIColor *top = active ? activeFill : [UIColor clearColor];
+    UIColor *bottom = top;
+    if (highlighted && !active) {
+        top = [[RBTheme separatorColor] colorWithAlphaComponent:0.44];
+        bottom = top;
+    } else if (highlighted) {
+        top = [top colorWithAlphaComponent:0.76];
+        bottom = [bottom colorWithAlphaComponent:0.76];
     }
     return @[(id)[top CGColor], (id)[bottom CGColor]];
 }
-
-@interface RBTabAuxButton : UIButton
-@property(nonatomic, strong) CAGradientLayer *fillLayer;
-@property(nonatomic, strong) CALayer *leftBorder;
-@end
 
 @interface RBTabCell : UIControl
 @property(nonatomic, assign) RBTabStrip *strip;
 @property(nonatomic, assign) NSInteger tabID;
 @property(nonatomic, assign) BOOL active;
 @property(nonatomic, strong) CAGradientLayer *fillLayer;
-@property(nonatomic, strong) CALayer *topBorder;
-@property(nonatomic, strong) CALayer *leftBorder;
-@property(nonatomic, strong) CALayer *rightBorder;
-@property(nonatomic, strong) CALayer *bottomBorder;
+@property(nonatomic, strong) CALayer *divider;
 @property(nonatomic, strong) UIButton *closeButton;
 @property(nonatomic, strong) UIImageView *faviconView;
 @property(nonatomic, copy) NSString *iconPath;
 @property(nonatomic, strong) UILabel *titleLabel;
+- (void)applyAppearance;
 @end
 
 @interface RBTabStrip ()
-@property(nonatomic, strong) UIView *tabContainer;
-@property(nonatomic, strong) UIButton *overflowButton;
+@property(nonatomic, strong) UIScrollView *tabScroller;
 @property(nonatomic, strong) UIButton *addTabButton;
 @property(nonatomic, strong) NSArray *tabs;
-@property(nonatomic, strong) NSArray *hiddenTabs;
 @property(nonatomic, strong) NSMutableDictionary *cells;
 @property(nonatomic, strong) NSURL *baseURL;
 @property(nonatomic, copy) NSString *fingerprint;
 @property(nonatomic, strong) NSMutableDictionary *iconCache;
 @property(nonatomic, strong) NSMutableSet *iconFetches;
-@property(nonatomic, strong) UIActionSheet *overflowSheet;
-@end
-
-@implementation RBTabAuxButton
-
-- (id)initWithFrame:(CGRect)frame {
-    self = [super initWithFrame:frame];
-    if (self) {
-        self.fillLayer = [CAGradientLayer layer];
-        self.fillLayer.colors = RBTabFillColors(NO, NO);
-        [self.layer insertSublayer:self.fillLayer atIndex:0];
-        self.leftBorder = [CALayer layer];
-        self.leftBorder.backgroundColor = [RBTabBorderColor() CGColor];
-        [self.layer addSublayer:self.leftBorder];
-    }
-    return self;
-}
-
-- (void)setHighlighted:(BOOL)highlighted {
-    [super setHighlighted:highlighted];
-    self.fillLayer.colors = RBTabFillColors(NO, highlighted);
-}
-
-- (void)layoutSubviews {
-    [super layoutSubviews];
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    self.fillLayer.frame = self.bounds;
-    self.leftBorder.frame = CGRectMake(0.0, 0.0, 1.0, self.bounds.size.height);
-    [CATransaction commit];
-}
-
+@property(nonatomic, assign) NSInteger activeTabID;
+@property(nonatomic, assign) NSUInteger lastTabCount;
+@property(nonatomic, assign) CGFloat lastLayoutWidth;
+@property(nonatomic, assign) BOOL needsActiveReveal;
 @end
 
 @implementation RBTabCell
@@ -102,26 +60,21 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
     self = [super initWithFrame:frame];
     if (self) {
         self.backgroundColor = [UIColor clearColor];
-        self.opaque = YES;
-        self.layer.cornerRadius = 7.0;
+        self.opaque = NO;
+        self.layer.cornerRadius = 8.0;
         self.layer.masksToBounds = YES;
 
         self.fillLayer = [CAGradientLayer layer];
         [self.layer insertSublayer:self.fillLayer atIndex:0];
-        self.topBorder = [CALayer layer];
-        self.leftBorder = [CALayer layer];
-        self.rightBorder = [CALayer layer];
-        self.bottomBorder = [CALayer layer];
-        for (CALayer *border in @[self.topBorder, self.leftBorder, self.rightBorder, self.bottomBorder]) {
-            border.backgroundColor = [RBTabBorderColor() CGColor];
-            [self.layer addSublayer:border];
-        }
+        self.divider = [CALayer layer];
+        self.divider.backgroundColor = [[RBTabBorderColor() colorWithAlphaComponent:0.55] CGColor];
+        [self.layer addSublayer:self.divider];
         [self addTarget:self action:@selector(tapped:) forControlEvents:UIControlEventTouchUpInside];
 
         self.closeButton = [UIButton buttonWithType:UIButtonTypeCustom];
-        [self.closeButton setImage:[RBTheme icon:RBIconClose size:10.5 color:[UIColor colorWithWhite:0.34 alpha:1.0]]
+        [self.closeButton setImage:[RBTheme icon:RBIconClose size:10.5 color:[RBTheme secondaryTextColor]]
                           forState:UIControlStateNormal];
-        [self.closeButton setImage:[RBTheme icon:RBIconClose size:10.5 color:[UIColor colorWithWhite:0.16 alpha:1.0]]
+        [self.closeButton setImage:[RBTheme icon:RBIconClose size:10.5 color:[RBTheme primaryTextColor]]
                           forState:UIControlStateHighlighted];
         self.closeButton.accessibilityLabel = @"Close Tab";
         [self.closeButton addTarget:self action:@selector(closeTapped:) forControlEvents:UIControlEventTouchUpInside];
@@ -146,17 +99,30 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
 
 - (void)setActive:(BOOL)active {
     _active = active;
-    self.titleLabel.textColor = active ? [RBTheme primaryTextColor] : [RBTheme secondaryTextColor];
+    self.titleLabel.textColor = active ? [RBTheme primaryTextColor]
+                                       : [[RBTheme secondaryTextColor] colorWithAlphaComponent:0.66];
     self.titleLabel.font = active ? [RBTheme displayFontOfSize:12.0] : [RBTheme fontOfSize:12.0 bold:NO];
-    self.closeButton.alpha = active ? 1.0 : 0.72;
+    self.closeButton.alpha = active ? 1.0 : 0.46;
+    self.faviconView.alpha = active ? 1.0 : 0.70;
     self.fillLayer.colors = RBTabFillColors(active, self.highlighted);
-    self.bottomBorder.hidden = active;
+    self.layer.borderWidth = active ? 1.0 : 0.0;
+    self.layer.borderColor = [[[RBTheme accentColor] colorWithAlphaComponent:0.72] CGColor];
+    self.divider.hidden = active;
     [self setNeedsLayout];
 }
 
 - (void)setHighlighted:(BOOL)highlighted {
     [super setHighlighted:highlighted];
     self.fillLayer.colors = RBTabFillColors(self.active, highlighted);
+}
+
+- (void)applyAppearance {
+    self.divider.backgroundColor = [[RBTabBorderColor() colorWithAlphaComponent:0.55] CGColor];
+    [self.closeButton setImage:[RBTheme icon:RBIconClose size:10.5 color:[RBTheme secondaryTextColor]]
+                      forState:UIControlStateNormal];
+    [self.closeButton setImage:[RBTheme icon:RBIconClose size:10.5 color:[RBTheme primaryTextColor]]
+                      forState:UIControlStateHighlighted];
+    self.active = self.active;
 }
 
 - (void)layoutSubviews {
@@ -166,10 +132,7 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     self.fillLayer.frame = self.bounds;
-    self.topBorder.frame = CGRectMake(0.0, 0.0, w, 1.0);
-    self.leftBorder.frame = CGRectMake(0.0, 0.0, 1.0, h);
-    self.rightBorder.frame = CGRectMake(MAX(0.0, w - 1.0), 0.0, 1.0, h);
-    self.bottomBorder.frame = CGRectMake(0.0, MAX(0.0, h - 1.0), w, 1.0);
+    self.divider.frame = CGRectMake(MAX(0.0, w - 1.0), 7.0, 1.0, MAX(0.0, h - 14.0));
     [CATransaction commit];
     CGFloat closeWidth = 27.0;
     self.closeButton.frame = CGRectMake(MAX(0.0, w - closeWidth), 0.0, closeWidth, h);
@@ -190,31 +153,17 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
 - (id)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
-        self.backgroundColor = RBTabRowBottomColor();
-        RBGradientBar *background = [[RBGradientBar alloc] initWithFrame:self.bounds];
-        background.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-        [background setTopColor:RBTabRowTopColor()
-                    bottomColor:RBTabRowBottomColor()
-                      lineColor:[RBTheme barLineColor]];
-        background.userInteractionEnabled = NO;
-        [self addSubview:background];
+        self.backgroundColor = [UIColor clearColor];
+        self.opaque = NO;
 
-        self.tabContainer = [[UIView alloc] initWithFrame:CGRectZero];
-        self.tabContainer.backgroundColor = [UIColor clearColor];
-        [self addSubview:self.tabContainer];
-        self.overflowButton = [[RBTabAuxButton alloc] initWithFrame:CGRectZero];
-        [self.overflowButton setImage:[RBTheme icon:RBIconMore size:19.0 color:[RBTheme accentColor]]
-                              forState:UIControlStateNormal];
-        self.overflowButton.accessibilityLabel = @"More Tabs";
-        [self.overflowButton addTarget:self action:@selector(overflowTapped:) forControlEvents:UIControlEventTouchUpInside];
-        [self addSubview:self.overflowButton];
-        self.addTabButton = [[RBTabAuxButton alloc] initWithFrame:CGRectZero];
-        [self.addTabButton setImage:[RBTheme icon:RBIconPlus size:18.0 color:[RBTheme accentColor]]
-                           forState:UIControlStateNormal];
-        [self.addTabButton setImage:[RBTheme icon:RBIconPlus size:18.0 color:[RBTheme deepTideColor]]
-                           forState:UIControlStateHighlighted];
-        self.addTabButton.adjustsImageWhenHighlighted = NO;
-        [self.addTabButton addTarget:self action:@selector(newTapped:) forControlEvents:UIControlEventTouchUpInside];
+        self.tabScroller = [[UIScrollView alloc] initWithFrame:CGRectZero];
+        self.tabScroller.backgroundColor = [UIColor clearColor];
+        self.tabScroller.showsHorizontalScrollIndicator = NO;
+        self.tabScroller.showsVerticalScrollIndicator = NO;
+        self.tabScroller.alwaysBounceHorizontal = NO;
+        self.tabScroller.directionalLockEnabled = YES;
+        [self addSubview:self.tabScroller];
+        self.addTabButton = [RBTheme barButtonWithIcon:RBIconPlus target:self action:@selector(newTapped:)];
         self.addTabButton.accessibilityLabel = @"New Tab";
         [self addSubview:self.addTabButton];
         self.cells = [NSMutableDictionary dictionary];
@@ -228,12 +177,28 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
     self.tabs = tabs ?: @[];
     self.baseURL = baseURL;
     self.fingerprint = fingerprint;
+    NSInteger nextActiveTabID = -1;
+    for (NSDictionary *tab in self.tabs) {
+        if ([[tab objectForKey:@"active"] boolValue]) {
+            nextActiveTabID = [[tab objectForKey:@"id"] integerValue];
+            break;
+        }
+    }
+    self.needsActiveReveal = self.activeTabID != nextActiveTabID ||
+                             self.lastTabCount != [self.tabs count];
+    self.activeTabID = nextActiveTabID;
+    self.lastTabCount = [self.tabs count];
     [self setNeedsLayout];
 }
 
 - (void)purgeIconCache {
     [self.iconCache removeAllObjects];
     for (RBTabCell *cell in [self.cells allValues]) cell.faviconView.image = nil;
+}
+
+- (void)applyAppearance {
+    [RBTheme styleBarButton:self.addTabButton icon:RBIconPlus];
+    for (RBTabCell *cell in [self.cells allValues]) [cell applyAppearance];
 }
 
 - (void)fetchIcon:(NSString *)iconPath {
@@ -276,48 +241,36 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
     return [title length] ? title : @"New Tab";
 }
 
-- (NSArray *)visibleTabsForCount:(NSUInteger)capacity {
-    if ([self.tabs count] <= capacity) {
-        self.hiddenTabs = @[];
-        return self.tabs;
-    }
-    NSInteger active = 0;
-    for (NSUInteger i = 0; i < [self.tabs count]; i++) {
-        if ([[[self.tabs objectAtIndex:i] objectForKey:@"active"] boolValue]) { active = (NSInteger)i; break; }
-    }
-    NSInteger start = MAX(0, MIN(active - (NSInteger)capacity / 2,
-                                 (NSInteger)[self.tabs count] - (NSInteger)capacity));
-    NSRange visibleRange = NSMakeRange((NSUInteger)start, capacity);
-    NSArray *visible = [self.tabs subarrayWithRange:visibleRange];
-    NSMutableArray *hidden = [NSMutableArray arrayWithCapacity:[self.tabs count] - capacity];
-    for (NSUInteger i = 0; i < [self.tabs count]; i++) {
-        if (!NSLocationInRange(i, visibleRange)) [hidden addObject:[self.tabs objectAtIndex:i]];
-    }
-    self.hiddenTabs = hidden;
-    return visible;
-}
-
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGFloat w = self.bounds.size.width;
-    CGFloat h = self.bounds.size.height;
-    CGFloat buttonW = 38.0;
-    BOOL needsOverflow = [self.tabs count] > (NSUInteger)MAX(1, floor((w - buttonW) / 112.0));
-    CGFloat controlsW = buttonW + (needsOverflow ? buttonW : 0.0);
-    CGFloat available = MAX(1.0, w - controlsW);
-    NSUInteger capacity = (NSUInteger)MAX(1, floor(available / 112.0));
-    NSArray *visibleTabs = [self visibleTabsForCount:capacity];
-    needsOverflow = [self.hiddenTabs count] > 0;
-    self.overflowButton.hidden = !needsOverflow;
-    self.addTabButton.frame = CGRectMake(w - buttonW, 0.0, buttonW, h);
-    self.overflowButton.frame = needsOverflow ? CGRectMake(w - buttonW * 2.0, 0.0, buttonW, h) : CGRectZero;
-    self.tabContainer.frame = CGRectMake(0.0, 0.0, w - buttonW - (needsOverflow ? buttonW : 0.0), h);
+    if (self.lastLayoutWidth != w) {
+        self.lastLayoutWidth = w;
+        self.needsActiveReveal = YES;
+    }
+    CGFloat verticalInset = 2.0;
+    CGFloat buttonW = 36.0;
+    CGFloat buttonGap = 5.0;
+    CGFloat targetCellWidth = 142.0;
+    CGFloat scrollerW = MAX(0.0, w - buttonW - buttonGap);
+    self.addTabButton.frame = CGRectMake(scrollerW + buttonGap, 0.0,
+                                         buttonW, self.bounds.size.height);
+    CGFloat scrollerH = MAX(0.0, self.bounds.size.height - verticalInset * 2.0);
+    CGRect scrollerFrame = CGRectMake(0.0, verticalInset, scrollerW, scrollerH);
+    CGFloat available = scrollerW;
+    NSUInteger tabCount = [self.tabs count];
+    CGFloat cellW = targetCellWidth;
+    if (tabCount && targetCellWidth * tabCount <= available) {
+        cellW = MIN(190.0, floorf(available / tabCount));
+    }
+    self.tabScroller.frame = scrollerFrame;
 
     NSMutableSet *used = [NSMutableSet set];
-    CGFloat cellW = [visibleTabs count] ? MIN(210.0, self.tabContainer.bounds.size.width / [visibleTabs count]) : 0.0;
+    CGFloat usedTabsWidth = floorf(cellW * tabCount);
+    self.tabScroller.contentSize = CGSizeMake(usedTabsWidth, scrollerH);
     RBTabCell *activeCell = nil;
-    for (NSUInteger visibleIndex = 0; visibleIndex < [visibleTabs count]; visibleIndex++) {
-        NSDictionary *tab = [visibleTabs objectAtIndex:visibleIndex];
+    for (NSUInteger visibleIndex = 0; visibleIndex < tabCount; visibleIndex++) {
+        NSDictionary *tab = [self.tabs objectAtIndex:visibleIndex];
         NSNumber *tabKey = [tab objectForKey:@"id"];
         if (!tabKey) continue;
         RBTabCell *cell = [self.cells objectForKey:tabKey];
@@ -326,14 +279,17 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
             cell.strip = self;
             cell.tabID = [tabKey integerValue];
             [self.cells setObject:cell forKey:tabKey];
-            [self.tabContainer addSubview:cell];
+            [self.tabScroller addSubview:cell];
         }
         [used addObject:tabKey];
         cell.hidden = NO;
         CGFloat cellX = floor(visibleIndex * cellW);
         CGFloat nextX = floor((visibleIndex + 1) * cellW);
-        cell.frame = CGRectMake(cellX + 2.0, 2.0, MAX(70.0, nextX - cellX - 3.0), h - 2.0);
+        // Individual tabs provide the only persistent chrome in the rail. The
+        // active outline identifies selection without enclosing the full row.
+        cell.frame = CGRectMake(cellX + 1.0, 0.0, MAX(1.0, nextX - cellX - 2.0), scrollerH);
         cell.titleLabel.text = [self titleForTab:tab];
+        cell.accessibilityLabel = cell.titleLabel.text;
         id iconValue = [tab objectForKey:@"icon"];
         cell.iconPath = [iconValue isKindOfClass:[NSString class]] ? iconValue : nil;
         cell.faviconView.image = [self.iconCache objectForKey:cell.iconPath];
@@ -346,7 +302,12 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
         RBTabCell *cell = [self.cells objectForKey:key];
         if (![used containsObject:key]) cell.hidden = YES;
     }
-    if (activeCell) [self.tabContainer bringSubviewToFront:activeCell];
+    if (activeCell) [self.tabScroller bringSubviewToFront:activeCell];
+    if (activeCell && self.needsActiveReveal) {
+        self.needsActiveReveal = NO;
+        CGRect revealRect = CGRectInset(activeCell.frame, -6.0, 0.0);
+        [self.tabScroller scrollRectToVisible:revealRect animated:self.window != nil];
+    }
 }
 
 - (void)cellTapped:(RBTabCell *)cell {
@@ -361,24 +322,5 @@ static NSArray *RBTabFillColors(BOOL active, BOOL highlighted) {
 }
 
 - (void)newTapped:(id)sender { [self.delegate tabStripNewTab:self]; }
-
-- (void)overflowTapped:(UIButton *)sender {
-    UIActionSheet *sheet = [[UIActionSheet alloc] initWithTitle:@"Open Tabs" delegate:self
-                                              cancelButtonTitle:nil destructiveButtonTitle:nil
-                                              otherButtonTitles:nil];
-    for (NSDictionary *tab in self.hiddenTabs) [sheet addButtonWithTitle:[self titleForTab:tab]];
-    sheet.cancelButtonIndex = [sheet addButtonWithTitle:@"Cancel"];
-    self.overflowSheet = sheet;
-    [sheet showFromRect:sender.frame inView:self animated:YES];
-}
-
-- (void)actionSheet:(UIActionSheet *)actionSheet clickedButtonAtIndex:(NSInteger)buttonIndex {
-    if (actionSheet != self.overflowSheet) return;
-    if (buttonIndex >= 0 && buttonIndex < (NSInteger)[self.hiddenTabs count]) {
-        NSDictionary *tab = [self.hiddenTabs objectAtIndex:(NSUInteger)buttonIndex];
-        [self.delegate tabStrip:self selectTab:[[tab objectForKey:@"id"] integerValue]];
-    }
-    self.overflowSheet = nil;
-}
 
 @end

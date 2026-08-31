@@ -12,9 +12,11 @@
 
     // Mobile pages are the natural default on the touch-first Surf client.
     // registerDefaults preserves an explicit user choice on upgrades.
-    [[NSUserDefaults standardUserDefaults] registerDefaults:@{RBDefaultsMobileLayoutKey: @YES}];
-    [RBTheme styleNavigationBar:(UINavigationBar *)[UINavigationBar appearance]];
-
+    [[NSUserDefaults standardUserDefaults] registerDefaults:@{
+        RBDefaultsMobileLayoutKey: @YES,
+        RBDefaultsDarkModeKey: @NO,
+        RBDefaultsBottomBrowserBarKey: @YES
+    }];
     self.window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
     self.window.rootViewController = [[RBRootViewController alloc] init];
     [self.window makeKeyAndVisible];

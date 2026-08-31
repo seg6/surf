@@ -13,4 +13,5 @@
 @interface RBNewTabView : UIView
 @property(nonatomic, assign) id<RBNewTabViewDelegate> delegate;
 - (void)setFavorites:(NSArray *)favorites;
+- (void)applyAppearance;
 @end

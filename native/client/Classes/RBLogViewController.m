@@ -170,7 +170,7 @@
     cell.detailTextLabel.font = [RBTheme monospacedFontOfSize:10.0 bold:YES];
     cell.detailTextLabel.textColor = [self colorForLevel:[event objectForKey:@"level"]];
     cell.textLabel.textColor = [RBTheme primaryTextColor];
-    cell.backgroundColor = [RBTheme pageBackgroundColor];
+    cell.backgroundColor = [RBTheme surfaceColor];
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     return cell;
 }

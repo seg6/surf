@@ -1,5 +1,5 @@
-// Command icns wraps a PNG in the modern ICNS entries macOS uses for a
-// 32-point Retina application icon. macOS scales the source for other views.
+// Command icns wraps Surf's full-resolution PNG in the modern 1024-point ICNS
+// entry. macOS scales that production artwork for each launcher presentation.
 package main
 
 import (
@@ -27,21 +27,19 @@ func encode(data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if image.Bounds().Dx() != 64 || image.Bounds().Dy() != 64 {
-		return nil, fmt.Errorf("icon dimensions are %dx%d, want 64x64",
+	if image.Bounds().Dx() != 1024 || image.Bounds().Dy() != 1024 {
+		return nil, fmt.Errorf("icon dimensions are %dx%d, want 1024x1024",
 			image.Bounds().Dx(), image.Bounds().Dy())
 	}
 
-	// icp6 is the 64x64 icon and ic12 is the 32x32@2x Retina icon. Both
-	// contain PNG data in modern ICNS files.
+	// ic10 is the 512-point @2x representation. Keeping the upstream PNG intact
+	// avoids a low-resolution intermediate and lets macOS perform final scaling.
 	var output bytes.Buffer
 	output.WriteString("icns")
-	_ = binary.Write(&output, binary.BigEndian, uint32(8+2*(8+len(data))))
-	for _, kind := range []string{"icp6", "ic12"} {
-		output.WriteString(kind)
-		_ = binary.Write(&output, binary.BigEndian, uint32(8+len(data)))
-		output.Write(data)
-	}
+	_ = binary.Write(&output, binary.BigEndian, uint32(8+8+len(data)))
+	output.WriteString("ic10")
+	_ = binary.Write(&output, binary.BigEndian, uint32(8+len(data)))
+	output.Write(data)
 	return output.Bytes(), nil
 }
 

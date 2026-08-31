@@ -282,6 +282,7 @@ func (b *Controller) onSecurityStateChanged(ev cdp.Event) {
 // noteNavigationError fires when a main frame lands on chrome-error://; the
 // caller kept the tab's previous URL so the omnibox doesn't show garbage.
 func (b *Controller) noteNavigationError(t *Tab) {
+	b.setTabLoading(t, false)
 	b.mu.Lock()
 	active := t.ID == b.activeID
 	u := t.URL

@@ -2,29 +2,49 @@
 
 This file records the user-visible changes in every Surf release.
 
-## 0.14.0 - 2026-08-26
+## 0.14.0 - 2026-08-31
 
 - Rebuilt the native browser around one Oceanic Precision interface across
   the omnibox, phone toolbar, iPad tabs, tab overview, new-tab page, connection
   states, Library, pairing, Reader, media controls, and supporting screens.
 - Replaced hand-drawn browser glyphs with the bundled Lucide icon family and
-  adopted pinned Apache-2.0 Deta Surf artwork for app and launch branding.
-- Preserved the plane-breaking transparent icon on iOS 6 while supplying
-  dedicated opaque, full-bleed icon sizes for iOS 7 and later.
+  adopted pinned Apache-2.0 Deta Surf artwork for native, desktop, management,
+  tray, and launch branding.
+- Preserved the plane-breaking transparent app icon on iOS 6 while supplying
+  dedicated opaque, full-bleed icon sizes for iOS 7 and later, with deterministic
+  artwork generation and package checks for every supported target.
+- Collapsed the iPad address toolbar and tab row into one responsive rail that
+  can sit at either screen edge, with a compact hostname-first omnibox that
+  expands for exact URL editing without resizing the remote browser viewport.
+- Replaced hidden-tab overflow with a continuous title-aware tab rail, kept the
+  active tab visibly distinct, and moved New Tab into a direct adjacent action.
 - Replaced the More share sheet with a dedicated browser-tools surface, keeping
-  AirDrop and other system destinations exclusive to the separate Share action.
-- Reworked Settings as a task-first dashboard with focused Browsing,
-  Diagnostics, Data & Privacy, and About destinations.
+  AirDrop and other system destinations exclusive to the native Share action;
+  compact tools and menus now fit their content instead of filling the screen.
+- Reworked Settings as one readable grouped list for Browsing, Performance,
+  Data, server controls, and About, with wrapping descriptions, clear unavailable
+  states, and the Surf client and protocol versions always visible.
 - Rebuilt the Performance Monitor as a translucent compact health instrument
   with a content-height, non-scrolling inspector for key readings, round-trip
-  history, and pipeline details; expansion never resizes the browser stream.
-- Kept the exact Surf client version visible in both Performance Monitor states
-  and added responsive two-column diagnostics for short landscape viewports.
-- Simplified the iPad new-tab affordance to a direct plus glyph and unified
-  headings and controls on the native system font family across iOS 6–14.
-- Added deterministic artwork generation and package checks for image sizes,
-  font and license resources, device families, architectures, and deployment
-  targets.
+  history, pipeline details, and the exact client version; expansion never
+  resizes the browser stream.
+- Added a persistent neutral-graphite Dark Mode across Surf's native UI and
+  synchronized Chromium's standard `prefers-color-scheme` value for current and
+  future tabs while leaving each website's authored colors intact.
+- Unified dark form sheets, popover chrome and arrows, Library controls,
+  selectors, table cells, navigation bars, inactive controls, and omnibox
+  placeholder contrast while preserving readable UIKit-owned share surfaces.
+- Fixed tab labels to use live document titles, reject URL-shaped titles, and
+  fall back to a compact hostname only while no useful title is available.
+- Made loading state truly per-tab and limited it to top-level Chromium frames,
+  with synchronized navigation, Stop, reconnect, activation, and closure state
+  plus bounded fallbacks when Chromium omits a completion event.
+- Unified headings and controls on the native system font family across iOS
+  6–14 and tightened touch targets, separators, selected states, and compact
+  controls for both phone and tablet layouts.
+- Bumped the exact native protocol to `20260826-1` for synchronized appearance
+  control and expanded build verification for resources, architectures, device
+  families, deployment targets, and embedded client metadata.
 
 ## 0.13.7 - 2026-08-21
 

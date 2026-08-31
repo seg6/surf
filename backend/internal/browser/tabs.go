@@ -3,11 +3,17 @@ package browser
 import (
 	"encoding/json"
 	"log"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
 
 	"surf-backend/internal/protocol"
+)
+
+const (
+	loadingDOMGracePeriod = 4 * time.Second
+	loadingSafetyTimeout  = 30 * time.Second
 )
 
 type targetInfo struct {
@@ -25,6 +31,142 @@ func (b *Controller) tabBySession(session string) (t *Tab, active bool) {
 	defer b.mu.Unlock()
 	t = b.bySession[session]
 	return t, t != nil && t.ID == b.activeID
+}
+
+// tabByPrimarySession rejects events from auto-attached cross-origin iframe
+// sessions. Those sessions intentionally map back to their owning tab for
+// editable/select support, but their page lifecycle must never drive the
+// browser chrome for the top-level document.
+func (b *Controller) tabByPrimarySession(session string) (t *Tab, active bool) {
+	if session == "" {
+		return nil, false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	t = b.bySession[session]
+	if t == nil || t.Session != session {
+		return nil, false
+	}
+	return t, t.ID == b.activeID
+}
+
+func (b *Controller) tabByMainFrame(session, frameID string) (t *Tab, active bool) {
+	if frameID == "" {
+		return nil, false
+	}
+	t, active = b.tabByPrimarySession(session)
+	if t == nil {
+		return nil, false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.tabs[t.ID] != t || t.mainFrameID != frameID {
+		return nil, false
+	}
+	return t, t.ID == b.activeID
+}
+
+func (b *Controller) isMainFrameEvent(session, frameID string) bool {
+	t, _ := b.tabByMainFrame(session, frameID)
+	return t != nil
+}
+
+// rememberMainFrame only accepts a root frame reported by the tab's own CDP
+// session. An out-of-process iframe is also a root within its child session,
+// so the session check is as important as the parentId check at the callsite.
+func (b *Controller) rememberMainFrame(session, frameID string) bool {
+	if session == "" || frameID == "" {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	t := b.bySession[session]
+	if t == nil || t.Session != session || b.tabs[t.ID] != t {
+		return false
+	}
+	t.mainFrameID = frameID
+	return true
+}
+
+func (b *Controller) captureMainFrame(t *Tab) {
+	if t == nil || t.Session == "" {
+		return
+	}
+	var tree struct {
+		FrameTree struct {
+			Frame struct {
+				ID string `json:"id"`
+			} `json:"frame"`
+		} `json:"frameTree"`
+	}
+	if err := b.cdp.CallInto(t.Session, "Page.getFrameTree", nil, &tree); err != nil {
+		log.Printf("tab %d: identify main frame: %v", t.ID, err)
+		return
+	}
+	b.rememberMainFrame(t.Session, tree.FrameTree.Frame.ID)
+}
+
+// setTabLoading owns the per-tab loading state and mirrors only the active
+// tab into native chrome. Each transition invalidates older completion timers,
+// so a slow previous navigation cannot clear a newer one.
+func (b *Controller) setTabLoading(t *Tab, on bool) {
+	if t == nil {
+		return
+	}
+	b.mu.Lock()
+	if b.tabs[t.ID] != t {
+		b.mu.Unlock()
+		return
+	}
+	t.loading = on
+	t.loadingGeneration++
+	generation := t.loadingGeneration
+	active := t.ID == b.activeID
+	b.mu.Unlock()
+	if active {
+		b.broadcast(protocol.BoolEvent{Type: "loading", On: on})
+	}
+	if on {
+		b.scheduleTabLoadingGeneration(t, generation, loadingSafetyTimeout)
+	}
+}
+
+func (b *Controller) activeTabLoading() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	t := b.tabs[b.activeID]
+	return t != nil && t.loading
+}
+
+func (b *Controller) scheduleTabLoadingCompletion(t *Tab, delay time.Duration) {
+	b.mu.Lock()
+	if t == nil || b.tabs[t.ID] != t || !t.loading {
+		b.mu.Unlock()
+		return
+	}
+	generation := t.loadingGeneration
+	b.mu.Unlock()
+	b.scheduleTabLoadingGeneration(t, generation, delay)
+}
+
+func (b *Controller) scheduleTabLoadingGeneration(t *Tab, generation uint64, delay time.Duration) {
+	time.AfterFunc(delay, func() {
+		if b.finishTabLoadingGeneration(t, generation) {
+			b.broadcast(protocol.BoolEvent{Type: "loading"})
+		}
+	})
+}
+
+// finishTabLoadingGeneration returns true only when it cleared the active tab.
+func (b *Controller) finishTabLoadingGeneration(t *Tab, generation uint64) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if t == nil || b.tabs[t.ID] != t || !t.loading || t.loadingGeneration != generation {
+		return false
+	}
+	t.loading = false
+	t.loadingGeneration++
+	return t.ID == b.activeID
 }
 
 // attachTarget sets up a newly discovered page target and focuses it
@@ -105,14 +247,17 @@ func (b *Controller) attachTarget(info targetInfo) {
 	// remains live during this short setup, then switchActive can produce the
 	// new tab continuously from frame one.
 	_ = b.cdp.Dispatch(s, "Page.enable", nil)
+	b.captureMainFrame(t)
 	_ = b.cdp.Dispatch(s, "Runtime.enable", nil)
 	b.mu.Lock()
 	userAgentParams := userAgentOverrideParams(b.userAgent, b.userAgentMetadata, b.mobile)
+	dark := b.dark
 	b.mu.Unlock()
 	if userAgentParams != nil {
 		_ = b.cdp.Dispatch(s, "Network.enable", nil)
 		_ = b.cdp.Dispatch(s, "Network.setUserAgentOverride", userAgentParams)
 	}
+	b.applyDarkMode(s, dark)
 	b.installCompatScripts(s)
 	b.setupEditableAutoAttach(s)
 	b.setupFeatures(t)
@@ -168,6 +313,9 @@ func (b *Controller) dropTarget(targetID string) {
 	}
 
 	if wasActive {
+		// Do not leave the closed tab's Stop state in native chrome while the
+		// replacement target is activating or being created.
+		b.broadcast(protocol.BoolEvent{Type: "loading"})
 		if nextID != 0 {
 			b.switchActive(nextID)
 		} else {
@@ -185,13 +333,25 @@ func (b *Controller) targetInfoChanged(info targetInfo) {
 		b.mu.Unlock()
 		return
 	}
-	titleChanged := info.Title != "" && info.Title != t.Title
 	urlChanged := info.URL != "" && info.URL != t.URL
-	if titleChanged {
-		t.Title = info.Title
+	nextURL := t.URL
+	if urlChanged {
+		nextURL = info.URL
+	}
+	nextTitle := meaningfulPageTitle(info.Title, nextURL)
+	if urlChanged && nextTitle == t.Title {
+		nextTitle = ""
+	}
+	titleChanged := false
+	if nextTitle != "" && nextTitle != t.Title {
+		t.Title = nextTitle
+		titleChanged = true
+	} else if urlChanged && nextTitle == "" && t.Title != "" {
+		t.Title = ""
+		titleChanged = true
 	}
 	if urlChanged {
-		t.URL = info.URL
+		t.URL = nextURL
 		t.awaitingPageFrame = true
 	}
 	active := t.ID == b.activeID
@@ -208,11 +368,11 @@ func (b *Controller) targetInfoChanged(info targetInfo) {
 	}
 	if urlChanged {
 		b.onURLChanged(t, url)
-		if titleChanged {
-			b.store.SetTitle(url, info.Title)
+		if titleChanged && nextTitle != "" {
+			b.store.SetTitle(url, nextTitle)
 		}
-	} else if titleChanged {
-		b.store.SetTitle(url, info.Title)
+	} else if titleChanged && nextTitle != "" {
+		b.store.SetTitle(url, nextTitle)
 	}
 }
 
@@ -234,6 +394,7 @@ func (b *Controller) tabNavigated(session, url string) {
 		t.IconKey = ""
 	}
 	t.URL = url
+	t.Title = ""
 	t.awaitingPageFrame = true
 	active := t.ID == b.activeID
 	b.mu.Unlock()
@@ -258,18 +419,73 @@ func (b *Controller) tabList() []protocol.TabInfo {
 	list := make([]protocol.TabInfo, 0, len(ids))
 	for _, id := range ids {
 		t := b.tabs[id]
-		title := t.Title
-		if title == "" {
-			title = t.URL
-		}
-		if title == "" {
-			title = "new tab"
-		}
+		title := displayTabTitle(t.Title, t.URL)
 		list = append(list, protocol.TabInfo{
 			ID: id, Title: title, URL: t.URL, Active: id == b.activeID, Icon: b.iconURLLocked(t),
 		})
 	}
 	return list
+}
+
+func meaningfulPageTitle(title, rawURL string) string {
+	title = strings.TrimSpace(title)
+	if title == "" || title == strings.TrimSpace(rawURL) {
+		return ""
+	}
+	if parsed, err := url.Parse(title); err == nil && parsed.IsAbs() && parsed.Host != "" {
+		return ""
+	}
+	return title
+}
+
+func displayTabTitle(title, rawURL string) string {
+	if title = meaningfulPageTitle(title, rawURL); title != "" {
+		return title
+	}
+	if strings.HasPrefix(rawURL, "about:blank") || rawURL == "" {
+		return "New Tab"
+	}
+	if parsed, err := url.Parse(rawURL); err == nil && parsed.Host != "" {
+		return parsed.Host
+	}
+	return "New Tab"
+}
+
+func (b *Controller) refreshTabTitle(t *Tab) {
+	b.mu.Lock()
+	if t == nil || t.Session == "" || b.bySession[t.Session] != t {
+		b.mu.Unlock()
+		return
+	}
+	session, pageURL := t.Session, t.URL
+	b.mu.Unlock()
+	raw, err := b.cdp.Call(session, "Runtime.evaluate", map[string]any{
+		"expression": "document.title || ''", "returnByValue": true,
+	})
+	if err != nil {
+		return
+	}
+	var result struct {
+		Result struct {
+			Value string `json:"value"`
+		} `json:"result"`
+	}
+	if json.Unmarshal(raw, &result) != nil {
+		return
+	}
+	title := meaningfulPageTitle(result.Result.Value, pageURL)
+	if title == "" {
+		return
+	}
+	b.mu.Lock()
+	if b.bySession[session] != t || t.URL != pageURL || t.Title == title {
+		b.mu.Unlock()
+		return
+	}
+	t.Title = title
+	b.mu.Unlock()
+	b.store.SetTitle(pageURL, title)
+	b.broadcastTabs()
 }
 
 func (b *Controller) broadcastTabs() {
@@ -367,8 +583,10 @@ func (b *Controller) switchActive(id int) {
 	b.broadcast(b.urlMessage(url))
 	b.mu.Lock()
 	fullscreen := next.Fullscreen
+	loading := next.loading
 	b.mu.Unlock()
 	b.broadcast(protocol.BoolEvent{Type: "fullscreen", On: fullscreen})
+	b.broadcast(protocol.BoolEvent{Type: "loading", On: loading})
 	b.pushNavState()
 	b.broadcastTabs()
 }

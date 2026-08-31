@@ -19,7 +19,8 @@
         _articleTitle = [title copy];
         _articleHTML = [html copy];
         _articleURL = [url copy];
-        _night = [[[NSUserDefaults standardUserDefaults] objectForKey:RBDefaultsReaderNightKey] boolValue];
+        _night = [RBTheme isDarkMode] ||
+                 [[[NSUserDefaults standardUserDefaults] objectForKey:RBDefaultsReaderNightKey] boolValue];
         self.modalPresentationStyle = UIModalPresentationFullScreen;
         self.modalTransitionStyle = UIModalTransitionStyleCoverVertical;
     }
@@ -28,7 +29,7 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.view.backgroundColor = [UIColor whiteColor];
+    self.view.backgroundColor = [RBTheme pageBackgroundColor];
 
     self.navBar = [[UINavigationBar alloc] initWithFrame:CGRectMake(0.0, 0.0, self.view.bounds.size.width, 44.0)];
     self.navBar.autoresizingMask = UIViewAutoresizingFlexibleWidth;

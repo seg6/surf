@@ -165,7 +165,7 @@ func DecodeCommand(data []byte) (Command, error) {
 		} else {
 			dst = &URLCommand{}
 		}
-	case "audio", "mobile", "fullscreen":
+	case "audio", "mobile", "dark", "fullscreen":
 		dst = &ToggleCommand{}
 	case "touch":
 		dst = &TouchCommand{}

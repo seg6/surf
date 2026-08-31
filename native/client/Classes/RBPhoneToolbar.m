@@ -77,6 +77,19 @@
     self.pagesButton.accessibilityValue = [NSString stringWithFormat:@"%u open", (unsigned int)count];
 }
 
+- (void)applyAppearance {
+    [self setTopColor:[RBTheme barTopColor]
+          bottomColor:[RBTheme barBottomColor]
+            lineColor:[RBTheme barLineColor]];
+    [RBTheme styleBarButton:self.backButton icon:RBIconBack];
+    [RBTheme styleBarButton:self.forwardButton icon:RBIconForward];
+    [RBTheme styleBarButton:self.shareButton icon:RBIconShare];
+    [RBTheme styleBarButton:self.pagesButton icon:RBIconTabs];
+    [RBTheme styleBarButton:self.moreButton icon:RBIconMore];
+    self.tabCountLabel.backgroundColor = [RBTheme deepTideColor];
+    self.tabCountLabel.layer.borderColor = [[RBTheme foamColor] CGColor];
+}
+
 - (void)backTapped:(id)sender { [self.delegate phoneToolbarBack:self]; }
 - (void)forwardTapped:(id)sender { [self.delegate phoneToolbarForward:self]; }
 - (void)shareTapped:(id)sender { [self.delegate phoneToolbar:self shareFromButton:self.shareButton]; }

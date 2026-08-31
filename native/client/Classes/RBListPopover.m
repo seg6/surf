@@ -22,6 +22,8 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     [RBTheme styleTableView:self.tableView];
+    self.view.backgroundColor = [RBTheme pageBackgroundColor];
+    self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
 }
 
 - (id)initWithSections:(NSArray *)sections {
@@ -57,6 +59,26 @@
     return [title length] ? title : nil;
 }
 
+- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
+    return [[self tableView:tableView titleForHeaderInSection:section] length] ? 28.0 : 0.0;
+}
+
+- (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
+    NSString *title = [self tableView:tableView titleForHeaderInSection:section];
+    if (![title length]) return nil;
+    UIView *header = [[UIView alloc] initWithFrame:CGRectZero];
+    header.backgroundColor = [RBTheme pageBackgroundColor];
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(12.0, 0.0,
+                                                               MAX(1.0, tableView.bounds.size.width - 24.0), 28.0)];
+    label.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    label.backgroundColor = [UIColor clearColor];
+    label.font = [RBTheme fontOfSize:11.0 bold:YES];
+    label.textColor = [RBTheme secondaryTextColor];
+    label.text = [title uppercaseString];
+    [header addSubview:label];
+    return header;
+}
+
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     return (NSInteger)[[[self.sections objectAtIndex:(NSUInteger)section] objectForKey:@"items"] count];
 }
@@ -79,8 +101,14 @@
         cell = [[UITableViewCell alloc] initWithStyle:style reuseIdentifier:reuse];
         cell.textLabel.font = [RBTheme fontOfSize:15.0 bold:NO];
         cell.detailTextLabel.font = [RBTheme fontOfSize:12.0 bold:NO];
-        cell.detailTextLabel.textColor = [UIColor grayColor];
     }
+    cell.backgroundColor = [RBTheme surfaceColor];
+    if (!cell.selectedBackgroundView) {
+        cell.selectedBackgroundView = [[UIView alloc] initWithFrame:CGRectZero];
+    }
+    cell.selectedBackgroundView.backgroundColor = [[RBTheme separatorColor] colorWithAlphaComponent:0.62];
+    cell.textLabel.textColor = [RBTheme primaryTextColor];
+    cell.detailTextLabel.textColor = [RBTheme secondaryTextColor];
     cell.textLabel.text = item.title;
     cell.detailTextLabel.text = item.subtitle;
     return cell;

@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="dark">
   <title>Surf</title>
-  <link rel="icon" href="/icon.png">
+  <link rel="icon" type="image/png" sizes="1024x1024" href="/icon.png">
+  <link rel="apple-touch-icon" href="/icon.png">
   <style>
     :root {
       --ink: #e7e9ed; --muted: #9ba1ab; --quiet: #737a85;
@@ -26,7 +27,7 @@
     main { min-width: 0; max-width: 960px; margin: 0 auto; padding: 28px 24px 48px; }
     .page-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
     .page-brand { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; }
-    .page-brand img { width: 32px; height: 32px; border-radius: 7px; }
+    .page-brand img { width: 32px; height: 32px; object-fit: contain; }
     .eyebrow { display: none; }
     h1 { font-size: 16px; line-height: 1.2; margin: 0; font-weight: 600; }
     h2 { font-size: 14px; margin: 0; font-weight: 600; }
@@ -40,7 +41,7 @@
     .hero-actions { display: flex; align-items: center; gap: 8px; }
     .engine { display: flex; align-items: center; gap: 13px; min-width: 0; }
     .engine-icon { width: 42px; height: 42px; }
-    .engine-icon img { display: block; width: 100%; height: 100%; border-radius: 8px; }
+    .engine-icon img { display: block; width: 100%; height: 100%; object-fit: contain; }
     .status-line { display: flex; align-items: center; gap: 7px; margin-bottom: 3px; color: var(--green); font-size: 12px; }
     .status-line.offline { color: var(--red); }
     .engine-title { font-size: 15px; font-weight: 600; }

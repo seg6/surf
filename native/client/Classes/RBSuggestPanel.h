@@ -14,4 +14,5 @@
 - (void)showItems:(NSArray *)items;
 - (void)hide;
 - (CGFloat)desiredHeight;
+- (void)applyAppearance;
 @end

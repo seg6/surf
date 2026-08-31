@@ -8,10 +8,11 @@
 - (void)tabStripNewTab:(RBTabStrip *)strip;
 @end
 
-// Classic iPad Safari tab row. Tabs fill the available width; excess tabs
-// move into a >> overflow menu and the active tab is always kept visible.
-@interface RBTabStrip : UIView <UIActionSheetDelegate>
+// Compact iPad tab rail hosted beside the omnibox. Tabs form one horizontally
+// scrolling sequence, and the active tab is always brought fully into view.
+@interface RBTabStrip : UIView
 @property(nonatomic, assign) id<RBTabStripDelegate> delegate;
 - (void)setTabs:(NSArray *)tabs baseURL:(NSURL *)baseURL fingerprint:(NSString *)fingerprint;
 - (void)purgeIconCache;
+- (void)applyAppearance;
 @end

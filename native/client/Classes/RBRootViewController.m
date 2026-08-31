@@ -43,7 +43,6 @@
 
 
 static const CGFloat kRBTopBarHeight = 50.0;
-static const CGFloat kRBTabStripHeight = 32.0;
 static const CGFloat kRBFindBarHeight = 40.0;
 static const NSTimeInterval kRBBackgroundDisconnectDelay = 60.0;
 
@@ -68,6 +67,15 @@ static BOOL RBValidClipboardText(id value) {
 
 @implementation RBModalNavigationController
 - (BOOL)disablesAutomaticKeyboardDismissal { return NO; }
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [RBTheme styleNavigationBar:self.navigationBar];
+    self.view.backgroundColor = [RBTheme pageBackgroundColor];
+    // UIKit owns the form-sheet mask. Clipping the child navigation view too
+    // exposes the system's white backing through both sets of rounded corners.
+    self.view.layer.cornerRadius = 0.0;
+    self.view.layer.masksToBounds = NO;
+}
 @end
 
 // H.264 4:2:0 requires even coded dimensions. Keep the visible stream surface
@@ -204,9 +212,20 @@ static CGFloat RBEvenExtent(CGFloat value) {
 - (CGSize)constrainedSelectPopoverSize:(RBSelectController *)controller;
 - (void)presentSelectMessage:(NSDictionary *)message;
 - (void)dismissSelectControllerSendingCancel:(BOOL)sendCancel;
+- (BOOL)browserBarAtBottom;
+- (UIPopoverArrowDirection)browserChromeArrowDirection;
+- (void)applyAppearance;
 @end
 
 @implementation RBRootViewController
+
+- (BOOL)browserBarAtBottom {
+    return [[NSUserDefaults standardUserDefaults] boolForKey:RBDefaultsBottomBrowserBarKey];
+}
+
+- (UIPopoverArrowDirection)browserChromeArrowDirection {
+    return [self browserBarAtBottom] ? UIPopoverArrowDirectionDown : UIPopoverArrowDirectionUp;
+}
 
 - (id)init {
     self = [super init];
@@ -264,6 +283,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
     self.chromeBar.delegate = self;
     self.chromeBar.omnibox.delegate = self;
     self.chromeBar.phoneLayout = !RBIsPad();
+    self.chromeBar.bottomPositioned = [self browserBarAtBottom];
     [self.view addSubview:self.chromeBar];
 
     self.phoneToolbar = [[RBPhoneToolbar alloc] initWithFrame:CGRectZero];
@@ -274,13 +294,16 @@ static CGFloat RBEvenExtent(CGFloat value) {
     self.tabStrip = [[RBTabStrip alloc] initWithFrame:CGRectZero];
     self.tabStrip.delegate = self;
     self.tabStrip.hidden = !RBIsPad();
-    [self.view addSubview:self.tabStrip];
+    self.tabStrip.frame = self.chromeBar.tabHostView.bounds;
+    self.tabStrip.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [self.chromeBar.tabHostView addSubview:self.tabStrip];
 
     self.tabThumbnails = [NSMutableDictionary dictionary];
     self.thumbnailLRU = [NSMutableArray array];
 
     self.findBar = [[RBFindBar alloc] initWithFrame:CGRectZero];
     self.findBar.delegate = self;
+    [self.findBar setPageBoundaryAtTop:[self browserBarAtBottom]];
     self.findBar.hidden = YES;
     [self.view addSubview:self.findBar];
 
@@ -370,9 +393,35 @@ static CGFloat RBEvenExtent(CGFloat value) {
     [self.view addSubview:self.diagnosticsOverlay];
     [self setDebugVisible:[[NSUserDefaults standardUserDefaults] boolForKey:RBDefaultsDiagnosticsKey]];
 
+    [self applyAppearance];
+
     [NSTimer scheduledTimerWithTimeInterval:1.0 target:self selector:@selector(watchdogTick:) userInfo:nil repeats:YES];
 
     RBLogEvent(@"application", @"info", @{@"protocol": RBNativeVersion ?: @""}, @"Browser interface loaded");
+}
+
+- (void)applyAppearance {
+    [self.chromeBar applyAppearance];
+    [self.phoneToolbar applyAppearance];
+    [self.tabStrip applyAppearance];
+    [self.findBar applyAppearance];
+    [self.suggestPanel applyAppearance];
+    [self.startPageView applyAppearance];
+    [self.browserStateView applyAppearance];
+    [self.diagnosticsOverlay applyAppearance];
+    UIColor *floatingSurface = [[RBTheme deepTideColor] colorWithAlphaComponent:0.88];
+    self.restoreButton.backgroundColor = floatingSurface;
+    self.fullscreenBackButton.backgroundColor = floatingSurface;
+    self.fullscreenForwardButton.backgroundColor = floatingSurface;
+    self.toastLabel.backgroundColor = [[RBTheme deepTideColor] colorWithAlphaComponent:0.94];
+    self.connectionPill.backgroundColor = floatingSurface;
+    UIToolbar *inputBar = (UIToolbar *)self.hiddenInput.inputAccessoryView;
+    inputBar.barStyle = [RBTheme isDarkMode] ? UIBarStyleBlack : UIBarStyleDefault;
+    self.hiddenInput.keyboardAppearance = [RBTheme isDarkMode] ? UIKeyboardAppearanceDark
+                                                               : UIKeyboardAppearanceDefault;
+    [RBTheme styleNavigationBar:self.modalNavigationController.navigationBar];
+    self.modalNavigationController.view.backgroundColor = [RBTheme pageBackgroundColor];
+    [self.view setNeedsLayout];
 }
 
 - (void)finishBackgroundTask {
@@ -487,10 +536,13 @@ static CGFloat RBEvenExtent(CGFloat value) {
     CGFloat w = self.view.bounds.size.width;
     CGFloat h = self.view.bounds.size.height;
     BOOL pad = RBIsPad();
+    BOOL browserBarAtBottom = pad && [self browserBarAtBottom];
     CGFloat topBarHeight = kRBTopBarHeight;
     CGFloat bottomBarHeight = pad ? 0.0 : 48.0;
 
     self.chromeBar.phoneLayout = !pad;
+    self.chromeBar.bottomPositioned = browserBarAtBottom;
+    [self.findBar setPageBoundaryAtTop:browserBarAtBottom];
     self.chromeBar.hidden = self.fullscreen;
     self.phoneToolbar.hidden = self.fullscreen || pad;
     self.tabStrip.hidden = self.fullscreen || !pad;
@@ -505,25 +557,43 @@ static CGFloat RBEvenExtent(CGFloat value) {
     CGFloat contentTop = 0.0;
     CGFloat contentBottom = h;
     if (!self.fullscreen) {
-        self.chromeBar.frame = CGRectMake(0.0, 0.0, w, topBarHeight);
         if (pad) {
-            self.tabStrip.frame = CGRectMake(0.0, topBarHeight, w, kRBTabStripHeight);
             self.phoneToolbar.frame = CGRectZero;
-            contentTop = topBarHeight + kRBTabStripHeight;
+            if (browserBarAtBottom) {
+                CGFloat shelfBottom = h;
+                if (self.keyboardVisible &&
+                    (self.chromeBar.omnibox.editing || self.findBar.editing)) {
+                    shelfBottom = MIN(h, MAX(topBarHeight, self.keyboardTop));
+                }
+                CGFloat chromeTop = shelfBottom - topBarHeight;
+                self.chromeBar.frame = CGRectMake(0.0, chromeTop, w, topBarHeight);
+                contentBottom = h - topBarHeight;
+                if (self.findVisible) {
+                    contentBottom -= kRBFindBarHeight;
+                    self.findBar.frame = CGRectMake(0.0, chromeTop - kRBFindBarHeight,
+                                                    w, kRBFindBarHeight);
+                }
+            } else {
+                self.chromeBar.frame = CGRectMake(0.0, 0.0, w, topBarHeight);
+                contentTop = topBarHeight;
+                if (self.findVisible) {
+                    self.findBar.frame = CGRectMake(0.0, contentTop, w, kRBFindBarHeight);
+                    contentTop += kRBFindBarHeight;
+                }
+            }
         } else {
-            self.tabStrip.frame = CGRectZero;
+            self.chromeBar.frame = CGRectMake(0.0, 0.0, w, topBarHeight);
             self.phoneToolbar.frame = CGRectMake(0.0, h - bottomBarHeight, w, bottomBarHeight);
             contentTop = topBarHeight;
             contentBottom = h - bottomBarHeight;
-        }
-        if (self.findVisible) {
-            self.findBar.frame = CGRectMake(0.0, contentTop, w, kRBFindBarHeight);
-            contentTop += kRBFindBarHeight;
+            if (self.findVisible) {
+                self.findBar.frame = CGRectMake(0.0, contentTop, w, kRBFindBarHeight);
+                contentTop += kRBFindBarHeight;
+            }
         }
     } else {
         self.chromeBar.frame = CGRectZero;
         self.phoneToolbar.frame = CGRectZero;
-        self.tabStrip.frame = CGRectZero;
         self.findBar.frame = CGRectZero;
     }
 
@@ -536,12 +606,21 @@ static CGFloat RBEvenExtent(CGFloat value) {
     self.startPageView.frame = CGRectMake(streamX, contentTop, streamW, streamH);
     self.browserStateView.frame = CGRectMake(streamX, contentTop, streamW, streamH);
 
+    [self.chromeBar setNeedsLayout];
+    [self.chromeBar layoutIfNeeded];
     CGRect omniboxFrame = [self.chromeBar convertRect:self.chromeBar.omnibox.frame toView:self.view];
-    CGFloat suggestTop = MAX(0.0, topBarHeight - 2.0);
-    CGFloat suggestH = MIN([self.suggestPanel desiredHeight],
-                           MAX(0.0, contentBottom - suggestTop));
-    self.suggestPanel.frame = CGRectMake(omniboxFrame.origin.x, suggestTop,
-                                         omniboxFrame.size.width, suggestH);
+    if (pad && browserBarAtBottom) {
+        CGFloat suggestBottom = MAX(0.0, CGRectGetMinY(self.chromeBar.frame) + 2.0);
+        CGFloat suggestH = MIN([self.suggestPanel desiredHeight], suggestBottom);
+        self.suggestPanel.frame = CGRectMake(omniboxFrame.origin.x, suggestBottom - suggestH,
+                                             omniboxFrame.size.width, suggestH);
+    } else {
+        CGFloat suggestTop = MAX(0.0, CGRectGetMaxY(self.chromeBar.frame) - 2.0);
+        CGFloat suggestH = MIN([self.suggestPanel desiredHeight],
+                               MAX(0.0, contentBottom - suggestTop));
+        self.suggestPanel.frame = CGRectMake(omniboxFrame.origin.x, suggestTop,
+                                             omniboxFrame.size.width, suggestH);
+    }
 
     self.restoreButton.frame = CGRectMake(w - 54.0, h - 54.0, 44.0, 44.0);
     self.fullscreenBackButton.frame = CGRectMake(10.0, h - 54.0, 44.0, 44.0);
@@ -698,6 +777,14 @@ static CGFloat RBEvenExtent(CGFloat value) {
 - (void)settings:(RBSettingsController *)settings preference:(NSString *)key enabled:(BOOL)enabled {
     if ([key isEqualToString:RBDefaultsMobileLayoutKey]) {
         [self.session sendMessage:@{@"t": @"mobile", @"on": [NSNumber numberWithBool:enabled]}];
+    } else if ([key isEqualToString:RBDefaultsDarkModeKey]) {
+        [self applyAppearance];
+        [self.session sendMessage:@{@"t": @"dark", @"on": [NSNumber numberWithBool:enabled]}];
+    } else if ([key isEqualToString:RBDefaultsBottomBrowserBarKey]) {
+        [self.view setNeedsLayout];
+        [UIView animateWithDuration:0.20 animations:^{
+            [self.view layoutIfNeeded];
+        }];
     }
 }
 
@@ -750,6 +837,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
     RBQRScannerController *scanner = [[RBQRScannerController alloc] init];
     scanner.delegate = self;
     UINavigationController *navigation = [[UINavigationController alloc] initWithRootViewController:scanner];
+    [RBTheme styleNavigationBar:navigation.navigationBar];
     navigation.modalPresentationStyle = UIModalPresentationFullScreen;
     [controller presentViewController:navigation animated:YES completion:nil];
 }
@@ -946,6 +1034,10 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
 
 - (void)session:(RBSession *)session didChangeState:(RBSessionState)state {
     if (session != self.session) return;
+    if (state != RBSessionStateOpen) {
+        self.loading = NO;
+        [self.chromeBar.omnibox setLoading:NO];
+    }
     switch (state) {
         case RBSessionStateOpen:
             self.connectionPill.hidden = YES;
@@ -961,6 +1053,9 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
             [self.session sendMessage:@{@"t": @"mobile",
                                         @"on": [NSNumber numberWithBool:
                                                 [[NSUserDefaults standardUserDefaults] boolForKey:RBDefaultsMobileLayoutKey]]}];
+            [self.session sendMessage:@{@"t": @"dark",
+                                        @"on": [NSNumber numberWithBool:
+                                                [[NSUserDefaults standardUserDefaults] boolForKey:RBDefaultsDarkModeKey]]}];
             self.audioRequested = NO;
             break;
         case RBSessionStateConnecting:
@@ -1177,8 +1272,9 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
                 if ([activeURL hasPrefix:@"about:blank#surf-new"] ||
                     [activeTitle hasPrefix:@"about:blank#surf-new"]) {
                     activeTitle = @"New Tab";
-                } else if (![activeTitle length]) {
-                    activeTitle = activeURL;
+                } else if (![activeTitle length] || [activeTitle isEqualToString:activeURL]) {
+                    activeTitle = [[NSURL URLWithString:activeURL] host];
+                    if (![activeTitle length]) activeTitle = @"New Tab";
                 }
             }
         }
@@ -1487,14 +1583,17 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
             UIPopoverPresentationController *presentation = controller.popoverPresentationController;
             presentation.sourceView = button;
             presentation.sourceRect = button.bounds;
+            presentation.permittedArrowDirections = [self browserChromeArrowDirection];
             [self presentViewController:controller animated:YES completion:nil];
         } else {
             UIPopoverController *popover = [[UIPopoverController alloc] initWithContentViewController:controller];
+            // System share destinations keep their native light sheet. Their
+            // icons and labels are not authored for Surf's dark surface.
             popover.delegate = self;
             self.popover = popover;
             CGRect anchor = [button convertRect:button.bounds toView:self.view];
             [popover presentPopoverFromRect:anchor inView:self.view
-                   permittedArrowDirections:UIPopoverArrowDirectionAny animated:YES];
+                   permittedArrowDirections:[self browserChromeArrowDirection] animated:YES];
         }
     } else {
         [self presentViewController:controller animated:YES completion:nil];
@@ -1549,12 +1648,19 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
         [controller didMoveToParentViewController:self];
         [controller showAnimated:YES];
     } else {
+        CGSize menuSize = [controller preferredSize];
+        controller.contentSizeForViewInPopover = menuSize;
+        if ([controller respondsToSelector:@selector(setPreferredContentSize:)]) {
+            controller.preferredContentSize = menuSize;
+        }
         UIPopoverController *popover = [[UIPopoverController alloc] initWithContentViewController:controller];
+        popover.popoverContentSize = menuSize;
+        [RBTheme stylePopoverController:popover];
         popover.delegate = self;
         self.popover = popover;
         CGRect anchor = [button convertRect:button.bounds toView:self.view];
         [popover presentPopoverFromRect:anchor inView:self.view
-               permittedArrowDirections:UIPopoverArrowDirectionUp animated:YES];
+               permittedArrowDirections:[self browserChromeArrowDirection] animated:YES];
     }
 }
 
@@ -1622,16 +1728,18 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
     self.pageMediaController = controller;
     if (RBIsPad()) {
         UIPopoverController *popover = [[UIPopoverController alloc] initWithContentViewController:controller];
+        [RBTheme stylePopoverController:popover];
         popover.delegate = self;
         self.popover = popover;
         CGRect anchor = [button convertRect:button.bounds toView:self.view];
         [popover presentPopoverFromRect:anchor inView:self.view
-               permittedArrowDirections:UIPopoverArrowDirectionUp animated:YES];
+               permittedArrowDirections:[self browserChromeArrowDirection] animated:YES];
     } else {
         controller.navigationItem.rightBarButtonItem =
             [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
                                                           target:self action:@selector(compactPopoverDone:)];
         UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:controller];
+        [RBTheme styleNavigationBar:nav.navigationBar];
         nav.modalPresentationStyle = UIModalPresentationFullScreen;
         self.compactPopoverController = nav;
         [self presentViewController:nav animated:YES completion:nil];
@@ -1758,11 +1866,14 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
     [self.session sendMessage:@{@"t": @"suggest", @"q": text}];
 }
 
-- (void)omniboxEditingBegan:(RBOmnibox *)omnibox {}
+- (void)omniboxEditingBegan:(RBOmnibox *)omnibox {
+    [self.chromeBar setOmniboxExpanded:YES animated:YES];
+}
 
 - (void)omniboxEditingEnded:(RBOmnibox *)omnibox {
     [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(fireSuggest) object:nil];
     [self.suggestPanel hide];
+    [self.chromeBar setOmniboxExpanded:NO animated:YES];
 }
 
 - (void)omniboxStarTapped:(RBOmnibox *)omnibox {
@@ -1940,17 +2051,19 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
     if (RBIsPad()) {
         list.contentSizeForViewInPopover = [list preferredSize];
         UIPopoverController *popover = [[UIPopoverController alloc] initWithContentViewController:list];
+        [RBTheme stylePopoverController:popover];
         popover.delegate = self;
         self.popover = popover;
         CGRect anchor = [button convertRect:button.bounds toView:self.view];
         [popover presentPopoverFromRect:anchor inView:self.view
-               permittedArrowDirections:UIPopoverArrowDirectionUp animated:YES];
+               permittedArrowDirections:[self browserChromeArrowDirection] animated:YES];
     } else {
         list.title = @"Actions";
         list.navigationItem.rightBarButtonItem =
             [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
                                                           target:self action:@selector(compactPopoverDone:)];
         UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:list];
+        [RBTheme styleNavigationBar:nav.navigationBar];
         nav.modalPresentationStyle = UIModalPresentationFullScreen;
         self.compactPopoverController = nav;
         [self presentViewController:nav animated:YES completion:nil];
@@ -2054,11 +2167,14 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
     };
     self.libraryController = library;
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:library];
+    [RBTheme styleNavigationBar:nav.navigationBar];
+    nav.view.backgroundColor = [RBTheme pageBackgroundColor];
     if (RBIsPad()) {
         CGSize librarySize = CGSizeMake(420.0, 520.0);
         library.contentSizeForViewInPopover = librarySize;
         nav.contentSizeForViewInPopover = librarySize;
         UIPopoverController *popover = [[UIPopoverController alloc] initWithContentViewController:nav];
+        [RBTheme stylePopoverController:popover];
         // iOS 6 does not reliably forward a navigation controller's preferred
         // size into an already-created popover. Set the owning controller too,
         // otherwise UIKit falls back to an almost full-screen table height.
@@ -2067,7 +2183,7 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
         self.popover = popover;
         CGRect anchor = [button convertRect:button.bounds toView:self.view];
         [popover presentPopoverFromRect:anchor inView:self.view
-               permittedArrowDirections:UIPopoverArrowDirectionUp animated:YES];
+               permittedArrowDirections:[self browserChromeArrowDirection] animated:YES];
     } else {
         nav.modalPresentationStyle = UIModalPresentationFullScreen;
         [self presentViewController:nav animated:YES completion:nil];
@@ -2222,11 +2338,37 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
     self.keyboardTop = kf.origin.y;
     self.keyboardVisible = YES;
     [self updateKeyboardAvoidance];
+    if (RBIsPad() && (self.chromeBar.omnibox.editing || self.findBar.editing)) {
+        NSTimeInterval duration = [[[note userInfo] objectForKey:UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+        UIViewAnimationCurve curve = (UIViewAnimationCurve)[[[note userInfo]
+            objectForKey:UIKeyboardAnimationCurveUserInfoKey] integerValue];
+        [UIView animateWithDuration:(duration > 0.0 ? duration : 0.25)
+                              delay:0.0
+                            options:UIViewAnimationOptionBeginFromCurrentState |
+                                    ((UIViewAnimationOptions)curve << 16)
+                         animations:^{
+            [self.view setNeedsLayout];
+            [self.view layoutIfNeeded];
+        } completion:nil];
+    }
 }
 
 - (void)keyboardWillHide:(NSNotification *)note {
     self.keyboardVisible = NO;
     [self updateKeyboardAvoidance];
+    if (RBIsPad()) {
+        NSTimeInterval duration = [[[note userInfo] objectForKey:UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+        UIViewAnimationCurve curve = (UIViewAnimationCurve)[[[note userInfo]
+            objectForKey:UIKeyboardAnimationCurveUserInfoKey] integerValue];
+        [UIView animateWithDuration:(duration > 0.0 ? duration : 0.25)
+                              delay:0.0
+                            options:UIViewAnimationOptionBeginFromCurrentState |
+                                    ((UIViewAnimationOptions)curve << 16)
+                         animations:^{
+            [self.view setNeedsLayout];
+            [self.view layoutIfNeeded];
+        } completion:nil];
+    }
 }
 
 - (void)updateKeyboardAvoidance {
@@ -2353,6 +2495,8 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
                  multiple:[[message objectForKey:@"multiple"] boolValue]];
     controller.delegate = self;
     UINavigationController *navigation = [[UINavigationController alloc] initWithRootViewController:controller];
+    [RBTheme styleNavigationBar:navigation.navigationBar];
+    navigation.view.backgroundColor = [RBTheme pageBackgroundColor];
     self.selectController = controller;
     self.selectNavigationController = navigation;
 
@@ -2360,6 +2504,7 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
         CGSize size = [self constrainedSelectPopoverSize:controller];
         navigation.contentSizeForViewInPopover = size;
         UIPopoverController *popover = [[UIPopoverController alloc] initWithContentViewController:navigation];
+        [RBTheme stylePopoverController:popover];
         popover.delegate = self;
         popover.popoverContentSize = size;
         self.selectPopover = popover;
@@ -2472,11 +2617,13 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
     if (RBIsPad()) {
         // iPad rule: the photo library picker must live in a popover.
         UIPopoverController *popover = [[UIPopoverController alloc] initWithContentViewController:picker];
+        // UIImagePickerController is system-owned and expects the native
+        // popover chrome just like the Share sheet.
         popover.delegate = self;
         self.uploadPopover = popover;
         CGRect anchor = [self.chromeBar.moreButton convertRect:self.chromeBar.moreButton.bounds toView:self.view];
         [popover presentPopoverFromRect:anchor inView:self.view
-               permittedArrowDirections:UIPopoverArrowDirectionUp animated:YES];
+               permittedArrowDirections:[self browserChromeArrowDirection] animated:YES];
     } else {
         self.uploadPicker = picker;
         [self presentViewController:picker animated:YES completion:nil];

@@ -20,4 +20,5 @@ typedef enum {
 @property(nonatomic, assign) RBDiagnosticsOverlayMode displayMode;
 - (CGFloat)preferredExpandedHeightForWidth:(CGFloat)width;
 - (void)updateWithSnapshot:(RBDiagnosticsSnapshot *)snapshot;
+- (void)applyAppearance;
 @end

@@ -96,14 +96,19 @@ into native 3.5-, 4-, 4.7-, and 5.5-inch viewports; the client sends the
 resulting live viewport and every rotation to the backend.
 There is no per-model resolution table in the client or backend: device bounds,
 chrome, orientation, and fullscreen determine the live even-sized surface.
-Named sizes in tests are regression examples only.
+Named sizes in tests are regression examples only. The explicit Dark Mode uses
+Surf's own semantic palette on iOS 6–14 and applies Chromium's dark color-scheme
+and automatic darkening overrides to existing and newly attached tabs.
 
 The runtime layout is selected with `UI_USER_INTERFACE_IDIOM()`. Phone builds
 use a five-action bottom toolbar and a full-screen Tabs controller; tablet
-builds use a top toolbar and persistent tab row. Width affects spacing and rotation only,
-so an iPhone-compatibility installation on an iPad exercises the real phone
-path. iOS 6–14 share Surf's Oceanic Precision palette, typography, and
-professionally sourced Lucide interface glyphs.
+builds use one responsive desktop-style rail, switchable between the top and
+bottom edge, containing navigation, a compact hostname that expands into the
+full editable URL, horizontally
+scrolling persistent tabs, and browser actions. Width affects spacing and tab
+scrolling only, so an iPhone-compatibility installation on an iPad exercises
+the real phone path. iOS 6–14 share Surf's Oceanic Precision palette,
+typography, and professionally sourced Lucide interface glyphs.
 
 Phone tab previews are snapshots of the last decoded frame. They are captured
 only when Tabs opens or the active phone tab is left, retained in a 12-entry
@@ -145,8 +150,9 @@ docker run --rm -v "$PWD:/src" surf-buildenv bash -c \
 
 For device acceptance, verify both idioms rather than resizing one layout:
 
-- On iPad, test the top toolbar, persistent tabs and overflow, anchored Share,
-  Library, and custom More popovers, rotation, Surf fullscreen, page-requested
+- On iPad, test both browser-rail positions, compact and expanded address
+  states, horizontal tab scrolling, active-tab reveal, correctly directed
+  Share, Library, and custom More popovers, rotation, Surf fullscreen, page-requested
   fullscreen, video, audio, and input. Fullscreen should expose only Exit.
 - On iOS 6, confirm the original paper plane escapes the pre-rendered blue tile.
   On iOS 7 and later, confirm SpringBoard selects the opaque native-size icon

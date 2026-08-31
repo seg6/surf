@@ -96,6 +96,7 @@ static const NSInteger kRBServerForgetAlert = 3203;
     cell.accessoryType = UITableViewCellAccessoryNone;
     cell.accessoryView = nil;
     cell.selectionStyle = UITableViewCellSelectionStyleBlue;
+    cell.backgroundColor = [RBTheme surfaceColor];
     cell.textLabel.textColor = [RBTheme primaryTextColor];
     cell.detailTextLabel.textColor = [RBTheme secondaryTextColor];
     cell.detailTextLabel.text = nil;

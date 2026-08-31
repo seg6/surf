@@ -10,7 +10,10 @@
 // Find-on-page bar: query field, prev/next, result state, Done.
 @interface RBFindBar : UIView
 @property(nonatomic, assign) id<RBFindBarDelegate> delegate;
+@property(nonatomic, readonly) BOOL editing;
 
 - (void)focusField;
 - (void)setFound:(BOOL)found;
+- (void)setPageBoundaryAtTop:(BOOL)top;
+- (void)applyAppearance;
 @end

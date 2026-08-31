@@ -13,7 +13,7 @@
 - (void)settingsWantsDiagnosticsInspector:(RBSettingsController *)settings;
 @end
 
-@interface RBSettingsController : UIViewController
+@interface RBSettingsController : UITableViewController
 @property(nonatomic, assign) id<RBSettingsDelegate> delegate;
 @property(nonatomic, assign) BOOL connected;
 @property(nonatomic, assign) BOOL diagnosticsVisible;

@@ -49,6 +49,7 @@ func (b *Controller) ClientConnected(c *transport.Client) {
 	b.mu.Unlock()
 	b.send(c, protocol.HelloEvent{Type: "hello", W: w, H: h})
 	b.send(c, protocol.TabsEvent{Type: "tabs", Tabs: b.tabList()})
+	b.send(c, protocol.BoolEvent{Type: "loading", On: b.activeTabLoading()})
 	// The native controller sends its laid-out viewport immediately after the
 	// socket opens. Let that ordered message settle before starting capture so
 	// startup does not encode at the config default and then restart twice.
@@ -117,6 +118,8 @@ func (b *Controller) handleCommand(c *transport.Client, command protocol.Command
 			b.handleAudio(c, m.On)
 		} else if kind == "mobile" {
 			b.handleMobileLayout(m.On)
+		} else if kind == "dark" {
+			b.handleDarkMode(m.On)
 		} else if kind == "fullscreen" {
 			b.setPageFullscreen(m.On)
 		}
@@ -175,25 +178,26 @@ func (b *Controller) handleCommand(c *transport.Client, command protocol.Command
 		// commits, and the WS reader must stay responsive meanwhile.
 		if u := NormalizeNavURL(m.URL); u != "" {
 			log.Printf("nav -> %s", u)
-			b.mu.Lock()
-			t.loading = true
-			b.mu.Unlock()
-			_ = b.cdp.Dispatch(s, "Page.navigate", map[string]any{"url": u})
+			b.setTabLoading(t, true)
+			if err := b.cdp.Dispatch(s, "Page.navigate", map[string]any{"url": u}); err != nil {
+				b.setTabLoading(t, false)
+			}
 		}
 	case *protocol.EmptyCommand:
 		switch kind {
 		case "reload":
-			b.mu.Lock()
-			t.loading = true
-			b.mu.Unlock()
-			_ = b.cdp.Dispatch(s, "Page.reload", map[string]any{})
+			b.setTabLoading(t, true)
+			if err := b.cdp.Dispatch(s, "Page.reload", map[string]any{}); err != nil {
+				b.setTabLoading(t, false)
+			}
 		case "stop":
 			_, _ = b.cdp.Call(s, "Page.stopLoading", nil)
+			b.setTabLoading(t, false)
 		case "back", "fwd":
-			b.mu.Lock()
-			t.loading = true
-			b.mu.Unlock()
-			b.navigateHistory(s, kind == "back")
+			b.setTabLoading(t, true)
+			if !b.navigateHistory(s, kind == "back") {
+				b.setTabLoading(t, false)
+			}
 		case "media-playpause":
 			b.controlPageMedia(c, s, "playpause", 0)
 		case "media-mute":
@@ -284,6 +288,46 @@ func (b *Controller) handleMobileLayout(on bool) {
 		b.mu.Unlock()
 		_ = b.cdp.Dispatch(session, "Page.reload", map[string]any{})
 	}
+}
+
+func darkModeMediaParams(dark bool) map[string]any {
+	value := "light"
+	if dark {
+		value = "dark"
+	}
+	return map[string]any{
+		"features": []map[string]any{{"name": "prefers-color-scheme", "value": value}},
+	}
+}
+
+func (b *Controller) applyDarkMode(session string, dark bool) {
+	if session == "" {
+		return
+	}
+	// Advertise the user's preference and let each page use its authored theme.
+	// This is per target, so it must also run during every future tab attach.
+	_ = b.cdp.Dispatch(session, "Emulation.setEmulatedMedia", darkModeMediaParams(dark))
+}
+
+func (b *Controller) handleDarkMode(on bool) {
+	b.mu.Lock()
+	changed := b.dark != on
+	b.dark = on
+	var sessions []string
+	for _, tab := range b.tabs {
+		if tab.Session != "" {
+			sessions = append(sessions, tab.Session)
+		}
+	}
+	b.mu.Unlock()
+	log.Printf("appearance: dark mode=%t changed=%t", on, changed)
+	if !changed {
+		return
+	}
+	for _, session := range sessions {
+		b.applyDarkMode(session, on)
+	}
+	b.video.RequestKeyframe()
 }
 
 func (b *Controller) controlPageMedia(c *transport.Client, session, command string, value float64) {
@@ -692,18 +736,19 @@ func (b *Controller) handleTab(m *protocol.TabCommand) {
 	}
 }
 
-func (b *Controller) navigateHistory(session string, back bool) {
+func (b *Controller) navigateHistory(session string, back bool) bool {
 	h, err := b.cdp.NavigationHistory(session)
 	if err != nil {
-		return
+		return false
 	}
 	i := h.CurrentIndex + 1
 	if back {
 		i = h.CurrentIndex - 1
 	}
 	if i >= 0 && i < len(h.Entries) {
-		_ = b.cdp.NavigateToHistoryEntry(session, h.Entries[i].ID)
+		return b.cdp.NavigateToHistoryEntry(session, h.Entries[i].ID) == nil
 	}
+	return false
 }
 
 func (b *Controller) setTouchMode(session string) {

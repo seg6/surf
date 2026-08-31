@@ -34,6 +34,9 @@
     if (!self.addressField) self.addressField = [[UITextField alloc] initWithFrame:CGRectZero];
     self.addressField.delegate = self;
     self.addressField.font = [RBTheme fontOfSize:16.0 bold:NO];
+    self.addressField.textColor = [RBTheme primaryTextColor];
+    self.addressField.keyboardAppearance = [RBTheme isDarkMode] ? UIKeyboardAppearanceDark
+                                                                : UIKeyboardAppearanceDefault;
     self.addressField.placeholder = @"192.168.1.25:7777";
     self.addressField.keyboardType = UIKeyboardTypeURL;
     self.addressField.returnKeyType = UIReturnKeyGo;
@@ -73,6 +76,7 @@
     static NSString *identifier = @"address";
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:identifier];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:identifier];
+    cell.backgroundColor = [RBTheme surfaceColor];
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
     self.addressField.frame = CGRectMake(15.0, 5.0, cell.contentView.bounds.size.width - 30.0,
                                          MAX(22.0, cell.contentView.bounds.size.height - 10.0));

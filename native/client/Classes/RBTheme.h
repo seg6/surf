@@ -34,16 +34,20 @@ typedef enum {
     RBIconMute
 } RBIcon;
 
-// Gradient bar with a 1px dark bottom hairline; the iOS 6 toolbar look.
+// Gradient bar with a configurable 1px boundary hairline.
 @interface RBGradientBar : UIView
 - (void)setTopColor:(UIColor *)top bottomColor:(UIColor *)bottom lineColor:(UIColor *)line;
+- (void)setHairlineAtTop:(BOOL)top;
 @end
 
 @interface RBTheme : NSObject
 + (UIImage *)icon:(RBIcon)icon size:(CGFloat)size color:(UIColor *)color;
++ (UIImage *)solidImage:(UIColor *)color cornerRadius:(CGFloat)radius;
 + (BOOL)usesClassicAppearance;
++ (BOOL)isDarkMode;
 // Etched toolbar button: icon with a subtle bottom highlight, dims when pressed.
 + (UIButton *)barButtonWithIcon:(RBIcon)icon target:(id)target action:(SEL)action;
++ (void)styleBarButton:(UIButton *)button icon:(RBIcon)icon;
 + (UIColor *)barTopColor;
 + (UIColor *)barBottomColor;
 + (UIColor *)barLineColor;
@@ -52,6 +56,7 @@ typedef enum {
 + (UIColor *)iconColor;
 + (UIColor *)progressFillColor;
 + (UIColor *)pageBackgroundColor;
++ (UIColor *)surfaceColor;
 + (UIColor *)primaryTextColor;
 + (UIColor *)secondaryTextColor;
 + (UIColor *)separatorColor;
@@ -65,6 +70,7 @@ typedef enum {
 + (UIFont *)displayFontOfSize:(CGFloat)size;
 + (UIFont *)monospacedFontOfSize:(CGFloat)size bold:(BOOL)bold;
 + (void)styleNavigationBar:(UINavigationBar *)navigationBar;
++ (void)stylePopoverController:(UIPopoverController *)popoverController;
 + (void)styleTableView:(UITableView *)tableView;
 + (void)stylePrimaryButton:(UIButton *)button;
 + (void)styleSecondaryButton:(UIButton *)button;

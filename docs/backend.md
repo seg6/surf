@@ -129,7 +129,7 @@ management, logs, updates, or clipboard services. The first authenticated
 native WebSocket starts Chromium. Media stops as soon as the last socket
 disconnects, and Chromium exits after `SURF_BROWSER_IDLE_TIMEOUT` unless a
 download is still active. Reconnecting during that grace period cancels the
-shutdown. Tabs, the active tab, mobile-site mode, cookies, and site storage are
+shutdown. Tabs, the active tab, mobile-site mode, dark appearance, cookies, and site storage are
 restored on the next connection.
 
 ## Logs and clipboard
