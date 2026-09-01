@@ -1,13 +1,42 @@
 package protocol
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"testing"
 )
+
+func TestPortableCCommandsDecode(t *testing.T) {
+	emitter := os.Getenv("SURF_C_PROTOCOL_EMITTER")
+	if emitter == "" {
+		t.Skip("portable C command emitter is built by the client-core suite")
+	}
+	command := exec.Command(emitter, "--emit-commands")
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("C command emitter: %v", err)
+	}
+	scanner := bufio.NewScanner(bytes.NewReader(output))
+	count := 0
+	for scanner.Scan() {
+		if _, err := DecodeCommand(scanner.Bytes()); err != nil {
+			t.Fatalf("C command %d (%s): %v", count, scanner.Text(), err)
+		}
+		count++
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if count != 43 {
+		t.Fatalf("C command count = %d, want 43", count)
+	}
+}
 
 func fixturePath(name string) string {
 	_, file, _, _ := runtime.Caller(0)

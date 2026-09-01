@@ -4,12 +4,12 @@
 without UIKit, Foundation, Qt, Rust, networking, TLS, decoder, renderer, or
 audio dependencies.
 
-The current slice owns the binary media envelope, H.264 Annex-B helpers, typed
-browser events, deterministic tab/navigation/editable state, immutable
-snapshots, platform effects, reconnect/media admission policy, NTP-style clock
-synchronization, and rolling pipeline diagnostics. As the migration proceeds
-it will add the remaining control messages, session state, and interaction
-sequencing.
+The core owns the binary media envelope, H.264 Annex-B helpers, the complete
+typed control-event decoder and command encoder, deterministic browser state,
+immutable snapshots, platform effects, reconnect/media/input policy, NTP-style
+clock synchronization, and rolling pipeline diagnostics. The JSON decoder is
+strict and allocation-free after a host supplies one reusable workspace;
+decoded strings and collections remain valid until that workspace is reused.
 
 Build and test it directly:
 

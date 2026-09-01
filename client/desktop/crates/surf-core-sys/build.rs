@@ -11,6 +11,7 @@ fn main() {
         "src/h264.c",
         "src/input.c",
         "src/media.c",
+        "src/protocol.c",
         "src/session.c",
     ];
 
@@ -51,6 +52,10 @@ fn main() {
     println!(
         "cargo:rerun-if-changed={}",
         core.join("include/surf/media.h").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        core.join("include/surf/protocol.h").display()
     );
     println!(
         "cargo:rerun-if-changed={}",

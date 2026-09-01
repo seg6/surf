@@ -14,6 +14,7 @@ add_library(surf_client_core STATIC
     src/h264.c
     src/input.c
     src/media.c
+    src/protocol.c
     src/session.c
 )
 add_library(Surf::ClientCore ALIAS surf_client_core)
@@ -84,6 +85,22 @@ if(BUILD_TESTING)
     surf_core_test(surf_h264_test tests/h264_test.c)
     surf_core_test(surf_input_test tests/input_test.c)
     surf_core_test(surf_media_test tests/media_test.c)
+    surf_core_test(surf_protocol_test tests/protocol_test.c)
+    target_compile_definitions(surf_protocol_test PRIVATE
+        SURF_PROTOCOL_EVENT_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/../../protocol/fixtures/events.json"
+    )
+    find_program(SURF_GO_EXECUTABLE go)
+    if(SURF_GO_EXECUTABLE)
+        add_test(NAME surf_protocol_go_contract
+            COMMAND ${CMAKE_COMMAND} -E env
+                SURF_C_PROTOCOL_EMITTER=$<TARGET_FILE:surf_protocol_test>
+                ${SURF_GO_EXECUTABLE} test ./internal/protocol
+                -run ^TestPortableCCommandsDecode$ -count=1
+        )
+        set_tests_properties(surf_protocol_go_contract PROPERTIES
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../../backend"
+        )
+    endif()
     surf_core_test(surf_core_test tests/core_test.c)
     surf_core_test(surf_session_test tests/session_test.c)
 endif()
