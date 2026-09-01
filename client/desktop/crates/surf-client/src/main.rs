@@ -31,9 +31,13 @@ mod icon {
     pub const BACK: char = '\u{e06e}';
     pub const FORWARD: char = '\u{e06f}';
     pub const RELOAD: char = '\u{e145}';
+    pub const STOP: char = '\u{e167}';
+    pub const CLOSE: char = '\u{e1b2}';
     pub const PLUS: char = '\u{e13d}';
     pub const MORE: char = '\u{e0b6}';
     pub const LOCK: char = '\u{e531}';
+    pub const WARNING: char = '\u{e193}';
+    pub const STAR: char = '\u{e176}';
 }
 
 fn main() -> eframe::Result {
@@ -58,6 +62,7 @@ struct SurfDesktop {
     snapshot: Snapshot,
     address: String,
     address_focused: bool,
+    address_editing: bool,
     session: Option<SessionClient>,
     media: Option<MediaPipeline>,
     video_surface: Arc<VideoSurface>,
@@ -158,6 +163,7 @@ impl SurfDesktop {
             snapshot,
             address: String::new(),
             address_focused: false,
+            address_editing: false,
             session,
             media,
             video_surface,
@@ -577,111 +583,202 @@ impl SurfDesktop {
             .frame(
                 Frame::new()
                     .fill(theme::CHROME)
-                    .inner_margin(Margin::symmetric(14, 10))
+                    .inner_margin(Margin::same(0))
                     .stroke(Stroke::new(1.0, theme::SEPARATOR)),
             )
             .show(root, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    if chrome_icon(ui, icon::BACK, self.snapshot.can_go_back, "Back") {
-                        self.send_command(Command::Back {
-                            causal: Causal::default(),
-                        });
-                    }
-                    if chrome_icon(ui, icon::FORWARD, self.snapshot.can_go_forward, "Forward") {
-                        self.send_command(Command::Forward {
-                            causal: Causal::default(),
-                        });
-                    }
-                    if chrome_icon(
-                        ui,
-                        icon::RELOAD,
-                        self.connected,
-                        if self.snapshot.loading {
-                            "Stop"
-                        } else {
-                            "Reload"
-                        },
-                    ) {
-                        self.send_command(if self.snapshot.loading {
-                            Command::Stop {
-                                causal: Causal::default(),
-                            }
-                        } else {
-                            Command::Reload {
-                                causal: Causal::default(),
-                            }
-                        });
-                    }
-                    ui.add_space(6.0);
-
-                    let address_width = (ui.available_width() - 122.0).max(220.0);
-                    Frame::new()
-                        .fill(theme::FIELD)
-                        .corner_radius(CornerRadius::same(10))
-                        .stroke(Stroke::new(1.0, theme::FIELD_BORDER))
-                        .inner_margin(Margin::symmetric(12, 7))
-                        .show(ui, |ui| {
-                            ui.set_width(address_width);
-                            ui.horizontal(|ui| {
-                                if !self.address_focused {
-                                    ui.label(
-                                        RichText::new(icon::LOCK.to_string())
-                                            .family(icon_family())
-                                            .color(theme::MUTED),
-                                    );
-                                }
-                                let hint = if self.address_focused {
-                                    "Search or enter address"
-                                } else {
-                                    "Search the modern web"
-                                };
-                                let response = ui.add_sized(
-                                    [ui.available_width(), 24.0],
-                                    TextEdit::singleline(&mut self.address)
-                                        .id_source("address")
-                                        .hint_text(hint)
-                                        .font(FontId::proportional(15.0))
-                                        .frame(Frame::NONE),
-                                );
-                                self.address_focused = response.has_focus();
-                                if response.lost_focus()
-                                    && ui.input(|input| input.key_pressed(egui::Key::Enter))
-                                {
-                                    self.navigate();
-                                }
-                            });
-                        });
-                    ui.add_space(6.0);
-                    if chrome_icon(ui, icon::PLUS, self.connected, "New tab") {
-                        self.send_command(Command::Tab {
-                            action: "new".to_owned(),
-                            id: 0,
-                            causal: Causal::default(),
-                        });
-                    }
-                    chrome_icon(ui, icon::MORE, false, "Browser tools are coming next");
-                });
-
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    let tabs = self.snapshot.tabs.clone();
-                    for tab in tabs {
-                        self.tab(ui, &tab);
-                    }
-                });
+                self.tab_runway(ui);
+                ui.separator();
+                Frame::new()
+                    .fill(theme::COMMAND_RAIL)
+                    .inner_margin(Margin::symmetric(12, 6))
+                    .show(ui, |ui| self.command_rail(ui));
+                if self.snapshot.loading {
+                    let rail = ui.max_rect();
+                    let width = (rail.width() * 0.24).clamp(90.0, 260.0);
+                    let travel = (rail.width() - width).max(1.0);
+                    let x = rail.left()
+                        + (ui.input(|input| input.time) * 210.0 % f64::from(travel)) as f32;
+                    ui.painter().rect_filled(
+                        egui::Rect::from_min_size(
+                            egui::pos2(x, rail.bottom() - 2.0),
+                            egui::vec2(width, 2.0),
+                        ),
+                        CornerRadius::ZERO,
+                        theme::ACCENT,
+                    );
+                }
             });
     }
 
-    fn tab(&mut self, ui: &mut egui::Ui, tab: &Tab) {
+    fn tab_runway(&mut self, ui: &mut egui::Ui) {
+        ui.set_height(36.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            let available = (ui.available_width() - 42.0).max(120.0);
+            let count = self.snapshot.tabs.len().max(1) as f32;
+            let tab_width = (available / count).clamp(132.0, 228.0);
+            egui::ScrollArea::horizontal()
+                .id_salt("tab_runway")
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .max_width(available)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        let tabs = self.snapshot.tabs.clone();
+                        for tab in tabs {
+                            self.tab(ui, &tab, tab_width);
+                        }
+                    });
+                });
+            if chrome_icon(ui, icon::PLUS, self.connected, "New tab (Ctrl+T)") {
+                self.new_tab();
+            }
+        });
+    }
+
+    fn command_rail(&mut self, ui: &mut egui::Ui) {
+        ui.set_height(34.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            if chrome_icon(ui, icon::BACK, self.snapshot.can_go_back, "Back (Alt+Left)") {
+                self.send_command(Command::Back {
+                    causal: Causal::default(),
+                });
+            }
+            if chrome_icon(
+                ui,
+                icon::FORWARD,
+                self.snapshot.can_go_forward,
+                "Forward (Alt+Right)",
+            ) {
+                self.send_command(Command::Forward {
+                    causal: Causal::default(),
+                });
+            }
+            let reload_icon = if self.snapshot.loading {
+                icon::STOP
+            } else {
+                icon::RELOAD
+            };
+            if chrome_icon(
+                ui,
+                reload_icon,
+                self.connected,
+                if self.snapshot.loading {
+                    "Stop (Esc)"
+                } else {
+                    "Reload (Ctrl+R)"
+                },
+            ) {
+                self.reload_or_stop();
+            }
+            ui.add_space(4.0);
+
+            let address_width = (ui.available_width() - 86.0).max(220.0);
+            let focused = self.address_editing || self.address_focused;
+            Frame::new()
+                .fill(theme::FIELD)
+                .corner_radius(CornerRadius::same(9))
+                .stroke(Stroke::new(
+                    1.0,
+                    if focused {
+                        theme::ACCENT
+                    } else {
+                        theme::FIELD_BORDER
+                    },
+                ))
+                .inner_margin(Margin::symmetric(11, 4))
+                .show(ui, |ui| {
+                    ui.set_width(address_width);
+                    ui.horizontal(|ui| {
+                        let security_icon = if self.snapshot.security == "dangerous" {
+                            icon::WARNING
+                        } else {
+                            icon::LOCK
+                        };
+                        let security_color = if self.snapshot.security == "dangerous" {
+                            theme::DANGER
+                        } else if self.snapshot.current_url.starts_with("https://") {
+                            theme::ACCENT_TEXT
+                        } else {
+                            theme::MUTED
+                        };
+                        ui.label(
+                            RichText::new(security_icon.to_string())
+                                .family(icon_family())
+                                .size(14.0)
+                                .color(security_color),
+                        );
+                        if self.address_editing {
+                            let response = ui.add_sized(
+                                [ui.available_width(), 24.0],
+                                TextEdit::singleline(&mut self.address)
+                                    .id_source("address")
+                                    .hint_text("Search or enter address")
+                                    .font(FontId::proportional(14.5))
+                                    .frame(Frame::NONE),
+                            );
+                            self.address_focused = response.has_focus();
+                            let enter = ui.input(|input| input.key_pressed(egui::Key::Enter));
+                            let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
+                            if enter {
+                                self.navigate();
+                                self.address_editing = false;
+                                response.surrender_focus();
+                            } else if escape {
+                                self.address.clone_from(&self.snapshot.current_url);
+                                self.address_editing = false;
+                                response.surrender_focus();
+                            } else if response.lost_focus() {
+                                self.address_editing = false;
+                            }
+                        } else {
+                            let display = compact_address(&self.snapshot.current_url);
+                            let response = ui.add_sized(
+                                [ui.available_width(), 24.0],
+                                egui::Button::new(
+                                    RichText::new(display).size(14.0).color(theme::TEXT),
+                                )
+                                .frame(false),
+                            );
+                            if response.clicked() {
+                                self.address.clone_from(&self.snapshot.current_url);
+                                self.address_editing = true;
+                                ui.ctx().memory_mut(|memory| {
+                                    memory.request_focus(egui::Id::new("address"));
+                                });
+                            }
+                        }
+                    });
+                });
+            ui.add_space(4.0);
+            if chrome_icon(
+                ui,
+                icon::STAR,
+                self.connected,
+                if self.snapshot.starred {
+                    "Remove bookmark (Ctrl+D)"
+                } else {
+                    "Bookmark (Ctrl+D)"
+                },
+            ) {
+                self.send_command(Command::Bookmark {
+                    causal: Causal::default(),
+                });
+            }
+            chrome_icon(ui, icon::MORE, false, "Browser tools");
+        });
+    }
+
+    fn tab(&mut self, ui: &mut egui::Ui, tab: &Tab, width: f32) {
         let fill = if tab.active {
             theme::TAB_ACTIVE
         } else {
             theme::CHROME
         };
-        let response = Frame::new()
+        let inner = Frame::new()
             .fill(fill)
-            .corner_radius(CornerRadius::same(8))
+            .corner_radius(CornerRadius::same(6))
             .stroke(Stroke::new(
                 1.0,
                 if tab.active {
@@ -690,18 +787,46 @@ impl SurfDesktop {
                     Color32::TRANSPARENT
                 },
             ))
-            .inner_margin(Margin::symmetric(12, 7))
+            .inner_margin(Margin::symmetric(9, 3))
             .show(ui, |ui| {
-                ui.set_min_width(160.0);
-                ui.set_max_width(240.0);
-                ui.label(RichText::new(&tab.title).size(13.5).color(if tab.active {
-                    theme::TEXT
-                } else {
-                    theme::MUTED
-                }));
-            })
-            .response
-            .interact(Sense::click());
+                ui.set_width(width);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 5.0;
+                    let title = if tab.title.trim().is_empty() {
+                        compact_address(&tab.url)
+                    } else {
+                        tab.title.clone()
+                    };
+                    ui.add_sized(
+                        [(ui.available_width() - 24.0).max(50.0), 24.0],
+                        egui::Label::new(RichText::new(title).size(12.5).color(if tab.active {
+                            theme::TEXT
+                        } else {
+                            theme::MUTED
+                        }))
+                        .truncate(),
+                    );
+                    let close = ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new(icon::CLOSE.to_string())
+                                    .family(icon_family())
+                                    .size(11.0)
+                                    .color(theme::MUTED),
+                            )
+                            .frame(false)
+                            .min_size(Vec2::splat(22.0)),
+                        )
+                        .on_hover_text("Close tab (Ctrl+W)");
+                    close.clicked()
+                })
+            });
+        let close_clicked = inner.inner.inner;
+        let response = inner.response.interact(Sense::click());
+        if close_clicked {
+            self.close_tab(tab.id);
+            return;
+        }
         if response.clicked() && !tab.active {
             self.send_command(Command::Tab {
                 action: "select".to_owned(),
@@ -721,6 +846,34 @@ impl SurfDesktop {
             let _ = self.core.dispatch(&CoreEvent::Tabs(next));
             self.refresh();
         }
+    }
+
+    fn new_tab(&mut self) {
+        self.send_command(Command::Tab {
+            action: "new".to_owned(),
+            id: 0,
+            causal: Causal::default(),
+        });
+    }
+
+    fn close_tab(&mut self, id: i64) {
+        self.send_command(Command::Tab {
+            action: "close".to_owned(),
+            id: i32::try_from(id).unwrap_or_default(),
+            causal: Causal::default(),
+        });
+    }
+
+    fn reload_or_stop(&mut self) {
+        self.send_command(if self.snapshot.loading {
+            Command::Stop {
+                causal: Causal::default(),
+            }
+        } else {
+            Command::Reload {
+                causal: Causal::default(),
+            }
+        });
     }
 
     fn navigate(&mut self) {
@@ -743,6 +896,64 @@ impl SurfDesktop {
             causal: Causal::default(),
         });
         self.address = url;
+    }
+
+    fn handle_shortcuts(&mut self, context: &egui::Context) {
+        let input = context.input(|input| {
+            (
+                input.modifiers.command,
+                input.modifiers.shift,
+                input.modifiers.alt,
+                input.key_pressed(egui::Key::L),
+                input.key_pressed(egui::Key::T),
+                input.key_pressed(egui::Key::W),
+                input.key_pressed(egui::Key::R),
+                input.key_pressed(egui::Key::F5),
+                input.key_pressed(egui::Key::D),
+                input.key_pressed(egui::Key::ArrowLeft),
+                input.key_pressed(egui::Key::ArrowRight),
+                input.key_pressed(egui::Key::Escape),
+            )
+        });
+        let (command, _shift, alt, key_l, key_t, key_w, key_r, key_f5, key_d, left, right, escape) =
+            input;
+        if command && key_l {
+            self.address.clone_from(&self.snapshot.current_url);
+            self.address_editing = true;
+            context.memory_mut(|memory| memory.request_focus(egui::Id::new("address")));
+        }
+        if command && key_t {
+            self.new_tab();
+        }
+        if command
+            && key_w
+            && let Some(id) = self.snapshot.active_tab_id
+        {
+            self.close_tab(id);
+        }
+        if (command && key_r) || key_f5 {
+            self.reload_or_stop();
+        }
+        if command && key_d {
+            self.send_command(Command::Bookmark {
+                causal: Causal::default(),
+            });
+        }
+        if alt && left && self.snapshot.can_go_back {
+            self.send_command(Command::Back {
+                causal: Causal::default(),
+            });
+        }
+        if alt && right && self.snapshot.can_go_forward {
+            self.send_command(Command::Forward {
+                causal: Causal::default(),
+            });
+        }
+        if escape && self.snapshot.loading && !self.address_editing {
+            self.send_command(Command::Stop {
+                causal: Causal::default(),
+            });
+        }
     }
 
     fn content(&mut self, root: &mut egui::Ui) {
@@ -771,14 +982,8 @@ impl SurfDesktop {
                             causal: Causal::default(),
                         });
                     }
-                    painter.rect_filled(surface, CornerRadius::same(12), Color32::BLACK);
+                    painter.rect_filled(surface, CornerRadius::ZERO, Color32::BLACK);
                     painter.add(self.video_surface.callback(surface));
-                    painter.rect_stroke(
-                        surface,
-                        CornerRadius::same(12),
-                        Stroke::new(1.0, theme::SEPARATOR),
-                        egui::StrokeKind::Inside,
-                    );
                     let label = if self.frames_received == 0 {
                         "Secure stream connected · waiting for the first frame".to_owned()
                     } else {
@@ -1034,9 +1239,13 @@ impl eframe::App for SurfDesktop {
         let context = ui.ctx().clone();
         self.drain_session();
         self.update_diagnostics();
-        if context.input(|input| input.modifiers.command && input.key_pressed(egui::Key::L)) {
-            context.memory_mut(|memory| memory.request_focus(egui::Id::new("address")));
-        }
+        self.handle_shortcuts(&context);
+        let title = self.snapshot.active_title.trim();
+        context.send_viewport_cmd(egui::ViewportCommand::Title(if title.is_empty() {
+            "Surf".to_owned()
+        } else {
+            format!("{title} — Surf")
+        }));
         self.chrome(ui);
         self.content(ui);
         let presented = self.video_surface.presented();
@@ -1140,6 +1349,31 @@ fn bounded_i32(value: u64) -> i32 {
     i32::try_from(value).unwrap_or(i32::MAX)
 }
 
+fn compact_address(url: &str) -> String {
+    let value = url.trim();
+    if value.is_empty() || value.starts_with("about:blank") {
+        return "New tab".to_owned();
+    }
+    if value.starts_with("data:") {
+        return "Local page".to_owned();
+    }
+    let without_scheme = value
+        .strip_prefix("https://")
+        .or_else(|| value.strip_prefix("http://"))
+        .unwrap_or(value);
+    let authority = without_scheme
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or(value);
+    let host = authority.rsplit('@').next().unwrap_or(authority);
+    let host = host.strip_prefix("www.").unwrap_or(host);
+    if host.is_empty() {
+        value.to_owned()
+    } else {
+        host.to_owned()
+    }
+}
+
 fn chrome_icon(ui: &mut egui::Ui, glyph: char, enabled: bool, label: &str) -> bool {
     let text = RichText::new(glyph.to_string())
         .family(icon_family())
@@ -1191,18 +1425,39 @@ fn install_style(context: &egui::Context) {
 mod theme {
     use eframe::egui::Color32;
 
-    pub const BACKGROUND: Color32 = Color32::from_rgb(17, 19, 23);
-    pub const CHROME: Color32 = Color32::from_rgb(25, 28, 34);
-    pub const FIELD: Color32 = Color32::from_rgb(38, 42, 49);
-    pub const FIELD_BORDER: Color32 = Color32::from_rgb(58, 64, 74);
-    pub const SURFACE: Color32 = Color32::from_rgb(27, 30, 36);
-    pub const TAB_ACTIVE: Color32 = Color32::from_rgb(42, 47, 55);
-    pub const TAB_BORDER: Color32 = Color32::from_rgb(75, 83, 95);
-    pub const SEPARATOR: Color32 = Color32::from_rgb(49, 54, 63);
-    pub const TEXT: Color32 = Color32::from_rgb(238, 241, 246);
-    pub const MUTED: Color32 = Color32::from_rgb(158, 166, 179);
-    pub const DISABLED: Color32 = Color32::from_rgb(89, 95, 105);
-    pub const ACCENT: Color32 = Color32::from_rgb(74, 157, 209);
-    pub const ACCENT_SOFT: Color32 = Color32::from_rgb(31, 61, 76);
-    pub const ACCENT_TEXT: Color32 = Color32::from_rgb(142, 211, 232);
+    pub const BACKGROUND: Color32 = Color32::from_rgb(23, 23, 25);
+    pub const CHROME: Color32 = Color32::from_rgb(29, 29, 32);
+    pub const COMMAND_RAIL: Color32 = Color32::from_rgb(32, 32, 35);
+    pub const FIELD: Color32 = Color32::from_rgb(42, 42, 46);
+    pub const FIELD_BORDER: Color32 = Color32::from_rgb(68, 68, 74);
+    pub const SURFACE: Color32 = Color32::from_rgb(35, 35, 38);
+    pub const TAB_ACTIVE: Color32 = Color32::from_rgb(46, 46, 50);
+    pub const TAB_BORDER: Color32 = Color32::from_rgb(77, 77, 84);
+    pub const SEPARATOR: Color32 = Color32::from_rgb(55, 55, 60);
+    pub const TEXT: Color32 = Color32::from_rgb(244, 244, 245);
+    pub const MUTED: Color32 = Color32::from_rgb(165, 165, 172);
+    pub const DISABLED: Color32 = Color32::from_rgb(94, 94, 101);
+    pub const ACCENT: Color32 = Color32::from_rgb(90, 200, 216);
+    pub const ACCENT_SOFT: Color32 = Color32::from_rgb(37, 63, 67);
+    pub const ACCENT_TEXT: Color32 = Color32::from_rgb(142, 220, 229);
+    pub const DANGER: Color32 = Color32::from_rgb(241, 116, 116);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compact_address;
+
+    #[test]
+    fn compact_address_keeps_only_the_meaningful_location() {
+        assert_eq!(
+            compact_address("https://www.example.com/path?q=1"),
+            "example.com"
+        );
+        assert_eq!(
+            compact_address("http://user@host.test:8080/a"),
+            "host.test:8080"
+        );
+        assert_eq!(compact_address("about:blank#surf-new"), "New tab");
+        assert_eq!(compact_address("data:text/html,hello"), "Local page");
+    }
 }

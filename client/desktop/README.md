@@ -19,6 +19,11 @@ On a server advertising `pointer-input`, egui mouse, wheel, modifier, keyboard,
 clipboard paste, and IME events use a bounded ordered desktop lane; older
 servers receive the established single-contact touch fallback.
 
+The desktop chrome uses a horizontally scrollable tab runway with independent
+new/close controls and a stable command rail. The omnibox shows the meaningful
+hostname while idle, expands to the complete address for editing, and supports
+the standard Ctrl+L/T/W/R/D, F5, Escape, and Alt+Arrow browser shortcuts.
+
 On Debian/Ubuntu development hosts, install the native media headers first:
 
 ```sh

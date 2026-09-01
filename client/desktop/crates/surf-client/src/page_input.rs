@@ -325,7 +325,12 @@ impl PageInput {
         modifiers: Modifiers,
         commands: &mut Vec<Command>,
     ) -> Result<(), Error> {
-        if modifiers.command && matches!(key, Key::L | Key::T | Key::W | Key::R | Key::V) {
+        if modifiers.command
+            && matches!(
+                key,
+                Key::D | Key::F | Key::H | Key::J | Key::L | Key::R | Key::T | Key::V | Key::W
+            )
+        {
             return Ok(());
         }
         if is_printable(key) && !modifiers.ctrl && !modifiers.alt && !modifiers.mac_cmd {
