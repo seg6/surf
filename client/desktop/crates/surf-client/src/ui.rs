@@ -23,7 +23,63 @@ const BAR_HEIGHT: f32 = 32.0;
 const PANEL_TOP: f32 = BAR_HEIGHT + 4.0;
 const PANEL_WIDTH: f32 = 330.0;
 const VIEWPORT_SETTLE: Duration = Duration::from_millis(120);
+const WINDOW_RESIZE_TIMEOUT: Duration = Duration::from_millis(900);
 const SURF_VERSION: &str = include_str!("../../../../../VERSION");
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DevicePreset {
+    label: &'static str,
+    portrait: [u32; 2],
+}
+
+impl DevicePreset {
+    const fn size(self, landscape: bool) -> [u32; 2] {
+        if landscape {
+            [self.portrait[1], self.portrait[0]]
+        } else {
+            self.portrait
+        }
+    }
+}
+
+const DEVICE_PRESETS: &[DevicePreset] = &[
+    DevicePreset {
+        label: "iPhone 3.5-inch",
+        portrait: [320, 480],
+    },
+    DevicePreset {
+        label: "iPhone 4-inch",
+        portrait: [320, 568],
+    },
+    DevicePreset {
+        label: "iPhone 4.7-inch",
+        portrait: [375, 667],
+    },
+    DevicePreset {
+        label: "iPhone 5.5-inch",
+        portrait: [414, 736],
+    },
+    DevicePreset {
+        label: "iPhone full-screen",
+        portrait: [375, 812],
+    },
+    DevicePreset {
+        label: "iPad / iPad mini / 9.7-inch",
+        portrait: [768, 1024],
+    },
+    DevicePreset {
+        label: "iPad 10.5-inch",
+        portrait: [834, 1112],
+    },
+    DevicePreset {
+        label: "iPad 11-inch",
+        portrait: [834, 1194],
+    },
+    DevicePreset {
+        label: "iPad 12.9-inch",
+        portrait: [1024, 1366],
+    },
+];
 
 mod icon {
     pub const BACK: &str = "<";
@@ -110,6 +166,16 @@ struct PendingFullscreen {
     command_sent: bool,
 }
 
+struct WindowSizeRequest {
+    label: &'static str,
+    size: [u32; 2],
+}
+
+struct PendingWindowSize {
+    request: WindowSizeRequest,
+    started: Instant,
+}
+
 impl SmokeState {
     fn from_environment() -> Self {
         let target = std::env::var("SURF_SMOKE_EXIT_AFTER_FRAMES")
@@ -161,6 +227,10 @@ pub struct DesktopApp {
     fullscreen_request: Option<bool>,
     fullscreen_pending: Option<PendingFullscreen>,
     theme_request: Option<bool>,
+    device_preset: usize,
+    device_landscape: bool,
+    window_size_request: Option<WindowSizeRequest>,
+    pending_window_size: Option<PendingWindowSize>,
     ui_wants_pointer: bool,
     ui_wants_keyboard: bool,
     observed_url: String,
@@ -198,6 +268,10 @@ impl DesktopApp {
             fullscreen_request: None,
             fullscreen_pending: None,
             theme_request: None,
+            device_preset: 5,
+            device_landscape: false,
+            window_size_request: None,
+            pending_window_size: None,
             ui_wants_pointer: false,
             ui_wants_keyboard: false,
             observed_url: String::new(),
@@ -312,12 +386,14 @@ impl DesktopApp {
         if let Some(on) = self.fullscreen_request.take() {
             self.set_fullscreen(window, on);
         }
+        self.update_window_size(window);
         self.ui_wants_pointer = ui.io().want_capture_mouse;
         self.ui_wants_keyboard = ui.io().want_text_input;
     }
 
     fn draw_chrome(&mut self, ui: &Ui) {
         let display = ui.io().display_size;
+        let narrow = display[0] < 520.0;
         let flags = WindowFlags::NO_DECORATION
             | WindowFlags::NO_MOVE
             | WindowFlags::NO_SAVED_SETTINGS
@@ -333,11 +409,13 @@ impl DesktopApp {
                         causal: Causal::default(),
                     });
                 }
-                ui.same_line();
-                if compact_button(ui, icon::FORWARD, "Forward", [24.0, 20.0]) {
-                    self.controller.command(Command::Forward {
-                        causal: Causal::default(),
-                    });
+                if !narrow {
+                    ui.same_line();
+                    if compact_button(ui, icon::FORWARD, "Forward", [24.0, 20.0]) {
+                        self.controller.command(Command::Forward {
+                            causal: Causal::default(),
+                        });
+                    }
                 }
                 ui.same_line();
                 let reload = if self.controller.snapshot.loading {
@@ -362,11 +440,17 @@ impl DesktopApp {
                         }
                     })
                     .unwrap_or_else(|| "No tab".to_owned());
-                let tab_width = (display[0] * 0.17).clamp(112.0, 180.0);
-                if ui.button_with_size(
-                    format!("{}  [{}]##tabs", truncate(&active_title, 22), tabs.len()),
-                    [tab_width, 20.0],
-                ) {
+                let tab_width = if narrow {
+                    (display[0] * 0.18).clamp(54.0, 76.0)
+                } else {
+                    (display[0] * 0.17).clamp(112.0, 180.0)
+                };
+                let tab_label = if narrow {
+                    format!("[{}]##tabs", tabs.len())
+                } else {
+                    format!("{}  [{}]##tabs", truncate(&active_title, 22), tabs.len())
+                };
+                if ui.button_with_size(tab_label, [tab_width, 20.0]) {
                     self.panel = toggle(self.panel, Panel::Tabs);
                     self.page_focused = false;
                 }
@@ -379,8 +463,13 @@ impl DesktopApp {
                 }
                 ui.same_line();
 
-                let utility_width = 58.0;
-                ui.set_next_item_width((ui.content_region_avail()[0] - utility_width).max(120.0));
+                let utility_width = if narrow { 28.0 } else { 58.0 };
+                let address_width = (ui.content_region_avail()[0] - utility_width).max(if narrow {
+                    60.0
+                } else {
+                    120.0
+                });
+                ui.set_next_item_width(address_width);
                 if self.address_editing {
                     if self.focus_address {
                         ui.set_keyboard_focus_here();
@@ -413,10 +502,7 @@ impl DesktopApp {
                     let compact = compact_address(&self.controller.snapshot.current_url);
                     if ui.button_with_size(
                         format!("{compact}##omnibox-display"),
-                        [
-                            (ui.content_region_avail()[0] - utility_width).max(120.0),
-                            20.0,
-                        ],
+                        [address_width, 20.0],
                     ) {
                         self.edit_address();
                     }
@@ -425,16 +511,18 @@ impl DesktopApp {
                         ui.tooltip_text(&self.controller.snapshot.current_url);
                     }
                 }
-                ui.same_line();
-                let star = if self.controller.snapshot.starred {
-                    "[*]".to_owned()
-                } else {
-                    icon::STAR.to_string()
-                };
-                if compact_button(ui, &star, "Bookmark", [24.0, 20.0]) {
-                    self.controller.command(Command::Bookmark {
-                        causal: Causal::default(),
-                    });
+                if !narrow {
+                    ui.same_line();
+                    let star = if self.controller.snapshot.starred {
+                        "[*]".to_owned()
+                    } else {
+                        icon::STAR.to_string()
+                    };
+                    if compact_button(ui, &star, "Bookmark", [24.0, 20.0]) {
+                        self.controller.command(Command::Bookmark {
+                            causal: Causal::default(),
+                        });
+                    }
                 }
                 ui.same_line();
                 if compact_button(ui, icon::MORE, "Browser tools", [24.0, 20.0]) {
@@ -467,7 +555,7 @@ impl DesktopApp {
 
     fn draw_start(&mut self, ui: &Ui) {
         let display = ui.io().display_size;
-        let width = display[0].clamp(340.0, 450.0);
+        let width = (display[0] - 16.0).clamp(280.0, 450.0);
         let flags = WindowFlags::NO_COLLAPSE
             | WindowFlags::NO_RESIZE
             | WindowFlags::NO_SAVED_SETTINGS
@@ -476,7 +564,7 @@ impl DesktopApp {
         ui.window("Connect to Surf")
             .position([display[0] * 0.5, display[1] * 0.5], Condition::Always)
             .position_pivot([0.5, 0.5])
-            .size_constraints([width, 0.0], [width, display[1] - 24.0])
+            .size_constraints([width, 0.0], [width, (display[1] - 16.0).max(220.0)])
             .flags(flags)
             .build(|| {
                 ui.text("AVAILABLE COMPUTERS");
@@ -570,11 +658,16 @@ impl DesktopApp {
 
     fn draw_tabs(&mut self, ui: &Ui) {
         let display = ui.io().display_size;
+        let panel_width = (display[0] - 8.0).clamp(280.0, 340.0);
+        let panel_x = if display[0] < 520.0 { 4.0 } else { 82.0 };
         let tabs = self.controller.snapshot.tabs.clone();
         let mut action = None;
         ui.window("Tabs##panel")
-            .position([82.0, PANEL_TOP], Condition::Always)
-            .size_constraints([300.0, 0.0], [340.0, display[1] * 0.7])
+            .position([panel_x, PANEL_TOP], Condition::Always)
+            .size_constraints(
+                [panel_width, 0.0],
+                [panel_width, (display[1] * 0.7).max(160.0)],
+            )
             .flags(overlay_flags() | WindowFlags::ALWAYS_AUTO_RESIZE | WindowFlags::NO_TITLE_BAR)
             .build(|| {
                 for (index, tab) in tabs.iter().enumerate() {
@@ -584,10 +677,11 @@ impl DesktopApp {
                         tab.title.clone()
                     };
                     let selected = tab.active;
+                    let row_width = (ui.content_region_avail()[0] - 30.0).max(80.0);
                     if ui
                         .selectable_config(format!("{}##tab-{index}", truncate(&title, 42)))
                         .selected(selected)
-                        .size([278.0, 18.0])
+                        .size([row_width, 18.0])
                         .build()
                     {
                         action = Some(("select", tab.id));
@@ -674,19 +768,19 @@ impl DesktopApp {
 
     fn draw_library(&mut self, ui: &Ui) {
         let display = ui.io().display_size;
+        let available_width = (display[0] - 16.0).max(280.0);
+        let available_height = (display[1] - 16.0).max(220.0);
+        let width = (display[0] * 0.72).clamp(280.0, 820.0).min(available_width);
+        let height = (display[1] * 0.72)
+            .clamp(220.0, 620.0)
+            .min(available_height);
         let mut open = true;
         let mut actions = Vec::new();
         ui.window("Library")
             .position([display[0] * 0.5, display[1] * 0.5], Condition::Appearing)
             .position_pivot([0.5, 0.5])
-            .size(
-                [
-                    (display[0] * 0.64).clamp(520.0, 820.0),
-                    (display[1] * 0.70).clamp(340.0, 620.0),
-                ],
-                Condition::Appearing,
-            )
-            .size_constraints([440.0, 280.0], [display[0] - 24.0, display[1] - 24.0])
+            .size([width, height], Condition::Appearing)
+            .size_constraints([280.0, 220.0], [available_width, available_height])
             .opened(&mut open)
             .flags(overlay_flags())
             .build(|| {
@@ -806,16 +900,17 @@ impl DesktopApp {
 
     fn draw_find(&mut self, ui: &Ui) {
         let display = ui.io().display_size;
+        let width = (display[0] - 8.0).clamp(280.0, 330.0);
         let mut open = true;
         let mut command = None;
         ui.window("Find##panel")
             .position([display[0], PANEL_TOP], Condition::Always)
             .position_pivot([1.0, 0.0])
-            .size([330.0, 0.0], Condition::Always)
+            .size([width, 0.0], Condition::Always)
             .opened(&mut open)
             .flags(overlay_flags() | WindowFlags::ALWAYS_AUTO_RESIZE)
             .build(|| {
-                ui.set_next_item_width(238.0);
+                ui.set_next_item_width((ui.content_region_avail()[0] - 70.0).max(100.0));
                 let previous = self.controller.browser.find_query.clone();
                 let changed = ui
                     .input_text("##find", &mut self.controller.browser.find_query)
@@ -853,6 +948,12 @@ impl DesktopApp {
             return;
         };
         let display = ui.io().display_size;
+        let width = (display[0] * 0.72)
+            .clamp(280.0, 900.0)
+            .min((display[0] - 16.0).max(280.0));
+        let height = (display[1] * 0.78)
+            .clamp(220.0, 720.0)
+            .min((display[1] - 16.0).max(220.0));
         let mut open = true;
         let mut navigate = false;
         ui.window(if reader.title.is_empty() {
@@ -862,13 +963,7 @@ impl DesktopApp {
         })
         .position([display[0] * 0.5, display[1] * 0.5], Condition::Appearing)
         .position_pivot([0.5, 0.5])
-        .size(
-            [
-                (display[0] * 0.68).clamp(520.0, 900.0),
-                (display[1] * 0.78).clamp(360.0, 720.0),
-            ],
-            Condition::Appearing,
-        )
+        .size([width, height], Condition::Appearing)
         .opened(&mut open)
         .flags(overlay_flags())
         .build(|| {
@@ -894,13 +989,14 @@ impl DesktopApp {
 
     fn draw_media(&mut self, ui: &Ui) {
         let display = ui.io().display_size;
+        let width = (display[0] - 8.0).clamp(280.0, PANEL_WIDTH);
         let media = self.controller.browser.media.clone();
         let mut open = true;
         let mut actions = Vec::new();
         ui.window("Media")
             .position([display[0], PANEL_TOP], Condition::Always)
             .position_pivot([1.0, 0.0])
-            .size_constraints([PANEL_WIDTH, 0.0], [PANEL_WIDTH, 260.0])
+            .size_constraints([width, 0.0], [width, 260.0])
             .opened(&mut open)
             .flags(overlay_flags() | WindowFlags::ALWAYS_AUTO_RESIZE)
             .build(|| {
@@ -946,16 +1042,65 @@ impl DesktopApp {
 
     fn draw_settings(&mut self, ui: &Ui) {
         let display = ui.io().display_size;
+        let width = (display[0] - 16.0).clamp(280.0, 470.0);
+        let max_height = (display[1] - 16.0).max(220.0);
         let mut open = true;
         let mut actions = Vec::new();
         ui.window("Settings")
             .position([display[0] * 0.5, display[1] * 0.5], Condition::Appearing)
             .position_pivot([0.5, 0.5])
-            .size([470.0, 0.0], Condition::Appearing)
-            .size_constraints([400.0, 0.0], [display[0] - 24.0, display[1] - 24.0])
+            .size([width, 0.0], Condition::Appearing)
+            .size_constraints([width, 0.0], [width, max_height])
             .opened(&mut open)
             .flags(overlay_flags() | WindowFlags::ALWAYS_AUTO_RESIZE)
             .build(|| {
+                ui.text_disabled("LINUX DEVICE WINDOW");
+                ui.text_wrapped(
+                    "Match an iPhone or iPad layout using UIKit points. Retina scale does not change the layout size.",
+                );
+                let preset = DEVICE_PRESETS[self.device_preset.min(DEVICE_PRESETS.len() - 1)];
+                let size = preset.size(self.device_landscape);
+                let preview = format!("{} — {} x {} pt", preset.label, size[0], size[1]);
+                ui.set_next_item_width(-1.0);
+                if let Some(_combo) = ui.begin_combo("##device-preset", preview) {
+                    for (index, candidate) in DEVICE_PRESETS.iter().enumerate() {
+                        let candidate_size = candidate.size(self.device_landscape);
+                        let selected = index == self.device_preset;
+                        if ui
+                            .selectable_config(format!(
+                                "{} — {} x {} pt",
+                                candidate.label, candidate_size[0], candidate_size[1]
+                            ))
+                            .selected(selected)
+                            .build()
+                        {
+                            self.device_preset = index;
+                        }
+                        if selected {
+                            ui.set_item_default_focus();
+                        }
+                    }
+                }
+                if ui.radio_button_bool("Portrait", !self.device_landscape) {
+                    self.device_landscape = false;
+                }
+                ui.same_line();
+                if ui.radio_button_bool("Landscape", self.device_landscape) {
+                    self.device_landscape = true;
+                }
+                let preset = DEVICE_PRESETS[self.device_preset.min(DEVICE_PRESETS.len() - 1)];
+                let size = preset.size(self.device_landscape);
+                if ui.button_with_size("Apply exact client size", [ui.content_region_avail()[0], 0.0]) {
+                    self.window_size_request = Some(WindowSizeRequest {
+                        label: preset.label,
+                        size,
+                    });
+                }
+                ui.text_disabled(format!(
+                    "Current client area: {:.0} x {:.0} pt",
+                    display[0], display[1]
+                ));
+                ui.separator();
                 ui.text_disabled("APPEARANCE");
                 let mut dark = self.controller.dark_mode;
                 if ui.checkbox("Dark interface and websites", &mut dark) {
@@ -1008,13 +1153,14 @@ impl DesktopApp {
 
     fn draw_performance(&mut self, ui: &Ui) {
         let display = ui.io().display_size;
+        let width = (display[0] - 8.0).clamp(280.0, 360.0);
         let report = self.controller.latest_diagnostics.unwrap_or_default();
         let media = self.controller.media_diagnostics();
         let mut open = true;
         ui.window("Performance")
             .position([display[0], PANEL_TOP], Condition::Always)
             .position_pivot([1.0, 0.0])
-            .size([360.0, 0.0], Condition::Always)
+            .size([width, 0.0], Condition::Always)
             .opened(&mut open)
             .flags(overlay_flags() | WindowFlags::ALWAYS_AUTO_RESIZE)
             .build(|| {
@@ -1050,18 +1196,18 @@ impl DesktopApp {
             return;
         };
         let display = ui.io().display_size;
+        let width = (display[0] * 0.72)
+            .clamp(280.0, 800.0)
+            .min((display[0] - 16.0).max(280.0));
+        let height = (display[1] * 0.72)
+            .clamp(220.0, 600.0)
+            .min((display[1] - 16.0).max(220.0));
         let mut open = true;
         let mut complete: Option<Vec<PathBuf>> = None;
         ui.window("Choose file")
             .position([display[0] * 0.5, display[1] * 0.5], Condition::Appearing)
             .position_pivot([0.5, 0.5])
-            .size(
-                [
-                    (display[0] * 0.62).clamp(520.0, 800.0),
-                    (display[1] * 0.66).clamp(340.0, 600.0),
-                ],
-                Condition::Appearing,
-            )
+            .size([width, height], Condition::Appearing)
             .opened(&mut open)
             .flags(overlay_flags())
             .build(|| {
@@ -1148,6 +1294,10 @@ impl DesktopApp {
         if !self.address_editing || self.controller.browser.suggestions.is_empty() {
             return;
         }
+        let display = ui.io().display_size;
+        let width = (self.omnibox_rect[2] - self.omnibox_rect[0])
+            .max(80.0)
+            .min((display[0] - 8.0).max(80.0));
         let suggestions = self.controller.browser.suggestions.clone();
         let mut selected = None;
         ui.window("##suggestions")
@@ -1155,20 +1305,8 @@ impl DesktopApp {
                 [self.omnibox_rect[0], self.omnibox_rect[3] + 2.0],
                 Condition::Always,
             )
-            .size(
-                [
-                    (self.omnibox_rect[2] - self.omnibox_rect[0]).max(180.0),
-                    0.0,
-                ],
-                Condition::Always,
-            )
-            .size_constraints(
-                [180.0, 0.0],
-                [
-                    (self.omnibox_rect[2] - self.omnibox_rect[0]).max(180.0),
-                    260.0,
-                ],
-            )
+            .size([width, 0.0], Condition::Always)
+            .size_constraints([width, 0.0], [width, 260.0])
             // Suggestions are a visual/click target owned by the omnibox. They must not
             // become the active keyboard window when the first result arrives.
             .flags(
@@ -1211,11 +1349,15 @@ impl DesktopApp {
             self.dialog_input.clone_from(&prompt.input);
         }
         let display = ui.io().display_size;
+        let width = (display[0] - 32.0).clamp(260.0, 520.0);
         let mut action = None;
         ui.window("This page says")
             .position([display[0] * 0.5, display[1] * 0.5], Condition::Always)
             .position_pivot([0.5, 0.5])
-            .size_constraints([360.0, 0.0], [display[0] - 32.0, display[1] - 32.0])
+            .size_constraints(
+                [width.min(360.0), 0.0],
+                [width, (display[1] - 32.0).max(180.0)],
+            )
             .flags(overlay_flags() | WindowFlags::ALWAYS_AUTO_RESIZE)
             .build(|| {
                 ui.text_wrapped(&prompt.text);
@@ -1847,6 +1989,46 @@ impl DesktopApp {
         self.fullscreen = on;
     }
 
+    fn update_window_size(&mut self, window: &Window) {
+        if let Some(request) = self.window_size_request.take() {
+            if self.fullscreen {
+                self.controller
+                    .browser
+                    .toast("Exit fullscreen before applying a device size");
+            } else {
+                let _ = window.request_inner_size(LogicalSize::new(
+                    f64::from(request.size[0]),
+                    f64::from(request.size[1]),
+                ));
+                self.pending_window_size = Some(PendingWindowSize {
+                    request,
+                    started: Instant::now(),
+                });
+            }
+        }
+
+        let current = logical_window_size(window);
+        let result = self.pending_window_size.as_ref().and_then(|pending| {
+            if window_size_matches(current, pending.request.size) {
+                Some(format!(
+                    "{}: {} x {} pt",
+                    pending.request.label, pending.request.size[0], pending.request.size[1]
+                ))
+            } else if pending.started.elapsed() >= WINDOW_RESIZE_TIMEOUT {
+                Some(format!(
+                    "Window manager kept {} x {} pt; float the window and apply again",
+                    current[0], current[1]
+                ))
+            } else {
+                None
+            }
+        });
+        if let Some(message) = result {
+            self.pending_window_size = None;
+            self.controller.browser.toast(message);
+        }
+    }
+
     fn apply_actions(&mut self, actions: Vec<Action>) {
         for action in actions {
             match action {
@@ -1890,6 +2072,18 @@ impl DesktopApp {
 
 fn overlay_flags() -> WindowFlags {
     WindowFlags::NO_SAVED_SETTINGS | WindowFlags::NO_COLLAPSE
+}
+
+fn logical_window_size(window: &Window) -> [u32; 2] {
+    let size: LogicalSize<f64> = window.inner_size().to_logical(window.scale_factor());
+    [
+        size.width.round().max(1.0) as u32,
+        size.height.round().max(1.0) as u32,
+    ]
+}
+
+fn window_size_matches(current: [u32; 2], requested: [u32; 2]) -> bool {
+    current[0].abs_diff(requested[0]) <= 1 && current[1].abs_diff(requested[1]) <= 1
 }
 
 fn toggle(current: Option<Panel>, panel: Panel) -> Option<Panel> {
@@ -2115,7 +2309,10 @@ fn utf16_offset(text: &str, bytes: usize) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{Key, Modifiers, NamedKey, format_bytes, plain_key_text, truncate, utf16_offset};
+    use super::{
+        DEVICE_PRESETS, Key, Modifiers, NamedKey, format_bytes, plain_key_text, truncate,
+        utf16_offset, window_size_matches,
+    };
 
     #[test]
     fn compact_helpers_are_unicode_and_size_safe() {
@@ -2137,5 +2334,22 @@ mod tests {
             ),
             Some(" ".to_owned())
         );
+    }
+
+    #[test]
+    fn device_presets_use_uikit_points_and_swap_orientation() {
+        let classic_ipad = DEVICE_PRESETS
+            .iter()
+            .find(|preset| preset.label.starts_with("iPad /"))
+            .expect("classic iPad preset");
+        assert_eq!(classic_ipad.size(false), [768, 1024]);
+        assert_eq!(classic_ipad.size(true), [1024, 768]);
+        assert_eq!(DEVICE_PRESETS[0].size(false), [320, 480]);
+    }
+
+    #[test]
+    fn compositor_rounding_allows_one_logical_point() {
+        assert!(window_size_matches([767, 1025], [768, 1024]));
+        assert!(!window_size_matches([766, 1024], [768, 1024]));
     }
 }

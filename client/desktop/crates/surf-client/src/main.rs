@@ -37,7 +37,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let attributes = WindowAttributes::default()
         .with_title("Surf")
         .with_inner_size(LogicalSize::new(1180.0, 760.0))
-        .with_min_inner_size(LogicalSize::new(640.0, 400.0))
+        .with_min_inner_size(LogicalSize::new(320.0, 320.0))
         .with_window_icon(load_window_icon());
     let (window, config) = glutin_winit::DisplayBuilder::new()
         .with_window_attributes(Some(attributes))

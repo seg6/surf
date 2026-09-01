@@ -35,6 +35,13 @@ settings, server management, and pipeline diagnostics are compact overlays
 over the live page. Downloads stream into the user's Downloads folder and
 uploads never block the control socket.
 
+Settings includes Linux-only device-window presets for common iPhone and iPad
+layout sizes. The dimensions are UIKit points, so they reproduce the amount of
+interface space rather than multiplying it by a Retina scale factor. Choose a
+device and orientation, then apply it to request that exact logical client
+area. Tiling window managers can intentionally refuse application-requested
+sizes; float the Surf window before applying a preset when that happens.
+
 On Debian/Ubuntu development hosts, install the native media headers first:
 
 ```sh
