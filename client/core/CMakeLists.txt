@@ -8,6 +8,7 @@ option(SURF_CORE_WARNINGS_AS_ERRORS "Treat client-core warnings as errors" ON)
 option(SURF_CORE_SANITIZE "Enable address and undefined-behavior sanitizers" OFF)
 
 add_library(surf_client_core STATIC
+    src/core.c
     src/frame.c
     src/h264.c
 )
@@ -76,4 +77,5 @@ if(BUILD_TESTING)
 
     surf_core_test(surf_frame_test tests/frame_test.c)
     surf_core_test(surf_h264_test tests/h264_test.c)
+    surf_core_test(surf_core_test tests/core_test.c)
 endif()

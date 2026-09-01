@@ -18,6 +18,7 @@
 #import "RBInteractionTracker.h"
 #import "RBOmnibox.h"
 #import "RBProtocol.h"
+#import "RBCoreBridge.h"
 #import "RBQRScannerController.h"
 #import "RBPageSwitcherController.h"
 #import "RBPairingController.h"
@@ -120,6 +121,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
 @property(nonatomic, strong) UIBarButtonItem *pagePasteButton;
 // Controllers
 @property(nonatomic, strong) RBSession *session;
+@property(nonatomic, strong) RBCoreBridge *clientCore;
 @property(nonatomic, strong) RBSettingsController *settingsController;
 @property(nonatomic, strong) RBServersController *serversController;
 @property(nonatomic, strong) RBPairingController *pairingController;
@@ -278,6 +280,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
     [self.streamView installSystemDisplayLayer:self.mediaPipeline.systemDisplayLayer];
     self.diagnostics = [[RBDiagnostics alloc] initWithMediaPipeline:self.mediaPipeline
                                                          streamView:self.streamView];
+    self.clientCore = [[RBCoreBridge alloc] init];
 
     UITapGestureRecognizer *tripleTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggleDebug:)];
     tripleTap.numberOfTapsRequired = 3;
@@ -1191,6 +1194,7 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
 
 - (void)streamView:(RBStreamView *)streamView didPresentMetadata:(RBFrameMetadata *)metadata {
     self.presentedSurfaceGeneration = metadata.encoderGeneration;
+    [self.clientCore notePresentedSourceSequence:metadata.sourceSequence];
     if (self.awaitingPageFrame && self.awaitedSourceSequence > 0 &&
         metadata.sourceSequence >= self.awaitedSourceSequence) {
         self.awaitingPageFrame = NO;
@@ -1239,13 +1243,22 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
 
 - (void)session:(RBSession *)session didReceiveControlMessage:(NSDictionary *)message {
     if ([self.diagnostics consumeControlMessage:message]) return;
+    NSError *coreError = nil;
+    BOOL coreHandled = [self.clientCore consumeControlMessage:message error:&coreError];
+    if (coreError) {
+        RBLogEvent(@"client-core", @"error",
+                   @{@"type": [message objectForKey:@"t"] ?: @"",
+                     @"error": [coreError localizedDescription] ?: @""},
+                   @"Portable browser state rejected a control event");
+    }
+    BOOL coreValid = coreHandled && !coreError;
     NSString *t = [message objectForKey:@"t"];
     if ([t isEqualToString:@"url"]) {
-        NSString *url = [message objectForKey:@"url"];
+        NSString *url = coreValid ? self.clientCore.currentURL : [message objectForKey:@"url"];
         self.currentURL = url ?: @"";
-        self.currentStarred = [[message objectForKey:@"starred"] boolValue];
-        self.currentSecurity = [message objectForKey:@"security"];
-        BOOL newTab = [self.currentURL hasPrefix:@"about:blank#surf-new"];
+        self.currentStarred = coreValid ? self.clientCore.starred : [[message objectForKey:@"starred"] boolValue];
+        self.currentSecurity = coreValid ? self.clientCore.security : [message objectForKey:@"security"];
+        BOOL newTab = coreValid ? self.clientCore.showStartPage : [self.currentURL hasPrefix:@"about:blank#surf-new"];
         if (newTab) {
             self.startPageView.hidden = NO;
             self.awaitingPageFrame = NO;
@@ -1253,7 +1266,8 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
             if (self.browserStateView.state == RBBrowserStateStartingVideo)
                 [self.browserStateView showState:RBBrowserStateHidden detail:nil];
             [self.chromeBar.omnibox setURLText:@""];
-            [self.session sendMessage:@{@"t": @"hist"}];
+            if (!coreValid || [self.clientCore consumeEffect:RBCoreEffectRequestLibrary])
+                [self.session sendMessage:@{@"t": @"hist"}];
         } else if (url) {
             if (!self.awaitingPageFrame) self.startPageView.hidden = YES;
             [self.chromeBar.omnibox setURLText:url];
@@ -1262,22 +1276,28 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
         [self.chromeBar.omnibox setSecurityState:self.currentSecurity];
         [self hideErrorCard];
     } else if ([t isEqualToString:@"histstate"]) {
-        self.canGoBack = [[message objectForKey:@"back"] boolValue];
-        self.canGoForward = [[message objectForKey:@"fwd"] boolValue];
+        self.canGoBack = coreValid ? self.clientCore.canGoBack : [[message objectForKey:@"back"] boolValue];
+        self.canGoForward = coreValid ? self.clientCore.canGoForward : [[message objectForKey:@"fwd"] boolValue];
         [self.chromeBar setCanGoBack:self.canGoBack forward:self.canGoForward];
         [self.phoneToolbar setCanGoBack:self.canGoBack forward:self.canGoForward];
         self.fullscreenBackButton.enabled = self.canGoBack;
         self.fullscreenForwardButton.enabled = self.canGoForward;
     } else if ([t isEqualToString:@"loading"]) {
-        self.loading = [[message objectForKey:@"on"] boolValue];
+        self.loading = coreValid ? self.clientCore.loading : [[message objectForKey:@"on"] boolValue];
         [self.chromeBar.omnibox setLoading:self.loading];
         if (self.loading) [self hideErrorCard];
     } else if ([t isEqualToString:@"editable"]) {
-        if ([[message objectForKey:@"on"] boolValue]) {
+        BOOL editable = coreValid ? self.clientCore.editable : [[message objectForKey:@"on"] boolValue];
+        if (editable) {
             BOOL keyboardWasOpen = [self.hiddenInput isFirstResponder];
-            [self configureKeyboardForKind:[message objectForKey:@"kind"] rect:[message objectForKey:@"rect"]];
-            if (keyboardWasOpen || [[message objectForKey:@"show"] boolValue]) [self showKeyboard];
+            NSString *kind = coreValid ? self.clientCore.editableKind : [message objectForKey:@"kind"];
+            NSArray *rect = coreValid ? self.clientCore.editableRect : [message objectForKey:@"rect"];
+            [self configureKeyboardForKind:kind rect:rect];
+            BOOL show = keyboardWasOpen || [[message objectForKey:@"show"] boolValue];
+            if (coreValid && [self.clientCore consumeEffect:RBCoreEffectShowKeyboard]) show = YES;
+            if (show) [self showKeyboard];
         } else {
+            if (coreValid) [self.clientCore consumeEffect:RBCoreEffectHideKeyboard];
             self.editableHasRect = NO;
             [self hidePageKeyboard];
         }
@@ -1286,7 +1306,8 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
     } else if ([t isEqualToString:@"video-config"]) {
         [self handleVideoConfig:message];
     } else if ([t isEqualToString:@"fullscreen"]) {
-        [self setFullscreen:[[message objectForKey:@"on"] boolValue] notifyPage:NO];
+        BOOL fullscreen = coreValid ? self.clientCore.fullscreen : [[message objectForKey:@"on"] boolValue];
+        [self setFullscreen:fullscreen notifyPage:NO];
     } else if ([t isEqualToString:@"audio-config"]) {
         if ([[message objectForKey:@"ok"] boolValue] && !self.applicationInBackground) {
             [self.mediaPipeline configureAudioSampleRate:[[message objectForKey:@"rate"] intValue]
@@ -1303,7 +1324,7 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
     } else if ([t isEqualToString:@"downloads"]) {
         [self.libraryController setDownloads:[message objectForKey:@"items"]];
     } else if ([t isEqualToString:@"tabs"]) {
-        id tabs = [message objectForKey:@"tabs"];
+        id tabs = coreValid ? self.clientCore.tabs : [message objectForKey:@"tabs"];
         NSArray *nextTabs = [tabs isKindOfClass:[NSArray class]] ? tabs : nil;
         NSNumber *oldActiveKey = [self activeTabKey];
         NSNumber *nextActiveKey = nil;
@@ -1321,11 +1342,11 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
                     fingerprint:[self.currentServer objectForKey:@"fingerprint"]];
         [self.phoneToolbar setTabCount:[self.lastTabs count]];
         NSMutableSet *liveTabIDs = [NSMutableSet set];
-        NSString *activeTitle = nil;
+        NSString *activeTitle = coreValid ? self.clientCore.activeTitle : nil;
         for (NSDictionary *tab in self.lastTabs) {
             NSNumber *tabID = [tab objectForKey:@"id"];
             if (tabID) [liveTabIDs addObject:tabID];
-            if ([[tab objectForKey:@"active"] boolValue]) {
+            if (!coreValid && [[tab objectForKey:@"active"] boolValue]) {
                 activeTitle = [tab objectForKey:@"title"];
                 NSString *activeURL = [tab objectForKey:@"url"];
                 if ([activeURL hasPrefix:@"about:blank#surf-new"] ||
@@ -1337,6 +1358,8 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
                 }
             }
         }
+        if (coreValid && [self.clientCore consumeEffect:RBCoreEffectHideKeyboard])
+            [self hidePageKeyboard];
         self.chromeBar.pageTitle = activeTitle;
         for (NSNumber *tabID in [self.tabThumbnails allKeys]) {
             if (![liveTabIDs containsObject:tabID]) {
@@ -1360,7 +1383,7 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
             self.startPageView.hidden = YES;
         }
     } else if ([t isEqualToString:@"starred"]) {
-        self.currentStarred = [[message objectForKey:@"on"] boolValue];
+        self.currentStarred = coreValid ? self.clientCore.starred : [[message objectForKey:@"on"] boolValue];
         [self.chromeBar.omnibox setStarred:self.currentStarred];
     } else if ([t isEqualToString:@"suggest"]) {
         if (self.chromeBar.omnibox.editing) {
@@ -1388,7 +1411,7 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
                                       : [NSString stringWithFormat:@"%@…", name])];
         }
     } else if ([t isEqualToString:@"security"]) {
-        self.currentSecurity = [message objectForKey:@"state"];
+        self.currentSecurity = coreValid ? self.clientCore.security : [message objectForKey:@"state"];
         [self.chromeBar.omnibox setSecurityState:self.currentSecurity];
     } else if ([t isEqualToString:@"pageerror"]) {
         [self showErrorCardForURL:[message objectForKey:@"url"]];
@@ -2415,6 +2438,7 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
     CGRect kf = [self.view convertRect:[frameValue CGRectValue] fromView:nil];
     self.keyboardTop = kf.origin.y;
     self.keyboardVisible = YES;
+    [self.clientCore noteKeyboardVisible:YES];
     [self updateKeyboardAvoidance];
     if (RBIsPad() && (self.chromeBar.omnibox.editing || self.findBar.editing)) {
         NSTimeInterval duration = [[[note userInfo] objectForKey:UIKeyboardAnimationDurationUserInfoKey] doubleValue];
@@ -2433,6 +2457,7 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
 
 - (void)keyboardWillHide:(NSNotification *)note {
     self.keyboardVisible = NO;
+    [self.clientCore noteKeyboardVisible:NO];
     [self updateKeyboardAvoidance];
     if (RBIsPad()) {
         NSTimeInterval duration = [[[note userInfo] objectForKey:UIKeyboardAnimationDurationUserInfoKey] doubleValue];

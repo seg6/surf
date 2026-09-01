@@ -4,10 +4,11 @@
 without UIKit, Foundation, Qt, Rust, networking, TLS, decoder, renderer, or
 audio dependencies.
 
-The initial slice owns the binary media envelope and H.264 Annex-B helpers. As
-the migration proceeds it will also own typed control messages, deterministic
-browser/session state, effects, interaction sequencing, media policy, and
-portable diagnostics.
+The current slice owns the binary media envelope, H.264 Annex-B helpers, typed
+browser events, deterministic tab/navigation/editable state, immutable
+snapshots, and platform effects. As the migration proceeds it will add the
+remaining control messages, session state, interaction sequencing, media
+policy, and portable diagnostics.
 
 Build and test it directly:
 
