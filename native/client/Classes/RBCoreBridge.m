@@ -9,6 +9,7 @@ static NSString *const RBCoreBridgeErrorDomain = @"space.seg6.surf.core";
     surf_core_t *_core;
     void *_protocolMemory;
     surf_protocol_workspace_t *_protocolWorkspace;
+    uint64_t _connectionGeneration;
 }
 @property(nonatomic, copy, readwrite) NSArray *tabs;
 @property(nonatomic, copy, readwrite) NSString *activeTitle;
@@ -48,6 +49,7 @@ static NSString *RBStringFromCore(surf_string_view_t value) {
         surf_core_config_t config;
         surf_core_config_init(&config);
         if (surf_core_create(&config, &_core) != SURF_CORE_OK) return nil;
+        _connectionGeneration = surf_core_connection_generation(_core);
         size_t protocolSize = surf_protocol_workspace_size(NULL);
         _protocolMemory = malloc(protocolSize);
         if (!_protocolMemory ||
@@ -73,7 +75,8 @@ static NSString *RBStringFromCore(surf_string_view_t value) {
 }
 
 - (BOOL)dispatchEvent:(surf_event_t *)event error:(NSError **)error {
-    surf_core_result_t result = surf_core_dispatch(_core, event);
+    surf_core_result_t result = surf_core_dispatch_scoped(
+        _core, _connectionGeneration, event);
     if (result != SURF_CORE_OK) {
         if (error) {
             NSString *message = [NSString stringWithUTF8String:
@@ -220,10 +223,12 @@ static NSString *RBStringFromCore(surf_string_view_t value) {
 }
 
 - (void)reset {
-    surf_event_t event;
-    memset(&event, 0, sizeof(event));
-    event.kind = SURF_EVENT_RESET;
-    [self dispatchEvent:&event error:nil];
+    if (_connectionGeneration != UINT64_MAX &&
+        surf_core_begin_connection(_core, _connectionGeneration + 1) ==
+            SURF_CORE_OK) {
+        _connectionGeneration++;
+        [self refreshSnapshot];
+    }
     [self.pendingEffects removeAllObjects];
 }
 

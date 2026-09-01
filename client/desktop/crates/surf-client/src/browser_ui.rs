@@ -92,6 +92,34 @@ pub struct BrowserUi {
 }
 
 impl BrowserUi {
+    pub fn reset_connection(&mut self) {
+        self.menu_open = false;
+        self.find_open = false;
+        self.find_query.clear();
+        self.find_found = None;
+        self.library_open = false;
+        self.reader_open = false;
+        self.media_open = false;
+        self.history.clear();
+        self.bookmarks.clear();
+        self.downloads.clear();
+        self.download_progress.clear();
+        self.suggestions.clear();
+        self.dialog = None;
+        self.select = None;
+        self.reader = None;
+        self.upload_multiple = None;
+        self.upload_paths.clear();
+        self.page_error = None;
+        self.media = MediaState::default();
+        self.clipboard_sync = false;
+        self.clipboard_known = false;
+        self.clipboard_text.clear();
+        self.pending_clipboard = None;
+        self.pending_downloads.clear();
+        self.toast = None;
+    }
+
     pub fn toast(&mut self, text: impl Into<String>) {
         self.toast = Some(Toast {
             text: text.into(),

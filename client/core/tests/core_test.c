@@ -275,6 +275,37 @@ static void test_configuration(void) {
     SURF_CHECK(surf_core_create(&config, &core) == SURF_CORE_ERROR_LIMIT);
 }
 
+static void test_connection_generations_reject_stale_events(void) {
+    surf_core_t *core = create_core();
+    surf_event_t event;
+    surf_snapshot_t before;
+    surf_snapshot_t after;
+
+    memset(&event, 0, sizeof(event));
+    event.kind = SURF_EVENT_LOADING;
+    event.data.boolean.on = 1;
+    SURF_CHECK(surf_core_dispatch_scoped(core, 1, &event) == SURF_CORE_OK);
+    SURF_CHECK(snapshot(core).loading);
+
+    SURF_CHECK(surf_core_begin_connection(core, 2) == SURF_CORE_OK);
+    before = snapshot(core);
+    SURF_CHECK(!before.loading && before.tab_count == 0);
+    SURF_CHECK(surf_core_connection_generation(core) == 2);
+
+    SURF_CHECK(surf_core_dispatch_scoped(core, 1, &event) == SURF_CORE_OK);
+    after = snapshot(core);
+    SURF_CHECK(after.revision == before.revision);
+    SURF_CHECK(!after.loading);
+    SURF_CHECK(surf_core_stale_event_count(core) == 1);
+
+    SURF_CHECK(surf_core_dispatch_scoped(core, 2, &event) == SURF_CORE_OK);
+    SURF_CHECK(snapshot(core).loading);
+    SURF_CHECK(surf_core_begin_connection(core, 2) == SURF_CORE_ERROR_STATE);
+    SURF_CHECK(surf_core_begin_connection(core, 0) ==
+               SURF_CORE_ERROR_ARGUMENT);
+    surf_core_destroy(core);
+}
+
 static void test_abi_layout(void) {
     SURF_CHECK(surf_core_abi_version() == SURF_CORE_ABI_VERSION);
     SURF_CHECK(surf_core_sizeof_string_view() == sizeof(surf_string_view_t));
@@ -291,6 +322,7 @@ int main(void) {
     test_invalid_tabs_are_atomic();
     test_allocator_failure();
     test_configuration();
+    test_connection_generations_reject_stale_events();
     test_abi_layout();
     puts("surf_core: all tests passed");
     return EXIT_SUCCESS;

@@ -35,6 +35,8 @@ struct surf_core {
     surf_owned_string_t editable_kind;
     double editable_rect[4];
     uint64_t revision;
+    uint64_t connection_generation;
+    uint64_t stale_event_count;
     uint32_t awaited_source_sequence;
     int has_active_tab;
     int show_start_page;
@@ -264,6 +266,27 @@ static void surf_clear_page_transients(surf_core_t *core) {
     core->awaiting_page_frame = 0;
     core->awaited_source_sequence = 0;
     surf_owned_string_clear(core, &core->editable_kind);
+}
+
+static void surf_clear_browser_state(surf_core_t *core) {
+    surf_owned_tabs_clear(core, core->tabs, core->tab_count, core->tab_views);
+    core->tabs = NULL;
+    core->tab_views = NULL;
+    core->tab_count = 0;
+    core->active_tab_id = 0;
+    core->has_active_tab = 0;
+    surf_owned_string_clear(core, &core->active_title);
+    surf_owned_string_clear(core, &core->current_url);
+    surf_owned_string_clear(core, &core->security);
+    surf_clear_page_transients(core);
+    core->show_start_page = 1;
+    core->can_go_back = 0;
+    core->can_go_forward = 0;
+    core->starred = 0;
+    core->fullscreen = 0;
+    core->keyboard_visible = 0;
+    core->effect_head = 0;
+    core->effect_count = 0;
 }
 
 static surf_core_result_t surf_dispatch_tabs(surf_core_t *core,
@@ -525,6 +548,7 @@ surf_core_result_t surf_core_create(const surf_core_config_t *config,
     core->max_tabs = resolved.max_tabs;
     core->show_start_page = 1;
     core->revision = 1;
+    core->connection_generation = 1;
     *out_core = core;
     return SURF_CORE_OK;
 }
@@ -613,6 +637,28 @@ surf_core_result_t surf_core_dispatch(surf_core_t *core,
     return result;
 }
 
+surf_core_result_t surf_core_begin_connection(surf_core_t *core,
+                                              uint64_t generation) {
+    if (core == NULL || generation == 0) return SURF_CORE_ERROR_ARGUMENT;
+    if (generation <= core->connection_generation) return SURF_CORE_ERROR_STATE;
+    surf_clear_browser_state(core);
+    core->connection_generation = generation;
+    core->revision++;
+    return SURF_CORE_OK;
+}
+
+surf_core_result_t surf_core_dispatch_scoped(surf_core_t *core,
+                                             uint64_t generation,
+                                             const surf_event_t *event) {
+    if (core == NULL || event == NULL || generation == 0)
+        return SURF_CORE_ERROR_ARGUMENT;
+    if (generation != core->connection_generation) {
+        core->stale_event_count++;
+        return SURF_CORE_OK;
+    }
+    return surf_core_dispatch(core, event);
+}
+
 surf_core_result_t surf_core_snapshot(const surf_core_t *core,
                                       surf_snapshot_t *out_snapshot) {
     if (core == NULL || out_snapshot == NULL) {
@@ -653,6 +699,14 @@ int surf_core_next_effect(surf_core_t *core, surf_effect_t *out_effect) {
     core->effect_head = (core->effect_head + 1) % SURF_EFFECT_CAPACITY;
     core->effect_count--;
     return 1;
+}
+
+uint64_t surf_core_connection_generation(const surf_core_t *core) {
+    return core == NULL ? 0 : core->connection_generation;
+}
+
+uint64_t surf_core_stale_event_count(const surf_core_t *core) {
+    return core == NULL ? 0 : core->stale_event_count;
 }
 
 const char *surf_core_result_string(surf_core_result_t result) {

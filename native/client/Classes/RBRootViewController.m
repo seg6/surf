@@ -1105,6 +1105,7 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
             self.audioRequested = NO;
             break;
         case RBSessionStateConnecting:
+            [self.clientCore reset];
             [self dismissSelectControllerSendingCancel:NO];
             self.connectionPill.hidden = YES;
             [self.browserStateView showState:RBBrowserStateConnecting detail:nil];

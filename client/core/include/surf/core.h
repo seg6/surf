@@ -157,11 +157,22 @@ void surf_core_config_init(surf_core_config_t *config);
 surf_core_result_t surf_core_create(const surf_core_config_t *config,
                                     surf_core_t **out_core);
 void surf_core_destroy(surf_core_t *core);
+/* Starts a new authenticated control epoch. Generations must be non-zero and
+ * strictly increasing. All prior browser/transient state is discarded. */
+surf_core_result_t surf_core_begin_connection(surf_core_t *core,
+                                              uint64_t generation);
+/* Dispatches only when `generation` is the current control epoch. Stale events
+ * are ignored without changing the snapshot revision. */
+surf_core_result_t surf_core_dispatch_scoped(surf_core_t *core,
+                                             uint64_t generation,
+                                             const surf_event_t *event);
 surf_core_result_t surf_core_dispatch(surf_core_t *core,
                                       const surf_event_t *event);
 surf_core_result_t surf_core_snapshot(const surf_core_t *core,
                                       surf_snapshot_t *out_snapshot);
 int surf_core_next_effect(surf_core_t *core, surf_effect_t *out_effect);
+uint64_t surf_core_connection_generation(const surf_core_t *core);
+uint64_t surf_core_stale_event_count(const surf_core_t *core);
 const char *surf_core_result_string(surf_core_result_t result);
 
 /* Runtime layout probes used by language bindings to fail fast if their raw

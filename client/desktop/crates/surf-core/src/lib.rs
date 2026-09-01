@@ -772,6 +772,7 @@ pub struct Snapshot {
 
 pub struct Core {
     raw: NonNull<sys::surf_core_t>,
+    connection_generation: u64,
     _single_owner: PhantomData<Rc<()>>,
 }
 
@@ -790,8 +791,27 @@ impl Core {
         })?;
         Ok(Self {
             raw,
+            connection_generation: 1,
             _single_owner: PhantomData,
         })
+    }
+
+    pub fn begin_connection(&mut self) -> Result<u64, Error> {
+        let generation = self
+            .connection_generation
+            .checked_add(1)
+            .ok_or_else(|| Error::invariant("connection generation exhausted"))?;
+        check(unsafe { sys::surf_core_begin_connection(self.raw.as_ptr(), generation) })?;
+        self.connection_generation = generation;
+        Ok(generation)
+    }
+
+    pub fn connection_generation(&self) -> u64 {
+        self.connection_generation
+    }
+
+    pub fn stale_event_count(&self) -> u64 {
+        unsafe { sys::surf_core_stale_event_count(self.raw.as_ptr()) }
     }
 
     pub fn dispatch(&mut self, event: &Event) -> Result<Vec<Effect>, Error> {
@@ -929,7 +949,9 @@ impl Core {
     }
 
     fn dispatch_raw(&mut self, event: &sys::surf_event_t) -> Result<(), Error> {
-        let result = unsafe { sys::surf_core_dispatch(self.raw.as_ptr(), event) };
+        let result = unsafe {
+            sys::surf_core_dispatch_scoped(self.raw.as_ptr(), self.connection_generation, event)
+        };
         check(result)
     }
 
@@ -1089,6 +1111,19 @@ mod tests {
         .unwrap();
         title.replace_range(.., "Changed!");
         assert_eq!(core.snapshot().unwrap().active_title, "Original");
+    }
+
+    #[test]
+    fn new_connection_discards_previous_browser_state() {
+        let mut core = Core::new().unwrap();
+        core.dispatch(&Event::Loading(true)).unwrap();
+        assert_eq!(core.connection_generation(), 1);
+        assert_eq!(core.begin_connection().unwrap(), 2);
+        let snapshot = core.snapshot().unwrap();
+        assert!(!snapshot.loading);
+        assert!(snapshot.tabs.is_empty());
+        assert_eq!(core.connection_generation(), 2);
+        assert_eq!(core.stale_event_count(), 0);
     }
 
     #[test]

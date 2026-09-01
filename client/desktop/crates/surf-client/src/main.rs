@@ -324,6 +324,12 @@ impl SurfDesktop {
                         .sort_by(|left, right| left.name.cmp(&right.name));
                 }
                 SessionEvent::Connected { info, config } => {
+                    if let Err(error) = self.core.begin_connection() {
+                        self.status = error.to_string();
+                        continue;
+                    }
+                    self.browser.reset_connection();
+                    self.refresh();
                     self.connected = true;
                     self.clock_available =
                         config.caps.iter().any(|capability| capability == "clock");

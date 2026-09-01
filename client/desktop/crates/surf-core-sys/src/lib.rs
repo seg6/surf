@@ -355,12 +355,20 @@ unsafe extern "C" {
         out_core: *mut *mut surf_core_t,
     ) -> c_int;
     pub fn surf_core_destroy(core: *mut surf_core_t);
+    pub fn surf_core_begin_connection(core: *mut surf_core_t, generation: u64) -> c_int;
+    pub fn surf_core_dispatch_scoped(
+        core: *mut surf_core_t,
+        generation: u64,
+        event: *const surf_event_t,
+    ) -> c_int;
     pub fn surf_core_dispatch(core: *mut surf_core_t, event: *const surf_event_t) -> c_int;
     pub fn surf_core_snapshot(
         core: *const surf_core_t,
         out_snapshot: *mut surf_snapshot_t,
     ) -> c_int;
     pub fn surf_core_next_effect(core: *mut surf_core_t, out_effect: *mut surf_effect_t) -> c_int;
+    pub fn surf_core_connection_generation(core: *const surf_core_t) -> u64;
+    pub fn surf_core_stale_event_count(core: *const surf_core_t) -> u64;
     pub fn surf_core_result_string(result: c_int) -> *const c_char;
     pub fn surf_core_abi_version() -> u32;
     pub fn surf_core_sizeof_string_view() -> usize;
