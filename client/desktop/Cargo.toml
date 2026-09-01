@@ -20,6 +20,7 @@ repository = "https://github.com/seg6/surf"
 eframe = { version = "0.36.1", default-features = false, features = ["accesskit", "default_fonts", "glow", "wayland", "x11"] }
 base64 = "0.22.1"
 bytes = "1.11.1"
+cpal = "0.18.2"
 directories = "6.0.0"
 egui_glow = "0.36.1"
 ffmpeg-the-third = { version = "6.0.0", default-features = false, features = ["format"] }

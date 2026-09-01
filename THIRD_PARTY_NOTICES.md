@@ -44,3 +44,6 @@ contributors and is distributed under the WTFPL. FFmpeg is copyright the
 FFmpeg developers and is normally distributed under LGPL 2.1 or later; the
 exact license of a system FFmpeg build can differ based on enabled components.
 Surf does not vendor or statically link an FFmpeg build.
+
+The desktop audio host uses CPAL 0.18.2, copyright the RustAudio contributors,
+under the Apache License 2.0.

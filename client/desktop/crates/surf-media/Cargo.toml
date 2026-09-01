@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 bytes.workspace = true
+cpal.workspace = true
 ffmpeg-the-third.workspace = true
 surf-core.workspace = true
 surf-protocol.workspace = true

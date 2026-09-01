@@ -17,6 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("usage: probe_decode ENDPOINT [CODE --confirm]")?;
     let code = args.get(1).cloned();
     let confirm = args.iter().any(|argument| argument == "--confirm");
+    let expect_audio = args.iter().any(|argument| argument == "--expect-audio");
     let storage = env::var_os("SURF_CLIENT_HOME")
         .map(Storage::at)
         .unwrap_or(Storage::system()?);
@@ -24,6 +25,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = SessionClient::spawn_with_frame_sink(storage, media.frame_sink())?;
     client.send(SessionAction::Inspect(endpoint.clone()))?;
     let deadline = Instant::now() + Duration::from_secs(45);
+    let mut connected = false;
+    let mut audio_ready = false;
+    let mut audio_requested = false;
+    let mut decoded_video = false;
     while Instant::now() < deadline {
         while let Some(event) = client.try_recv() {
             println!("{event:?}");
@@ -44,6 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 SessionEvent::PairingPhrase(_) => {
                     return Err("pairing confirmation required".into());
                 }
+                SessionEvent::Connected { .. } => connected = true,
                 SessionEvent::Failure(failure) => return Err(failure.message.into()),
                 _ => {}
             }
@@ -57,7 +63,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }))?
                 }
                 MediaEvent::DecoderError(message) => eprintln!("decoder: {message}"),
+                MediaEvent::AudioReady { .. } => audio_ready = true,
+                MediaEvent::AudioUnavailable(message) | MediaEvent::AudioError(message) => {
+                    eprintln!("audio: {message}");
+                }
             }
+        }
+        if connected && audio_ready && expect_audio && !audio_requested {
+            client.send(SessionAction::Send(Command::Audio {
+                on: true,
+                causal: Causal::default(),
+            }))?;
+            audio_requested = true;
         }
         if let Some(frame) = media.take_latest_frame() {
             let diagnostics = media.diagnostics();
@@ -71,6 +88,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             if frame.y().len() != usize::try_from(frame.width * frame.height)? {
                 return Err("decoded luma plane has the wrong size".into());
+            }
+            decoded_video = true;
+        }
+        let diagnostics = media.diagnostics();
+        if decoded_video && (!expect_audio || diagnostics.audio_packets >= 3) {
+            if expect_audio {
+                println!(
+                    "received {} bounded PCM packets with {} underruns",
+                    diagnostics.audio_packets, diagnostics.audio_underruns
+                );
             }
             return Ok(());
         }

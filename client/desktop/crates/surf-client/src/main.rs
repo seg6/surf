@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use eframe::egui::{
     self, Align, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Frame,
@@ -68,7 +68,14 @@ struct SurfDesktop {
     last_frame: String,
     remote_viewport: Option<(i32, i32)>,
     connect_after_inspect: bool,
-    smoke_exit_after_frame: bool,
+    startup_url: Option<String>,
+    startup_navigation_sent: bool,
+    smoke_frame_target: Option<u64>,
+    smoke_started: Option<Instant>,
+    smoke_reported: bool,
+    smoke_interaction: bool,
+    smoke_interaction_step: u8,
+    audio_available: bool,
 }
 
 impl SurfDesktop {
@@ -114,6 +121,18 @@ impl SurfDesktop {
         };
         let startup_endpoint =
             (saved_servers.len() == 1).then(|| saved_servers[0].endpoint.clone());
+        let startup_url = std::env::args()
+            .skip(1)
+            .find(|argument| !argument.starts_with('-'));
+        let smoke_frame_target = std::env::var("SURF_SMOKE_EXIT_AFTER_FRAMES")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .or_else(|| {
+                std::env::var_os("SURF_SMOKE_EXIT_AFTER_FRAME")
+                    .is_some()
+                    .then_some(1)
+            });
         let mut client = Self {
             core,
             snapshot,
@@ -136,7 +155,14 @@ impl SurfDesktop {
             last_frame: String::new(),
             remote_viewport: None,
             connect_after_inspect: false,
-            smoke_exit_after_frame: std::env::var_os("SURF_SMOKE_EXIT_AFTER_FRAME").is_some(),
+            startup_url,
+            startup_navigation_sent: false,
+            smoke_frame_target,
+            smoke_started: None,
+            smoke_reported: false,
+            smoke_interaction: std::env::var_os("SURF_SMOKE_INTERACTION").is_some(),
+            smoke_interaction_step: 0,
+            audio_available: false,
         };
         if let Some(endpoint) = startup_endpoint {
             client.inspect(endpoint, true);
@@ -234,6 +260,22 @@ impl SurfDesktop {
                     self.status = format!("Connected securely to {}", info.name);
                     self.pairing = None;
                     self.remote_viewport = None;
+                    if self.audio_available {
+                        self.send(SessionAction::Send(Command::Audio {
+                            on: true,
+                            causal: Causal::default(),
+                        }));
+                    }
+                    if !self.startup_navigation_sent
+                        && let Some(url) = self.startup_url.clone()
+                    {
+                        self.startup_navigation_sent = true;
+                        self.address.clone_from(&url);
+                        self.send(SessionAction::Send(Command::Navigate {
+                            url,
+                            causal: Causal::default(),
+                        }));
+                    }
                 }
                 SessionEvent::Reconnecting {
                     attempt,
@@ -284,6 +326,21 @@ impl SurfDesktop {
                 }),
                 MediaEvent::DecoderError(message) => {
                     self.status = format!("Video decoder: {message}");
+                }
+                MediaEvent::AudioReady { .. } => {
+                    self.audio_available = true;
+                    if self.connected {
+                        self.send(SessionAction::Send(Command::Audio {
+                            on: true,
+                            causal: Causal::default(),
+                        }));
+                    }
+                }
+                MediaEvent::AudioUnavailable(_) => {
+                    self.audio_available = false;
+                }
+                MediaEvent::AudioError(message) => {
+                    self.status = format!("Audio output: {message}");
                 }
             }
         }
@@ -796,7 +853,60 @@ impl eframe::App for SurfDesktop {
         }
         self.chrome(ui);
         self.content(ui);
-        if self.smoke_exit_after_frame && self.video_surface.presented() > 0 {
+        let presented = self.video_surface.presented();
+        if presented > 0 && self.smoke_started.is_none() {
+            self.smoke_started = Some(Instant::now());
+            eprintln!("SURF_SMOKE_STEP first-frame presented={presented}");
+        }
+        if self.smoke_interaction {
+            if self.smoke_interaction_step == 0 && presented >= 45 {
+                self.smoke_interaction_step = 1;
+                eprintln!("SURF_SMOKE_STEP resize-small presented={presented}");
+                context
+                    .send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(940.0, 680.0)));
+            } else if self.smoke_interaction_step == 1 && presented >= 90 {
+                self.smoke_interaction_step = 2;
+                eprintln!("SURF_SMOKE_STEP edit-omnibox presented={presented}");
+                self.address = "Editing the omnibox while video remains live".to_owned();
+                context.memory_mut(|memory| memory.request_focus(egui::Id::new("address")));
+            } else if self.smoke_interaction_step == 2 && presented >= 135 {
+                self.smoke_interaction_step = 3;
+                eprintln!("SURF_SMOKE_STEP resize-large presented={presented}");
+                context
+                    .send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(1_260.0, 800.0)));
+            }
+        }
+        if !self.smoke_reported
+            && self
+                .smoke_frame_target
+                .is_some_and(|target| presented >= target)
+        {
+            self.smoke_reported = true;
+            let elapsed = self
+                .smoke_started
+                .map(|started| started.elapsed())
+                .unwrap_or(Duration::ZERO);
+            let intervals = presented.saturating_sub(1);
+            let fps = if elapsed.is_zero() {
+                0.0
+            } else {
+                intervals as f64 / elapsed.as_secs_f64()
+            };
+            let media = self
+                .media
+                .as_ref()
+                .map(MediaPipeline::diagnostics)
+                .unwrap_or_default();
+            println!(
+                "SURF_SMOKE_RESULT presented={presented} elapsed_ms={} fps={fps:.2} decoded={} ingress_replaced={} output_replaced={} gaps={} decode_errors={} upload_us={}",
+                elapsed.as_millis(),
+                media.decoded_frames,
+                media.ingress_replaced,
+                media.output_replaced,
+                media.gaps,
+                media.decode_errors,
+                self.video_surface.latest_upload_us(),
+            );
             context.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         context.request_repaint_after(Duration::from_millis(16));

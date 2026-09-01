@@ -25,7 +25,9 @@ client_home="$test_root/client"
 server_log="$test_root/server.log"
 pair_log="$test_root/pair.log"
 devices_log="$test_root/devices.log"
+render_log="$test_root/render.log"
 port=18443
+animation_url="data:text/html;base64,PCFkb2N0eXBlIGh0bWw+PHN0eWxlPmh0bWwsYm9keXttYXJnaW46MDtoZWlnaHQ6MTAwJTtvdmVyZmxvdzpoaWRkZW47YmFja2dyb3VuZDojMTExfS5ib3h7d2lkdGg6MzUlO2hlaWdodDozNSU7YmFja2dyb3VuZDpsaW5lYXItZ3JhZGllbnQoMTM1ZGVnLCMzOWQsI2Y0NSk7YW5pbWF0aW9uOnN1cmYgMXMgbGluZWFyIGluZmluaXRlfUBrZXlmcmFtZXMgc3VyZnswJXt0cmFuc2Zvcm06dHJhbnNsYXRlKDAsMCk7ZmlsdGVyOmh1ZS1yb3RhdGUoMGRlZyl9NTAle3RyYW5zZm9ybTp0cmFuc2xhdGUoMTgwJSwxODAlKTtmaWx0ZXI6aHVlLXJvdGF0ZSgxODBkZWcpfTEwMCV7dHJhbnNmb3JtOnRyYW5zbGF0ZSgwLDApO2ZpbHRlcjpodWUtcm90YXRlKDM2MGRlZyl9fTwvc3R5bGU+PGRpdiBjbGFzcz0iYm94Ij48L2Rpdj4="
 
 (
   cd "$repository_root/backend"
@@ -76,16 +78,40 @@ fi
 (
   cd "$repository_root/client/desktop"
   SURF_CLIENT_HOME="$client_home" cargo run -q -p surf-media --example probe_decode -- \
-    "127.0.0.1:$port" "$pairing_code" --confirm
+    "127.0.0.1:$port" "$pairing_code" --confirm --expect-audio
 )
 
-(
+if ! (
   cd "$repository_root/client/desktop"
   timeout 40s xvfb-run -a env \
     SURF_CLIENT_HOME="$client_home" \
-    SURF_SMOKE_EXIT_AFTER_FRAME=1 \
-    cargo run -q -p surf-client
-)
+    SURF_SMOKE_EXIT_AFTER_FRAMES=240 \
+    SURF_SMOKE_INTERACTION=1 \
+    cargo run -q -p surf-client -- "$animation_url" >"$render_log" 2>&1
+); then
+  echo "Surf OpenGL client process did not complete its sustained smoke test" >&2
+  sed -n '1,240p' "$render_log" >&2
+  exit 1
+fi
+if ! rg -q '^SURF_SMOKE_RESULT presented=240 ' "$render_log"; then
+  echo "Surf OpenGL client did not sustain its live presentation smoke test" >&2
+  sed -n '1,240p' "$render_log" >&2
+  exit 1
+fi
+for step in resize-small edit-omnibox resize-large; do
+  if ! rg -q "^SURF_SMOKE_STEP $step " "$render_log"; then
+    echo "Surf sustained smoke test did not execute $step" >&2
+    sed -n '1,240p' "$render_log" >&2
+    exit 1
+  fi
+done
+smoke_fps="$(sed -n 's/^SURF_SMOKE_RESULT .* fps=\([0-9.]*\) .*/\1/p' "$render_log")"
+if ! awk -v fps="$smoke_fps" 'BEGIN { exit !(fps >= 55.0) }'; then
+  echo "Surf sustained presentation rate was ${smoke_fps:-missing} FPS; expected at least 55" >&2
+  sed -n '1,240p' "$render_log" >&2
+  exit 1
+fi
+sed -n '/^SURF_SMOKE_RESULT /p' "$render_log"
 
 kill "$pair_pid" 2>/dev/null || true
 wait "$pair_pid" 2>/dev/null || true

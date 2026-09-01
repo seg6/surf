@@ -5,19 +5,23 @@
 //! form an unbounded queue behind another lane.
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use cpal::SizedSample;
+use cpal::traits::{DeviceTrait as _, HostTrait as _, StreamTrait as _};
 use ffmpeg_the_third as ffmpeg;
 use surf_core::{Frame, FrameKind, MediaAction, MediaAdmissionPolicy};
 use surf_session::FrameSink;
 use thiserror::Error;
 
 const AUDIO_QUEUE_CAPACITY: usize = 8;
+const AUDIO_BUFFER_MS: usize = 120;
+const AUDIO_PRIME_MS: usize = 60;
 const BUFFER_POOL_CAPACITY: usize = 3;
 
 static FFMPEG_INIT: OnceLock<std::result::Result<(), String>> = OnceLock::new();
@@ -42,6 +46,9 @@ pub enum MediaError {
 pub enum MediaEvent {
     RequestKeyframe,
     DecoderError(String),
+    AudioReady { sample_rate: u32, channels: u16 },
+    AudioUnavailable(String),
+    AudioError(String),
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -50,6 +57,10 @@ pub struct Diagnostics {
     pub ingress_replaced: u64,
     pub ingress_contended: u64,
     pub audio_dropped: u64,
+    pub audio_packets: u64,
+    pub audio_queue_dropped_samples: u64,
+    pub audio_underruns: u64,
+    pub audio_device_errors: u64,
     pub video_packets: u64,
     pub decoded_frames: u64,
     pub output_replaced: u64,
@@ -170,6 +181,10 @@ struct Counters {
     ingress_replaced: AtomicU64,
     ingress_contended: AtomicU64,
     audio_dropped: AtomicU64,
+    audio_packets: AtomicU64,
+    audio_queue_dropped_samples: AtomicU64,
+    audio_underruns: AtomicU64,
+    audio_device_errors: AtomicU64,
     video_packets: AtomicU64,
     decoded_frames: AtomicU64,
     output_replaced: AtomicU64,
@@ -188,6 +203,10 @@ impl Counters {
             ingress_replaced: self.ingress_replaced.load(Ordering::Relaxed),
             ingress_contended: self.ingress_contended.load(Ordering::Relaxed),
             audio_dropped: self.audio_dropped.load(Ordering::Relaxed),
+            audio_packets: self.audio_packets.load(Ordering::Relaxed),
+            audio_queue_dropped_samples: self.audio_queue_dropped_samples.load(Ordering::Relaxed),
+            audio_underruns: self.audio_underruns.load(Ordering::Relaxed),
+            audio_device_errors: self.audio_device_errors.load(Ordering::Relaxed),
             video_packets: self.video_packets.load(Ordering::Relaxed),
             decoded_frames: self.decoded_frames.load(Ordering::Relaxed),
             output_replaced: self.output_replaced.load(Ordering::Relaxed),
@@ -212,9 +231,123 @@ struct IngressState {
     audio: VecDeque<EncodedFrame>,
 }
 
+#[derive(Default)]
+struct AudioQueueState {
+    samples: VecDeque<f32>,
+    last_sequence: Option<u32>,
+}
+
+struct AudioPlayback {
+    state: Mutex<AudioQueueState>,
+    input_rate: AtomicU32,
+    input_channels: AtomicU32,
+    primed: AtomicBool,
+}
+
+impl AudioPlayback {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(AudioQueueState::default()),
+            input_rate: AtomicU32::new(0),
+            input_channels: AtomicU32::new(0),
+            primed: AtomicBool::new(false),
+        }
+    }
+
+    fn clear(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.samples.clear();
+            state.last_sequence = None;
+        }
+        self.primed.store(false, Ordering::Release);
+    }
+
+    fn push(&self, frame: &Frame<'_>, counters: &Counters) -> std::result::Result<(), String> {
+        let sample_rate = u32::from(frame.width);
+        let channels = usize::from(frame.height);
+        if !(8_000..=192_000).contains(&sample_rate) || !(1..=8).contains(&channels) {
+            return Err(format!(
+                "invalid PCM configuration {sample_rate} Hz, {channels} channels"
+            ));
+        }
+        let bytes_per_frame = channels
+            .checked_mul(2)
+            .ok_or_else(|| "PCM frame width overflow".to_owned())?;
+        if frame.payload.is_empty() || !frame.payload.len().is_multiple_of(bytes_per_frame) {
+            return Err("PCM payload is not complete signed 16-bit frames".to_owned());
+        }
+        let previous_rate = self.input_rate.swap(sample_rate, Ordering::AcqRel);
+        let previous_channels = self.input_channels.swap(
+            u32::try_from(channels).unwrap_or(u32::MAX),
+            Ordering::AcqRel,
+        );
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "PCM queue lock was poisoned".to_owned())?;
+        let discontinuity = state
+            .last_sequence
+            .is_some_and(|sequence| sequence.wrapping_add(1) != frame.sequence);
+        if previous_rate != sample_rate
+            || previous_channels != u32::try_from(channels).unwrap_or(u32::MAX)
+            || discontinuity
+        {
+            state.samples.clear();
+            self.primed.store(false, Ordering::Release);
+        }
+        state.last_sequence = Some(frame.sequence);
+
+        let capacity = usize::try_from(sample_rate)
+            .unwrap_or(usize::MAX)
+            .saturating_mul(AUDIO_BUFFER_MS)
+            / 1_000;
+        let incoming = frame.payload.len() / bytes_per_frame;
+        let overflow = state
+            .samples
+            .len()
+            .saturating_add(incoming)
+            .saturating_sub(capacity);
+        let drop_existing = overflow.min(state.samples.len());
+        for _ in 0..drop_existing {
+            state.samples.pop_front();
+        }
+        counters.audio_queue_dropped_samples.fetch_add(
+            u64::try_from(overflow).unwrap_or(u64::MAX),
+            Ordering::Relaxed,
+        );
+
+        let skip_incoming = overflow.saturating_sub(drop_existing);
+        for pcm_frame in frame
+            .payload
+            .chunks_exact(bytes_per_frame)
+            .skip(skip_incoming)
+        {
+            let mut mixed = 0.0_f32;
+            for channel in 0..channels {
+                let offset = channel * 2;
+                let sample = i16::from_le_bytes([pcm_frame[offset], pcm_frame[offset + 1]]);
+                mixed += f32::from(sample) / 32_768.0;
+            }
+            state.samples.push_back(mixed / channels as f32);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct AudioRenderState {
+    input_rate: u32,
+    previous: f32,
+    next: f32,
+    phase: f64,
+    initialized: bool,
+}
+
 struct Shared {
     ingress: Mutex<IngressState>,
-    wake: Condvar,
+    video_wake: Condvar,
+    audio_wake: Condvar,
+    audio: AudioPlayback,
     output: Mutex<Option<DecodedFrame>>,
     epoch: AtomicU64,
     shutdown: AtomicBool,
@@ -225,7 +358,9 @@ impl Shared {
     fn new() -> Self {
         Self {
             ingress: Mutex::new(IngressState::default()),
-            wake: Condvar::new(),
+            video_wake: Condvar::new(),
+            audio_wake: Condvar::new(),
+            audio: AudioPlayback::new(),
             output: Mutex::new(None),
             epoch: AtomicU64::new(1),
             shutdown: AtomicBool::new(false),
@@ -258,6 +393,8 @@ impl FrameSink for Shared {
                         .ingress_replaced
                         .fetch_add(1, Ordering::Relaxed);
                 }
+                drop(ingress);
+                self.video_wake.notify_one();
             }
             4 => {
                 if ingress.audio.len() == AUDIO_QUEUE_CAPACITY {
@@ -265,11 +402,11 @@ impl FrameSink for Shared {
                     self.counters.audio_dropped.fetch_add(1, Ordering::Relaxed);
                 }
                 ingress.audio.push_back(encoded);
+                drop(ingress);
+                self.audio_wake.notify_one();
             }
-            _ => return,
+            _ => (),
         }
-        drop(ingress);
-        self.wake.notify_one();
     }
 
     fn clear(&self) {
@@ -281,29 +418,45 @@ impl FrameSink for Shared {
         if let Ok(mut output) = self.output.lock() {
             *output = None;
         }
-        self.wake.notify_one();
+        self.audio.clear();
+        self.video_wake.notify_one();
+        self.audio_wake.notify_one();
     }
 }
 
 pub struct MediaPipeline {
     shared: Arc<Shared>,
     events: Receiver<MediaEvent>,
-    worker: Option<thread::JoinHandle<()>>,
+    workers: Vec<thread::JoinHandle<()>>,
 }
 
 impl MediaPipeline {
     pub fn spawn() -> Result<Self> {
         initialize_ffmpeg()?;
         let shared = Arc::new(Shared::new());
-        let worker_shared = Arc::clone(&shared);
         let (event_tx, events) = mpsc::sync_channel(16);
-        let worker = thread::Builder::new()
+        let video_shared = Arc::clone(&shared);
+        let video_events = event_tx.clone();
+        let video_worker = thread::Builder::new()
             .name("surf-video-decode".to_owned())
-            .spawn(move || decoder_worker(worker_shared, event_tx))?;
+            .spawn(move || decoder_worker(video_shared, video_events))?;
+        let audio_shared = Arc::clone(&shared);
+        let audio_worker = match thread::Builder::new()
+            .name("surf-audio-output".to_owned())
+            .spawn(move || audio_worker(audio_shared, event_tx))
+        {
+            Ok(worker) => worker,
+            Err(error) => {
+                shared.shutdown.store(true, Ordering::Release);
+                shared.video_wake.notify_one();
+                let _ = video_worker.join();
+                return Err(error.into());
+            }
+        };
         Ok(Self {
             shared,
             events,
-            worker: Some(worker),
+            workers: vec![video_worker, audio_worker],
         })
     }
 
@@ -331,8 +484,9 @@ impl MediaPipeline {
 impl Drop for MediaPipeline {
     fn drop(&mut self) {
         self.shared.shutdown.store(true, Ordering::Release);
-        self.shared.wake.notify_one();
-        if let Some(worker) = self.worker.take() {
+        self.shared.video_wake.notify_one();
+        self.shared.audio_wake.notify_one();
+        for worker in self.workers.drain(..) {
             let _ = worker.join();
         }
     }
@@ -376,19 +530,19 @@ fn decoder_worker(shared: Arc<Shared>, events: SyncSender<MediaEvent>) {
                 Ok(ingress) => ingress,
                 Err(_) => return,
             };
-            while ingress.video.is_none()
-                && ingress.audio.is_empty()
-                && !shared.shutdown.load(Ordering::Acquire)
-            {
+            while ingress.video.is_none() && !shared.shutdown.load(Ordering::Acquire) {
                 let waited = shared
-                    .wake
+                    .video_wake
                     .wait_timeout(ingress, Duration::from_millis(250));
                 let Ok((next, _)) = waited else { return };
                 ingress = next;
             }
-            ingress.video.take().or_else(|| ingress.audio.pop_front())
+            ingress.video.take()
         };
         let Some(encoded) = encoded else { continue };
+        if encoded.epoch != shared.epoch.load(Ordering::Acquire) {
+            continue;
+        }
         if encoded.epoch != decoder_epoch {
             decoder_epoch = encoded.epoch;
             admission_policy.reset();
@@ -403,7 +557,7 @@ fn decoder_worker(shared: Arc<Shared>, events: SyncSender<MediaEvent>) {
                 continue;
             }
         };
-        if frame.kind == FrameKind::Audio {
+        if frame.kind != FrameKind::Video {
             continue;
         }
         shared
@@ -500,6 +654,219 @@ fn decoder_worker(shared: Arc<Shared>, events: SyncSender<MediaEvent>) {
                 }
             }
         }
+    }
+}
+
+fn audio_worker(shared: Arc<Shared>, events: SyncSender<MediaEvent>) {
+    let _stream = match start_audio_output(Arc::clone(&shared), events.clone()) {
+        Ok(stream) => Some(stream),
+        Err(error) => {
+            let _ = events.try_send(MediaEvent::AudioUnavailable(error));
+            None
+        }
+    };
+    while !shared.shutdown.load(Ordering::Acquire) {
+        let encoded = {
+            let mut ingress = match shared.ingress.lock() {
+                Ok(ingress) => ingress,
+                Err(_) => return,
+            };
+            while ingress.audio.is_empty() && !shared.shutdown.load(Ordering::Acquire) {
+                let waited = shared
+                    .audio_wake
+                    .wait_timeout(ingress, Duration::from_millis(250));
+                let Ok((next, _)) = waited else { return };
+                ingress = next;
+            }
+            ingress.audio.pop_front()
+        };
+        let Some(encoded) = encoded else { continue };
+        if encoded.epoch != shared.epoch.load(Ordering::Acquire) {
+            continue;
+        }
+        let frame = match Frame::parse(&encoded.bytes) {
+            Ok(frame) if frame.kind == FrameKind::Audio => frame,
+            Ok(_) => continue,
+            Err(error) => {
+                let _ = events.try_send(MediaEvent::AudioError(error.to_string()));
+                continue;
+            }
+        };
+        shared
+            .counters
+            .audio_packets
+            .fetch_add(1, Ordering::Relaxed);
+        if _stream.is_some()
+            && let Err(error) = shared.audio.push(&frame, &shared.counters)
+        {
+            let _ = events.try_send(MediaEvent::AudioError(error));
+        }
+    }
+}
+
+fn start_audio_output(
+    shared: Arc<Shared>,
+    events: SyncSender<MediaEvent>,
+) -> std::result::Result<cpal::Stream, String> {
+    let host = cpal::default_host();
+    let device = host
+        .default_output_device()
+        .ok_or_else(|| "no default audio output device".to_owned())?;
+    let supported = device
+        .default_output_config()
+        .map_err(|error| error.to_string())?;
+    let sample_format = supported.sample_format();
+    let config: cpal::StreamConfig = supported.into();
+    let stream = match sample_format {
+        cpal::SampleFormat::I8 => build_audio_stream::<i8>(&device, &config, &shared, &events)?,
+        cpal::SampleFormat::I16 => build_audio_stream::<i16>(&device, &config, &shared, &events)?,
+        cpal::SampleFormat::I24 => {
+            build_audio_stream::<cpal::I24>(&device, &config, &shared, &events)?
+        }
+        cpal::SampleFormat::I32 => build_audio_stream::<i32>(&device, &config, &shared, &events)?,
+        cpal::SampleFormat::I64 => build_audio_stream::<i64>(&device, &config, &shared, &events)?,
+        cpal::SampleFormat::U8 => build_audio_stream::<u8>(&device, &config, &shared, &events)?,
+        cpal::SampleFormat::U16 => build_audio_stream::<u16>(&device, &config, &shared, &events)?,
+        cpal::SampleFormat::U24 => {
+            build_audio_stream::<cpal::U24>(&device, &config, &shared, &events)?
+        }
+        cpal::SampleFormat::U32 => build_audio_stream::<u32>(&device, &config, &shared, &events)?,
+        cpal::SampleFormat::U64 => build_audio_stream::<u64>(&device, &config, &shared, &events)?,
+        cpal::SampleFormat::F32 => build_audio_stream::<f32>(&device, &config, &shared, &events)?,
+        cpal::SampleFormat::F64 => build_audio_stream::<f64>(&device, &config, &shared, &events)?,
+        format => return Err(format!("unsupported output sample format {format}")),
+    };
+    stream.play().map_err(|error| error.to_string())?;
+    let _ = events.try_send(MediaEvent::AudioReady {
+        sample_rate: config.sample_rate,
+        channels: config.channels,
+    });
+    Ok(stream)
+}
+
+fn build_audio_stream<T>(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    shared: &Arc<Shared>,
+    events: &SyncSender<MediaEvent>,
+) -> std::result::Result<cpal::Stream, String>
+where
+    T: SizedSample + cpal::FromSample<f32>,
+{
+    let channels = usize::from(config.channels);
+    let output_rate = config.sample_rate;
+    let mut render_state = AudioRenderState::default();
+    let render_shared = Arc::clone(shared);
+    let error_shared = Arc::clone(shared);
+    let error_events = events.clone();
+    let stream = device
+        .build_output_stream(
+            *config,
+            move |output: &mut [T], _| {
+                render_audio(
+                    output,
+                    channels,
+                    output_rate,
+                    &render_shared,
+                    &mut render_state,
+                );
+            },
+            move |error| {
+                error_shared
+                    .counters
+                    .audio_device_errors
+                    .fetch_add(1, Ordering::Relaxed);
+                let _ = error_events.try_send(MediaEvent::AudioError(error.to_string()));
+            },
+            None,
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(stream)
+}
+
+fn render_audio<T>(
+    output: &mut [T],
+    output_channels: usize,
+    output_rate: u32,
+    shared: &Shared,
+    render: &mut AudioRenderState,
+) where
+    T: SizedSample + cpal::FromSample<f32>,
+{
+    let write_silence = |output: &mut [T]| {
+        for sample in output {
+            *sample = T::from_sample(0.0);
+        }
+    };
+    if output_channels == 0 || output_rate == 0 {
+        write_silence(output);
+        return;
+    }
+    let input_rate = shared.audio.input_rate.load(Ordering::Acquire);
+    if input_rate == 0 {
+        write_silence(output);
+        return;
+    }
+    let Ok(mut queue) = shared.audio.state.try_lock() else {
+        write_silence(output);
+        return;
+    };
+    if !shared.audio.primed.load(Ordering::Acquire) {
+        let prime_samples = usize::try_from(input_rate)
+            .unwrap_or(usize::MAX)
+            .saturating_mul(AUDIO_PRIME_MS)
+            / 1_000;
+        if queue.samples.len() < prime_samples.max(2) {
+            write_silence(output);
+            return;
+        }
+        shared.audio.primed.store(true, Ordering::Release);
+        render.initialized = false;
+    }
+    if render.input_rate != input_rate {
+        render.input_rate = input_rate;
+        render.phase = 0.0;
+        render.initialized = false;
+    }
+    if !render.initialized {
+        let Some(previous) = queue.samples.pop_front() else {
+            write_silence(output);
+            return;
+        };
+        render.previous = previous;
+        render.next = queue.samples.pop_front().unwrap_or(previous);
+        render.initialized = true;
+    }
+
+    let step = f64::from(input_rate) / f64::from(output_rate);
+    let mut underflow = false;
+    for output_frame in output.chunks_mut(output_channels) {
+        while render.phase >= 1.0 {
+            render.previous = render.next;
+            match queue.samples.pop_front() {
+                Some(next) => render.next = next,
+                None => {
+                    render.next = 0.0;
+                    underflow = true;
+                }
+            }
+            render.phase -= 1.0;
+        }
+        let value =
+            render.previous + (render.next - render.previous) * render.phase.clamp(0.0, 1.0) as f32;
+        let value = T::from_sample(value);
+        for sample in output_frame {
+            *sample = value;
+        }
+        render.phase += step;
+    }
+    if underflow {
+        shared.audio.primed.store(false, Ordering::Release);
+        render.initialized = false;
+        shared
+            .counters
+            .audio_underruns
+            .fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -640,7 +1007,33 @@ fn copy_plane(
 
 #[cfg(test)]
 mod tests {
-    use super::{BufferPool, FrameBuffers};
+    use std::sync::atomic::Ordering;
+
+    use surf_core::{Frame, FrameKind};
+
+    use super::{
+        AudioPlayback, AudioRenderState, BufferPool, Counters, FrameBuffers, Shared, render_audio,
+    };
+
+    fn audio_frame(payload: &[u8], sequence: u32) -> Frame<'_> {
+        Frame {
+            kind: FrameKind::Audio,
+            idr: false,
+            sequence,
+            source_sequence: 0,
+            width: 16_000,
+            height: 1,
+            interaction_id: 0,
+            source_receive_ns: 0,
+            encode_complete_ns: 0,
+            socket_write_ns: 0,
+            encoder_generation: 0,
+            input_receive_ns: 0,
+            cdp_accepted_ns: 0,
+            profile: 0,
+            payload,
+        }
+    }
 
     #[test]
     fn decoder_buffers_are_bounded_and_reused() {
@@ -654,5 +1047,57 @@ mod tests {
         }
         let frames = pool.frames.lock().expect("pool lock");
         assert_eq!(frames.len(), super::BUFFER_POOL_CAPACITY);
+    }
+
+    #[test]
+    fn pcm_queue_keeps_only_its_bounded_newest_window() {
+        let audio = AudioPlayback::new();
+        let counters = Counters::default();
+        let payload = vec![0_u8; 4_000 * 2];
+        audio
+            .push(&audio_frame(&payload, 1), &counters)
+            .expect("valid PCM");
+        let state = audio.state.lock().expect("audio lock");
+        assert_eq!(state.samples.len(), 1_920);
+        assert_eq!(
+            counters.audio_queue_dropped_samples.load(Ordering::Relaxed),
+            2_080
+        );
+
+        drop(state);
+        audio.clear();
+        let initial = vec![0_u8; 500 * 2];
+        let oversized = vec![0_u8; 2_500 * 2];
+        audio
+            .push(&audio_frame(&initial, 2), &counters)
+            .expect("valid initial PCM");
+        audio
+            .push(&audio_frame(&oversized, 3), &counters)
+            .expect("valid oversized PCM");
+        assert_eq!(audio.state.lock().expect("audio lock").samples.len(), 1_920);
+        assert_eq!(
+            counters.audio_queue_dropped_samples.load(Ordering::Relaxed),
+            3_160
+        );
+    }
+
+    #[test]
+    fn audio_callback_primes_and_resamples_without_channel_skew() {
+        let shared = Shared::new();
+        let sample = 16_384_i16.to_le_bytes();
+        let mut payload = Vec::with_capacity(1_200 * 2);
+        for _ in 0..1_200 {
+            payload.extend_from_slice(&sample);
+        }
+        shared
+            .audio
+            .push(&audio_frame(&payload, 1), &shared.counters)
+            .expect("valid PCM");
+        let mut output = [0.0_f32; 960];
+        let mut render = AudioRenderState::default();
+        render_audio(&mut output, 2, 48_000, &shared, &mut render);
+        assert!(output.iter().all(|sample| *sample > 0.49 && *sample < 0.51));
+        assert!(output.chunks_exact(2).all(|frame| frame[0] == frame[1]));
+        assert_eq!(shared.counters.audio_underruns.load(Ordering::Relaxed), 0);
     }
 }
