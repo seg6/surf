@@ -1,43 +1,44 @@
 # Surf Desktop Client
 
-This workspace contains the real Rust/egui Surf client, initially certified on
-Linux. It embeds the same portable C99 core used by the native iOS host.
+This workspace contains the native GTK4 Surf client for Linux. Its interface is
+a thin platform host over the same portable C99 core used by iOS; transport and
+media remain reusable Rust crates with no dependency on GTK.
 
-Current status: the preview is integration-verified on X11/x86-64. Wayland,
-AccessKit, clipboard, HiDPI-aware coordinates, and IME support are compiled in;
-IME/input semantics have automated coverage, while a compositor-backed Wayland
-runtime remains build-supported rather than certified.
+Current status: the preview is integration-verified on X11/x86-64. GTK provides
+native focus, accessibility, menus, dialogs, clipboard, HiDPI coordinates, and
+input-method handling on both X11 and Wayland. A compositor-backed Wayland run
+remains build-supported rather than part of the automated certification job.
 
 This is a genuine usable client rather than a replay shell. It discovers nearby
 servers (with manual entry as a fallback), persists a per-server device
 identity, completes phrase-confirmed pairing, pins the exact server
 certificate, authenticates, and opens the production WebSocket. A dedicated
 FFmpeg worker decodes the newest eligible H.264 access unit into pooled YUV420
-planes, and a custom egui/glow callback uploads and converts those planes on the
-GPU. Networking, decoding, presentation, and UI work do not queue behind one
-another. Reconnect backoff is decided by the same C99 core policy available to
-other platform hosts. Signed 16-bit backend PCM travels through its own bounded
-lane and a 120 ms maximum jitter window; the CPAL device callback resamples and
+planes, and `GtkGLArea` uploads and converts those planes directly on the GPU.
+Networking, decoding, presentation, and UI work do not queue behind one
+another. Reconnect backoff is decided by the C99 core policy available to every
+platform host. Signed 16-bit backend PCM travels through its own bounded lane
+and a 120 ms maximum jitter window; the CPAL device callback resamples and
 duplicates mono into the host's native output format without blocking video.
 The C99 core also owns surface-scoped input sequencing and normalized samples.
-On a server advertising `pointer-input`, egui mouse, wheel, modifier, keyboard,
-clipboard paste, and IME events use a bounded ordered desktop lane; older
-servers receive the established single-contact touch fallback.
+On a server advertising `pointer-input`, GTK pointer, wheel, modifier,
+keyboard, clipboard paste, and IME events use a bounded ordered desktop lane;
+older servers receive the established single-contact touch fallback.
 
-The desktop chrome uses a horizontally scrollable tab runway with independent
-new/close controls and a stable command rail. The omnibox shows the meaningful
-hostname while idle, expands to the complete address for editing, and supports
-the standard Ctrl+L/T/W/R/D/F, F5, Escape, and Alt+Arrow browser shortcuts.
-Browser tools cover history, bookmarks, downloads, reader mode, page search,
-media controls, file upload, JavaScript dialogs and selects, fullscreen,
-clipboard handoff, light/dark appearance, mobile-site requests, and shared
-pipeline diagnostics. Downloads are streamed into the user's Downloads folder
-and uploads never block the control socket.
+The retained desktop chrome uses a horizontally scrollable tab runway with
+independent new/close controls and a stable command rail. The omnibox shows the
+meaningful hostname while idle, expands to the complete address for editing,
+and supports Ctrl+L/T/W/R/D/F, F5, Escape, and Alt+Arrow shortcuts. Native
+surfaces cover history, bookmarks, downloads, reader mode, page search, media
+controls, file upload, JavaScript dialogs and selects, fullscreen, clipboard
+handoff, light/dark appearance, mobile-site requests, server management, and
+shared pipeline diagnostics. Downloads stream into the user's Downloads
+folder and uploads never block the control socket.
 
 On Debian/Ubuntu development hosts, install the native media headers first:
 
 ```sh
-sudo apt-get install libasound2-dev libavcodec-dev libavformat-dev libavutil-dev
+sudo apt-get install libasound2-dev libavcodec-dev libavformat-dev libavutil-dev libgtk-4-dev
 ```
 
 ```sh
@@ -50,8 +51,8 @@ client/desktop/package-linux.sh
 The package command builds a locked release binary, rejects unresolved native
 libraries, embeds the Surf icon and desktop entry, and writes a versioned
 `dist/surf-desktop-<version>-linux-<arch>.tar.gz` archive. The target machine
-needs compatible FFmpeg and ALSA runtime libraries; these are ordinary distro
-packages on the initially supported Linux systems.
+needs compatible GTK4, FFmpeg, ALSA, and OpenGL runtime libraries; these are
+ordinary distro packages on the initially supported Linux systems.
 
 To install the extracted archive for all users:
 
@@ -67,6 +68,8 @@ When exactly one paired server is saved, the desktop client verifies and
 reconnects to it automatically. The integration test builds an ordinary Surf
 backend, performs real phrase-confirmed pairing, receives real PCM, and decodes
 a live browser frame. Its headless OpenGL run then presents 600 unique animated
-frames at no less than 55 FPS while resizing twice, actively editing the
-omnibox, and draining cleanly after a deliberate 180 ms UI stall forces the
-bounded decoded-frame slot to replace stale output.
+frames at no less than 55 FPS while resizing the real GTK window twice,
+actively editing the native omnibox, and draining cleanly after a deliberate
+180 ms UI stall forces the bounded decoded-frame slot to replace stale output.
+The test also verifies those resized viewport dimensions reached the backend
+and rejects hidden-widget sizes during stack transitions.

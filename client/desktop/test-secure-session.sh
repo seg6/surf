@@ -160,6 +160,7 @@ if ! (
   timeout 40s xvfb-run -a -s "-screen 0 1920x1080x24" env \
     SURF_CLIENT_HOME="$client_home" \
     LIBGL_ALWAYS_SOFTWARE=1 \
+    GSK_RENDERER=ngl \
     WAYLAND_DISPLAY= \
     XDG_SESSION_TYPE=x11 \
     WINIT_UNIX_BACKEND=x11 \

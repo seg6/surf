@@ -8,11 +8,8 @@ repository.workspace = true
 
 [dependencies]
 directories.workspace = true
-eframe.workspace = true
-egui_glow.workspace = true
 glow.workspace = true
 gtk.workspace = true
-image.workspace = true
 libc.workspace = true
 surf-client-app.workspace = true
 surf-core.workspace = true
@@ -24,7 +21,3 @@ serde_json.workspace = true
 [[bin]]
 name = "surf-client"
 path = "src/main.rs"
-
-[[bin]]
-name = "surf-client-egui"
-path = "src/bin/surf-client-egui.rs"

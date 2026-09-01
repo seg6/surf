@@ -47,6 +47,8 @@ fn install_css() {
         .surf-tab { background: transparent; border: 0; border-radius: 5px 5px 0 0; padding: 5px 8px; }
         .surf-tab:hover { background: #292b2f; }
         .surf-tab.active { background: #34363a; color: #ffffff; }
+        .surf-tab .surf-icon { opacity: 0.55; }
+        .surf-tab:hover .surf-icon, .surf-tab.active .surf-icon { opacity: 1; }
         .surf-toolbar { min-height: 38px; padding: 5px 8px 7px 8px; border-bottom: 1px solid #3a3c40; }
         .surf-icon { min-width: 30px; min-height: 30px; padding: 0; border: 0; background: transparent; }
         .surf-icon:hover { background: #35373b; }
@@ -151,6 +153,8 @@ struct BrowserWindow {
     library_view: RefCell<Option<LibraryView>>,
     media_view: RefCell<Option<MediaView>>,
     performance_view: RefCell<Option<PerformanceView>>,
+    settings_window: RefCell<Option<gtk::Window>>,
+    find_popover: RefCell<Option<gtk::Popover>>,
     page_dialog: RefCell<Option<gtk::Dialog>>,
     page_select: RefCell<Option<gtk::Popover>>,
     file_chooser: RefCell<Option<gtk::FileChooserNative>>,
@@ -455,6 +459,8 @@ impl BrowserWindow {
             library_view: RefCell::new(None),
             media_view: RefCell::new(None),
             performance_view: RefCell::new(None),
+            settings_window: RefCell::new(None),
+            find_popover: RefCell::new(None),
             page_dialog: RefCell::new(None),
             page_select: RefCell::new(None),
             file_chooser: RefCell::new(None),
@@ -1247,17 +1253,24 @@ impl BrowserWindow {
                 .map_or_else(String::new, |toast| toast.text.clone()),
         );
         let tab_revision = client.snapshot.revision;
-        let servers: Vec<_> = client
+        let mut servers: Vec<_> = client
             .saved_servers
             .iter()
             .map(|server| (server.name.clone(), server.endpoint.clone()))
-            .chain(
-                client
-                    .discovered_servers
-                    .iter()
-                    .map(|server| (server.name.clone(), server.endpoint.clone())),
-            )
             .collect();
+        servers.extend(
+            client
+                .discovered_servers
+                .iter()
+                .filter(|discovered| {
+                    !client.saved_servers.iter().any(|saved| {
+                        (!discovered.server_id.is_empty()
+                            && discovered.server_id == saved.server_id)
+                            || discovered.endpoint == saved.endpoint
+                    })
+                })
+                .map(|server| (server.name.clone(), server.endpoint.clone())),
+        );
         let suggestions: Vec<_> = client
             .browser
             .suggestions
@@ -1443,6 +1456,9 @@ impl BrowserWindow {
             dialog.close();
         }
         if let Some(popover) = self.page_select.borrow_mut().take() {
+            popover.popdown();
+        }
+        if let Some(popover) = self.find_popover.borrow_mut().take() {
             popover.popdown();
         }
         if let Some(window) = self.reader_window.borrow_mut().take() {
@@ -1804,6 +1820,10 @@ impl BrowserWindow {
     }
 
     fn show_find(self: &Rc<Self>) {
+        if let Some(popover) = self.find_popover.borrow().as_ref() {
+            popover.popup();
+            return;
+        }
         let popover = gtk::Popover::new();
         popover.set_parent(&self.gl_area);
         popover.set_halign(gtk::Align::End);
@@ -1851,11 +1871,22 @@ impl BrowserWindow {
                 });
             }
         });
+        let weak = Rc::downgrade(self);
+        popover.connect_closed(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.find_popover.borrow_mut().take();
+            }
+        });
+        self.find_popover.replace(Some(popover.clone()));
         popover.popup();
         entry.grab_focus();
     }
 
     fn show_settings(self: &Rc<Self>) {
+        if let Some(window) = self.settings_window.borrow().as_ref() {
+            window.present();
+            return;
+        }
         let dialog = gtk::Window::builder()
             .transient_for(&self.window)
             .modal(true)
@@ -1977,6 +2008,14 @@ impl BrowserWindow {
                 ui.controller.borrow_mut().disconnect();
             }
         });
+        let weak = Rc::downgrade(self);
+        dialog.connect_close_request(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.settings_window.borrow_mut().take();
+            }
+            Propagation::Proceed
+        });
+        self.settings_window.replace(Some(dialog.clone()));
         dialog.present();
     }
 

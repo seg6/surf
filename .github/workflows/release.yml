@@ -224,7 +224,8 @@ jobs:
 
           sudo apt-get update
           sudo apt-get install -y \
-            libasound2-dev libavcodec-dev libavformat-dev libavutil-dev
+            libasound2-dev libavcodec-dev libavformat-dev libavutil-dev \
+            libgtk-4-dev
           rustup toolchain install 1.95.0 --profile minimal
           rustup override set 1.95.0
           test "$(rustc --version | awk '{print $2}')" = "1.95.0"
