@@ -1,18 +1,19 @@
 Package: space.seg6.surf
 Name: Surf
+X-Surf-Compatibility: 1
 Description: Native Surf browser client
 Maintainer: seg6 <hi@seg6.space>
 Author: null <null@example.invalid>
 Section: Applications
 Architecture: iphoneos-arm
-Version: 0.15.4-1
+Version: 0.15.5-1
 Installed-Size: 3632
 Homepage: https://seg6.space/surf/
 Icon: https://seg6.space/surf/CydiaIcon.png
-Filename: debs/space.seg6.surf_0.15.4-1_iphoneos-arm.deb
-Size: 1633022
-MD5sum: eb40abf4b049a549c487113a20474cee
-SHA1: 876a67eb04ac9a2c79760c7391d18642e78a1ef9
-SHA256: 4643af13c84b9bd1e1032b234631e13d20be3dc78e9bff5b7e7d38fcf296cbd2
-SHA512: 89ebc034b81c9564a34dd90f6dd731280109bd780322fb0358043e6ce7943eda1eaa2153b5ca5d47089c5a21d583c4c6a6463e440871f044ad0c968cf8608f44
+Filename: debs/space.seg6.surf_0.15.5-1_iphoneos-arm.deb
+Size: 1635366
+MD5sum: bddb7a2402b82474fab51079ee622d05
+SHA1: e870026bd45b74b9cf226f779eef4cf4299136a2
+SHA256: e38ee421c3d0781072e31c4c99a53d251390fb98e7b10db2eeb48f98a586f397
+SHA512: c3a5190139aeb937b4d2359559581ce8d2b08fec67c7242c17dcf15cd7b808fedbc8e808df366ed3a5bfb898900cb0f30170bffdcbf8ee9d31f12e781d022c88
 
