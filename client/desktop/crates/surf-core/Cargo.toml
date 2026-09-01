@@ -8,3 +8,4 @@ repository.workspace = true
 
 [dependencies]
 surf-core-sys.workspace = true
+surf-protocol.workspace = true

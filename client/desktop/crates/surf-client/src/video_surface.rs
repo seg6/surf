@@ -16,6 +16,13 @@ pub struct SurfaceDiagnostics {
     pub latest_presentation_gap_us: u64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PresentedFrame {
+    pub count: u64,
+    pub generation: u32,
+    pub source_sequence: u32,
+}
+
 pub struct VideoSurface {
     pending: Mutex<Option<DecodedFrame>>,
     resources: Mutex<Option<GlResources>>,
@@ -28,6 +35,7 @@ pub struct VideoSurface {
     last_presentation_ns: AtomicU64,
     latest_presentation_gap_us: AtomicU64,
     surface_generation: AtomicU32,
+    source_sequence: AtomicU32,
 }
 
 impl VideoSurface {
@@ -44,6 +52,7 @@ impl VideoSurface {
             last_presentation_ns: AtomicU64::new(0),
             latest_presentation_gap_us: AtomicU64::new(0),
             surface_generation: AtomicU32::new(0),
+            source_sequence: AtomicU32::new(0),
         })
     }
 
@@ -62,6 +71,7 @@ impl VideoSurface {
         self.latest_presentation_gap_us.store(0, Ordering::Release);
         self.latest_frame_age_us.store(0, Ordering::Release);
         self.surface_generation.store(0, Ordering::Release);
+        self.source_sequence.store(0, Ordering::Release);
         if let Ok(mut pending) = self.pending.lock() {
             *pending = None;
         }
@@ -87,6 +97,14 @@ impl VideoSurface {
 
     pub fn surface_generation(&self) -> u32 {
         self.surface_generation.load(Ordering::Acquire)
+    }
+
+    pub fn presented_frame(&self) -> PresentedFrame {
+        PresentedFrame {
+            count: self.presented.load(Ordering::Acquire),
+            generation: self.surface_generation.load(Ordering::Acquire),
+            source_sequence: self.source_sequence.load(Ordering::Acquire),
+        }
     }
 
     pub fn diagnostics(&self) -> SurfaceDiagnostics {
@@ -156,11 +174,13 @@ impl VideoSurface {
             );
             self.surface_generation
                 .store(frame.generation, Ordering::Release);
+            self.source_sequence
+                .store(frame.source_sequence, Ordering::Release);
             uploaded = true;
         }
         unsafe { resources.draw(gl) };
         if uploaded {
-            self.presented.fetch_add(1, Ordering::Relaxed);
+            self.presented.fetch_add(1, Ordering::Release);
         }
     }
 }

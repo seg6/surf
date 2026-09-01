@@ -1,4 +1,5 @@
 #include "surf/core.h"
+#include "surf/protocol.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -7,6 +8,7 @@
 #define SURF_MAX_TITLE_BYTES ((size_t)2048)
 #define SURF_MAX_ICON_BYTES ((size_t)8192)
 #define SURF_MAX_SHORT_TEXT_BYTES ((size_t)128)
+#define SURF_MAX_CONTENT_BYTES ((size_t)(1024 * 1024))
 #define SURF_EFFECT_CAPACITY ((size_t)16)
 
 typedef struct surf_owned_string {
@@ -33,6 +35,20 @@ struct surf_core {
     surf_owned_string_t current_url;
     surf_owned_string_t security;
     surf_owned_string_t editable_kind;
+    surf_owned_string_t dialog_kind;
+    surf_owned_string_t dialog_text;
+    surf_owned_string_t dialog_default_text;
+    surf_owned_string_t select_id;
+    surf_owned_string_t select_title;
+    surf_owned_string_t clipboard_id;
+    surf_owned_string_t clipboard_text;
+    surf_owned_string_t reader_title;
+    surf_owned_string_t reader_url;
+    surf_owned_string_t media_title;
+    surf_owned_string_t page_error;
+    surf_owned_string_t toast_text;
+    surf_owned_string_t download_name;
+    surf_owned_string_t history_query;
     double editable_rect[4];
     uint64_t revision;
     uint64_t connection_generation;
@@ -49,6 +65,34 @@ struct surf_core {
     int editable_has_rect;
     int keyboard_visible;
     int awaiting_page_frame;
+    size_t select_option_count;
+    size_t suggestion_count;
+    size_t history_count;
+    size_t bookmark_count;
+    size_t download_count;
+    int32_t history_offset;
+    int32_t history_total;
+    int32_t download_percent;
+    int32_t media_count;
+    double media_volume;
+    double media_current_time;
+    double media_duration;
+    int dialog_active;
+    int select_active;
+    int select_multiple;
+    int file_chooser_active;
+    int file_chooser_multiple;
+    int find_known;
+    int find_found;
+    int clipboard_pending;
+    int clipboard_sync_request;
+    int clipboard_sync_enabled;
+    int clipboard_known;
+    int reader_available;
+    int media_available;
+    int media_paused;
+    int media_muted;
+    uint32_t video_generation;
     surf_effect_t effects[SURF_EFFECT_CAPACITY];
     size_t effect_head;
     size_t effect_count;
@@ -121,6 +165,32 @@ static surf_core_result_t surf_owned_string_replace(
     }
     surf_owned_string_clear(core, destination);
     *destination = next;
+    return SURF_CORE_OK;
+}
+
+static surf_core_result_t surf_owned_string_group_replace(
+    surf_core_t *core, surf_owned_string_t **destinations,
+    const surf_string_view_t *sources, size_t count, size_t maximum) {
+    surf_owned_string_t next[3];
+    size_t index;
+    surf_core_result_t result = SURF_CORE_OK;
+    if (count > sizeof(next) / sizeof(next[0])) return SURF_CORE_ERROR_ARGUMENT;
+    memset(next, 0, sizeof(next));
+    for (index = 0; index < count; index++) {
+        result = surf_owned_string_create(core, sources[index], maximum,
+                                          &next[index]);
+        if (result != SURF_CORE_OK) break;
+    }
+    if (result != SURF_CORE_OK) {
+        size_t clear_index;
+        for (clear_index = 0; clear_index < count; clear_index++)
+            surf_owned_string_clear(core, &next[clear_index]);
+        return result;
+    }
+    for (index = 0; index < count; index++) {
+        surf_owned_string_clear(core, destinations[index]);
+        *destinations[index] = next[index];
+    }
     return SURF_CORE_OK;
 }
 
@@ -258,6 +328,38 @@ static surf_core_result_t surf_queue_effect(surf_core_t *core,
     return SURF_CORE_OK;
 }
 
+static void surf_clear_semantic_transients(surf_core_t *core) {
+    surf_owned_string_clear(core, &core->dialog_kind);
+    surf_owned_string_clear(core, &core->dialog_text);
+    surf_owned_string_clear(core, &core->dialog_default_text);
+    surf_owned_string_clear(core, &core->select_id);
+    surf_owned_string_clear(core, &core->select_title);
+    surf_owned_string_clear(core, &core->clipboard_id);
+    surf_owned_string_clear(core, &core->reader_title);
+    surf_owned_string_clear(core, &core->reader_url);
+    surf_owned_string_clear(core, &core->media_title);
+    surf_owned_string_clear(core, &core->page_error);
+    core->dialog_active = 0;
+    core->select_active = 0;
+    core->select_multiple = 0;
+    core->select_option_count = 0;
+    core->file_chooser_active = 0;
+    core->file_chooser_multiple = 0;
+    core->find_known = 0;
+    core->find_found = 0;
+    core->suggestion_count = 0;
+    core->clipboard_pending = 0;
+    core->clipboard_sync_request = 0;
+    core->reader_available = 0;
+    core->media_available = 0;
+    core->media_count = 0;
+    core->media_paused = 0;
+    core->media_muted = 0;
+    core->media_volume = 0.0;
+    core->media_current_time = 0.0;
+    core->media_duration = 0.0;
+}
+
 static void surf_clear_page_transients(surf_core_t *core) {
     core->loading = 0;
     core->editable = 0;
@@ -266,6 +368,7 @@ static void surf_clear_page_transients(surf_core_t *core) {
     core->awaiting_page_frame = 0;
     core->awaited_source_sequence = 0;
     surf_owned_string_clear(core, &core->editable_kind);
+    surf_clear_semantic_transients(core);
 }
 
 static void surf_clear_browser_state(surf_core_t *core) {
@@ -287,6 +390,19 @@ static void surf_clear_browser_state(surf_core_t *core) {
     core->keyboard_visible = 0;
     core->effect_head = 0;
     core->effect_count = 0;
+    surf_owned_string_clear(core, &core->toast_text);
+    surf_owned_string_clear(core, &core->download_name);
+    surf_owned_string_clear(core, &core->history_query);
+    surf_owned_string_clear(core, &core->clipboard_text);
+    core->history_count = 0;
+    core->bookmark_count = 0;
+    core->download_count = 0;
+    core->history_offset = 0;
+    core->history_total = 0;
+    core->download_percent = 0;
+    core->clipboard_sync_enabled = 0;
+    core->clipboard_known = 0;
+    core->video_generation = 0;
 }
 
 static surf_core_result_t surf_dispatch_tabs(surf_core_t *core,
@@ -559,11 +675,7 @@ void surf_core_destroy(surf_core_t *core) {
         return;
     }
     allocator = core->allocator;
-    surf_owned_tabs_clear(core, core->tabs, core->tab_count, core->tab_views);
-    surf_owned_string_clear(core, &core->active_title);
-    surf_owned_string_clear(core, &core->current_url);
-    surf_owned_string_clear(core, &core->security);
-    surf_owned_string_clear(core, &core->editable_kind);
+    surf_clear_browser_state(core);
     memset(core, 0, sizeof(*core));
     allocator.deallocate(allocator.context, core);
 }
@@ -659,6 +771,310 @@ surf_core_result_t surf_core_dispatch_scoped(surf_core_t *core,
     return surf_core_dispatch(core, event);
 }
 
+static surf_core_result_t surf_dispatch_protocol_strings(
+    surf_core_t *core, surf_owned_string_t **destinations,
+    const surf_string_view_t *sources, size_t count, size_t maximum) {
+    surf_core_result_t result = surf_owned_string_group_replace(
+        core, destinations, sources, count, maximum);
+    if (result == SURF_CORE_OK) core->revision++;
+    return result;
+}
+
+surf_core_result_t surf_core_dispatch_protocol(
+    surf_core_t *core, uint64_t generation,
+    const struct surf_protocol_event *opaque_event) {
+    const surf_protocol_event_t *event =
+        (const surf_protocol_event_t *)opaque_event;
+    surf_event_t mapped;
+    surf_owned_string_t *destinations[3];
+    surf_string_view_t sources[3];
+    surf_core_result_t result;
+    if (core == NULL || event == NULL || generation == 0)
+        return SURF_CORE_ERROR_ARGUMENT;
+    if (generation != core->connection_generation) {
+        core->stale_event_count++;
+        return SURF_CORE_OK;
+    }
+    memset(&mapped, 0, sizeof(mapped));
+    switch (event->kind) {
+    case SURF_PROTOCOL_EVENT_TABS:
+        mapped.kind = SURF_EVENT_TABS;
+        mapped.data.tabs.items = event->data.tabs.items;
+        mapped.data.tabs.count = event->data.tabs.count;
+        return surf_core_dispatch_scoped(core, generation, &mapped);
+    case SURF_PROTOCOL_EVENT_URL:
+        mapped.kind = SURF_EVENT_URL;
+        mapped.data.url.url = event->data.url.url;
+        mapped.data.url.security = event->data.url.security;
+        mapped.data.url.starred = event->data.url.starred;
+        return surf_core_dispatch_scoped(core, generation, &mapped);
+    case SURF_PROTOCOL_EVENT_HISTORY_STATE:
+        mapped.kind = SURF_EVENT_HISTORY_STATE;
+        mapped.data.history.can_go_back = event->data.history_state.back;
+        mapped.data.history.can_go_forward = event->data.history_state.forward;
+        return surf_core_dispatch_scoped(core, generation, &mapped);
+    case SURF_PROTOCOL_EVENT_LOADING:
+    case SURF_PROTOCOL_EVENT_FULLSCREEN:
+    case SURF_PROTOCOL_EVENT_STARRED:
+        mapped.kind = event->kind == SURF_PROTOCOL_EVENT_LOADING
+            ? SURF_EVENT_LOADING
+            : (event->kind == SURF_PROTOCOL_EVENT_FULLSCREEN
+                ? SURF_EVENT_FULLSCREEN : SURF_EVENT_STARRED);
+        mapped.data.boolean.on = event->data.boolean.on;
+        return surf_core_dispatch_scoped(core, generation, &mapped);
+    case SURF_PROTOCOL_EVENT_EDITABLE:
+        mapped.kind = SURF_EVENT_EDITABLE;
+        mapped.data.editable.on = event->data.editable.on;
+        mapped.data.editable.show_keyboard =
+            event->data.editable.show_keyboard;
+        mapped.data.editable.kind = event->data.editable.kind;
+        mapped.data.editable.has_rect = event->data.editable.has_rect;
+        memcpy(mapped.data.editable.rect, event->data.editable.rect,
+               sizeof(mapped.data.editable.rect));
+        return surf_core_dispatch_scoped(core, generation, &mapped);
+    case SURF_PROTOCOL_EVENT_SECURITY:
+        mapped.kind = SURF_EVENT_SECURITY;
+        mapped.data.security.state = event->data.security.state;
+        return surf_core_dispatch_scoped(core, generation, &mapped);
+    case SURF_PROTOCOL_EVENT_PAGE_FRAME:
+        mapped.kind = SURF_EVENT_PAGE_FRAME;
+        mapped.data.page_frame.source_sequence =
+            event->data.page_frame.source_sequence;
+        return surf_core_dispatch_scoped(core, generation, &mapped);
+    case SURF_PROTOCOL_EVENT_FOUND:
+        core->find_known = 1;
+        core->find_found = event->data.boolean.on != 0;
+        core->revision++;
+        return SURF_CORE_OK;
+    case SURF_PROTOCOL_EVENT_VIDEO_CONFIG:
+        core->video_generation = event->data.video.generation;
+        core->revision++;
+        return SURF_CORE_OK;
+    case SURF_PROTOCOL_EVENT_SUGGEST:
+        core->suggestion_count = event->data.entries.count;
+        core->revision++;
+        return SURF_CORE_OK;
+    case SURF_PROTOCOL_EVENT_LIBRARY:
+        core->history_count = event->data.library.history_count;
+        core->bookmark_count = event->data.library.bookmark_count;
+        core->starred = event->data.library.starred != 0;
+        core->revision++;
+        return SURF_CORE_OK;
+    case SURF_PROTOCOL_EVENT_HISTORY:
+        destinations[0] = &core->history_query;
+        sources[0] = event->data.history.query;
+        result = surf_owned_string_group_replace(core, destinations, sources,
+                                                 1, SURF_MAX_TITLE_BYTES);
+        if (result != SURF_CORE_OK) return result;
+        core->history_count = event->data.history.count;
+        core->history_offset = event->data.history.offset;
+        core->history_total = event->data.history.total;
+        core->revision++;
+        return SURF_CORE_OK;
+    case SURF_PROTOCOL_EVENT_DOWNLOADS:
+        core->download_count = event->data.downloads.count;
+        core->revision++;
+        return SURF_CORE_OK;
+    case SURF_PROTOCOL_EVENT_DIALOG:
+        destinations[0] = &core->dialog_kind;
+        destinations[1] = &core->dialog_text;
+        destinations[2] = &core->dialog_default_text;
+        sources[0] = event->data.dialog.kind;
+        sources[1] = event->data.dialog.text;
+        sources[2] = event->data.dialog.default_text;
+        result = surf_dispatch_protocol_strings(
+            core, destinations, sources, 3, SURF_MAX_CONTENT_BYTES);
+        if (result == SURF_CORE_OK) core->dialog_active = 1;
+        return result;
+    case SURF_PROTOCOL_EVENT_DIALOG_DONE:
+        surf_owned_string_clear(core, &core->dialog_kind);
+        surf_owned_string_clear(core, &core->dialog_text);
+        surf_owned_string_clear(core, &core->dialog_default_text);
+        core->dialog_active = 0;
+        core->revision++;
+        return SURF_CORE_OK;
+    case SURF_PROTOCOL_EVENT_FILE_CHOOSER:
+        core->file_chooser_active = 1;
+        core->file_chooser_multiple = event->data.chooser.multiple != 0;
+        core->revision++;
+        return SURF_CORE_OK;
+    case SURF_PROTOCOL_EVENT_SELECT:
+        destinations[0] = &core->select_id;
+        destinations[1] = &core->select_title;
+        sources[0] = event->data.select.id;
+        sources[1] = event->data.select.title;
+        result = surf_dispatch_protocol_strings(
+            core, destinations, sources, 2, SURF_MAX_TITLE_BYTES);
+        if (result == SURF_CORE_OK) {
+            core->select_active = 1;
+            core->select_multiple = event->data.select.multiple != 0;
+            core->select_option_count = event->data.select.option_count;
+        }
+        return result;
+    case SURF_PROTOCOL_EVENT_CLIPBOARD:
+        destinations[0] = &core->clipboard_id;
+        destinations[1] = &core->clipboard_text;
+        sources[0] = event->data.clipboard.id;
+        sources[1] = event->data.clipboard.text;
+        result = surf_dispatch_protocol_strings(
+            core, destinations, sources, 2, SURF_MAX_CONTENT_BYTES);
+        if (result == SURF_CORE_OK) {
+            core->clipboard_pending = 1;
+            core->clipboard_sync_request = event->data.clipboard.sync != 0;
+        }
+        return result;
+    case SURF_PROTOCOL_EVENT_CLIPBOARD_SYNC:
+        destinations[0] = &core->clipboard_text;
+        sources[0] = event->data.clipboard_sync.text;
+        result = surf_dispatch_protocol_strings(
+            core, destinations, sources, 1, SURF_MAX_CONTENT_BYTES);
+        if (result == SURF_CORE_OK) {
+            core->clipboard_pending = 0;
+            core->clipboard_sync_enabled =
+                event->data.clipboard_sync.enabled != 0;
+            core->clipboard_known = event->data.clipboard_sync.known != 0;
+        }
+        return result;
+    case SURF_PROTOCOL_EVENT_READER:
+        destinations[0] = &core->reader_title;
+        destinations[1] = &core->reader_url;
+        sources[0] = event->data.reader.title;
+        sources[1] = event->data.reader.url;
+        result = surf_dispatch_protocol_strings(
+            core, destinations, sources, 2, SURF_MAX_URL_BYTES);
+        if (result == SURF_CORE_OK)
+            core->reader_available = event->data.reader.ok != 0;
+        return result;
+    case SURF_PROTOCOL_EVENT_MEDIA_STATE:
+        destinations[0] = &core->media_title;
+        sources[0] = event->data.media.title;
+        result = surf_dispatch_protocol_strings(
+            core, destinations, sources, 1, SURF_MAX_TITLE_BYTES);
+        if (result == SURF_CORE_OK) {
+            core->media_available = event->data.media.available != 0;
+            core->media_count = event->data.media.count;
+            core->media_paused = event->data.media.paused != 0;
+            core->media_muted = event->data.media.muted != 0;
+            core->media_volume = event->data.media.volume;
+            core->media_current_time = event->data.media.current_time;
+            core->media_duration = event->data.media.duration;
+        }
+        return result;
+    case SURF_PROTOCOL_EVENT_PAGE_ERROR:
+        destinations[0] = &core->current_url;
+        destinations[1] = &core->security;
+        destinations[2] = &core->page_error;
+        sources[0] = event->data.url.url;
+        sources[1] = event->data.url.security;
+        sources[2] = event->data.url.url;
+        result = surf_owned_string_group_replace(
+            core, destinations, sources, 3, SURF_MAX_URL_BYTES);
+        if (result != SURF_CORE_OK) return result;
+        core->starred = event->data.url.starred != 0;
+        core->show_start_page = 0;
+        core->revision++;
+        return SURF_CORE_OK;
+    case SURF_PROTOCOL_EVENT_TOAST:
+        destinations[0] = &core->toast_text;
+        sources[0] = event->data.text.text;
+        return surf_dispatch_protocol_strings(
+            core, destinations, sources, 1, SURF_MAX_TITLE_BYTES);
+    case SURF_PROTOCOL_EVENT_DOWNLOAD:
+        destinations[0] = &core->download_name;
+        sources[0] = event->data.name.name;
+        return surf_dispatch_protocol_strings(
+            core, destinations, sources, 1, SURF_MAX_TITLE_BYTES);
+    case SURF_PROTOCOL_EVENT_DOWNLOAD_PROGRESS:
+        destinations[0] = &core->download_name;
+        sources[0] = event->data.progress.name;
+        result = surf_dispatch_protocol_strings(
+            core, destinations, sources, 1, SURF_MAX_TITLE_BYTES);
+        if (result == SURF_CORE_OK)
+            core->download_percent = event->data.progress.percent;
+        return result;
+    case SURF_PROTOCOL_EVENT_HELLO:
+    case SURF_PROTOCOL_EVENT_AUDIO_CONFIG:
+    case SURF_PROTOCOL_EVENT_CLOCK:
+    case SURF_PROTOCOL_EVENT_LOG_REQUEST:
+    case SURF_PROTOCOL_EVENT_LOG_CLEAR:
+        return SURF_CORE_OK;
+    default:
+        return SURF_CORE_ERROR_ARGUMENT;
+    }
+}
+
+surf_core_result_t surf_core_dispatch_protocol_json(
+    surf_core_t *core, uint64_t generation,
+    struct surf_protocol_workspace *workspace, const char *json,
+    size_t length) {
+    surf_protocol_event_t event;
+    surf_protocol_result_t result;
+    if (core == NULL || workspace == NULL || json == NULL || length == 0)
+        return SURF_CORE_ERROR_ARGUMENT;
+    result = surf_protocol_decode_event(workspace, json, length, &event);
+    if (result != SURF_PROTOCOL_OK) return SURF_CORE_ERROR_ARGUMENT;
+    return surf_core_dispatch_protocol(core, generation, &event);
+}
+
+surf_core_result_t surf_core_present_frame(
+    surf_core_t *core, uint64_t connection_generation,
+    uint32_t video_generation, uint32_t source_sequence) {
+    surf_event_t event;
+    if (core == NULL || connection_generation == 0)
+        return SURF_CORE_ERROR_ARGUMENT;
+    if (connection_generation != core->connection_generation ||
+        (core->video_generation != 0 && video_generation != 0 &&
+         video_generation != core->video_generation)) {
+        core->stale_event_count++;
+        return SURF_CORE_OK;
+    }
+    memset(&event, 0, sizeof(event));
+    event.kind = SURF_EVENT_FRAME_PRESENTED;
+    event.data.frame_presented.source_sequence = source_sequence;
+    return surf_core_dispatch_scoped(core, connection_generation, &event);
+}
+
+surf_core_result_t surf_core_complete_semantic(
+    surf_core_t *core, uint64_t generation,
+    surf_semantic_completion_t completion) {
+    if (core == NULL || generation == 0) return SURF_CORE_ERROR_ARGUMENT;
+    if (generation != core->connection_generation) {
+        core->stale_event_count++;
+        return SURF_CORE_OK;
+    }
+    switch (completion) {
+    case SURF_SEMANTIC_COMPLETE_DIALOG:
+        surf_owned_string_clear(core, &core->dialog_kind);
+        surf_owned_string_clear(core, &core->dialog_text);
+        surf_owned_string_clear(core, &core->dialog_default_text);
+        core->dialog_active = 0;
+        break;
+    case SURF_SEMANTIC_COMPLETE_SELECT:
+        surf_owned_string_clear(core, &core->select_id);
+        surf_owned_string_clear(core, &core->select_title);
+        core->select_active = 0;
+        core->select_multiple = 0;
+        core->select_option_count = 0;
+        break;
+    case SURF_SEMANTIC_COMPLETE_FILE_CHOOSER:
+        core->file_chooser_active = 0;
+        core->file_chooser_multiple = 0;
+        break;
+    case SURF_SEMANTIC_COMPLETE_CLIPBOARD:
+        surf_owned_string_clear(core, &core->clipboard_id);
+        core->clipboard_pending = 0;
+        core->clipboard_sync_request = 0;
+        break;
+    case SURF_SEMANTIC_COMPLETE_TOAST:
+        surf_owned_string_clear(core, &core->toast_text);
+        break;
+    default:
+        return SURF_CORE_ERROR_ARGUMENT;
+    }
+    core->revision++;
+    return SURF_CORE_OK;
+}
+
 surf_core_result_t surf_core_snapshot(const surf_core_t *core,
                                       surf_snapshot_t *out_snapshot) {
     if (core == NULL || out_snapshot == NULL) {
@@ -688,6 +1104,59 @@ surf_core_result_t surf_core_snapshot(const surf_core_t *core,
     out_snapshot->editable_has_rect = core->editable_has_rect;
     out_snapshot->keyboard_visible = core->keyboard_visible;
     out_snapshot->awaiting_page_frame = core->awaiting_page_frame;
+    return SURF_CORE_OK;
+}
+
+surf_core_result_t surf_core_semantic_snapshot(
+    const surf_core_t *core, surf_semantic_snapshot_t *out_snapshot) {
+    if (core == NULL || out_snapshot == NULL)
+        return SURF_CORE_ERROR_ARGUMENT;
+    memset(out_snapshot, 0, sizeof(*out_snapshot));
+    out_snapshot->revision = core->revision;
+    out_snapshot->dialog_kind = surf_owned_string_view(&core->dialog_kind);
+    out_snapshot->dialog_text = surf_owned_string_view(&core->dialog_text);
+    out_snapshot->dialog_default_text =
+        surf_owned_string_view(&core->dialog_default_text);
+    out_snapshot->select_id = surf_owned_string_view(&core->select_id);
+    out_snapshot->select_title = surf_owned_string_view(&core->select_title);
+    out_snapshot->clipboard_id = surf_owned_string_view(&core->clipboard_id);
+    out_snapshot->clipboard_text =
+        surf_owned_string_view(&core->clipboard_text);
+    out_snapshot->reader_title = surf_owned_string_view(&core->reader_title);
+    out_snapshot->reader_url = surf_owned_string_view(&core->reader_url);
+    out_snapshot->media_title = surf_owned_string_view(&core->media_title);
+    out_snapshot->page_error = surf_owned_string_view(&core->page_error);
+    out_snapshot->toast_text = surf_owned_string_view(&core->toast_text);
+    out_snapshot->download_name = surf_owned_string_view(&core->download_name);
+    out_snapshot->history_query = surf_owned_string_view(&core->history_query);
+    out_snapshot->select_option_count = core->select_option_count;
+    out_snapshot->suggestion_count = core->suggestion_count;
+    out_snapshot->history_count = core->history_count;
+    out_snapshot->bookmark_count = core->bookmark_count;
+    out_snapshot->download_count = core->download_count;
+    out_snapshot->history_offset = core->history_offset;
+    out_snapshot->history_total = core->history_total;
+    out_snapshot->download_percent = core->download_percent;
+    out_snapshot->media_count = core->media_count;
+    out_snapshot->media_volume = core->media_volume;
+    out_snapshot->media_current_time = core->media_current_time;
+    out_snapshot->media_duration = core->media_duration;
+    out_snapshot->dialog_active = core->dialog_active;
+    out_snapshot->select_active = core->select_active;
+    out_snapshot->select_multiple = core->select_multiple;
+    out_snapshot->file_chooser_active = core->file_chooser_active;
+    out_snapshot->file_chooser_multiple = core->file_chooser_multiple;
+    out_snapshot->find_known = core->find_known;
+    out_snapshot->find_found = core->find_found;
+    out_snapshot->clipboard_pending = core->clipboard_pending;
+    out_snapshot->clipboard_sync_request = core->clipboard_sync_request;
+    out_snapshot->clipboard_sync_enabled = core->clipboard_sync_enabled;
+    out_snapshot->clipboard_known = core->clipboard_known;
+    out_snapshot->reader_available = core->reader_available;
+    out_snapshot->media_available = core->media_available;
+    out_snapshot->media_paused = core->media_paused;
+    out_snapshot->media_muted = core->media_muted;
+    out_snapshot->video_generation = core->video_generation;
     return SURF_CORE_OK;
 }
 
@@ -746,4 +1215,8 @@ size_t surf_core_sizeof_event(void) {
 
 size_t surf_core_sizeof_snapshot(void) {
     return sizeof(surf_snapshot_t);
+}
+
+size_t surf_core_sizeof_semantic_snapshot(void) {
+    return sizeof(surf_semantic_snapshot_t);
 }

@@ -38,8 +38,14 @@ typedef NS_ENUM(NSInteger, RBCoreEffect) {
 // rendering adapter while surfaces migrate to typed snapshots.
 - (BOOL)consumeControlData:(NSData *)data message:(NSDictionary *)message
                      error:(NSError **)error;
-- (void)notePresentedSourceSequence:(unsigned int)sourceSequence;
+- (void)notePresentedSourceSequence:(unsigned int)sourceSequence
+                    videoGeneration:(unsigned int)videoGeneration;
 - (void)noteKeyboardVisible:(BOOL)visible;
+- (void)noteDialogCompleted;
+- (void)noteSelectCompleted;
+- (void)noteFileChooserCompleted;
+- (void)noteClipboardCompleted;
+- (void)noteToastCompleted;
 - (void)reset;
 - (BOOL)consumeEffect:(RBCoreEffect)effect;
 @end

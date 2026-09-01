@@ -149,6 +149,64 @@ typedef struct surf_snapshot {
     int awaiting_page_frame;
 } surf_snapshot_t;
 
+/* Non-visual state for platform-presented browser surfaces. Large collection
+ * contents remain typed protocol views/copies in the host; the core owns their
+ * current identity, presence, counts, and control values so reconnect/tab
+ * transitions cannot leave stale presentation behind. */
+typedef struct surf_semantic_snapshot {
+    uint64_t revision;
+    surf_string_view_t dialog_kind;
+    surf_string_view_t dialog_text;
+    surf_string_view_t dialog_default_text;
+    surf_string_view_t select_id;
+    surf_string_view_t select_title;
+    surf_string_view_t clipboard_id;
+    surf_string_view_t clipboard_text;
+    surf_string_view_t reader_title;
+    surf_string_view_t reader_url;
+    surf_string_view_t media_title;
+    surf_string_view_t page_error;
+    surf_string_view_t toast_text;
+    surf_string_view_t download_name;
+    surf_string_view_t history_query;
+    size_t select_option_count;
+    size_t suggestion_count;
+    size_t history_count;
+    size_t bookmark_count;
+    size_t download_count;
+    int32_t history_offset;
+    int32_t history_total;
+    int32_t download_percent;
+    int32_t media_count;
+    double media_volume;
+    double media_current_time;
+    double media_duration;
+    int dialog_active;
+    int select_active;
+    int select_multiple;
+    int file_chooser_active;
+    int file_chooser_multiple;
+    int find_known;
+    int find_found;
+    int clipboard_pending;
+    int clipboard_sync_request;
+    int clipboard_sync_enabled;
+    int clipboard_known;
+    int reader_available;
+    int media_available;
+    int media_paused;
+    int media_muted;
+    uint32_t video_generation;
+} surf_semantic_snapshot_t;
+
+typedef enum surf_semantic_completion {
+    SURF_SEMANTIC_COMPLETE_DIALOG = 1,
+    SURF_SEMANTIC_COMPLETE_SELECT,
+    SURF_SEMANTIC_COMPLETE_FILE_CHOOSER,
+    SURF_SEMANTIC_COMPLETE_CLIPBOARD,
+    SURF_SEMANTIC_COMPLETE_TOAST
+} surf_semantic_completion_t;
+
 surf_string_view_t surf_string_view(const char *data, size_t length);
 surf_string_view_t surf_string_from_cstr(const char *string);
 int surf_string_equal(surf_string_view_t left, surf_string_view_t right);
@@ -166,10 +224,27 @@ surf_core_result_t surf_core_begin_connection(surf_core_t *core,
 surf_core_result_t surf_core_dispatch_scoped(surf_core_t *core,
                                              uint64_t generation,
                                              const surf_event_t *event);
+struct surf_protocol_event;
+struct surf_protocol_workspace;
+surf_core_result_t surf_core_dispatch_protocol(
+    surf_core_t *core, uint64_t generation,
+    const struct surf_protocol_event *event);
+surf_core_result_t surf_core_dispatch_protocol_json(
+    surf_core_t *core, uint64_t generation,
+    struct surf_protocol_workspace *workspace, const char *json,
+    size_t length);
+surf_core_result_t surf_core_present_frame(
+    surf_core_t *core, uint64_t connection_generation,
+    uint32_t video_generation, uint32_t source_sequence);
+surf_core_result_t surf_core_complete_semantic(
+    surf_core_t *core, uint64_t generation,
+    surf_semantic_completion_t completion);
 surf_core_result_t surf_core_dispatch(surf_core_t *core,
                                       const surf_event_t *event);
 surf_core_result_t surf_core_snapshot(const surf_core_t *core,
                                       surf_snapshot_t *out_snapshot);
+surf_core_result_t surf_core_semantic_snapshot(
+    const surf_core_t *core, surf_semantic_snapshot_t *out_snapshot);
 int surf_core_next_effect(surf_core_t *core, surf_effect_t *out_effect);
 uint64_t surf_core_connection_generation(const surf_core_t *core);
 uint64_t surf_core_stale_event_count(const surf_core_t *core);
@@ -182,6 +257,7 @@ size_t surf_core_sizeof_string_view(void);
 size_t surf_core_sizeof_config(void);
 size_t surf_core_sizeof_event(void);
 size_t surf_core_sizeof_snapshot(void);
+size_t surf_core_sizeof_semantic_snapshot(void);
 
 #ifdef __cplusplus
 }

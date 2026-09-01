@@ -4000,6 +4000,7 @@ name = "surf-core"
 version = "0.15.5"
 dependencies = [
  "surf-core-sys",
+ "surf-protocol",
 ]
 
 [[package]]

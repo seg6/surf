@@ -1195,7 +1195,8 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
 
 - (void)streamView:(RBStreamView *)streamView didPresentMetadata:(RBFrameMetadata *)metadata {
     self.presentedSurfaceGeneration = metadata.encoderGeneration;
-    [self.clientCore notePresentedSourceSequence:metadata.sourceSequence];
+    [self.clientCore notePresentedSourceSequence:metadata.sourceSequence
+                                 videoGeneration:metadata.encoderGeneration];
     if (self.awaitingPageFrame && self.awaitedSourceSequence > 0 &&
         metadata.sourceSequence >= self.awaitedSourceSequence) {
         self.awaitingPageFrame = NO;
@@ -1477,6 +1478,7 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
         if ([requestID isKindOfClass:[NSString class]] && [requestID length]) {
             [self.session sendMessage:@{ @"t": @"clipboard-result", @"id": requestID, @"ok": @(valid) }];
         }
+        [self.clientCore noteClipboardCompleted];
     }
 }
 
@@ -2213,6 +2215,7 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
         if (controller) {
             [self.session sendMessage:@{@"t": @"selectreply", @"id": controller.requestID ?: @"",
                                         @"cancel": @YES}];
+            [self.clientCore noteSelectCompleted];
         }
     }
 }
@@ -2636,6 +2639,7 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
     if (sendCancel && controller) {
         [self.session sendMessage:@{@"t": @"selectreply", @"id": controller.requestID ?: @"",
                                     @"cancel": @YES}];
+        [self.clientCore noteSelectCompleted];
     }
 }
 
@@ -2645,6 +2649,7 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
     [self dismissSelectControllerSendingCancel:NO];
     [self.session sendMessage:@{@"t": @"selectreply", @"id": requestID ?: @"",
                                 @"indices": indices ?: @[]}];
+    [self.clientCore noteSelectCompleted];
 }
 
 - (void)selectControllerDidCancel:(RBSelectController *)controller {
@@ -2712,6 +2717,7 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
         [reply setObject:text forKey:@"text"];
     }
     [self.session sendMessage:reply];
+    [self.clientCore noteDialogCompleted];
 }
 
 // ------------------------------------------------------------- uploads (M2.2)
@@ -2770,6 +2776,7 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
 // postUploadData ships one file (or nothing = cancel) through the pinned,
 // authenticated API. The device session rides in the shared cookie jar.
 - (void)postUploadData:(NSData *)data filename:(NSString *)filename {
+    [self.clientCore noteFileChooserCompleted];
     NSURL *url = [NSURL URLWithString:@"/api/v1/uploads" relativeToURL:self.session.baseURL];
     if (!url) return;
     NSString *boundary = [NSString stringWithFormat:@"rbsurf-%08x", arc4random()];
@@ -2916,6 +2923,7 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
 
 - (void)hideToast {
     [UIView animateWithDuration:0.35 animations:^{ self.toastLabel.alpha = 0.0; }];
+    [self.clientCore noteToastCompleted];
 }
 
 // --------------------------------------------------------- debug + watchdog

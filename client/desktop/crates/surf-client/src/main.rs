@@ -8,7 +8,7 @@ use eframe::egui::{
 };
 use surf_core::{
     ClockSync, Core, DiagnosticsReport, DiagnosticsSample, Event as CoreEvent, PipelineDiagnostics,
-    Snapshot, Tab, monotonic_ns,
+    SemanticCompletion, Snapshot, Tab, monotonic_ns,
 };
 use surf_media::{MediaEvent, MediaPipeline};
 use surf_protocol::{Causal, Command, Event as WireEvent};
@@ -102,6 +102,7 @@ struct SurfDesktop {
     discovery_note: Option<String>,
     connected: bool,
     frames_received: u64,
+    core_presented_count: u64,
     last_frame: String,
     remote_viewport: Option<(i32, i32)>,
     connect_after_inspect: bool,
@@ -207,6 +208,7 @@ impl SurfDesktop {
             discovery_note: None,
             connected: false,
             frames_received: 0,
+            core_presented_count: 0,
             last_frame: String::new(),
             remote_viewport: None,
             connect_after_inspect: false,
@@ -240,6 +242,21 @@ impl SurfDesktop {
 
     fn refresh(&mut self) {
         self.snapshot = self.core.snapshot().expect("core snapshot stays valid");
+    }
+
+    fn acknowledge_presented_frame(&mut self) {
+        let presented = self.video_surface.presented_frame();
+        if presented.count == self.core_presented_count {
+            return;
+        }
+        self.core_presented_count = presented.count;
+        if let Err(error) = self
+            .core
+            .present_frame(presented.generation, presented.source_sequence)
+        {
+            self.status = format!("portable core rejected presented frame: {error}");
+        }
+        self.refresh();
     }
 
     fn send(&mut self, action: SessionAction) {
@@ -507,81 +524,39 @@ impl SurfDesktop {
     }
 
     fn apply_control(&mut self, event: WireEvent) {
-        let mapped = match event {
+        if let Err(error) = self.core.dispatch_wire_event(&event) {
+            self.status = format!("Rejected control event: {error}");
+            return;
+        }
+        match event {
             WireEvent::Clock { c0, s1, s2 } => {
                 if self.clock_sync.consume(c0, s1, s2, monotonic_ns())
                     && let Some(media) = &self.media
                 {
                     media.set_clock_offset(self.clock_sync.server_minus_client_ns());
                 }
-                None
             }
-            WireEvent::Tabs { tabs } => Some(CoreEvent::Tabs(
-                tabs.into_iter()
-                    .map(|tab| Tab {
-                        id: i64::from(tab.id),
-                        title: tab.title,
-                        url: tab.url,
-                        icon: tab.icon,
-                        active: tab.active,
-                    })
-                    .collect(),
-            )),
-            WireEvent::Url {
-                url,
-                starred,
-                security,
-            } => {
+            WireEvent::Url { url, .. } => {
                 if !self.address_focused {
                     self.address.clone_from(&url);
                 }
-                Some(CoreEvent::Url {
-                    url,
-                    security,
-                    starred,
-                })
             }
-            WireEvent::HistoryState { back, fwd } => Some(CoreEvent::History {
-                can_go_back: back,
-                can_go_forward: fwd,
-            }),
-            WireEvent::Loading { on } => Some(CoreEvent::Loading(on)),
-            WireEvent::Editable {
-                on,
-                show_keyboard,
-                kind,
-                rect,
-            } => Some(CoreEvent::Editable {
-                on,
-                show_keyboard,
-                kind,
-                rect: rect.as_slice().try_into().ok(),
-            }),
-            WireEvent::Fullscreen { on } => Some(CoreEvent::Fullscreen(on)),
-            WireEvent::Security { state } => Some(CoreEvent::Security(state)),
-            WireEvent::Starred { on } => Some(CoreEvent::Starred(on)),
-            WireEvent::PageFrame { source_seq } => Some(CoreEvent::PageFrame(source_seq)),
             WireEvent::Hello { vw, vh } => {
                 self.remote_viewport = Some((vw, vh));
-                None
             }
             WireEvent::VideoConfig { state, reason, .. } => {
                 if state != "ready" && !reason.is_empty() {
                     self.status = format!("Video: {reason}");
                 }
-                None
             }
             WireEvent::AudioConfig { ok, .. } => {
                 self.audio_available = ok;
-                None
             }
             WireEvent::Found { on } => {
                 self.browser.find_found = Some(on);
-                None
             }
             WireEvent::Toast { text } => {
                 self.browser.toast(text);
-                None
             }
             WireEvent::Download { name } => {
                 let destination = default_download_path(&name);
@@ -590,32 +565,24 @@ impl SurfDesktop {
                     destination,
                 });
                 self.browser.pending_downloads.push(name);
-                None
             }
             WireEvent::DownloadProgress { name, pct } => {
                 self.browser.download_progress.insert(name, pct);
-                None
             }
             WireEvent::Suggest { items } => {
                 self.browser.suggestions = items;
-                None
             }
             WireEvent::Library {
-                hist,
-                bookmarks,
-                starred,
+                hist, bookmarks, ..
             } => {
                 self.browser.history = hist;
                 self.browser.bookmarks = bookmarks;
-                Some(CoreEvent::Starred(starred))
             }
             WireEvent::History { items, .. } => {
                 self.browser.history = items;
-                None
             }
             WireEvent::Downloads { items } => {
                 self.browser.downloads = items;
-                None
             }
             WireEvent::Dialog {
                 kind,
@@ -627,34 +594,19 @@ impl SurfDesktop {
                     text,
                     input: default,
                 });
-                None
             }
             WireEvent::DialogDone => {
                 self.browser.dialog = None;
-                None
             }
             WireEvent::FileChooser { multiple } => {
                 self.browser.upload_multiple = Some(multiple);
                 self.browser.upload_paths.clear();
-                None
             }
-            WireEvent::PageError {
-                url,
-                starred,
-                security,
-            } => {
+            WireEvent::PageError { url, .. } => {
                 self.browser.page_error = Some(url.clone());
                 if !self.address_focused {
                     self.address.clone_from(&url);
                 }
-                if let Err(error) = self.core.dispatch(&CoreEvent::Starred(starred)) {
-                    self.status = error.to_string();
-                }
-                Some(CoreEvent::Url {
-                    url,
-                    security,
-                    starred,
-                })
             }
             WireEvent::Reader {
                 ok,
@@ -673,7 +625,6 @@ impl SurfDesktop {
                     self.browser
                         .toast("Reader mode is not available for this page");
                 }
-                None
             }
             WireEvent::Select {
                 id,
@@ -683,7 +634,6 @@ impl SurfDesktop {
                 ..
             } => {
                 self.browser.open_select(id, title, multiple, options);
-                None
             }
             WireEvent::MediaState {
                 available,
@@ -705,11 +655,9 @@ impl SurfDesktop {
                     duration,
                     title,
                 };
-                None
             }
             WireEvent::Clipboard { id, text, .. } => {
                 self.browser.pending_clipboard = Some((id, text));
-                None
             }
             WireEvent::ClipboardSync {
                 enabled,
@@ -722,7 +670,6 @@ impl SurfDesktop {
                 if enabled && known {
                     self.browser.pending_clipboard = Some((String::new(), text));
                 }
-                None
             }
             WireEvent::LogRequest => {
                 self.send_command(Command::LogRecord {
@@ -734,21 +681,22 @@ impl SurfDesktop {
                     }),
                     causal: Causal::default(),
                 });
-                None
             }
             WireEvent::LogClear => {
                 self.send_command(Command::LogCleared {
                     causal: Causal::default(),
                 });
-                None
             }
-        };
-        if let Some(event) = mapped {
-            if let Err(error) = self.core.dispatch(&event) {
-                self.status = format!("portable core rejected server state: {error}");
-            }
-            self.refresh();
+            WireEvent::Tabs { .. }
+            | WireEvent::HistoryState { .. }
+            | WireEvent::Loading { .. }
+            | WireEvent::Editable { .. }
+            | WireEvent::Fullscreen { .. }
+            | WireEvent::Security { .. }
+            | WireEvent::Starred { .. }
+            | WireEvent::PageFrame { .. } => {}
         }
+        self.refresh();
     }
 
     fn update_diagnostics(&mut self) {
@@ -1883,6 +1831,7 @@ impl SurfDesktop {
                 text: if accept { prompt.input } else { String::new() },
                 causal: Causal::default(),
             });
+            let _ = self.core.complete_semantic(SemanticCompletion::Dialog);
             self.browser.dialog = None;
         } else {
             self.browser.dialog = Some(prompt);
@@ -1947,6 +1896,7 @@ impl SurfDesktop {
                 indices,
                 causal: Causal::default(),
             });
+            let _ = self.core.complete_semantic(SemanticCompletion::Select);
             self.browser.select = None;
         } else {
             self.browser.select = Some(prompt);
@@ -1996,10 +1946,12 @@ impl SurfDesktop {
                 self.browser.toast("Choose an existing local file");
             } else {
                 self.send(SessionAction::Upload(paths));
+                let _ = self.core.complete_semantic(SemanticCompletion::FileChooser);
                 self.browser.upload_multiple = None;
             }
         } else if cancel {
             self.send(SessionAction::CancelUpload);
+            let _ = self.core.complete_semantic(SemanticCompletion::FileChooser);
             self.browser.upload_multiple = None;
         }
     }
@@ -2334,6 +2286,7 @@ impl eframe::App for SurfDesktop {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let context = ui.ctx().clone();
         self.drain_session();
+        self.acknowledge_presented_frame();
         if let Some((request_id, text)) = self.browser.pending_clipboard.take() {
             context.copy_text(text);
             if !request_id.is_empty() {
@@ -2343,8 +2296,11 @@ impl eframe::App for SurfDesktop {
                     causal: Causal::default(),
                 });
             }
+            let _ = self.core.complete_semantic(SemanticCompletion::Clipboard);
         }
-        self.browser.prune();
+        if self.browser.prune() {
+            let _ = self.core.complete_semantic(SemanticCompletion::Toast);
+        }
         self.update_diagnostics();
         self.handle_shortcuts(&context);
         let title = self.snapshot.active_title.trim();

@@ -770,9 +770,66 @@ pub struct Snapshot {
     pub awaiting_page_frame: bool,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct SemanticSnapshot {
+    pub revision: u64,
+    pub dialog_kind: String,
+    pub dialog_text: String,
+    pub dialog_default_text: String,
+    pub select_id: String,
+    pub select_title: String,
+    pub clipboard_id: String,
+    pub clipboard_text: String,
+    pub reader_title: String,
+    pub reader_url: String,
+    pub media_title: String,
+    pub page_error: String,
+    pub toast_text: String,
+    pub download_name: String,
+    pub history_query: String,
+    pub select_option_count: usize,
+    pub suggestion_count: usize,
+    pub history_count: usize,
+    pub bookmark_count: usize,
+    pub download_count: usize,
+    pub history_offset: i32,
+    pub history_total: i32,
+    pub download_percent: i32,
+    pub media_count: i32,
+    pub media_volume: f64,
+    pub media_current_time: f64,
+    pub media_duration: f64,
+    pub dialog_active: bool,
+    pub select_active: bool,
+    pub select_multiple: bool,
+    pub file_chooser_active: bool,
+    pub file_chooser_multiple: bool,
+    pub find_found: Option<bool>,
+    pub clipboard_pending: bool,
+    pub clipboard_sync_request: bool,
+    pub clipboard_sync_enabled: bool,
+    pub clipboard_known: bool,
+    pub reader_available: bool,
+    pub media_available: bool,
+    pub media_paused: bool,
+    pub media_muted: bool,
+    pub video_generation: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SemanticCompletion {
+    Dialog,
+    Select,
+    FileChooser,
+    Clipboard,
+    Toast,
+}
+
 pub struct Core {
     raw: NonNull<sys::surf_core_t>,
     connection_generation: u64,
+    _protocol_memory: Vec<usize>,
+    protocol_workspace: NonNull<sys::surf_protocol_workspace_t>,
     _single_owner: PhantomData<Rc<()>>,
 }
 
@@ -789,9 +846,37 @@ impl Core {
             code: -1,
             message: "core returned a null handle".to_owned(),
         })?;
+        let protocol_size = unsafe { sys::surf_protocol_workspace_size(ptr::null()) };
+        let word_size = std::mem::size_of::<usize>();
+        let word_count = protocol_size
+            .checked_add(word_size - 1)
+            .ok_or_else(|| Error::invariant("protocol workspace size overflow"))?
+            / word_size;
+        let mut protocol_memory = vec![0_usize; word_count];
+        let mut protocol_workspace = ptr::null_mut();
+        let protocol_result = unsafe {
+            sys::surf_protocol_workspace_init(
+                &mut protocol_workspace,
+                protocol_memory.as_mut_ptr().cast(),
+                protocol_memory.len() * word_size,
+                ptr::null(),
+            )
+        };
+        if protocol_result != sys::SURF_PROTOCOL_OK {
+            unsafe { sys::surf_core_destroy(raw.as_ptr()) };
+            return Err(Error::invariant(
+                "portable protocol workspace initialization failed",
+            ));
+        }
+        let Some(protocol_workspace) = NonNull::new(protocol_workspace) else {
+            unsafe { sys::surf_core_destroy(raw.as_ptr()) };
+            return Err(Error::invariant("protocol workspace returned null"));
+        };
         Ok(Self {
             raw,
             connection_generation: 1,
+            _protocol_memory: protocol_memory,
+            protocol_workspace,
             _single_owner: PhantomData,
         })
     }
@@ -812,6 +897,53 @@ impl Core {
 
     pub fn stale_event_count(&self) -> u64 {
         unsafe { sys::surf_core_stale_event_count(self.raw.as_ptr()) }
+    }
+
+    pub fn dispatch_wire_event(&mut self, event: &surf_protocol::Event) -> Result<(), Error> {
+        let json = event
+            .encode()
+            .map_err(|error| Error::invariant(&format!("control event encode failed: {error}")))?;
+        check(unsafe {
+            sys::surf_core_dispatch_protocol_json(
+                self.raw.as_ptr(),
+                self.connection_generation,
+                self.protocol_workspace.as_ptr(),
+                json.as_ptr().cast(),
+                json.len(),
+            )
+        })
+    }
+
+    pub fn present_frame(
+        &mut self,
+        video_generation: u32,
+        source_sequence: u32,
+    ) -> Result<(), Error> {
+        check(unsafe {
+            sys::surf_core_present_frame(
+                self.raw.as_ptr(),
+                self.connection_generation,
+                video_generation,
+                source_sequence,
+            )
+        })
+    }
+
+    pub fn complete_semantic(&mut self, completion: SemanticCompletion) -> Result<(), Error> {
+        let completion = match completion {
+            SemanticCompletion::Dialog => sys::SURF_SEMANTIC_COMPLETE_DIALOG,
+            SemanticCompletion::Select => sys::SURF_SEMANTIC_COMPLETE_SELECT,
+            SemanticCompletion::FileChooser => sys::SURF_SEMANTIC_COMPLETE_FILE_CHOOSER,
+            SemanticCompletion::Clipboard => sys::SURF_SEMANTIC_COMPLETE_CLIPBOARD,
+            SemanticCompletion::Toast => sys::SURF_SEMANTIC_COMPLETE_TOAST,
+        };
+        check(unsafe {
+            sys::surf_core_complete_semantic(
+                self.raw.as_ptr(),
+                self.connection_generation,
+                completion,
+            )
+        })
     }
 
     pub fn dispatch(&mut self, event: &Event) -> Result<Vec<Effect>, Error> {
@@ -1005,6 +1137,56 @@ impl Core {
         })
     }
 
+    pub fn semantic_snapshot(&self) -> Result<SemanticSnapshot, Error> {
+        let mut raw = std::mem::MaybeUninit::<sys::surf_semantic_snapshot_t>::uninit();
+        check(unsafe { sys::surf_core_semantic_snapshot(self.raw.as_ptr(), raw.as_mut_ptr()) })?;
+        let raw = unsafe { raw.assume_init() };
+        Ok(SemanticSnapshot {
+            revision: raw.revision,
+            dialog_kind: owned_string(raw.dialog_kind)?,
+            dialog_text: owned_string(raw.dialog_text)?,
+            dialog_default_text: owned_string(raw.dialog_default_text)?,
+            select_id: owned_string(raw.select_id)?,
+            select_title: owned_string(raw.select_title)?,
+            clipboard_id: owned_string(raw.clipboard_id)?,
+            clipboard_text: owned_string(raw.clipboard_text)?,
+            reader_title: owned_string(raw.reader_title)?,
+            reader_url: owned_string(raw.reader_url)?,
+            media_title: owned_string(raw.media_title)?,
+            page_error: owned_string(raw.page_error)?,
+            toast_text: owned_string(raw.toast_text)?,
+            download_name: owned_string(raw.download_name)?,
+            history_query: owned_string(raw.history_query)?,
+            select_option_count: raw.select_option_count,
+            suggestion_count: raw.suggestion_count,
+            history_count: raw.history_count,
+            bookmark_count: raw.bookmark_count,
+            download_count: raw.download_count,
+            history_offset: raw.history_offset,
+            history_total: raw.history_total,
+            download_percent: raw.download_percent,
+            media_count: raw.media_count,
+            media_volume: raw.media_volume,
+            media_current_time: raw.media_current_time,
+            media_duration: raw.media_duration,
+            dialog_active: raw.dialog_active != 0,
+            select_active: raw.select_active != 0,
+            select_multiple: raw.select_multiple != 0,
+            file_chooser_active: raw.file_chooser_active != 0,
+            file_chooser_multiple: raw.file_chooser_multiple != 0,
+            find_found: (raw.find_known != 0).then_some(raw.find_found != 0),
+            clipboard_pending: raw.clipboard_pending != 0,
+            clipboard_sync_request: raw.clipboard_sync_request != 0,
+            clipboard_sync_enabled: raw.clipboard_sync_enabled != 0,
+            clipboard_known: raw.clipboard_known != 0,
+            reader_available: raw.reader_available != 0,
+            media_available: raw.media_available != 0,
+            media_paused: raw.media_paused != 0,
+            media_muted: raw.media_muted != 0,
+            video_generation: raw.video_generation,
+        })
+    }
+
     fn drain_effects(&mut self) -> Vec<Effect> {
         let mut effects = Vec::new();
         loop {
@@ -1124,6 +1306,35 @@ mod tests {
         assert!(snapshot.tabs.is_empty());
         assert_eq!(core.connection_generation(), 2);
         assert_eq!(core.stale_event_count(), 0);
+    }
+
+    #[test]
+    fn typed_wire_events_drive_shared_semantic_state() {
+        let mut core = Core::new().unwrap();
+        core.dispatch_wire_event(&surf_protocol::Event::Dialog {
+            kind: "prompt".to_owned(),
+            text: "Your name?".to_owned(),
+            default: "Surf".to_owned(),
+        })
+        .unwrap();
+        core.dispatch_wire_event(&surf_protocol::Event::MediaState {
+            available: true,
+            count: 1,
+            paused: false,
+            muted: false,
+            volume: 0.75,
+            current_time: 3.0,
+            duration: 42.0,
+            title: "Player".to_owned(),
+        })
+        .unwrap();
+        let semantic = core.semantic_snapshot().unwrap();
+        assert!(semantic.dialog_active && semantic.media_available);
+        assert_eq!(semantic.dialog_text, "Your name?");
+        assert_eq!(semantic.media_title, "Player");
+        assert_eq!(semantic.media_volume, 0.75);
+        core.complete_semantic(SemanticCompletion::Dialog).unwrap();
+        assert!(!core.semantic_snapshot().unwrap().dialog_active);
     }
 
     #[test]

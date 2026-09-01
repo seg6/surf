@@ -139,6 +139,7 @@ static NSString *RBStringFromCore(surf_string_view_t value) {
 
 - (BOOL)consumeControlData:(NSData *)data message:(NSDictionary *)message
                      error:(NSError **)error {
+    (void)message;
     surf_protocol_event_t protocolEvent;
     surf_protocol_result_t decode = surf_protocol_decode_event(
         _protocolWorkspace, [data bytes], [data length], &protocolEvent);
@@ -153,65 +154,29 @@ static NSString *RBStringFromCore(surf_string_view_t value) {
         // data is considered handled so UIKit never falls back to it.
         return YES;
     }
-    NSString *type = [message objectForKey:@"t"];
-    if (![type isKindOfClass:[NSString class]]) return NO;
-    surf_event_t event;
-    memset(&event, 0, sizeof(event));
-
-    if (protocolEvent.kind == SURF_PROTOCOL_EVENT_TABS) {
-        event.kind = SURF_EVENT_TABS;
-        event.data.tabs.items = protocolEvent.data.tabs.items;
-        event.data.tabs.count = protocolEvent.data.tabs.count;
-        [self dispatchEvent:&event error:error];
+    surf_core_result_t result = surf_core_dispatch_protocol(
+        _core, _connectionGeneration, &protocolEvent);
+    if (result != SURF_CORE_OK) {
+        if (error) {
+            NSString *reason = [NSString stringWithUTF8String:
+                surf_core_result_string(result)] ?: @"Portable client error";
+            *error = [NSError errorWithDomain:RBCoreBridgeErrorDomain code:result
+                userInfo:@{NSLocalizedDescriptionKey: reason}];
+        }
         return YES;
     }
-    if (protocolEvent.kind == SURF_PROTOCOL_EVENT_URL) {
-        event.kind = SURF_EVENT_URL;
-        event.data.url.url = protocolEvent.data.url.url;
-        event.data.url.security = protocolEvent.data.url.security;
-        event.data.url.starred = protocolEvent.data.url.starred;
-    } else if (protocolEvent.kind == SURF_PROTOCOL_EVENT_HISTORY_STATE) {
-        event.kind = SURF_EVENT_HISTORY_STATE;
-        event.data.history.can_go_back = protocolEvent.data.history_state.back;
-        event.data.history.can_go_forward = protocolEvent.data.history_state.forward;
-    } else if (protocolEvent.kind == SURF_PROTOCOL_EVENT_LOADING) {
-        event.kind = SURF_EVENT_LOADING;
-        event.data.boolean.on = protocolEvent.data.boolean.on;
-    } else if (protocolEvent.kind == SURF_PROTOCOL_EVENT_EDITABLE) {
-        event.kind = SURF_EVENT_EDITABLE;
-        event.data.editable.on = protocolEvent.data.editable.on;
-        event.data.editable.show_keyboard =
-            protocolEvent.data.editable.show_keyboard;
-        event.data.editable.kind = protocolEvent.data.editable.kind;
-        event.data.editable.has_rect = protocolEvent.data.editable.has_rect;
-        memcpy(event.data.editable.rect, protocolEvent.data.editable.rect,
-               sizeof(event.data.editable.rect));
-    } else if (protocolEvent.kind == SURF_PROTOCOL_EVENT_FULLSCREEN) {
-        event.kind = SURF_EVENT_FULLSCREEN;
-        event.data.boolean.on = protocolEvent.data.boolean.on;
-    } else if (protocolEvent.kind == SURF_PROTOCOL_EVENT_SECURITY) {
-        event.kind = SURF_EVENT_SECURITY;
-        event.data.security.state = protocolEvent.data.security.state;
-    } else if (protocolEvent.kind == SURF_PROTOCOL_EVENT_STARRED) {
-        event.kind = SURF_EVENT_STARRED;
-        event.data.boolean.on = protocolEvent.data.boolean.on;
-    } else if (protocolEvent.kind == SURF_PROTOCOL_EVENT_PAGE_FRAME) {
-        event.kind = SURF_EVENT_PAGE_FRAME;
-        event.data.page_frame.source_sequence =
-            protocolEvent.data.page_frame.source_sequence;
-    } else {
-        return NO;
-    }
-    [self dispatchEvent:&event error:error];
+    surf_effect_t effect;
+    while (surf_core_next_effect(_core, &effect))
+        [self.pendingEffects addObject:@((NSInteger)effect.kind)];
+    [self refreshSnapshot];
     return YES;
 }
 
-- (void)notePresentedSourceSequence:(unsigned int)sourceSequence {
-    surf_event_t event;
-    memset(&event, 0, sizeof(event));
-    event.kind = SURF_EVENT_FRAME_PRESENTED;
-    event.data.frame_presented.source_sequence = sourceSequence;
-    [self dispatchEvent:&event error:nil];
+- (void)notePresentedSourceSequence:(unsigned int)sourceSequence
+                    videoGeneration:(unsigned int)videoGeneration {
+    if (surf_core_present_frame(_core, _connectionGeneration, videoGeneration,
+                                sourceSequence) == SURF_CORE_OK)
+        [self refreshSnapshot];
 }
 
 - (void)noteKeyboardVisible:(BOOL)visible {
@@ -220,6 +185,32 @@ static NSString *RBStringFromCore(surf_string_view_t value) {
     event.kind = SURF_EVENT_KEYBOARD_VISIBILITY;
     event.data.boolean.on = visible;
     [self dispatchEvent:&event error:nil];
+}
+
+- (void)completeSemantic:(surf_semantic_completion_t)completion {
+    if (surf_core_complete_semantic(_core, _connectionGeneration, completion) ==
+        SURF_CORE_OK)
+        [self refreshSnapshot];
+}
+
+- (void)noteDialogCompleted {
+    [self completeSemantic:SURF_SEMANTIC_COMPLETE_DIALOG];
+}
+
+- (void)noteSelectCompleted {
+    [self completeSemantic:SURF_SEMANTIC_COMPLETE_SELECT];
+}
+
+- (void)noteFileChooserCompleted {
+    [self completeSemantic:SURF_SEMANTIC_COMPLETE_FILE_CHOOSER];
+}
+
+- (void)noteClipboardCompleted {
+    [self completeSemantic:SURF_SEMANTIC_COMPLETE_CLIPBOARD];
+}
+
+- (void)noteToastCompleted {
+    [self completeSemantic:SURF_SEMANTIC_COMPLETE_TOAST];
 }
 
 - (void)reset {

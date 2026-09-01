@@ -127,14 +127,16 @@ impl BrowserUi {
         });
     }
 
-    pub fn prune(&mut self) {
+    pub fn prune(&mut self) -> bool {
         if self
             .toast
             .as_ref()
             .is_some_and(|toast| toast.expires <= Instant::now())
         {
             self.toast = None;
+            return true;
         }
+        false
     }
 
     pub fn open_select(

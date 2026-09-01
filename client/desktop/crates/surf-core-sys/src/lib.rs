@@ -4,6 +4,7 @@ use std::ffi::{c_char, c_int, c_void};
 
 pub const SURF_CORE_ABI_VERSION: u32 = 1;
 pub const SURF_CORE_OK: c_int = 0;
+pub const SURF_PROTOCOL_OK: c_int = 0;
 pub const SURF_FRAME_OK: c_int = 0;
 pub const SURF_RECONNECT_STOP: c_int = 0;
 pub const SURF_RECONNECT_RETRY: c_int = 1;
@@ -28,9 +29,19 @@ pub const SURF_EVENT_STARRED: c_int = 9;
 pub const SURF_EVENT_PAGE_FRAME: c_int = 10;
 pub const SURF_EVENT_FRAME_PRESENTED: c_int = 11;
 pub const SURF_EVENT_KEYBOARD_VISIBILITY: c_int = 12;
+pub const SURF_SEMANTIC_COMPLETE_DIALOG: c_int = 1;
+pub const SURF_SEMANTIC_COMPLETE_SELECT: c_int = 2;
+pub const SURF_SEMANTIC_COMPLETE_FILE_CHOOSER: c_int = 3;
+pub const SURF_SEMANTIC_COMPLETE_CLIPBOARD: c_int = 4;
+pub const SURF_SEMANTIC_COMPLETE_TOAST: c_int = 5;
 
 #[repr(C)]
 pub struct surf_core_t {
+    _private: [u8; 0],
+}
+
+#[repr(C)]
+pub struct surf_protocol_workspace_t {
     _private: [u8; 0],
 }
 
@@ -182,6 +193,54 @@ pub struct surf_snapshot_t {
     pub editable_has_rect: c_int,
     pub keyboard_visible: c_int,
     pub awaiting_page_frame: c_int,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct surf_semantic_snapshot_t {
+    pub revision: u64,
+    pub dialog_kind: surf_string_view_t,
+    pub dialog_text: surf_string_view_t,
+    pub dialog_default_text: surf_string_view_t,
+    pub select_id: surf_string_view_t,
+    pub select_title: surf_string_view_t,
+    pub clipboard_id: surf_string_view_t,
+    pub clipboard_text: surf_string_view_t,
+    pub reader_title: surf_string_view_t,
+    pub reader_url: surf_string_view_t,
+    pub media_title: surf_string_view_t,
+    pub page_error: surf_string_view_t,
+    pub toast_text: surf_string_view_t,
+    pub download_name: surf_string_view_t,
+    pub history_query: surf_string_view_t,
+    pub select_option_count: usize,
+    pub suggestion_count: usize,
+    pub history_count: usize,
+    pub bookmark_count: usize,
+    pub download_count: usize,
+    pub history_offset: i32,
+    pub history_total: i32,
+    pub download_percent: i32,
+    pub media_count: i32,
+    pub media_volume: f64,
+    pub media_current_time: f64,
+    pub media_duration: f64,
+    pub dialog_active: c_int,
+    pub select_active: c_int,
+    pub select_multiple: c_int,
+    pub file_chooser_active: c_int,
+    pub file_chooser_multiple: c_int,
+    pub find_known: c_int,
+    pub find_found: c_int,
+    pub clipboard_pending: c_int,
+    pub clipboard_sync_request: c_int,
+    pub clipboard_sync_enabled: c_int,
+    pub clipboard_known: c_int,
+    pub reader_available: c_int,
+    pub media_available: c_int,
+    pub media_paused: c_int,
+    pub media_muted: c_int,
+    pub video_generation: u32,
 }
 
 #[repr(C)]
@@ -361,10 +420,32 @@ unsafe extern "C" {
         generation: u64,
         event: *const surf_event_t,
     ) -> c_int;
+    pub fn surf_core_dispatch_protocol_json(
+        core: *mut surf_core_t,
+        generation: u64,
+        workspace: *mut surf_protocol_workspace_t,
+        json: *const c_char,
+        length: usize,
+    ) -> c_int;
+    pub fn surf_core_present_frame(
+        core: *mut surf_core_t,
+        connection_generation: u64,
+        video_generation: u32,
+        source_sequence: u32,
+    ) -> c_int;
+    pub fn surf_core_complete_semantic(
+        core: *mut surf_core_t,
+        generation: u64,
+        completion: c_int,
+    ) -> c_int;
     pub fn surf_core_dispatch(core: *mut surf_core_t, event: *const surf_event_t) -> c_int;
     pub fn surf_core_snapshot(
         core: *const surf_core_t,
         out_snapshot: *mut surf_snapshot_t,
+    ) -> c_int;
+    pub fn surf_core_semantic_snapshot(
+        core: *const surf_core_t,
+        out_snapshot: *mut surf_semantic_snapshot_t,
     ) -> c_int;
     pub fn surf_core_next_effect(core: *mut surf_core_t, out_effect: *mut surf_effect_t) -> c_int;
     pub fn surf_core_connection_generation(core: *const surf_core_t) -> u64;
@@ -375,6 +456,14 @@ unsafe extern "C" {
     pub fn surf_core_sizeof_config() -> usize;
     pub fn surf_core_sizeof_event() -> usize;
     pub fn surf_core_sizeof_snapshot() -> usize;
+    pub fn surf_core_sizeof_semantic_snapshot() -> usize;
+    pub fn surf_protocol_workspace_size(config: *const c_void) -> usize;
+    pub fn surf_protocol_workspace_init(
+        out_workspace: *mut *mut surf_protocol_workspace_t,
+        memory: *mut c_void,
+        memory_size: usize,
+        config: *const c_void,
+    ) -> c_int;
     pub fn surf_frame_parse(
         data: *const u8,
         length: usize,
@@ -483,6 +572,10 @@ mod tests {
             assert_eq!(surf_core_sizeof_config(), size_of::<surf_core_config_t>());
             assert_eq!(surf_core_sizeof_event(), size_of::<surf_event_t>());
             assert_eq!(surf_core_sizeof_snapshot(), size_of::<surf_snapshot_t>());
+            assert_eq!(
+                surf_core_sizeof_semantic_snapshot(),
+                size_of::<surf_semantic_snapshot_t>()
+            );
             assert_eq!(surf_frame_sizeof_view(), size_of::<surf_frame_view_t>());
             assert_eq!(
                 surf_reconnect_policy_sizeof(),
