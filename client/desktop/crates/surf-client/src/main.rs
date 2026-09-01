@@ -63,7 +63,8 @@ fn run() -> Result<(), Box<dyn Error>> {
                     .create_context(&config, &fallback_attributes)
             })?
     };
-    let initial = nonzero_size(window.inner_size());
+    let mut surface_size = window.inner_size();
+    let initial = nonzero_size(surface_size);
     let surface_attributes = SurfaceAttributesBuilder::<WindowSurface>::new()
         .with_srgb(Some(true))
         .build(raw_window, initial.0, initial.1);
@@ -117,11 +118,24 @@ fn run() -> Result<(), Box<dyn Error>> {
             }
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => target.exit(),
-                WindowEvent::Resized(size) => resize_surface(&surface, &gl_context, size),
+                WindowEvent::Resized(size) => {
+                    resize_surface(&surface, &gl_context, size);
+                    surface_size = size;
+                }
                 WindowEvent::ScaleFactorChanged { .. } => {
-                    resize_surface(&surface, &gl_context, window.inner_size());
+                    surface_size = window.inner_size();
+                    resize_surface(&surface, &gl_context, surface_size);
                 }
                 WindowEvent::RedrawRequested => {
+                    // Some window systems apply request_inner_size synchronously and
+                    // intentionally emit no Resized event. Keep both ImGui and the GL
+                    // swapchain tied to Winit's actual inner size on every frame.
+                    let actual_size = window.inner_size();
+                    if actual_size != surface_size {
+                        resize_surface(&surface, &gl_context, actual_size);
+                        surface_size = actual_size;
+                    }
+                    sync_imgui_display_size(imgui.io_mut(), surface_size, window.scale_factor());
                     if let Err(error) = platform.prepare_frame(imgui.io_mut(), &window) {
                         app.report_host_error(format!("window input: {error}"));
                     }
@@ -133,6 +147,32 @@ fn run() -> Result<(), Box<dyn Error>> {
                     app.draw(frame, &window);
                     platform.prepare_render(frame, &window);
                     let draw_data = imgui.render();
+
+                    // A device preset can synchronously resize the window from
+                    // inside app.draw. Rendering draw data built for the old size
+                    // would make the compositor stretch the complete UI. Resize and
+                    // present a clean frame; the next redraw rebuilds ImGui exactly.
+                    let size_after_draw = window.inner_size();
+                    if size_after_draw != surface_size {
+                        resize_surface(&surface, &gl_context, size_after_draw);
+                        surface_size = size_after_draw;
+                        // SAFETY: this thread owns the current context and framebuffer.
+                        unsafe {
+                            shared_gl.viewport(
+                                0,
+                                0,
+                                i32::try_from(surface_size.width).unwrap_or(i32::MAX),
+                                i32::try_from(surface_size.height).unwrap_or(i32::MAX),
+                            );
+                            shared_gl.clear_color(0.063, 0.071, 0.078, 1.0);
+                            shared_gl.clear(glow::COLOR_BUFFER_BIT);
+                        }
+                        if let Err(error) = surface.swap_buffers(&gl_context) {
+                            app.report_host_error(format!("swap buffers: {error}"));
+                        }
+                        window.request_redraw();
+                        return;
+                    }
 
                     // SAFETY: this thread owns the current context and default framebuffer.
                     unsafe {
@@ -182,6 +222,11 @@ fn resize_surface(
 ) {
     let (width, height) = nonzero_size(size);
     surface.resize(context, width, height);
+}
+
+fn sync_imgui_display_size(io: &mut imgui::Io, size: PhysicalSize<u32>, scale_factor: f64) {
+    let logical = size.to_logical::<f64>(scale_factor);
+    io.display_size = [logical.width as f32, logical.height as f32];
 }
 
 fn nonzero_size(size: PhysicalSize<u32>) -> (NonZeroU32, NonZeroU32) {

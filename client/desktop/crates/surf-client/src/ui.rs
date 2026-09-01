@@ -23,7 +23,7 @@ const BAR_HEIGHT: f32 = 32.0;
 const PANEL_TOP: f32 = BAR_HEIGHT + 4.0;
 const PANEL_WIDTH: f32 = 330.0;
 const VIEWPORT_SETTLE: Duration = Duration::from_millis(120);
-const WINDOW_RESIZE_TIMEOUT: Duration = Duration::from_millis(900);
+const WINDOW_RESIZE_TIMEOUT: Duration = Duration::from_secs(4);
 const SURF_VERSION: &str = include_str!("../../../../../VERSION");
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -175,6 +175,7 @@ struct WindowSizeRequest {
 struct PendingWindowSize {
     request: WindowSizeRequest,
     started: Instant,
+    viewport: Option<(i32, i32)>,
 }
 
 impl SmokeState {
@@ -351,7 +352,9 @@ impl DesktopApp {
         };
         if connected {
             self.draw_chrome(ui);
-            self.update_viewport(window.scale_factor());
+            if self.pending_window_size.is_none() {
+                self.update_viewport(window.scale_factor());
+            }
         } else {
             self.viewport_candidate = None;
             self.viewport_committed = None;
@@ -1101,6 +1104,15 @@ impl DesktopApp {
                     "Current client area: {:.0} x {:.0} pt",
                     display[0], display[1]
                 ));
+                if let Some(pending) = &self.pending_window_size {
+                    if let Some((width, height)) = pending.viewport {
+                        ui.text_disabled(format!("Applying browser: {width} x {height} px…"));
+                    } else {
+                        ui.text_disabled("Applying window size…");
+                    }
+                } else if let Some((width, height)) = self.controller.video_dimensions {
+                    ui.text_disabled(format!("Browser video: {width} x {height} px"));
+                }
                 ui.separator();
                 ui.text_disabled("APPEARANCE");
                 let mut dark = self.controller.dark_mode;
@@ -2004,48 +2016,67 @@ impl DesktopApp {
                 self.pending_window_size = Some(PendingWindowSize {
                     request,
                     started: Instant::now(),
+                    viewport: None,
                 });
             }
         }
 
         let current = logical_window_size(window);
-        let result = self.pending_window_size.as_ref().and_then(|pending| {
-            if window_size_matches(current, pending.request.size) {
-                Some((
-                    Some(pending.request),
-                    format!(
-                        "{}: {} x {} pt",
-                        pending.request.label, pending.request.size[0], pending.request.size[1]
-                    ),
-                ))
-            } else if pending.started.elapsed() >= WINDOW_RESIZE_TIMEOUT {
-                Some((
-                    None,
-                    format!(
-                        "Window manager kept {} x {} pt; float the window and apply again",
-                        current[0], current[1]
-                    ),
-                ))
-            } else {
-                None
-            }
+        let viewport_to_send = self.pending_window_size.as_ref().and_then(|pending| {
+            (pending.viewport.is_none()
+                && window_size_matches(current, pending.request.size)
+                && self.controller.connected)
+                .then(|| viewport_for_window(current, window.scale_factor()))
         });
-        if let Some((applied, message)) = result {
-            self.pending_window_size = None;
-            if applied.is_some() && self.controller.connected {
-                // Applying a device preset is one transaction: resize the host,
-                // then explicitly commit the browser viewport beneath its chrome.
-                // A static page must not remain on the previous video generation.
-                let candidate = viewport_for_window(current, window.scale_factor());
-                self.viewport_candidate = Some(candidate);
-                self.viewport_candidate_since = Instant::now();
-                let changed = self.controller.set_viewport(candidate.0, candidate.1);
-                self.viewport_committed = Some(candidate);
-                if changed {
-                    self.video.clear();
-                    self.page_input.reset();
-                }
+        if let Some(candidate) = viewport_to_send
+            && let Some(viewport) = self.controller.force_viewport(candidate.0, candidate.1)
+        {
+            self.viewport_candidate = Some(viewport);
+            self.viewport_candidate_since = Instant::now();
+            self.viewport_committed = Some(viewport);
+            self.video.clear();
+            self.page_input.reset();
+            if let Some(pending) = &mut self.pending_window_size {
+                pending.viewport = Some(viewport);
+                pending.started = Instant::now();
             }
+        }
+
+        let result = self.pending_window_size.as_ref().and_then(|pending| {
+            if let Some(viewport) = pending.viewport {
+                let video_ready = self.controller.video_dimensions == Some(viewport)
+                    && self.controller.last_frame_dimensions
+                        == Some((viewport.0 as u32, viewport.1 as u32));
+                if video_ready {
+                    return Some(format!(
+                        "{}: window {} x {} pt, browser {} x {} px",
+                        pending.request.label,
+                        pending.request.size[0],
+                        pending.request.size[1],
+                        viewport.0,
+                        viewport.1
+                    ));
+                }
+                if pending.started.elapsed() >= WINDOW_RESIZE_TIMEOUT {
+                    let video = self.controller.video_dimensions.map_or_else(
+                        || "none".to_owned(),
+                        |(width, height)| format!("{width} x {height}"),
+                    );
+                    return Some(format!(
+                        "Browser resize stalled: requested {} x {}, video {video}",
+                        viewport.0, viewport.1
+                    ));
+                }
+            } else if pending.started.elapsed() >= WINDOW_RESIZE_TIMEOUT {
+                return Some(format!(
+                    "Window manager kept {} x {} pt; float the window and apply again",
+                    current[0], current[1]
+                ));
+            }
+            None
+        });
+        if let Some(message) = result {
+            self.pending_window_size = None;
             self.controller.browser.toast(message);
         }
     }

@@ -206,13 +206,29 @@ impl ClientController {
         if self.requested_viewport == Some(viewport) {
             return false;
         }
+        self.send_viewport(viewport);
+        true
+    }
+
+    /// Sends a viewport command even when the requested dimensions match the
+    /// local deduplication cache. Device presets use this to make applying a
+    /// native window size and changing Chromium one acknowledged transaction.
+    pub fn force_viewport(&mut self, width: i32, height: i32) -> Option<(i32, i32)> {
+        if !self.connected || width < 64 || height < 64 {
+            return None;
+        }
+        let viewport = (width.max(2) & !1, height.max(2) & !1);
+        self.send_viewport(viewport);
+        Some(viewport)
+    }
+
+    fn send_viewport(&mut self, viewport: (i32, i32)) {
         self.requested_viewport = Some(viewport);
         self.command(Command::Size {
             w: viewport.0,
             h: viewport.1,
             causal: Causal::default(),
         });
-        true
     }
 
     pub fn set_dark_mode(&mut self, enabled: bool) {
@@ -651,6 +667,7 @@ impl ClientController {
                     self.video_dimensions = Some((w, h));
                 } else if state == "starting" {
                     self.video_dimensions = None;
+                    self.last_frame_dimensions = None;
                     effects.push(HostEffect::ClearVideo);
                 } else if !reason.is_empty() {
                     self.status = format!("Video: {reason}");
