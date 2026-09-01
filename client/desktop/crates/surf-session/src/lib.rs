@@ -13,6 +13,7 @@ use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use bytes::Bytes;
 use futures_util::{SinkExt as _, StreamExt as _};
 use surf_core::{Frame, ReconnectPolicy, RetryDecision};
 use surf_protocol::{Causal, Command, Event};
@@ -171,21 +172,60 @@ pub enum SessionEvent {
     Failure(SessionFailure),
 }
 
+/// Receives validated wire frames without making the network task wait for
+/// decoding or presentation. Implementations must keep `submit` and `clear`
+/// bounded and non-blocking.
+pub trait FrameSink: Send + Sync + 'static {
+    fn submit(&self, frame: Bytes);
+    fn clear(&self);
+}
+
+#[derive(Default)]
+struct LatestFrameSink {
+    slot: Mutex<Option<Bytes>>,
+}
+
+impl FrameSink for LatestFrameSink {
+    fn submit(&self, frame: Bytes) {
+        if let Ok(mut slot) = self.slot.try_lock() {
+            *slot = Some(frame);
+        }
+    }
+
+    fn clear(&self) {
+        if let Ok(mut slot) = self.slot.try_lock() {
+            *slot = None;
+        }
+    }
+}
+
 pub struct SessionClient {
     actions: ActionSender<SessionAction>,
     events: Receiver<SessionEvent>,
-    latest_frame: Arc<Mutex<Option<Vec<u8>>>>,
+    latest_frame: Arc<LatestFrameSink>,
     discovery: Option<discovery::DiscoveryWorker>,
     thread: Option<thread::JoinHandle<()>>,
 }
 
 impl SessionClient {
     pub fn spawn(storage: Storage) -> Result<Self> {
+        let latest_frame = Arc::new(LatestFrameSink::default());
+        let frame_sink: Arc<dyn FrameSink> = latest_frame.clone();
+        Self::spawn_inner(storage, frame_sink, latest_frame)
+    }
+
+    pub fn spawn_with_frame_sink(storage: Storage, frame_sink: Arc<dyn FrameSink>) -> Result<Self> {
+        Self::spawn_inner(storage, frame_sink, Arc::new(LatestFrameSink::default()))
+    }
+
+    fn spawn_inner(
+        storage: Storage,
+        frame_sink: Arc<dyn FrameSink>,
+        latest_frame: Arc<LatestFrameSink>,
+    ) -> Result<Self> {
         let (actions, action_rx) = channel(256);
         let (event_tx, events) = mpsc::sync_channel(256);
         let discovery_events = event_tx.clone();
-        let latest_frame = Arc::new(Mutex::new(None));
-        let worker_frame = Arc::clone(&latest_frame);
         let thread = thread::Builder::new()
             .name("surf-session".to_owned())
             .spawn(move || {
@@ -196,7 +236,7 @@ impl SessionClient {
                     .build();
                 match runtime {
                     Ok(runtime) => {
-                        runtime.block_on(driver(storage, action_rx, event_tx.clone(), worker_frame))
+                        runtime.block_on(driver(storage, action_rx, event_tx.clone(), frame_sink))
                     }
                     Err(error) => {
                         let _ = event_tx.try_send(SessionEvent::Failure(SessionFailure {
@@ -232,8 +272,8 @@ impl SessionClient {
         self.events.try_recv().ok()
     }
 
-    pub fn take_latest_frame(&self) -> Option<Vec<u8>> {
-        self.latest_frame.lock().ok()?.take()
+    pub fn take_latest_frame(&self) -> Option<Bytes> {
+        self.latest_frame.slot.lock().ok()?.take()
     }
 }
 
@@ -253,7 +293,7 @@ async fn driver(
     storage: Storage,
     mut actions: ActionReceiver<SessionAction>,
     events: SyncSender<SessionEvent>,
-    latest_frame: Arc<Mutex<Option<Vec<u8>>>>,
+    frame_sink: Arc<dyn FrameSink>,
 ) {
     let mut verified: Option<VerifiedEndpoint> = None;
     let mut pairing: Option<PairingStatus> = None;
@@ -328,7 +368,7 @@ async fn driver(
                 },
                 SessionAction::Connect => match verified.as_ref() {
                     Some(server) => {
-                        run_connection(server, &storage, &mut actions, &events, &latest_frame).await
+                        run_connection(server, &storage, &mut actions, &events, &frame_sink).await
                     }
                     None => Err(SessionError::Endpoint(
                         "verify a server before connecting".to_owned(),
@@ -338,7 +378,7 @@ async fn driver(
                     "browser command sent while disconnected".to_owned(),
                 )),
                 SessionAction::Disconnect => {
-                    clear_latest_frame(&latest_frame);
+                    frame_sink.clear();
                     emit(
                         &events,
                         SessionEvent::Disconnected("Disconnected".to_owned()),
@@ -364,7 +404,7 @@ async fn run_connection(
     storage: &Storage,
     actions: &mut ActionReceiver<SessionAction>,
     events: &SyncSender<SessionEvent>,
-    latest_frame: &Arc<Mutex<Option<Vec<u8>>>>,
+    frame_sink: &Arc<dyn FrameSink>,
 ) -> Result<Option<SessionAction>> {
     let mut reconnect_policy = ReconnectPolicy::new();
     let mut pending_retry: Option<RetryDecision> = None;
@@ -382,15 +422,15 @@ async fn run_connection(
             )?;
             tokio::select! {
                 () = tokio::time::sleep(retry.delay) => {}
-                action = actions.recv() => return handle_interrupted_connection(action, events, latest_frame),
+                action = actions.recv() => return handle_interrupted_connection(action, events, frame_sink),
             }
         }
 
-        clear_latest_frame(latest_frame);
+        frame_sink.clear();
         emit_status(events, "authentication", "Authenticating this device");
         let config = tokio::select! {
             result = api::authenticate(server, storage) => result,
-            action = actions.recv() => return handle_interrupted_connection(action, events, latest_frame),
+            action = actions.recv() => return handle_interrupted_connection(action, events, frame_sink),
         };
         let (attempt, connected_for) = match config {
             Ok(config) => {
@@ -403,7 +443,7 @@ async fn run_connection(
                 )?;
                 let connected_at = Instant::now();
                 (
-                    run_socket(server, &config, actions, events, latest_frame).await,
+                    run_socket(server, &config, actions, events, frame_sink).await,
                     connected_at.elapsed(),
                 )
             }
@@ -421,7 +461,7 @@ async fn run_connection(
                     last_failure = error.to_string();
                     continue;
                 }
-                clear_latest_frame(latest_frame);
+                frame_sink.clear();
                 let _ = events.try_send(SessionEvent::Disconnected(
                     "The secure session ended".to_owned(),
                 ));
@@ -434,9 +474,9 @@ async fn run_connection(
 fn handle_interrupted_connection(
     action: Option<SessionAction>,
     events: &SyncSender<SessionEvent>,
-    latest_frame: &Arc<Mutex<Option<Vec<u8>>>>,
+    frame_sink: &Arc<dyn FrameSink>,
 ) -> Result<Option<SessionAction>> {
-    clear_latest_frame(latest_frame);
+    frame_sink.clear();
     match action {
         Some(SessionAction::Disconnect) => {
             emit(
@@ -455,7 +495,7 @@ async fn run_socket(
     config: &NativeConfig,
     actions: &mut ActionReceiver<SessionAction>,
     events: &SyncSender<SessionEvent>,
-    latest_frame: &Arc<Mutex<Option<Vec<u8>>>>,
+    frame_sink: &Arc<dyn FrameSink>,
 ) -> Result<Option<SessionAction>> {
     emit_status(
         events,
@@ -500,7 +540,7 @@ async fn run_socket(
                 Some(SessionAction::Send(command)) => send_command(&mut writer, &command).await?,
                 Some(SessionAction::Disconnect) => {
                     writer.send(Message::Close(None)).await?;
-                    clear_latest_frame(latest_frame);
+                    frame_sink.clear();
                     emit(events, SessionEvent::Disconnected("Disconnected".to_owned()))?;
                     return Ok(None);
                 }
@@ -522,9 +562,7 @@ async fn run_socket(
                 }
                 Some(Ok(Message::Binary(data))) => {
                     Frame::parse(&data).map_err(|error| SessionError::Protocol(error.to_string()))?;
-                    if let Ok(mut slot) = latest_frame.lock() {
-                        *slot = Some(data.to_vec());
-                    }
+                    frame_sink.submit(data);
                 }
                 Some(Ok(Message::Ping(data))) => writer.send(Message::Pong(data)).await?,
                 Some(Ok(Message::Pong(_))) | Some(Ok(Message::Frame(_))) => {}
@@ -570,12 +608,6 @@ fn emit(events: &SyncSender<SessionEvent>, event: SessionEvent) -> Result<()> {
             SessionError::Protocol("session event consumer stopped".to_owned())
         }
     })
-}
-
-fn clear_latest_frame(latest_frame: &Arc<Mutex<Option<Vec<u8>>>>) {
-    if let Ok(mut slot) = latest_frame.lock() {
-        *slot = None;
-    }
 }
 
 fn atomic_write_private(path: &Path, data: &[u8]) -> Result<()> {

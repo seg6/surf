@@ -70,6 +70,11 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
+      - name: Install desktop media and headless OpenGL dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libavcodec-dev libavformat-dev libavutil-dev libgl1-mesa-dri xauth xvfb
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:

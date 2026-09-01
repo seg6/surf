@@ -1,5 +1,5 @@
 [package]
-name = "surf-client"
+name = "surf-media"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,9 +7,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-eframe.workspace = true
-egui_glow.workspace = true
+bytes.workspace = true
+ffmpeg-the-third.workspace = true
 surf-core.workspace = true
-surf-media.workspace = true
 surf-protocol.workspace = true
 surf-session.workspace = true
+thiserror.workspace = true

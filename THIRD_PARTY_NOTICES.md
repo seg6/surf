@@ -35,3 +35,12 @@ Copyright 2026 Lucide Icons and Contributors. Licensed under the ISC License.
 Some Lucide glyphs are derived from Feather Icons, copyright 2013–present
 Cole Bemis, licensed under the MIT License. The copyright and permission
 notices are reproduced in `native/client/Artwork/LUCIDE-LICENSE.txt`.
+
+## FFmpeg and ffmpeg-the-third
+
+The Linux desktop client uses the system FFmpeg libraries through
+`ffmpeg-the-third` 6.0.0+ffmpeg-9.0. `ffmpeg-the-third` is copyright its
+contributors and is distributed under the WTFPL. FFmpeg is copyright the
+FFmpeg developers and is normally distributed under LGPL 2.1 or later; the
+exact license of a system FFmpeg build can differ based on enabled components.
+Surf does not vendor or statically link an FFmpeg build.

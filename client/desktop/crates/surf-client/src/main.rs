@@ -5,7 +5,8 @@ use eframe::egui::{
     self, Align, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Frame,
     Layout, Margin, RichText, Sense, Stroke, TextEdit, Vec2,
 };
-use surf_core::{Core, Event as CoreEvent, Frame as BinaryFrame, Snapshot, Tab};
+use surf_core::{Core, Event as CoreEvent, Snapshot, Tab};
+use surf_media::{MediaEvent, MediaPipeline};
 use surf_protocol::{Causal, Command, Event as WireEvent};
 use surf_session::{
     DiscoveredServer, FailureKind, PairingStatus, SavedServer, ServerInfo, SessionAction,
@@ -14,6 +15,10 @@ use surf_session::{
 
 const LUCIDE: &[u8] = include_bytes!("../../../../../native/client/Resources/Lucide.ttf");
 const ICON_FONT: &str = "surf-lucide";
+
+mod video_surface;
+
+use video_surface::VideoSurface;
 
 mod icon {
     pub const BACK: char = '\u{e06e}';
@@ -47,6 +52,8 @@ struct SurfDesktop {
     address: String,
     address_focused: bool,
     session: Option<SessionClient>,
+    media: Option<MediaPipeline>,
+    video_surface: Arc<VideoSurface>,
     endpoint: String,
     pairing_code: String,
     status: String,
@@ -59,6 +66,9 @@ struct SurfDesktop {
     connected: bool,
     frames_received: u64,
     last_frame: String,
+    remote_viewport: Option<(i32, i32)>,
+    connect_after_inspect: bool,
+    smoke_exit_after_frame: bool,
 }
 
 impl SurfDesktop {
@@ -81,26 +91,37 @@ impl SurfDesktop {
         })
         .expect("initial desktop URL is valid");
         let snapshot = core.snapshot().expect("initial snapshot is valid");
-        let (session, saved_servers, status) = match Storage::system() {
+        let video_surface = VideoSurface::new();
+        let (session, media, saved_servers, status) = match Storage::system() {
             Ok(storage) => {
                 let servers = storage.servers().unwrap_or_default();
-                match SessionClient::spawn(storage) {
-                    Ok(session) => (
-                        Some(session),
-                        servers,
-                        "Choose or pair a Surf server".to_owned(),
-                    ),
-                    Err(error) => (None, servers, error.to_string()),
+                match MediaPipeline::spawn() {
+                    Ok(media) => {
+                        match SessionClient::spawn_with_frame_sink(storage, media.frame_sink()) {
+                            Ok(session) => (
+                                Some(session),
+                                Some(media),
+                                servers,
+                                "Choose or pair a Surf server".to_owned(),
+                            ),
+                            Err(error) => (None, Some(media), servers, error.to_string()),
+                        }
+                    }
+                    Err(error) => (None, None, servers, error.to_string()),
                 }
             }
-            Err(error) => (None, Vec::new(), error.to_string()),
+            Err(error) => (None, None, Vec::new(), error.to_string()),
         };
-        Self {
+        let startup_endpoint =
+            (saved_servers.len() == 1).then(|| saved_servers[0].endpoint.clone());
+        let mut client = Self {
             core,
             snapshot,
             address: String::new(),
             address_focused: false,
             session,
+            media,
+            video_surface,
             endpoint: "127.0.0.1:18080".to_owned(),
             pairing_code: String::new(),
             status,
@@ -113,7 +134,14 @@ impl SurfDesktop {
             connected: false,
             frames_received: 0,
             last_frame: String::new(),
+            remote_viewport: None,
+            connect_after_inspect: false,
+            smoke_exit_after_frame: std::env::var_os("SURF_SMOKE_EXIT_AFTER_FRAME").is_some(),
+        };
+        if let Some(endpoint) = startup_endpoint {
+            client.inspect(endpoint, true);
         }
+        client
     }
 
     fn refresh(&mut self) {
@@ -136,11 +164,12 @@ impl SurfDesktop {
         }
     }
 
-    fn inspect(&mut self, endpoint: String) {
+    fn inspect(&mut self, endpoint: String, connect_when_paired: bool) {
         self.endpoint = endpoint;
         self.inspected = None;
         self.pairing = None;
         self.paired = false;
+        self.connect_after_inspect = connect_when_paired;
         self.send(SessionAction::Inspect(self.endpoint.clone()));
     }
 
@@ -183,6 +212,9 @@ impl SurfDesktop {
                     self.inspected = Some(info);
                     self.paired = paired;
                     self.pairing = None;
+                    if paired && std::mem::take(&mut self.connect_after_inspect) {
+                        self.send(SessionAction::Connect);
+                    }
                 }
                 SessionEvent::PairingPhrase(pairing) => {
                     self.status = "Compare these six words, then confirm".to_owned();
@@ -201,6 +233,7 @@ impl SurfDesktop {
                     self.connected = true;
                     self.status = format!("Connected securely to {}", info.name);
                     self.pairing = None;
+                    self.remote_viewport = None;
                 }
                 SessionEvent::Reconnecting {
                     attempt,
@@ -209,6 +242,7 @@ impl SurfDesktop {
                     reason,
                 } => {
                     self.connected = false;
+                    self.video_surface.clear();
                     self.status = format!(
                         "Connection interrupted. Retrying {attempt}/{maximum} in {:.1}s — {reason}",
                         delay.as_secs_f32()
@@ -217,12 +251,16 @@ impl SurfDesktop {
                 SessionEvent::Control(event) => self.apply_control(event),
                 SessionEvent::Disconnected(message) => {
                     self.connected = false;
+                    self.video_surface.clear();
+                    self.remote_viewport = None;
                     self.status = message;
                     let _ = self.core.dispatch(&CoreEvent::Loading(false));
                     self.refresh();
                 }
                 SessionEvent::Failure(failure) => {
                     self.connected = false;
+                    self.video_surface.clear();
+                    self.remote_viewport = None;
                     let heading = match failure.kind {
                         FailureKind::Endpoint => "Server address",
                         FailureKind::Trust => "Server identity",
@@ -239,17 +277,34 @@ impl SurfDesktop {
                 }
             }
         }
-        if let Some(data) = self
-            .session
+        while let Some(event) = self.media.as_ref().and_then(MediaPipeline::try_recv_event) {
+            match event {
+                MediaEvent::RequestKeyframe => self.send_command(Command::RequestKeyframe {
+                    causal: Causal::default(),
+                }),
+                MediaEvent::DecoderError(message) => {
+                    self.status = format!("Video decoder: {message}");
+                }
+            }
+        }
+        if let Some(frame) = self
+            .media
             .as_ref()
-            .and_then(SessionClient::take_latest_frame)
-            && let Ok(frame) = BinaryFrame::parse(&data)
+            .and_then(MediaPipeline::take_latest_frame)
         {
             self.frames_received = self.frames_received.saturating_add(1);
             self.last_frame = format!(
-                "{}×{} · generation {} · frame {}",
-                frame.width, frame.height, frame.encoder_generation, frame.sequence
+                "{}×{} · generation {} · frame {} · decode {:.2} ms",
+                frame.width,
+                frame.height,
+                frame.generation,
+                frame.sequence,
+                frame.decode_time.as_secs_f64() * 1_000.0,
             );
+            self.video_surface.submit(frame);
+        }
+        if let Some(error) = self.video_surface.take_error() {
+            self.status = format!("Video renderer: {error}");
         }
     }
 
@@ -496,8 +551,21 @@ impl SurfDesktop {
                 painter.rect_filled(available, CornerRadius::ZERO, theme::BACKGROUND);
 
                 if self.connected {
-                    let surface = available.shrink(18.0);
+                    let surface = available;
+                    let viewport = (
+                        ((surface.width().floor() as i32).max(2)) & !1,
+                        ((surface.height().floor() as i32).max(2)) & !1,
+                    );
+                    if self.remote_viewport != Some(viewport) {
+                        self.remote_viewport = Some(viewport);
+                        self.send_command(Command::Size {
+                            w: viewport.0,
+                            h: viewport.1,
+                            causal: Causal::default(),
+                        });
+                    }
                     painter.rect_filled(surface, CornerRadius::same(12), Color32::BLACK);
+                    painter.add(self.video_surface.callback(surface));
                     painter.rect_stroke(
                         surface,
                         CornerRadius::same(12),
@@ -507,18 +575,29 @@ impl SurfDesktop {
                     let label = if self.frames_received == 0 {
                         "Secure stream connected · waiting for the first frame".to_owned()
                     } else {
+                        let media = self
+                            .media
+                            .as_ref()
+                            .map(MediaPipeline::diagnostics)
+                            .unwrap_or_default();
                         format!(
-                            "{} frames received · {}",
-                            self.frames_received, self.last_frame
+                            "{} decoded · {} presented · {} · upload {:.2} ms · gaps {}",
+                            self.frames_received,
+                            self.video_surface.presented(),
+                            self.last_frame,
+                            self.video_surface.latest_upload_us() as f64 / 1_000.0,
+                            media.gaps,
                         )
                     };
-                    painter.text(
-                        surface.left_top() + Vec2::new(16.0, 16.0),
-                        egui::Align2::LEFT_TOP,
-                        label,
-                        FontId::proportional(13.0),
-                        theme::MUTED,
-                    );
+                    if self.frames_received == 0 {
+                        painter.text(
+                            surface.left_top() + Vec2::new(16.0, 16.0),
+                            egui::Align2::LEFT_TOP,
+                            label,
+                            FontId::proportional(13.0),
+                            theme::MUTED,
+                        );
+                    }
                     return;
                 }
 
@@ -590,7 +669,7 @@ impl SurfDesktop {
                             ui.add_space(8.0);
                         }
                         if let Some(endpoint) = chosen_endpoint {
-                            self.inspect(endpoint);
+                            self.inspect(endpoint, true);
                         }
                         ui.label(
                             RichText::new("Server address")
@@ -611,7 +690,7 @@ impl SurfDesktop {
                             )
                             .clicked()
                         {
-                            self.inspect(self.endpoint.clone());
+                            self.inspect(self.endpoint.clone(), false);
                         }
 
                         if let Some(pairing) = self.pairing.clone() {
@@ -717,6 +796,9 @@ impl eframe::App for SurfDesktop {
         }
         self.chrome(ui);
         self.content(ui);
+        if self.smoke_exit_after_frame && self.video_surface.presented() > 0 {
+            context.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
         context.request_repaint_after(Duration::from_millis(16));
     }
 }

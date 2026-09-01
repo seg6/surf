@@ -75,8 +75,16 @@ fi
 
 (
   cd "$repository_root/client/desktop"
-  SURF_CLIENT_HOME="$client_home" cargo run -q -p surf-session --example probe -- \
+  SURF_CLIENT_HOME="$client_home" cargo run -q -p surf-media --example probe_decode -- \
     "127.0.0.1:$port" "$pairing_code" --confirm
+)
+
+(
+  cd "$repository_root/client/desktop"
+  timeout 40s xvfb-run -a env \
+    SURF_CLIENT_HOME="$client_home" \
+    SURF_SMOKE_EXIT_AFTER_FRAME=1 \
+    cargo run -q -p surf-client
 )
 
 kill "$pair_pid" 2>/dev/null || true
@@ -93,4 +101,4 @@ if ! rg -q 'Surf integration probe' "$devices_log"; then
   exit 1
 fi
 
-echo "Secure desktop session integration passed"
+echo "Secure session, FFmpeg decode, and OpenGL YUV presentation integration passed"

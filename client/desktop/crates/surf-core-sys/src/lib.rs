@@ -7,6 +7,10 @@ pub const SURF_CORE_OK: c_int = 0;
 pub const SURF_FRAME_OK: c_int = 0;
 pub const SURF_RECONNECT_STOP: c_int = 0;
 pub const SURF_RECONNECT_RETRY: c_int = 1;
+pub const SURF_MEDIA_OK: c_int = 0;
+pub const SURF_MEDIA_ACTION_DROP_REQUEST_KEYFRAME: c_int = 0;
+pub const SURF_MEDIA_ACTION_DECODE: c_int = 1;
+pub const SURF_MEDIA_ACTION_RESET_AND_DECODE: c_int = 2;
 pub const SURF_EVENT_RESET: c_int = 1;
 pub const SURF_EVENT_TABS: c_int = 2;
 pub const SURF_EVENT_URL: c_int = 3;
@@ -206,6 +210,25 @@ pub struct surf_reconnect_policy_t {
     pub maximum_delay_ms: u32,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct surf_media_policy_t {
+    pub generation: u32,
+    pub last_sequence: u32,
+    pub has_generation: u8,
+    pub has_sequence: u8,
+    pub waiting_for_idr: u8,
+    pub reset_pending: u8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct surf_media_admission_t {
+    pub action: c_int,
+    pub generation_changed: c_int,
+    pub sequence_gap: c_int,
+}
+
 unsafe extern "C" {
     pub fn surf_core_config_init(config: *mut surf_core_config_t);
     pub fn surf_core_create(
@@ -242,6 +265,17 @@ unsafe extern "C" {
         out_delay_ms: *mut u32,
     ) -> c_int;
     pub fn surf_reconnect_policy_sizeof() -> usize;
+    pub fn surf_media_policy_init(policy: *mut surf_media_policy_t);
+    pub fn surf_media_policy_reset(policy: *mut surf_media_policy_t);
+    pub fn surf_media_policy_admit(
+        policy: *mut surf_media_policy_t,
+        generation: u32,
+        sequence: u32,
+        is_idr: c_int,
+        out_admission: *mut surf_media_admission_t,
+    ) -> c_int;
+    pub fn surf_media_policy_sizeof() -> usize;
+    pub fn surf_media_admission_sizeof() -> usize;
 }
 
 #[cfg(test)]
@@ -264,6 +298,11 @@ mod tests {
             assert_eq!(
                 surf_reconnect_policy_sizeof(),
                 size_of::<surf_reconnect_policy_t>()
+            );
+            assert_eq!(surf_media_policy_sizeof(), size_of::<surf_media_policy_t>());
+            assert_eq!(
+                surf_media_admission_sizeof(),
+                size_of::<surf_media_admission_t>()
             );
         }
     }

@@ -132,6 +132,88 @@ impl Default for ReconnectPolicy {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MediaAction {
+    DropRequestKeyframe,
+    Decode,
+    ResetAndDecode,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MediaAdmission {
+    pub action: MediaAction,
+    pub generation_changed: bool,
+    pub sequence_gap: bool,
+}
+
+pub struct MediaAdmissionPolicy {
+    raw: sys::surf_media_policy_t,
+}
+
+impl MediaAdmissionPolicy {
+    pub fn new() -> Self {
+        let mut raw = std::mem::MaybeUninit::<sys::surf_media_policy_t>::uninit();
+        // SAFETY: the C initializer writes every field of the non-null output.
+        unsafe { sys::surf_media_policy_init(raw.as_mut_ptr()) };
+        // SAFETY: `surf_media_policy_init` initializes the complete value.
+        let raw = unsafe { raw.assume_init() };
+        Self { raw }
+    }
+
+    pub fn reset(&mut self) {
+        // SAFETY: `self.raw` is a valid, uniquely borrowed policy.
+        unsafe { sys::surf_media_policy_reset(&mut self.raw) };
+    }
+
+    pub fn admit(
+        &mut self,
+        generation: u32,
+        sequence: u32,
+        is_idr: bool,
+    ) -> Result<MediaAdmission, Error> {
+        let mut raw = std::mem::MaybeUninit::<sys::surf_media_admission_t>::uninit();
+        // SAFETY: both pointers are valid and uniquely borrowed; C initializes
+        // the admission on SURF_MEDIA_OK.
+        let result = unsafe {
+            sys::surf_media_policy_admit(
+                &mut self.raw,
+                generation,
+                sequence,
+                i32::from(is_idr),
+                raw.as_mut_ptr(),
+            )
+        };
+        if result != sys::SURF_MEDIA_OK {
+            return Err(Error::invariant(
+                "media admission policy rejected its arguments",
+            ));
+        }
+        // SAFETY: SURF_MEDIA_OK guarantees initialized output.
+        let raw = unsafe { raw.assume_init() };
+        let action = match raw.action {
+            sys::SURF_MEDIA_ACTION_DROP_REQUEST_KEYFRAME => MediaAction::DropRequestKeyframe,
+            sys::SURF_MEDIA_ACTION_DECODE => MediaAction::Decode,
+            sys::SURF_MEDIA_ACTION_RESET_AND_DECODE => MediaAction::ResetAndDecode,
+            value => {
+                return Err(Error::invariant(&format!(
+                    "unknown media admission action {value}"
+                )));
+            }
+        };
+        Ok(MediaAdmission {
+            action,
+            generation_changed: raw.generation_changed != 0,
+            sequence_gap: raw.sequence_gap != 0,
+        })
+    }
+}
+
+impl Default for MediaAdmissionPolicy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FrameKind {
     Video,
     Audio,
@@ -647,5 +729,28 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(stable.attempt, 1);
+    }
+
+    #[test]
+    fn media_recovery_policy_is_shared_with_platform_hosts() {
+        let mut policy = MediaAdmissionPolicy::new();
+        assert_eq!(
+            policy.admit(1, 1, false).unwrap().action,
+            MediaAction::DropRequestKeyframe
+        );
+        assert_eq!(
+            policy.admit(1, 2, true).unwrap().action,
+            MediaAction::ResetAndDecode
+        );
+        assert_eq!(
+            policy.admit(1, 3, false).unwrap().action,
+            MediaAction::Decode
+        );
+        let gap = policy.admit(1, 5, false).unwrap();
+        assert!(gap.sequence_gap);
+        assert_eq!(gap.action, MediaAction::DropRequestKeyframe);
+        let generation = policy.admit(2, 1, true).unwrap();
+        assert!(generation.generation_changed);
+        assert_eq!(generation.action, MediaAction::ResetAndDecode);
     }
 }

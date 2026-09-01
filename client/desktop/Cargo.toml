@@ -4,6 +4,7 @@ members = [
     "crates/surf-client",
     "crates/surf-core",
     "crates/surf-core-sys",
+    "crates/surf-media",
     "crates/surf-protocol",
     "crates/surf-session",
 ]
@@ -18,7 +19,10 @@ repository = "https://github.com/seg6/surf"
 [workspace.dependencies]
 eframe = { version = "0.36.1", default-features = false, features = ["accesskit", "default_fonts", "glow", "wayland", "x11"] }
 base64 = "0.22.1"
+bytes = "1.11.1"
 directories = "6.0.0"
+egui_glow = "0.36.1"
+ffmpeg-the-third = { version = "6.0.0", default-features = false, features = ["format"] }
 futures-util = "0.3.31"
 hex = "0.4.3"
 mdns-sd = { version = "0.21.1", default-features = false }
@@ -31,6 +35,7 @@ serde_json = "1.0.145"
 sha2 = { version = "0.10.9", features = ["oid"] }
 surf-core = { path = "crates/surf-core" }
 surf-core-sys = { path = "crates/surf-core-sys" }
+surf-media = { path = "crates/surf-media" }
 surf-protocol = { path = "crates/surf-protocol" }
 surf-session = { path = "crates/surf-session" }
 thiserror = "2.0.17"
