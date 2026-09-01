@@ -4,7 +4,7 @@ mod gtk_video;
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gtk::gdk;
 use gtk::glib::{self, ControlFlow, Propagation};
@@ -30,7 +30,9 @@ fn main() -> glib::ExitCode {
         }
         Err(error) => show_startup_error(application, &error),
     });
-    let exit = application.run();
+    // The controller reads the optional startup URL itself. Do not let
+    // GApplication reinterpret it as a local file-open request.
+    let exit = application.run_with_args(&["surf-client"]);
     active_window.borrow_mut().take();
     exit
 }
@@ -63,6 +65,13 @@ fn install_css() {
         .surf-popover { padding: 6px; }
         .surf-popover button { min-height: 34px; padding: 4px 10px; }
         .surf-toast { background: #303236; border: 1px solid #4a4d52; border-radius: 7px; padding: 8px 12px; }
+        .surf-dialog-content { padding: 18px; }
+        .surf-dialog-heading { font-size: 18px; font-weight: 700; }
+        .surf-library-row { padding: 8px 10px; border-bottom: 1px solid #36383c; }
+        .surf-library-row:hover { background: #292b2f; }
+        .surf-metric { padding: 12px; border-radius: 7px; background: #292b2f; }
+        .surf-metric-value { font-size: 20px; font-weight: 700; }
+        .surf-monospace { font-family: monospace; }
         "#,
     );
     if let Some(display) = gdk::Display::default() {
@@ -139,11 +148,82 @@ struct BrowserWindow {
     last_servers: RefCell<Vec<(String, String)>>,
     last_suggestions: RefCell<Vec<(String, String)>>,
     was_connected: Cell<bool>,
-    dialog_visible: Cell<bool>,
-    select_visible: Cell<bool>,
-    file_visible: Cell<bool>,
-    reader_visible: Cell<bool>,
-    error_visible: Cell<bool>,
+    library_view: RefCell<Option<LibraryView>>,
+    media_view: RefCell<Option<MediaView>>,
+    performance_view: RefCell<Option<PerformanceView>>,
+    page_dialog: RefCell<Option<gtk::Dialog>>,
+    page_select: RefCell<Option<gtk::Popover>>,
+    file_chooser: RefCell<Option<gtk::FileChooserNative>>,
+    reader_window: RefCell<Option<gtk::Window>>,
+    page_error: RefCell<Option<gtk::MessageDialog>>,
+    smoke: RefCell<SmokeState>,
+}
+
+struct LibraryView {
+    window: gtk::Window,
+    history: gtk::Box,
+    bookmarks: gtk::Box,
+    downloads: gtk::Box,
+    signature: RefCell<String>,
+}
+
+struct MediaView {
+    window: gtk::Window,
+    title: gtk::Label,
+    time: gtk::Label,
+    play_pause: gtk::Button,
+    mute: gtk::Button,
+    volume: gtk::Scale,
+    unavailable: gtk::Label,
+    controls: gtk::Box,
+    updating: Cell<bool>,
+}
+
+struct PerformanceView {
+    window: gtk::Window,
+    presented: gtk::Label,
+    decoded: gtk::Label,
+    dropped: gtk::Label,
+    details: gtk::Label,
+    health: gtk::Label,
+}
+
+struct SmokeState {
+    target: Option<u64>,
+    started: Option<Instant>,
+    last_heartbeat: Instant,
+    interaction: bool,
+    interaction_step: u8,
+    stall_ms: Option<u64>,
+    stalled: bool,
+    reported: bool,
+}
+
+impl SmokeState {
+    fn from_environment() -> Self {
+        let target = std::env::var("SURF_SMOKE_EXIT_AFTER_FRAMES")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .or_else(|| {
+                std::env::var_os("SURF_SMOKE_EXIT_AFTER_FRAME")
+                    .is_some()
+                    .then_some(1)
+            });
+        Self {
+            target,
+            started: None,
+            last_heartbeat: Instant::now(),
+            interaction: std::env::var_os("SURF_SMOKE_INTERACTION").is_some(),
+            interaction_step: 0,
+            stall_ms: std::env::var("SURF_SMOKE_STALL_MS")
+                .ok()
+                .and_then(|value| value.parse::<u64>().ok())
+                .filter(|value| *value > 0),
+            stalled: false,
+            reported: false,
+        }
+    }
 }
 
 impl BrowserWindow {
@@ -297,7 +377,7 @@ impl BrowserWindow {
         browser.append(&toolbar);
         let loading = gtk::ProgressBar::new();
         loading.add_css_class("surf-loading");
-        loading.set_visible(false);
+        loading.set_opacity(0.0);
         browser.append(&loading);
 
         let page_overlay = gtk::Overlay::new();
@@ -372,11 +452,15 @@ impl BrowserWindow {
             last_servers: RefCell::new(Vec::new()),
             last_suggestions: RefCell::new(Vec::new()),
             was_connected: Cell::new(false),
-            dialog_visible: Cell::new(false),
-            select_visible: Cell::new(false),
-            file_visible: Cell::new(false),
-            reader_visible: Cell::new(false),
-            error_visible: Cell::new(false),
+            library_view: RefCell::new(None),
+            media_view: RefCell::new(None),
+            performance_view: RefCell::new(None),
+            page_dialog: RefCell::new(None),
+            page_select: RefCell::new(None),
+            file_chooser: RefCell::new(None),
+            reader_window: RefCell::new(None),
+            page_error: RefCell::new(None),
+            smoke: RefCell::new(SmokeState::from_environment()),
         });
 
         ui.install_actions();
@@ -387,7 +471,10 @@ impl BrowserWindow {
         ui.update_view();
 
         let weak = Rc::downgrade(&ui);
-        glib::timeout_add_local(Duration::from_millis(16), move || {
+        // Drain the bounded decoder output faster than one display interval;
+        // GtkGLArea still presents on GTK's frame clock, while the newest
+        // decoded frame is ready before each refresh instead of one tick late.
+        glib::timeout_add_local(Duration::from_millis(8), move || {
             let Some(ui) = weak.upgrade() else {
                 return ControlFlow::Break;
             };
@@ -568,15 +655,18 @@ impl BrowserWindow {
                 self.command(Command::Downloads {
                     causal: Causal::default(),
                 });
-                self.show_message("Library", "History, bookmarks, and downloads are loading.");
+                self.show_library();
             }
             "reader" => self.command(Command::Reader {
                 causal: Causal::default(),
             }),
             "find" => self.show_find(),
-            "media" => self.command(Command::MediaQuery {
-                causal: Causal::default(),
-            }),
+            "media" => {
+                self.command(Command::MediaQuery {
+                    causal: Causal::default(),
+                });
+                self.show_media();
+            }
             "fullscreen" => {
                 let fullscreen = self.controller.borrow().snapshot.fullscreen;
                 self.command(Command::Fullscreen {
@@ -825,9 +915,9 @@ impl BrowserWindow {
             return;
         };
         let weak = Rc::downgrade(self);
-        display.clipboard().read_text_async(
-            gtk::gio::Cancellable::NONE,
-            move |result| {
+        display
+            .clipboard()
+            .read_text_async(gtk::gio::Cancellable::NONE, move |result| {
                 let Some(ui) = weak.upgrade() else {
                     return;
                 };
@@ -844,8 +934,7 @@ impl BrowserWindow {
                     Ok(command) => ui.command(command),
                     Err(error) => ui.controller.borrow_mut().report_renderer_error(error),
                 }
-            },
-        );
+            });
     }
 
     fn send_page_key(
@@ -971,7 +1060,7 @@ impl BrowserWindow {
                     self.input.borrow_mut().reset();
                     self.gl_area.queue_render();
                 }
-                HostEffect::ClearPagePresentation => self.suggestions.popdown(),
+                HostEffect::ClearPagePresentation => self.clear_page_surfaces(),
                 HostEffect::SetClipboard { request_id, text } => {
                     let ok = if let Some(display) = gdk::Display::default() {
                         display.clipboard().set_text(&text);
@@ -993,6 +1082,99 @@ impl BrowserWindow {
             self.controller.borrow_mut().report_renderer_error(error);
         }
         self.update_view();
+        self.handle_smoke();
+    }
+
+    fn handle_smoke(&self) {
+        let presented = self.video.borrow_mut().diagnostics().presented;
+        let mut smoke = self.smoke.borrow_mut();
+        if smoke.target.is_none() {
+            return;
+        }
+        if smoke.last_heartbeat.elapsed() >= Duration::from_secs(2) {
+            smoke.last_heartbeat = Instant::now();
+            let client = self.controller.borrow();
+            let media = client.media_diagnostics();
+            eprintln!(
+                "SURF_SMOKE_HEARTBEAT presented={presented} decoded={} ingress={} encoded_depth={} decoded_depth={} connected={}",
+                media.decoded_frames,
+                media.ingress_frames,
+                media.encoded_video_depth,
+                media.decoded_video_depth,
+                client.connected,
+            );
+        }
+        if presented > 0 && smoke.started.is_none() {
+            smoke.started = Some(Instant::now());
+            eprintln!("SURF_SMOKE_STEP first-frame presented={presented}");
+        }
+        if smoke.interaction {
+            if smoke.interaction_step == 0 && presented >= 45 {
+                smoke.interaction_step = 1;
+                eprintln!("SURF_SMOKE_STEP resize-small presented={presented}");
+                self.window.set_default_size(940, 680);
+            } else if smoke.interaction_step == 1 && presented >= 90 {
+                smoke.interaction_step = 2;
+                eprintln!("SURF_SMOKE_STEP edit-omnibox presented={presented}");
+                self.address_entry.grab_focus();
+                self.address_entry
+                    .set_text("Editing the omnibox while video remains live");
+                self.address_entry.select_region(0, -1);
+            } else if smoke.interaction_step == 2 && presented >= 135 {
+                smoke.interaction_step = 3;
+                eprintln!("SURF_SMOKE_STEP resize-large presented={presented}");
+                self.window.set_default_size(1260, 800);
+                self.gl_area.grab_focus();
+            }
+        }
+        if !smoke.stalled
+            && presented >= 165
+            && let Some(stall_ms) = smoke.stall_ms
+        {
+            smoke.stalled = true;
+            eprintln!("SURF_SMOKE_STEP ui-stall presented={presented} ms={stall_ms}");
+            std::thread::sleep(Duration::from_millis(stall_ms));
+        }
+        if smoke.reported || !smoke.target.is_some_and(|target| presented >= target) {
+            return;
+        }
+        smoke.reported = true;
+        let elapsed = smoke
+            .started
+            .map(|started| started.elapsed())
+            .unwrap_or(Duration::ZERO);
+        drop(smoke);
+        let intervals = presented.saturating_sub(1);
+        let fps = if elapsed.is_zero() {
+            0.0
+        } else {
+            intervals as f64 / elapsed.as_secs_f64()
+        };
+        let surface = self.video.borrow_mut().diagnostics();
+        let client = self.controller.borrow();
+        let media = client.media_diagnostics();
+        let diagnostics = client.latest_diagnostics.unwrap_or_default();
+        println!(
+            "SURF_SMOKE_RESULT presented={presented} elapsed_ms={} fps={fps:.2} decoded={} ingress_replaced={} output_replaced={} presentation_replaced={} gaps={} decode_errors={} encoded_depth={} decoded_depth={} upload_us={} rtt_us={} network_us={} clock_uncertainty_us={} frame_age_us={} timing_synchronized={} health={:?}",
+            elapsed.as_millis(),
+            media.decoded_frames,
+            media.ingress_replaced,
+            media.output_replaced,
+            surface.replaced,
+            media.gaps,
+            media.decode_errors,
+            media.encoded_video_depth,
+            media.decoded_video_depth,
+            surface.latest_upload_us,
+            diagnostics.rtt_us,
+            diagnostics.network_us,
+            diagnostics.clock_uncertainty_us,
+            diagnostics.frame_age_us,
+            diagnostics.timing_synchronized,
+            diagnostics.health,
+        );
+        drop(client);
+        self.window.close();
     }
 
     fn update_view(self: &Rc<Self>) {
@@ -1019,7 +1201,8 @@ impl BrowserWindow {
             } else {
                 "view-refresh-symbolic"
             }));
-        self.loading.set_visible(client.snapshot.loading);
+        self.loading
+            .set_opacity(if client.snapshot.loading { 1.0 } else { 0.0 });
         if client.snapshot.loading {
             self.loading.pulse();
         }
@@ -1104,6 +1287,7 @@ impl BrowserWindow {
             self.was_connected.set(false);
         }
         self.reconcile_semantic_surfaces();
+        self.refresh_auxiliary_windows();
     }
 
     fn rebuild_tabs(self: &Rc<Self>) {
@@ -1226,10 +1410,14 @@ impl BrowserWindow {
         let dialog = self.controller.borrow().browser.dialog.clone();
         if let Some(dialog) = dialog {
             self.show_page_dialog(dialog);
+        } else if let Some(window) = self.page_dialog.borrow_mut().take() {
+            window.close();
         }
         let select = self.controller.borrow().browser.select.clone();
         if let Some(select) = select {
             self.show_page_select(select);
+        } else if let Some(popover) = self.page_select.borrow_mut().take() {
+            popover.popdown();
         }
         let upload = self.controller.borrow().browser.upload_multiple;
         if let Some(multiple) = upload {
@@ -1238,23 +1426,381 @@ impl BrowserWindow {
         let reader = self.controller.borrow().browser.reader.clone();
         if let Some(reader) = reader {
             self.show_reader(reader);
+        } else if let Some(window) = self.reader_window.borrow_mut().take() {
+            window.close();
         }
         let error = self.controller.borrow().browser.page_error.clone();
         if let Some(url) = error {
             self.show_page_error(&url);
+        } else if let Some(dialog) = self.page_error.borrow_mut().take() {
+            dialog.close();
         }
     }
 
-    fn show_message(&self, title: &str, text: &str) {
-        let dialog = gtk::MessageDialog::builder()
+    fn clear_page_surfaces(&self) {
+        self.suggestions.popdown();
+        if let Some(dialog) = self.page_dialog.borrow_mut().take() {
+            dialog.close();
+        }
+        if let Some(popover) = self.page_select.borrow_mut().take() {
+            popover.popdown();
+        }
+        if let Some(window) = self.reader_window.borrow_mut().take() {
+            window.close();
+        }
+        if let Some(dialog) = self.page_error.borrow_mut().take() {
+            dialog.close();
+        }
+        if let Some(chooser) = self.file_chooser.borrow_mut().take() {
+            chooser.destroy();
+        }
+    }
+
+    fn show_library(self: &Rc<Self>) {
+        if let Some(view) = self.library_view.borrow().as_ref() {
+            view.window.present();
+            return;
+        }
+        let window = gtk::Window::builder()
             .transient_for(&self.window)
-            .modal(true)
-            .text(title)
-            .secondary_text(text)
-            .buttons(gtk::ButtonsType::Close)
+            .title("Library")
+            .default_width(620)
+            .default_height(520)
             .build();
-        dialog.connect_response(|dialog, _| dialog.close());
-        dialog.present();
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 10);
+        content.add_css_class("surf-dialog-content");
+        let heading = gtk::Label::builder().label("Library").xalign(0.0).build();
+        heading.add_css_class("surf-dialog-heading");
+        content.append(&heading);
+
+        let stack = gtk::Stack::builder()
+            .transition_type(gtk::StackTransitionType::Crossfade)
+            .hexpand(true)
+            .vexpand(true)
+            .build();
+        let switcher = gtk::StackSwitcher::builder()
+            .stack(&stack)
+            .halign(gtk::Align::Start)
+            .build();
+        content.append(&switcher);
+
+        let history = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let bookmarks = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let downloads = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        for (name, title, list) in [
+            ("history", "History", &history),
+            ("bookmarks", "Bookmarks", &bookmarks),
+            ("downloads", "Downloads", &downloads),
+        ] {
+            let scroll = gtk::ScrolledWindow::builder()
+                .hscrollbar_policy(gtk::PolicyType::Never)
+                .vexpand(true)
+                .child(list)
+                .build();
+            stack.add_titled(&scroll, Some(name), title);
+        }
+        content.append(&stack);
+        window.set_child(Some(&content));
+
+        let weak = Rc::downgrade(self);
+        window.connect_close_request(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.library_view.borrow_mut().take();
+            }
+            Propagation::Proceed
+        });
+        self.library_view.replace(Some(LibraryView {
+            window: window.clone(),
+            history,
+            bookmarks,
+            downloads,
+            signature: RefCell::new(String::new()),
+        }));
+        self.refresh_library();
+        window.present();
+    }
+
+    fn refresh_library(self: &Rc<Self>) {
+        let (history, bookmarks, downloads, progress) = {
+            let client = self.controller.borrow();
+            (
+                client.browser.history.clone(),
+                client.browser.bookmarks.clone(),
+                client.browser.downloads.clone(),
+                client.browser.download_progress.clone(),
+            )
+        };
+        let signature = format!("{history:?}|{bookmarks:?}|{downloads:?}|{progress:?}");
+        let Some((history_box, bookmarks_box, downloads_box)) =
+            self.library_view.borrow().as_ref().and_then(|view| {
+                if *view.signature.borrow() == signature {
+                    None
+                } else {
+                    view.signature.replace(signature);
+                    Some((
+                        view.history.clone(),
+                        view.bookmarks.clone(),
+                        view.downloads.clone(),
+                    ))
+                }
+            })
+        else {
+            return;
+        };
+
+        clear_box(&history_box);
+        clear_box(&bookmarks_box);
+        clear_box(&downloads_box);
+        if history.is_empty() {
+            append_empty_state(&history_box, "No browsing history yet.");
+        }
+        for item in history {
+            let row = library_entry_row(&item.title, &item.url, "Remove from history");
+            let open = row.1;
+            let remove = row.2;
+            history_box.append(&row.0);
+            let weak = Rc::downgrade(self);
+            let url = item.url.clone();
+            open.connect_clicked(move |_| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.controller.borrow_mut().navigate(&url);
+                }
+            });
+            let weak = Rc::downgrade(self);
+            remove.connect_clicked(move |_| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.command(Command::HistoryDelete {
+                        url: item.url.clone(),
+                        ts: item.ts,
+                        causal: Causal::default(),
+                    });
+                    ui.command(Command::Library {
+                        causal: Causal::default(),
+                    });
+                }
+            });
+        }
+        if bookmarks.is_empty() {
+            append_empty_state(&bookmarks_box, "Pages you bookmark appear here.");
+        }
+        for item in bookmarks {
+            let row = library_entry_row(&item.title, &item.url, "Remove bookmark");
+            let open = row.1;
+            let remove = row.2;
+            bookmarks_box.append(&row.0);
+            let weak = Rc::downgrade(self);
+            let url = item.url.clone();
+            open.connect_clicked(move |_| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.controller.borrow_mut().navigate(&url);
+                }
+            });
+            let weak = Rc::downgrade(self);
+            remove.connect_clicked(move |_| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.command(Command::BookmarkDelete {
+                        url: item.url.clone(),
+                        causal: Causal::default(),
+                    });
+                    ui.command(Command::Library {
+                        causal: Causal::default(),
+                    });
+                }
+            });
+        }
+        if downloads.is_empty() {
+            append_empty_state(&downloads_box, "Downloads from this server appear here.");
+        }
+        for item in downloads {
+            let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            row.add_css_class("surf-library-row");
+            let labels = gtk::Box::new(gtk::Orientation::Vertical, 2);
+            labels.set_hexpand(true);
+            labels.append(
+                &gtk::Label::builder()
+                    .label(&item.name)
+                    .xalign(0.0)
+                    .ellipsize(gtk::pango::EllipsizeMode::Middle)
+                    .build(),
+            );
+            let detail = progress.get(&item.name).map_or_else(
+                || format_bytes(item.size),
+                |percent| format!("{} · {percent}%", format_bytes(item.size)),
+            );
+            labels.append(
+                &gtk::Label::builder()
+                    .label(detail)
+                    .xalign(0.0)
+                    .css_classes(["surf-status"])
+                    .build(),
+            );
+            let save = gtk::Button::with_label("Save");
+            save.set_tooltip_text(Some("Save to your Downloads folder"));
+            let remove = icon_button("user-trash-symbolic", "Remove download");
+            row.append(&labels);
+            row.append(&save);
+            row.append(&remove);
+            downloads_box.append(&row);
+            let weak = Rc::downgrade(self);
+            let name = item.name.clone();
+            save.connect_clicked(move |_| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.controller
+                        .borrow_mut()
+                        .request_download(name.clone(), download_destination(&name));
+                }
+            });
+            let weak = Rc::downgrade(self);
+            remove.connect_clicked(move |_| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.command(Command::DownloadDelete {
+                        name: item.name.clone(),
+                        causal: Causal::default(),
+                    });
+                    ui.command(Command::Downloads {
+                        causal: Causal::default(),
+                    });
+                }
+            });
+        }
+    }
+
+    fn show_media(self: &Rc<Self>) {
+        if let Some(view) = self.media_view.borrow().as_ref() {
+            view.window.present();
+            return;
+        }
+        let window = gtk::Window::builder()
+            .transient_for(&self.window)
+            .title("Media")
+            .default_width(380)
+            .resizable(false)
+            .build();
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        content.add_css_class("surf-dialog-content");
+        let title = gtk::Label::builder()
+            .xalign(0.0)
+            .ellipsize(gtk::pango::EllipsizeMode::End)
+            .build();
+        title.add_css_class("surf-dialog-heading");
+        let time = gtk::Label::builder()
+            .xalign(0.0)
+            .css_classes(["surf-status", "surf-monospace"])
+            .build();
+        let unavailable = gtk::Label::builder()
+            .label("No controllable media on this page.")
+            .xalign(0.0)
+            .build();
+        let controls = gtk::Box::new(gtk::Orientation::Vertical, 10);
+        let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        let play_pause = gtk::Button::with_label("Play");
+        let mute = gtk::Button::with_label("Mute");
+        buttons.append(&play_pause);
+        buttons.append(&mute);
+        let volume = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1.0, 0.01);
+        volume.set_hexpand(true);
+        volume.set_draw_value(false);
+        volume.set_tooltip_text(Some("Volume"));
+        controls.append(&buttons);
+        controls.append(&volume);
+        content.append(&title);
+        content.append(&time);
+        content.append(&unavailable);
+        content.append(&controls);
+        window.set_child(Some(&content));
+
+        let weak = Rc::downgrade(self);
+        play_pause.connect_clicked(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.command(Command::MediaPlayPause {
+                    causal: Causal::default(),
+                });
+            }
+        });
+        let weak = Rc::downgrade(self);
+        mute.connect_clicked(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.command(Command::MediaMute {
+                    causal: Causal::default(),
+                });
+            }
+        });
+        let weak = Rc::downgrade(self);
+        volume.connect_value_changed(move |scale| {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            let updating = ui
+                .media_view
+                .borrow()
+                .as_ref()
+                .is_some_and(|view| view.updating.get());
+            if !updating {
+                ui.command(Command::MediaVolume {
+                    value: scale.value(),
+                    causal: Causal::default(),
+                });
+            }
+        });
+        let weak = Rc::downgrade(self);
+        window.connect_close_request(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.media_view.borrow_mut().take();
+            }
+            Propagation::Proceed
+        });
+        self.media_view.replace(Some(MediaView {
+            window: window.clone(),
+            title,
+            time,
+            play_pause,
+            mute,
+            volume,
+            unavailable,
+            controls,
+            updating: Cell::new(false),
+        }));
+        self.refresh_media();
+        window.present();
+    }
+
+    fn refresh_media(&self) {
+        let media = self.controller.borrow().browser.media.clone();
+        let binding = self.media_view.borrow();
+        let Some(view) = binding.as_ref() else {
+            return;
+        };
+        view.unavailable.set_visible(!media.available);
+        view.controls.set_visible(media.available);
+        view.title.set_visible(media.available);
+        view.time.set_visible(media.available);
+        if !media.available {
+            return;
+        }
+        let media_title = if media.title.is_empty() {
+            format!("{} media element(s)", media.count)
+        } else {
+            media.title
+        };
+        view.title.set_text(&media_title);
+        view.time.set_text(&format!(
+            "{} / {}",
+            format_time(media.current_time),
+            format_time(media.duration)
+        ));
+        view.play_pause
+            .set_label(if media.paused { "Play" } else { "Pause" });
+        view.mute
+            .set_label(if media.muted { "Unmute" } else { "Mute" });
+        view.updating.set(true);
+        view.volume.set_value(media.volume.clamp(0.0, 1.0));
+        view.updating.set(false);
+    }
+
+    fn refresh_auxiliary_windows(self: &Rc<Self>) {
+        self.refresh_library();
+        self.refresh_media();
+        self.refresh_performance();
     }
 
     fn show_find(self: &Rc<Self>) {
@@ -1314,14 +1860,15 @@ impl BrowserWindow {
             .transient_for(&self.window)
             .modal(true)
             .title("Settings")
-            .default_width(460)
+            .default_width(500)
             .resizable(false)
             .build();
         let content = gtk::Box::new(gtk::Orientation::Vertical, 14);
-        content.set_margin_top(18);
-        content.set_margin_bottom(18);
-        content.set_margin_start(18);
-        content.set_margin_end(18);
+        content.add_css_class("surf-dialog-content");
+        let heading = gtk::Label::builder().label("Settings").xalign(0.0).build();
+        heading.add_css_class("surf-dialog-heading");
+        content.append(&heading);
+        content.append(&section_label("APPEARANCE"));
         let dark = gtk::Switch::builder()
             .active(self.controller.borrow().dark_mode)
             .build();
@@ -1338,6 +1885,49 @@ impl BrowserWindow {
             "Request compact layouts from Chromium.",
             &mobile,
         ));
+        content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        content.append(&section_label("PRIVACY"));
+        let clear_history = gtk::Button::with_label("Clear browsing history");
+        clear_history.set_halign(gtk::Align::Fill);
+        content.append(&clear_history);
+        content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        content.append(&section_label("CONNECTION"));
+        let connection = gtk::Label::builder()
+            .label(&self.controller.borrow().status)
+            .wrap(true)
+            .xalign(0.0)
+            .css_classes(["surf-status"])
+            .build();
+        content.append(&connection);
+        for server in self.controller.borrow().saved_servers.clone() {
+            let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            let labels = gtk::Box::new(gtk::Orientation::Vertical, 1);
+            labels.set_hexpand(true);
+            labels.append(
+                &gtk::Label::builder()
+                    .label(&server.name)
+                    .xalign(0.0)
+                    .build(),
+            );
+            labels.append(
+                &gtk::Label::builder()
+                    .label(server.endpoint.trim_start_matches("https://"))
+                    .xalign(0.0)
+                    .css_classes(["surf-status"])
+                    .build(),
+            );
+            let forget = gtk::Button::with_label("Forget");
+            row.append(&labels);
+            row.append(&forget);
+            content.append(&row);
+            let weak = Rc::downgrade(self);
+            let dialog_weak = dialog.downgrade();
+            forget.connect_clicked(move |_| {
+                if let (Some(ui), Some(parent)) = (weak.upgrade(), dialog_weak.upgrade()) {
+                    ui.confirm_forget_server(&parent, server.clone());
+                }
+            });
+        }
         let disconnect = gtk::Button::with_label("Disconnect");
         content.append(&disconnect);
         content.append(
@@ -1369,6 +1959,19 @@ impl BrowserWindow {
             }
         });
         let weak = Rc::downgrade(self);
+        clear_history.connect_clicked(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.command(Command::Clear {
+                    what: "history".to_owned(),
+                    causal: Causal::default(),
+                });
+                ui.controller
+                    .borrow_mut()
+                    .browser
+                    .toast("Browsing history cleared");
+            }
+        });
+        let weak = Rc::downgrade(self);
         disconnect.connect_clicked(move |_| {
             if let Some(ui) = weak.upgrade() {
                 ui.controller.borrow_mut().disconnect();
@@ -1377,31 +1980,145 @@ impl BrowserWindow {
         dialog.present();
     }
 
-    fn show_performance(&self) {
-        let client = self.controller.borrow();
-        let report = client.latest_diagnostics.unwrap_or_default();
-        let media = client.media_diagnostics();
-        let text = format!(
-            "Presented  {:.1} fps\nDecoded    {:.1} fps\nDropped    {:.1}%\n\nDecode     {} µs\nGPU upload {} µs\nFrame age  {} µs\nRound trip {} µs\nQueues     {} / {} / {}\n\nGaps {} · decode errors {}",
-            report.presentation_fps,
-            report.decode_fps,
-            report.drop_percent,
+    fn confirm_forget_server(
+        self: &Rc<Self>,
+        parent: &gtk::Window,
+        server: surf_session::SavedServer,
+    ) {
+        let dialog = gtk::Dialog::builder()
+            .transient_for(parent)
+            .modal(true)
+            .title("Forget server?")
+            .build();
+        dialog.add_button("Cancel", gtk::ResponseType::Cancel);
+        dialog.add_button("Forget", gtk::ResponseType::Accept);
+        let content = dialog.content_area();
+        content.add_css_class("surf-dialog-content");
+        content.append(
+            &gtk::Label::builder()
+                .label(format!(
+                    "Surf will remove {} and this computer's pairing key for it.",
+                    server.name
+                ))
+                .wrap(true)
+                .xalign(0.0)
+                .build(),
+        );
+        let weak = Rc::downgrade(self);
+        dialog.connect_response(move |dialog, response| {
+            if response == gtk::ResponseType::Accept
+                && let Some(ui) = weak.upgrade()
+            {
+                match ui.controller.borrow_mut().forget_server(&server.server_id) {
+                    Ok(()) => ui
+                        .controller
+                        .borrow_mut()
+                        .browser
+                        .toast(format!("Forgot {}", server.name)),
+                    Err(error) => ui.controller.borrow_mut().browser.toast(error),
+                }
+            }
+            dialog.close();
+        });
+        dialog.present();
+    }
+
+    fn show_performance(self: &Rc<Self>) {
+        if let Some(view) = self.performance_view.borrow().as_ref() {
+            view.window.present();
+            return;
+        }
+        let window = gtk::Window::builder()
+            .transient_for(&self.window)
+            .title("Performance")
+            .default_width(430)
+            .resizable(false)
+            .build();
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        content.add_css_class("surf-dialog-content");
+        let heading = gtk::Label::builder()
+            .label("Streaming performance")
+            .xalign(0.0)
+            .build();
+        heading.add_css_class("surf-dialog-heading");
+        content.append(&heading);
+        let metrics = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let (presented_card, presented) = metric_card("Presented");
+        let (decoded_card, decoded) = metric_card("Decoded");
+        let (dropped_card, dropped) = metric_card("Dropped");
+        metrics.append(&presented_card);
+        metrics.append(&decoded_card);
+        metrics.append(&dropped_card);
+        content.append(&metrics);
+        let details = gtk::Label::builder()
+            .xalign(0.0)
+            .selectable(true)
+            .css_classes(["surf-monospace"])
+            .build();
+        content.append(&details);
+        let health = gtk::Label::builder()
+            .xalign(0.0)
+            .wrap(true)
+            .css_classes(["surf-status"])
+            .build();
+        content.append(&health);
+        window.set_child(Some(&content));
+        let weak = Rc::downgrade(self);
+        window.connect_close_request(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.performance_view.borrow_mut().take();
+            }
+            Propagation::Proceed
+        });
+        self.performance_view.replace(Some(PerformanceView {
+            window: window.clone(),
+            presented,
+            decoded,
+            dropped,
+            details,
+            health,
+        }));
+        self.refresh_performance();
+        window.present();
+    }
+
+    fn refresh_performance(&self) {
+        let (report, media) = {
+            let client = self.controller.borrow();
+            (
+                client.latest_diagnostics.unwrap_or_default(),
+                client.media_diagnostics(),
+            )
+        };
+        let binding = self.performance_view.borrow();
+        let Some(view) = binding.as_ref() else {
+            return;
+        };
+        view.presented
+            .set_text(&format!("{:.1} fps", report.presentation_fps));
+        view.decoded
+            .set_text(&format!("{:.1} fps", report.decode_fps));
+        view.dropped
+            .set_text(&format!("{:.1}%", report.drop_percent));
+        view.details.set_text(&format!(
+            "Decode       {:>8} µs\nGPU upload   {:>8} µs\nFrame age    {:>8} µs\nNetwork      {:>8} µs\nRound trip   {:>8} µs\nQueues        {} / {} / {}",
             report.decode_us,
             report.upload_us,
             report.frame_age_us,
+            report.network_us,
             report.rtt_us,
             report.encoded_video_depth,
             report.decoded_video_depth,
             report.audio_depth,
-            report.sequence_gaps,
-            media.decode_errors,
-        );
-        drop(client);
-        self.show_message("Performance", &text);
+        ));
+        view.health.set_text(&format!(
+            "{:?} · {} sequence gaps · {} decode errors · {} frames received",
+            report.health, report.sequence_gaps, report.decode_errors, media.ingress_frames
+        ));
     }
 
     fn show_page_dialog(self: &Rc<Self>, prompt: surf_client_app::DialogPrompt) {
-        if self.dialog_visible.replace(true) {
+        if self.page_dialog.borrow().is_some() {
             return;
         }
         let dialog = gtk::Dialog::builder()
@@ -1409,7 +2126,9 @@ impl BrowserWindow {
             .modal(true)
             .title("This page says")
             .build();
-        dialog.add_button("Cancel", gtk::ResponseType::Cancel);
+        if prompt.kind != "alert" {
+            dialog.add_button("Cancel", gtk::ResponseType::Cancel);
+        }
         dialog.add_button("OK", gtk::ResponseType::Ok);
         let content = dialog.content_area();
         content.set_spacing(10);
@@ -1431,8 +2150,9 @@ impl BrowserWindow {
         let weak = Rc::downgrade(self);
         let response_input = input.clone();
         dialog.connect_response(move |dialog, response| {
-            if let Some(ui) = weak.upgrade() {
-                ui.dialog_visible.set(false);
+            if let Some(ui) = weak.upgrade()
+                && ui.page_dialog.borrow_mut().take().is_some()
+            {
                 ui.controller.borrow_mut().reply_dialog(
                     response == gtk::ResponseType::Ok,
                     response_input.text().to_string(),
@@ -1440,6 +2160,7 @@ impl BrowserWindow {
             }
             dialog.close();
         });
+        self.page_dialog.replace(Some(dialog.clone()));
         dialog.present();
         if prompt.kind == "prompt" {
             input.grab_focus();
@@ -1448,7 +2169,7 @@ impl BrowserWindow {
     }
 
     fn show_page_select(self: &Rc<Self>, prompt: surf_client_app::SelectPrompt) {
-        if self.select_visible.replace(true) {
+        if self.page_select.borrow().is_some() {
             return;
         }
         let popover = gtk::Popover::new();
@@ -1468,6 +2189,7 @@ impl BrowserWindow {
         if !prompt.title.is_empty() {
             content.append(&gtk::Label::new(Some(&prompt.title)));
         }
+        let choices = Rc::new(RefCell::new(Vec::with_capacity(prompt.options.len())));
         for (index, option) in prompt.options.iter().enumerate() {
             let button = gtk::CheckButton::with_label(&option.label);
             button.set_active(prompt.selected[index]);
@@ -1479,7 +2201,7 @@ impl BrowserWindow {
                     if button.is_active()
                         && let Some(ui) = weak.upgrade()
                     {
-                        ui.select_visible.set(false);
+                        ui.page_select.borrow_mut().take();
                         ui.controller
                             .borrow_mut()
                             .reply_select(false, vec![index as i32]);
@@ -1487,26 +2209,48 @@ impl BrowserWindow {
                     }
                 });
             }
+            choices.borrow_mut().push(button.clone());
             content.append(&button);
         }
         if prompt.multiple {
             let choose = gtk::Button::with_label("Choose");
+            let weak = Rc::downgrade(self);
+            let popover_clone = popover.clone();
+            let choices = Rc::clone(&choices);
+            choose.connect_clicked(move |_| {
+                if let Some(ui) = weak.upgrade() {
+                    let indices = choices
+                        .borrow()
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(index, choice)| {
+                            choice
+                                .is_active()
+                                .then_some(i32::try_from(index).unwrap_or(i32::MAX))
+                        })
+                        .collect();
+                    ui.page_select.borrow_mut().take();
+                    ui.controller.borrow_mut().reply_select(false, indices);
+                    popover_clone.popdown();
+                }
+            });
             content.append(&choose);
         }
         let weak = Rc::downgrade(self);
         popover.connect_closed(move |_| {
             if let Some(ui) = weak.upgrade()
-                && ui.select_visible.replace(false)
+                && ui.page_select.borrow_mut().take().is_some()
             {
                 ui.controller.borrow_mut().reply_select(true, Vec::new());
             }
         });
         popover.set_child(Some(&content));
+        self.page_select.replace(Some(popover.clone()));
         popover.popup();
     }
 
     fn show_file_chooser(self: &Rc<Self>, multiple: bool) {
-        if self.file_visible.replace(true) {
+        if self.file_chooser.borrow().is_some() {
             return;
         }
         let chooser = gtk::FileChooserNative::builder()
@@ -1520,8 +2264,9 @@ impl BrowserWindow {
             .build();
         let weak = Rc::downgrade(self);
         chooser.connect_response(move |chooser, response| {
-            if let Some(ui) = weak.upgrade() {
-                ui.file_visible.set(false);
+            if let Some(ui) = weak.upgrade()
+                && ui.file_chooser.borrow_mut().take().is_some()
+            {
                 let paths = if response == gtk::ResponseType::Accept {
                     list_model_paths(&chooser.files())
                 } else {
@@ -1531,11 +2276,12 @@ impl BrowserWindow {
             }
             chooser.destroy();
         });
+        self.file_chooser.replace(Some(chooser.clone()));
         chooser.show();
     }
 
     fn show_reader(self: &Rc<Self>, reader: surf_client_app::ReaderDocument) {
-        if self.reader_visible.replace(true) {
+        if self.reader_window.borrow().is_some() {
             return;
         }
         let window = gtk::Window::builder()
@@ -1548,6 +2294,19 @@ impl BrowserWindow {
             .default_width(680)
             .default_height(620)
             .build();
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        toolbar.add_css_class("surf-toolbar");
+        let address = gtk::Label::builder()
+            .label(compact_address(&reader.url))
+            .xalign(0.0)
+            .hexpand(true)
+            .ellipsize(gtk::pango::EllipsizeMode::Middle)
+            .css_classes(["surf-status"])
+            .build();
+        let open = gtk::Button::with_label("Open page");
+        toolbar.append(&address);
+        toolbar.append(&open);
         let scroll = gtk::ScrolledWindow::new();
         let text = gtk::Label::builder()
             .label(&reader.text)
@@ -1561,20 +2320,35 @@ impl BrowserWindow {
             .margin_end(32)
             .build();
         scroll.set_child(Some(&text));
-        window.set_child(Some(&scroll));
+        content.append(&toolbar);
+        content.append(&scroll);
+        window.set_child(Some(&content));
+        let weak = Rc::downgrade(self);
+        let url = reader.url.clone();
+        open.connect_clicked(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.controller.borrow_mut().navigate(&url);
+                if let Some(window) = ui.reader_window.borrow_mut().take() {
+                    window.close();
+                }
+                ui.controller.borrow_mut().browser.reader = None;
+            }
+        });
         let weak = Rc::downgrade(self);
         window.connect_close_request(move |_| {
-            if let Some(ui) = weak.upgrade() {
-                ui.reader_visible.set(false);
+            if let Some(ui) = weak.upgrade()
+                && ui.reader_window.borrow_mut().take().is_some()
+            {
                 ui.controller.borrow_mut().browser.reader = None;
             }
             Propagation::Proceed
         });
+        self.reader_window.replace(Some(window.clone()));
         window.present();
     }
 
-    fn show_page_error(&self, url: &str) {
-        if self.error_visible.replace(true) {
+    fn show_page_error(self: &Rc<Self>, url: &str) {
+        if self.page_error.borrow().is_some() {
             return;
         }
         let dialog = gtk::MessageDialog::builder()
@@ -1584,13 +2358,16 @@ impl BrowserWindow {
             .secondary_text(compact_address(url))
             .buttons(gtk::ButtonsType::Close)
             .build();
-        let controller = Rc::clone(&self.controller);
-        let error_visible = self.error_visible.clone();
+        let weak = Rc::downgrade(self);
         dialog.connect_response(move |dialog, _| {
-            error_visible.set(false);
-            controller.borrow_mut().browser.page_error = None;
+            if let Some(ui) = weak.upgrade()
+                && ui.page_error.borrow_mut().take().is_some()
+            {
+                ui.controller.borrow_mut().browser.page_error = None;
+            }
             dialog.close();
         });
+        self.page_error.replace(Some(dialog.clone()));
         dialog.present();
     }
 }
@@ -1630,6 +2407,108 @@ fn setting_row(title: &str, detail: &str, toggle: &gtk::Switch) -> gtk::Box {
     row.append(&labels);
     row.append(toggle);
     row
+}
+
+fn section_label(text: &str) -> gtk::Label {
+    let label = gtk::Label::builder().label(text).xalign(0.0).build();
+    label.add_css_class("surf-section");
+    label
+}
+
+fn library_entry_row(
+    title: &str,
+    url: &str,
+    remove_tooltip: &str,
+) -> (gtk::Box, gtk::Button, gtk::Button) {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    row.add_css_class("surf-library-row");
+    let open = gtk::Button::new();
+    open.add_css_class("flat");
+    open.set_hexpand(true);
+    let labels = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    let title = if title.trim().is_empty() {
+        compact_address(url)
+    } else {
+        title.to_owned()
+    };
+    labels.append(
+        &gtk::Label::builder()
+            .label(title)
+            .xalign(0.0)
+            .ellipsize(gtk::pango::EllipsizeMode::End)
+            .build(),
+    );
+    labels.append(
+        &gtk::Label::builder()
+            .label(compact_address(url))
+            .xalign(0.0)
+            .ellipsize(gtk::pango::EllipsizeMode::Middle)
+            .css_classes(["surf-status"])
+            .build(),
+    );
+    open.set_child(Some(&labels));
+    let remove = icon_button("user-trash-symbolic", remove_tooltip);
+    row.append(&open);
+    row.append(&remove);
+    (row, open, remove)
+}
+
+fn append_empty_state(container: &gtk::Box, text: &str) {
+    container.append(
+        &gtk::Label::builder()
+            .label(text)
+            .xalign(0.0)
+            .margin_top(18)
+            .margin_bottom(18)
+            .margin_start(10)
+            .margin_end(10)
+            .css_classes(["surf-status"])
+            .build(),
+    );
+}
+
+fn download_destination(name: &str) -> PathBuf {
+    directories::UserDirs::new()
+        .and_then(|directories| directories.download_dir().map(PathBuf::from))
+        .unwrap_or_else(std::env::temp_dir)
+        .join(name)
+}
+
+fn format_bytes(bytes: i64) -> String {
+    let bytes = bytes.max(0) as f64;
+    if bytes >= 1024.0 * 1024.0 * 1024.0 {
+        format!("{:.1} GB", bytes / (1024.0 * 1024.0 * 1024.0))
+    } else if bytes >= 1024.0 * 1024.0 {
+        format!("{:.1} MB", bytes / (1024.0 * 1024.0))
+    } else if bytes >= 1024.0 {
+        format!("{:.1} KB", bytes / 1024.0)
+    } else {
+        format!("{} B", bytes as i64)
+    }
+}
+
+fn format_time(seconds: f64) -> String {
+    if !seconds.is_finite() || seconds < 0.0 {
+        return "0:00".to_owned();
+    }
+    let seconds = seconds.round() as u64;
+    format!("{}:{:02}", seconds / 60, seconds % 60)
+}
+
+fn metric_card(name: &str) -> (gtk::Box, gtk::Label) {
+    let card = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    card.set_hexpand(true);
+    card.add_css_class("surf-metric");
+    let value = gtk::Label::new(Some("—"));
+    value.add_css_class("surf-metric-value");
+    card.append(&value);
+    card.append(
+        &gtk::Label::builder()
+            .label(name)
+            .css_classes(["surf-status"])
+            .build(),
+    );
+    (card, value)
 }
 
 fn list_model_paths(model: &gtk::gio::ListModel) -> Vec<PathBuf> {

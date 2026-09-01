@@ -40,6 +40,7 @@ pub struct Tick {
 
 pub struct ClientController {
     core: Core,
+    storage: Storage,
     pub snapshot: Snapshot,
     session: Option<SessionClient>,
     media: Option<MediaPipeline>,
@@ -70,6 +71,7 @@ pub struct ClientController {
     clock_sync: ClockSync,
     pipeline_diagnostics: PipelineDiagnostics,
     render_diagnostics: RenderDiagnostics,
+    requested_viewport: Option<(i32, i32)>,
 }
 
 impl ClientController {
@@ -90,10 +92,13 @@ impl ClientController {
         })
         .map_err(|error| error.to_string())?;
         let snapshot = core.snapshot().map_err(|error| error.to_string())?;
-        let storage = Storage::system().map_err(|error| error.to_string())?;
+        let storage = std::env::var_os("SURF_CLIENT_HOME")
+            .map(Storage::at)
+            .map_or_else(Storage::system, Ok)
+            .map_err(|error| error.to_string())?;
         let saved_servers = storage.servers().unwrap_or_default();
         let media = MediaPipeline::spawn().map_err(|error| error.to_string())?;
-        let session = SessionClient::spawn_with_frame_sink(storage, media.frame_sink())
+        let session = SessionClient::spawn_with_frame_sink(storage.clone(), media.frame_sink())
             .map_err(|error| error.to_string())?;
         let startup_endpoint =
             (saved_servers.len() == 1).then(|| saved_servers[0].endpoint.clone());
@@ -102,6 +107,7 @@ impl ClientController {
             .find(|argument| !argument.starts_with('-'));
         let mut controller = Self {
             core,
+            storage,
             snapshot,
             session: Some(session),
             media: Some(media),
@@ -136,6 +142,7 @@ impl ClientController {
             clock_sync: ClockSync::new(),
             pipeline_diagnostics: PipelineDiagnostics::new(),
             render_diagnostics: RenderDiagnostics::default(),
+            requested_viewport: None,
         };
         if let Some(endpoint) = startup_endpoint {
             controller.inspect(endpoint, true);
@@ -189,14 +196,16 @@ impl ClientController {
     }
 
     pub fn set_viewport(&mut self, width: i32, height: i32) -> bool {
-        if !self.connected {
+        // GTK may briefly allocate hidden stack children at 0×0 while the
+        // browser page becomes visible. That is not a real viewport change.
+        if !self.connected || width < 64 || height < 64 {
             return false;
         }
         let viewport = (width.max(2) & !1, height.max(2) & !1);
-        if self.remote_viewport == Some(viewport) {
+        if self.requested_viewport == Some(viewport) {
             return false;
         }
-        self.remote_viewport = Some(viewport);
+        self.requested_viewport = Some(viewport);
         self.command(Command::Size {
             w: viewport.0,
             h: viewport.1,
@@ -287,8 +296,8 @@ impl ClientController {
     }
 
     pub fn forget_server(&mut self, server_id: &str) -> Result<(), String> {
-        Storage::system()
-            .and_then(|storage| storage.forget_server(server_id))
+        self.storage
+            .forget_server(server_id)
             .map_err(|error| error.to_string())?;
         let connected_to_server = self
             .inspected
@@ -364,6 +373,7 @@ impl ClientController {
             media.set_clock_offset(None);
         }
         self.remote_viewport = None;
+        self.requested_viewport = None;
         self.video_dimensions = None;
         effects.push(HostEffect::ClearVideo);
     }
@@ -443,6 +453,7 @@ impl ClientController {
                 self.status = format!("Connected securely to {}", info.name);
                 self.pairing = None;
                 self.remote_viewport = None;
+                self.requested_viewport = None;
                 self.command(Command::Dark {
                     on: self.dark_mode,
                     causal: Causal::default(),

@@ -17,8 +17,8 @@ use surf_session::{
     SessionClient, SessionEvent, Storage,
 };
 
-const LUCIDE: &[u8] = include_bytes!("../../../../../client/ios/Resources/Lucide.ttf");
-const APP_ICON: &[u8] = include_bytes!("../../../../../backend/cmd/surf/surf-icon.png");
+const LUCIDE: &[u8] = include_bytes!("../../../../../../client/ios/Resources/Lucide.ttf");
+const APP_ICON: &[u8] = include_bytes!("../../../../../../backend/cmd/surf/surf-icon.png");
 const ICON_FONT: &str = "surf-lucide";
 
 #[path = "../browser_ui.rs"]
@@ -715,7 +715,7 @@ impl SurfDesktop {
                         "source": "desktop",
                         "level": "info",
                         "message": "Surf Desktop is connected",
-                        "version": include_str!("../../../../../VERSION").trim(),
+                        "version": include_str!("../../../../../../VERSION").trim(),
                     }),
                     causal: Causal::default(),
                 });
@@ -1700,7 +1700,7 @@ impl SurfDesktop {
                 ui.label(
                     RichText::new(format!(
                         "Surf {} · C99 portable core",
-                        include_str!("../../../../../VERSION").trim()
+                        include_str!("../../../../../../VERSION").trim()
                     ))
                     .monospace()
                     .weak(),

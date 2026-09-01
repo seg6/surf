@@ -1,3 +1,5 @@
+use std::ffi::{CStr, CString, c_void};
+use std::sync::OnceLock;
 use std::time::Instant;
 
 use glow::HasContext as _;
@@ -41,13 +43,8 @@ impl VideoSurface {
             return Ok(());
         }
         // SAFETY: GtkGLArea has made its context current before `realize` is
-        // called. GTK has loaded the platform GL implementation into this
-        // process, so its entry points can be resolved from the global scope.
-        let gl = unsafe {
-            glow::Context::from_loader_function_cstr(|name| {
-                libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr()).cast_const()
-            })
-        };
+        // called. GTK uses libepoxy for context-specific GL dispatch.
+        let gl = unsafe { glow::Context::from_loader_function_cstr(|name| load_gl_symbol(name)) };
         // SAFETY: the GTK context is current on this thread.
         let resources = unsafe { GlResources::create(&gl)? };
         self.gl = Some(gl);
@@ -142,6 +139,32 @@ impl VideoSurface {
     pub fn take_error(&mut self) -> Option<String> {
         self.error.take()
     }
+}
+
+unsafe fn load_gl_symbol(name: &CStr) -> *const c_void {
+    static EPOXY_HANDLE: OnceLock<usize> = OnceLock::new();
+    let handle = *EPOXY_HANDLE.get_or_init(|| {
+        // Keep one process-lifetime reference: glow retains the pointers.
+        unsafe {
+            libc::dlopen(c"libepoxy.so.0".as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL) as usize
+        }
+    }) as *mut c_void;
+    if handle.is_null() {
+        return std::ptr::null();
+    }
+    let mut epoxy_name = Vec::with_capacity(name.to_bytes().len() + 7);
+    epoxy_name.extend_from_slice(b"epoxy_");
+    epoxy_name.extend_from_slice(name.to_bytes());
+    let Ok(epoxy_name) = CString::new(epoxy_name) else {
+        return std::ptr::null();
+    };
+    // libepoxy publishes each GL entry point as a function-pointer variable.
+    // `dlsym` returns the address of that slot, which must be dereferenced once.
+    let slot = unsafe { libc::dlsym(handle, epoxy_name.as_ptr()) };
+    if !slot.is_null() {
+        return unsafe { *(slot as *const *const c_void) };
+    }
+    unsafe { libc::dlsym(handle, name.as_ptr()).cast_const() }
 }
 
 struct GlResources {

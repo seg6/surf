@@ -207,6 +207,18 @@ if ! rg -q '^SURF_SMOKE_RESULT .* timing_synchronized=true ' "$render_log"; then
   sed -n '1,240p' "$render_log" >&2
   exit 1
 fi
+if rg -q 'size: client asked [0-9]{1,2}x[0-9]' "$server_log"; then
+  echo "Surf GTK shell sent a transient hidden-widget viewport" >&2
+  sed -n '/size: client asked/p' "$server_log" >&2
+  exit 1
+fi
+for width in 940 1260; do
+  if ! rg -q "size: client asked ${width}x" "$server_log"; then
+    echo "Surf GTK resize to width $width did not reach the backend" >&2
+    sed -n '/size: client asked/p' "$server_log" >&2
+    exit 1
+  fi
+done
 sed -n '/^SURF_SMOKE_RESULT /p' "$render_log"
 
 kill "$pair_pid" 2>/dev/null || true
