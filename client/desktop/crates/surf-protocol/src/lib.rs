@@ -4,12 +4,20 @@
 //! Unknown message kinds, unknown fields, trailing data, invalid types, and
 //! values outside bounded client limits are rejected.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
 pub const MAX_TEXT_BYTES: usize = 1024 * 1024;
 pub const MAX_COLLECTION_ITEMS: usize = 4096;
 pub const MAX_TOUCH_POINTS: usize = 16;
+
+fn null_to_default<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<Vec<T>>::deserialize(deserializer).map(Option::unwrap_or_default)
+}
 
 #[derive(Debug, Error)]
 pub enum ProtocolError {
@@ -416,7 +424,10 @@ pub enum Event {
     #[serde(rename = "hello")]
     Hello { vw: i32, vh: i32 },
     #[serde(rename = "tabs")]
-    Tabs { tabs: Vec<TabInfo> },
+    Tabs {
+        #[serde(default, deserialize_with = "null_to_default")]
+        tabs: Vec<TabInfo>,
+    },
     #[serde(rename = "video-config")]
     VideoConfig {
         state: String,
@@ -465,10 +476,15 @@ pub enum Event {
     #[serde(rename = "dlprogress")]
     DownloadProgress { name: String, pct: i32 },
     #[serde(rename = "suggest")]
-    Suggest { items: Vec<LibraryEntry> },
+    Suggest {
+        #[serde(default, deserialize_with = "null_to_default")]
+        items: Vec<LibraryEntry>,
+    },
     #[serde(rename = "hist")]
     Library {
+        #[serde(default, deserialize_with = "null_to_default")]
         hist: Vec<LibraryEntry>,
+        #[serde(default, deserialize_with = "null_to_default")]
         bookmarks: Vec<LibraryEntry>,
         starred: bool,
     },
@@ -476,12 +492,16 @@ pub enum Event {
     History {
         #[serde(default)]
         q: String,
+        #[serde(default, deserialize_with = "null_to_default")]
         items: Vec<LibraryEntry>,
         offset: i32,
         total: i32,
     },
     #[serde(rename = "downloads")]
-    Downloads { items: Vec<DownloadItem> },
+    Downloads {
+        #[serde(default, deserialize_with = "null_to_default")]
+        items: Vec<DownloadItem>,
+    },
     #[serde(rename = "dialog")]
     Dialog {
         kind: String,
@@ -519,7 +539,7 @@ pub enum Event {
         show_keyboard: bool,
         #[serde(default)]
         kind: String,
-        #[serde(default)]
+        #[serde(default, deserialize_with = "null_to_default")]
         rect: Vec<f64>,
     },
     #[serde(rename = "select")]
@@ -529,8 +549,9 @@ pub enum Event {
         title: String,
         #[serde(default)]
         multiple: bool,
+        #[serde(default, deserialize_with = "null_to_default")]
         options: Vec<SelectOption>,
-        #[serde(default)]
+        #[serde(default, deserialize_with = "null_to_default")]
         rect: Vec<f64>,
     },
     #[serde(rename = "media-state")]
@@ -805,6 +826,22 @@ mod tests {
         assert!(Event::decode(br#"{"t":"loading","on":true} {}"#).is_err());
         let huge = "x".repeat(super::MAX_TEXT_BYTES + 1);
         assert!(Event::Toast { text: huge }.encode().is_err());
+    }
+
+    #[test]
+    fn tolerates_null_collections_from_legacy_go_servers() {
+        assert_eq!(
+            Event::decode(br#"{"t":"suggest","items":null}"#).unwrap(),
+            Event::Suggest { items: Vec::new() }
+        );
+        assert_eq!(
+            Event::decode(br#"{"t":"hist","hist":null,"bookmarks":null,"starred":false}"#).unwrap(),
+            Event::Library {
+                hist: Vec::new(),
+                bookmarks: Vec::new(),
+                starred: false,
+            }
+        );
     }
 
     #[test]

@@ -196,8 +196,9 @@ impl ClientController {
     }
 
     pub fn set_viewport(&mut self, width: i32, height: i32) -> bool {
-        // GTK may briefly allocate hidden stack children at 0×0 while the
-        // browser page becomes visible. That is not a real viewport change.
+        // Native hosts may briefly report a zero-sized or tiny surface while a
+        // window is mapped or its layout is being replaced. That is not a real
+        // browser viewport change.
         if !self.connected || width < 64 || height < 64 {
             return false;
         }
@@ -403,21 +404,28 @@ impl ClientController {
             SessionEvent::Inspected {
                 info,
                 endpoint,
-                paired,
+                saved_pairing,
             } => {
                 self.endpoint = endpoint;
-                self.status = if paired {
-                    format!("{} is verified and already paired", info.name)
-                } else if info.pairing {
+                // An open server-side pairing session is an explicit request
+                // to pair the selected client. Prefer it over a stale local
+                // record; otherwise clicking the server can detour through an
+                // avoidable 401 before revealing the code field.
+                let can_connect = saved_pairing && !info.pairing;
+                self.status = if info.pairing {
                     format!("Enter the six-digit code shown by {}", info.name)
+                } else if can_connect {
+                    format!("{} is verified and already paired", info.name)
                 } else {
                     format!("Open pairing on {} to continue", info.name)
                 };
                 self.inspected = Some(info);
-                self.paired = paired;
+                self.paired = can_connect;
                 self.pairing = None;
-                if paired && std::mem::take(&mut self.connect_after_inspect) {
+                if can_connect && std::mem::take(&mut self.connect_after_inspect) {
                     self.send(SessionAction::Connect);
+                } else {
+                    self.connect_after_inspect = false;
                 }
             }
             SessionEvent::PairingPhrase(pairing) => {
@@ -519,6 +527,29 @@ impl ClientController {
             }
             SessionEvent::Failure(failure) => {
                 self.reset_transport(effects);
+                if failure.kind == FailureKind::Authentication {
+                    // A saved key only proves that this client paired at some
+                    // point. A 401/403 is the server's authoritative answer:
+                    // it no longer accepts that key, so expose pairing again
+                    // instead of leaving the user at a dead Connect button.
+                    self.paired = false;
+                    self.pairing = None;
+                    self.connect_after_inspect = false;
+                    if let Some(info) = &self.inspected {
+                        self.status = if info.pairing {
+                            format!(
+                                "{} no longer recognizes this computer. Enter the six-digit pairing code",
+                                info.name
+                            )
+                        } else {
+                            format!(
+                                "{} no longer recognizes this computer. Open pairing on the server to continue",
+                                info.name
+                            )
+                        };
+                        return;
+                    }
+                }
                 let heading = match failure.kind {
                     FailureKind::Endpoint => "Server address",
                     FailureKind::Trust => "Server identity",
@@ -773,7 +804,7 @@ impl ClientController {
                 presented_fps: report.presentation_fps,
                 decode_fps: report.decode_fps,
                 au_rate: report.video_fps,
-                renderer: "gtk-glarea-yuv".to_owned(),
+                renderer: "imgui-opengl-yuv".to_owned(),
                 renderer_fps: report.presentation_fps,
                 renderer_ms: report.upload_us as f64 / 1_000.0,
                 renderer_backpressure: bounded_i32(report.dropped_frames),

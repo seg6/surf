@@ -1,8 +1,6 @@
-use std::ffi::{CStr, CString, c_void};
-use std::sync::OnceLock;
 use std::time::Instant;
 
-use glow::HasContext as _;
+use imgui_glow_renderer::glow::{self, HasContext as _};
 use surf_client_app::RenderDiagnostics;
 use surf_core::monotonic_ns;
 use surf_media::{ColorMatrix, ColorRange, DecodedFrame};
@@ -14,8 +12,7 @@ pub struct PresentedFrame {
 }
 
 pub struct VideoSurface {
-    gl: Option<glow::Context>,
-    resources: Option<GlResources>,
+    resources: GlResources,
     pending: Option<DecodedFrame>,
     visible: bool,
     diagnostics: RenderDiagnostics,
@@ -25,39 +22,18 @@ pub struct VideoSurface {
 }
 
 impl VideoSurface {
-    pub fn new() -> Self {
-        Self {
-            gl: None,
-            resources: None,
+    pub fn new(gl: &glow::Context) -> Result<Self, String> {
+        Ok(Self {
+            // SAFETY: creation happens on the event-loop thread while its GL
+            // context is current. All later access stays on that thread.
+            resources: unsafe { GlResources::create(gl)? },
             pending: None,
             visible: false,
             diagnostics: RenderDiagnostics::default(),
             last_presentation_ns: 0,
             surface_generation: 0,
             error: None,
-        }
-    }
-
-    pub fn realize(&mut self) -> Result<(), String> {
-        if self.gl.is_some() {
-            return Ok(());
-        }
-        // SAFETY: GtkGLArea has made its context current before `realize` is
-        // called. GTK uses libepoxy for context-specific GL dispatch.
-        let gl = unsafe { glow::Context::from_loader_function_cstr(|name| load_gl_symbol(name)) };
-        // SAFETY: the GTK context is current on this thread.
-        let resources = unsafe { GlResources::create(&gl)? };
-        self.gl = Some(gl);
-        self.resources = Some(resources);
-        Ok(())
-    }
-
-    pub fn unrealize(&mut self) {
-        if let (Some(gl), Some(resources)) = (&self.gl, self.resources.take()) {
-            // SAFETY: GtkGLArea makes the context current for unrealize.
-            unsafe { resources.destroy(gl) };
-        }
-        self.gl = None;
+        })
     }
 
     pub fn submit(&mut self, frame: DecodedFrame) {
@@ -76,16 +52,16 @@ impl VideoSurface {
         self.diagnostics.latest_presentation_gap_us = 0;
     }
 
-    pub fn render(&mut self, width: i32, height: i32) -> Option<PresentedFrame> {
-        let (Some(gl), Some(resources)) = (&self.gl, &mut self.resources) else {
-            return None;
-        };
-        // SAFETY: GtkGLArea's render signal owns the current framebuffer and
-        // this renderer's objects belong to the same context.
+    pub fn render(&mut self, gl: &glow::Context, viewport: [i32; 4]) -> Option<PresentedFrame> {
+        // SAFETY: the event loop owns the current framebuffer and these
+        // resources belong to the same glutin context.
         unsafe {
-            gl.viewport(0, 0, width.max(1), height.max(1));
-            gl.clear_color(0.0, 0.0, 0.0, 1.0);
-            gl.clear(glow::COLOR_BUFFER_BIT);
+            gl.viewport(
+                viewport[0],
+                viewport[1],
+                viewport[2].max(1),
+                viewport[3].max(1),
+            );
         }
         if !self.visible {
             return None;
@@ -94,8 +70,8 @@ impl VideoSurface {
         if let Some(frame) = self.pending.take() {
             let started = Instant::now();
             // SAFETY: decoded planes are compact, validated, and uploaded only
-            // while this GLArea context is current.
-            if let Err(error) = unsafe { resources.upload(gl, &frame) } {
+            // while the host GL context is current.
+            if let Err(error) = unsafe { self.resources.upload(gl, &frame) } {
                 self.visible = false;
                 self.error = Some(error);
                 return None;
@@ -118,8 +94,8 @@ impl VideoSurface {
                 source_sequence: frame.source_sequence,
             });
         }
-        // SAFETY: resources belong to the current GLArea context.
-        unsafe { resources.draw(gl) };
+        // SAFETY: resources belong to the current host GL context.
+        unsafe { self.resources.draw(gl) };
         if presented.is_some() {
             self.diagnostics.presented = self.diagnostics.presented.saturating_add(1);
         }
@@ -139,32 +115,6 @@ impl VideoSurface {
     pub fn take_error(&mut self) -> Option<String> {
         self.error.take()
     }
-}
-
-unsafe fn load_gl_symbol(name: &CStr) -> *const c_void {
-    static EPOXY_HANDLE: OnceLock<usize> = OnceLock::new();
-    let handle = *EPOXY_HANDLE.get_or_init(|| {
-        // Keep one process-lifetime reference: glow retains the pointers.
-        unsafe {
-            libc::dlopen(c"libepoxy.so.0".as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL) as usize
-        }
-    }) as *mut c_void;
-    if handle.is_null() {
-        return std::ptr::null();
-    }
-    let mut epoxy_name = Vec::with_capacity(name.to_bytes().len() + 7);
-    epoxy_name.extend_from_slice(b"epoxy_");
-    epoxy_name.extend_from_slice(name.to_bytes());
-    let Ok(epoxy_name) = CString::new(epoxy_name) else {
-        return std::ptr::null();
-    };
-    // libepoxy publishes each GL entry point as a function-pointer variable.
-    // `dlsym` returns the address of that slot, which must be dereferenced once.
-    let slot = unsafe { libc::dlsym(handle, epoxy_name.as_ptr()) };
-    if !slot.is_null() {
-        return unsafe { *(slot as *const *const c_void) };
-    }
-    unsafe { libc::dlsym(handle, name.as_ptr()).cast_const() }
 }
 
 struct GlResources {
@@ -361,17 +311,6 @@ impl GlResources {
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
         }
     }
-
-    unsafe fn destroy(self, gl: &glow::Context) {
-        // SAFETY: all resources belong to the current context and are consumed.
-        unsafe {
-            for texture in self.textures {
-                gl.delete_texture(texture);
-            }
-            gl.delete_vertex_array(self.vertex_array);
-            gl.delete_program(self.program);
-        }
-    }
 }
 
 unsafe fn upload_plane(
@@ -397,7 +336,7 @@ unsafe fn upload_plane(
                 0,
                 glow::RED,
                 glow::UNSIGNED_BYTE,
-                glow::PixelUnpackData::Slice(Some(data)),
+                Some(data),
             );
         } else {
             gl.tex_sub_image_2d(
@@ -409,7 +348,7 @@ unsafe fn upload_plane(
                 height,
                 glow::RED,
                 glow::UNSIGNED_BYTE,
-                glow::PixelUnpackData::Slice(Some(data)),
+                glow::PixelUnpackData::Slice(data),
             );
         }
     }

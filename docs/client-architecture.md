@@ -43,7 +43,7 @@ values, completion, and connection/page cleanup.
 ```text
 client/
   core/       portable C99 behavior and protocol
-  desktop/    Rust/egui desktop host, initially certified on Linux
+  desktop/    Rust/ImGui desktop host, initially certified on Linux
   ios/        Objective-C/UIKit old-iOS host
 ```
 
@@ -56,7 +56,7 @@ continues to live under `native/buildenv`.
 
 ```text
                          semantic actions
-  UIKit or egui  --------------------------------->  control core
+  UIKit or ImGui --------------------------------->  control core
        ^                                                   |
        |                 immutable snapshot                |
        +---------------------------------------------------+
@@ -126,9 +126,9 @@ surf_core_result_t surf_core_snapshot(const surf_core_t *core,
 | Device-key operations | Requested | Keychain/SecKey | Rust identity store |
 | H.264 frame admission | Yes | Calls core media API | Calls core media API |
 | H.264 decode | No | VideoToolbox | FFmpeg initially |
-| Video presentation | No | sample-buffer/OpenGL | egui OpenGL callback |
+| Video presentation | No | sample-buffer/OpenGL | direct OpenGL surface |
 | Audio output | No | AudioQueue | desktop audio adapter |
-| UI layout and theme | No | UIKit | egui |
+| UI layout and theme | No | UIKit | Dear ImGui |
 | Clipboard/files/dialog widgets | Requested | UIKit services | desktop services |
 
 ## Completed initial migration

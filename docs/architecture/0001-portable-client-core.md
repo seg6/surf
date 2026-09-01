@@ -35,7 +35,8 @@ renderer, audio, clipboard, or file API. It will not create threads. Platform
 hosts serialize events into the core, drain requested effects, execute those
 effects using platform APIs, and return results as new events.
 
-The first desktop host will live at `client/desktop` and use Rust with egui.
+The first desktop host will live at `client/desktop` and use Rust with Dear
+ImGui, winit, and glutin.
 Rust will provide asynchronous platform orchestration, pinned TLS, secure
 pairing, FFmpeg integration, audio, and a custom OpenGL video surface. A raw
 FFI crate and a safe ownership wrapper will isolate Rust from the C ABI.
@@ -64,7 +65,7 @@ Positive consequences:
 
 - Client behavior can run under ordinary Linux unit tests, sanitizers, and
   fuzzers.
-- UIKit and egui can express interfaces appropriate to their platforms while
+- UIKit and Dear ImGui can express interfaces appropriate to their roles while
   sharing the same behavioral source of truth.
 - New hosts can consume a small C ABI without inheriting Rust, Qt, UIKit, or a
   language runtime.

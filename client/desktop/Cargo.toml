@@ -18,18 +18,23 @@ license = "MIT"
 repository = "https://github.com/seg6/surf"
 
 [workspace.dependencies]
+arboard = "3.6.1"
 base64 = "0.22.1"
 bytes = "1.11.1"
 cpal = "0.18.2"
 directories = "6.0.0"
-glow = "0.17.0"
-gtk = { package = "gtk4", version = "0.11.4" }
-libc = "0.2.177"
 ffmpeg-the-third = { version = "6.0.0", default-features = false, features = ["format"] }
 futures-util = "0.3.31"
+glutin = "0.32.3"
+glutin-winit = "0.5.0"
 hex = "0.4.3"
+image = { version = "0.25.9", default-features = false, features = ["png"] }
+imgui = { version = "0.12.0", features = ["tables-api"] }
+imgui-glow-renderer = "0.13.0"
+imgui-winit-support = "0.13.0"
 mdns-sd = { version = "0.21.1", default-features = false }
 rand = "0.8.5"
+raw-window-handle = "0.6.2"
 reqwest = { version = "0.13.4", default-features = false, features = ["cookies", "json", "multipart", "rustls", "stream"] }
 rsa = { version = "0.9.8", features = ["sha2"] }
 rustls = { version = "0.23.40", default-features = true }

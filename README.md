@@ -23,10 +23,10 @@ servers, touch and keyboard input, video and audio, rotation, and synchronized
 page/native fullscreen; the phone layout is also exercised there through a
 disposable compatibility-mode package.
 
-A real Rust/egui Linux client now exercises the same portable C99 behavior core
-through an ordinary paired Surf session. It is a developer preview, initially
-integration-tested on X11/x86-64; it is not yet part of the normal end-user
-release promise.
+A real Rust/Dear ImGui Linux client now exercises the same portable C99 behavior
+core through an ordinary paired Surf session. It is a compact developer client,
+initially integration-tested on X11/x86-64; it is not yet part of the normal
+end-user release promise.
 
 ## Compatibility
 

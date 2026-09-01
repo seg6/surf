@@ -104,12 +104,12 @@ func (s *Store) SetTitle(url, title string) {
 func (s *Store) Suggest(q string) []Entry {
 	q = strings.ToLower(strings.TrimSpace(q))
 	if q == "" {
-		return nil
+		return []Entry{}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	seen := map[string]bool{}
-	var out []Entry
+	out := make([]Entry, 0, 6)
 	add := func(e Entry) bool {
 		if seen[e.URL] {
 			return false

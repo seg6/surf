@@ -33,10 +33,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         while let Some(event) = client.try_recv() {
             println!("{event:?}");
             match event {
-                SessionEvent::Inspected { paired: true, .. } => {
+                SessionEvent::Inspected {
+                    info,
+                    saved_pairing: true,
+                    ..
+                } if !info.pairing => {
                     client.send(SessionAction::Connect)?;
                 }
-                SessionEvent::Inspected { paired: false, .. } => match &code {
+                SessionEvent::Inspected { .. } => match &code {
                     Some(code) => client.send(SessionAction::Pair {
                         code: code.clone(),
                         device_name: "Surf integration probe".to_owned(),

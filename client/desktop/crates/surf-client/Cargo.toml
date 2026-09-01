@@ -7,10 +7,15 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+arboard.workspace = true
 directories.workspace = true
-glow.workspace = true
-gtk.workspace = true
-libc.workspace = true
+glutin.workspace = true
+glutin-winit.workspace = true
+image.workspace = true
+imgui.workspace = true
+imgui-glow-renderer.workspace = true
+imgui-winit-support.workspace = true
+raw-window-handle.workspace = true
 surf-client-app.workspace = true
 surf-core.workspace = true
 surf-media.workspace = true

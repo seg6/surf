@@ -10,7 +10,7 @@ The reusable boundary is the C99 behavior core under `client/core`.
 ```text
 client/ios      Objective-C/UIKit adapters  ─┐
                                               ├─> client/core (C99)
-client/desktop  Rust/egui adapters          ─┘
+client/desktop  Rust/ImGui adapters         ─┘
 
 backend (Go) <──── pinned HTTPS + WebSocket + typed protocol ────> host
 ```
@@ -70,7 +70,7 @@ picker must not stop socket ingress or decoder progress.
 | Audio | Signed 16-bit PCM output through a bounded device callback |
 | Input | Platform pointer/touch, key, paste, and IME translation into normalized core samples |
 | Services | Clipboard, files, downloads, sharing, lifecycle, and notifications |
-| UI | Native or suitable toolkit layout, focus, accessibility, and theme |
+| UI | Platform-appropriate layout, focus, input methods, and theme |
 
 The platform must never replace Surf's pin with ambient system trust, share one
 private key between unrelated servers, or let a blocking service callback run
@@ -109,9 +109,11 @@ acceptance gate for hardware-specific decoder and lifecycle behavior.
 | Build-supported | Code and dependencies compile, but the full runtime matrix is not yet an acceptance claim | Linux Wayland; additional supported iOS slices |
 | Port candidate | Adapter design exists; no distributable host exists yet | Android and legacy Windows |
 
-The Linux desktop enables X11, Wayland, AccessKit, clipboard, HiDPI-aware egui
-coordinates, and IME support. CI currently runs the real OpenGL/session soak on
-X11; Wayland is compile-covered until a compositor-backed job is added.
+The Linux desktop enables X11, Wayland, clipboard, HiDPI-aware winit
+coordinates, and IME support. Dear ImGui provides a deliberately compact
+developer console rather than imitating the UIKit product. CI currently runs
+the real OpenGL/session soak on X11; Wayland is compile-covered until a
+compositor-backed job is added.
 
 ## Android adapter outline
 
@@ -125,13 +127,13 @@ remain mandatory.
 
 ## Legacy Windows adapter outline
 
-The first experiment should reuse the Rust desktop session and egui host while
-keeping the C99 core unchanged. Evaluate OpenGL availability and FFmpeg runtime
-packaging on the oldest target before promising support. A later native Win32
-host can use Schannel/WinHTTP or a pinned bundled transport, Media Foundation or
-a bundled decoder, WASAPI, and native accessibility. Do not fork protocol or
-state policy to accommodate Windows; add a platform adapter or negotiated
-capability instead.
+The first experiment should reuse the Rust desktop adapters and compact ImGui
+host while keeping the C99 core unchanged. Evaluate OpenGL availability and
+FFmpeg runtime packaging on the oldest target before promising support. A later
+native Win32 host can use Schannel/WinHTTP or a pinned bundled transport, Media
+Foundation or a bundled decoder, WASAPI, and native accessibility. Do not fork
+protocol or state policy to accommodate Windows; add a platform adapter or
+negotiated capability instead.
 
 The minimum Windows version, decoder choice, and binary distribution strategy
 remain release decisions because they depend on hardware/driver testing, not on

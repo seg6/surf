@@ -703,6 +703,27 @@ func (b *Controller) handleSize(m *protocol.SizeCommand) {
 }
 
 func normalizeViewportSize(width, height, defaultWidth, defaultHeight int) (int, int) {
+	if width == 0 {
+		width = defaultWidth
+	}
+	if height == 0 {
+		height = defaultHeight
+	}
+	// A desktop window can be much wider than the encoder safety bound. Scale
+	// both axes together so fullscreen keeps the page/display aspect ratio;
+	// independently clamping width and height can create an unsupported AVC
+	// surface (for example 2560x1408 becoming 1600x1408) and freeze video.
+	scale := 1.0
+	if width > maxViewportDimension {
+		scale = min(scale, float64(maxViewportDimension)/float64(width))
+	}
+	if height > maxViewportDimension {
+		scale = min(scale, float64(maxViewportDimension)/float64(height))
+	}
+	if scale < 1 {
+		width = int(math.Floor(float64(width) * scale))
+		height = int(math.Floor(float64(height) * scale))
+	}
 	clampDim := func(value, fallback int) int {
 		if value == 0 {
 			value = fallback
@@ -765,10 +786,20 @@ func (b *Controller) handleTab(m *protocol.TabCommand) {
 		b.mu.Lock()
 		t := b.tabs[m.ID]
 		var target string
+		var session string
+		lastTab := len(b.tabs) <= 1
 		if t != nil {
 			target = t.TargetID
+			session = t.Session
 		}
 		b.mu.Unlock()
+		// Closing Chromium's final page can terminate the browser before the
+		// target-destroyed recovery callback gets a chance to create a blank
+		// replacement. Reuse that final target as Surf's New Tab instead.
+		if lastTab && session != "" {
+			_ = b.cdp.Dispatch(session, "Page.navigate", map[string]any{"url": "about:blank#surf-new"})
+			return
+		}
 		if target != "" {
 			_, _ = b.cdp.Call("", "Target.closeTarget", map[string]any{"targetId": target})
 		}

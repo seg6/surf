@@ -87,6 +87,17 @@ func TestNormalizeViewportUsesEvenEncoderBounds(t *testing.T) {
 	}
 }
 
+func TestNormalizeViewportPreservesAspectRatioAboveEncoderBounds(t *testing.T) {
+	w, h := normalizeViewportSize(2560, 1408, 768, 950)
+	if w != 1600 || h != 880 {
+		t.Fatalf("wide fullscreen normalized to %dx%d, want 1600x880", w, h)
+	}
+	w, h = normalizeViewportSize(1408, 2560, 768, 950)
+	if w != 880 || h != 1600 {
+		t.Fatalf("tall fullscreen normalized to %dx%d, want 880x1600", w, h)
+	}
+}
+
 func TestPageOrigin(t *testing.T) {
 	cases := map[string]string{
 		"https://example.com/path":      "https://example.com",

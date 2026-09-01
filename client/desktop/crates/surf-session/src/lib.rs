@@ -156,7 +156,7 @@ pub enum SessionEvent {
     Inspected {
         info: ServerInfo,
         endpoint: String,
-        paired: bool,
+        saved_pairing: bool,
     },
     PairingPhrase(PairingStatus),
     Paired(SavedServer),
@@ -328,7 +328,7 @@ async fn driver(
                     emit_status(&events, "verification", "Verifying server identity");
                     match api::inspect_endpoint(&endpoint).await {
                         Ok(result) => {
-                            let paired = storage
+                            let saved_pairing = storage
                                 .server(&result.info.server_id)
                                 .ok()
                                 .flatten()
@@ -342,7 +342,7 @@ async fn driver(
                                         .as_str()
                                         .trim_end_matches('/')
                                         .to_owned(),
-                                    paired,
+                                    saved_pairing,
                                 },
                             )?;
                             verified = Some(result);

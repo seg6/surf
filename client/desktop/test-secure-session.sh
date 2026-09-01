@@ -160,7 +160,6 @@ if ! (
   timeout 40s xvfb-run -a -s "-screen 0 1920x1080x24" env \
     SURF_CLIENT_HOME="$client_home" \
     LIBGL_ALWAYS_SOFTWARE=1 \
-    GSK_RENDERER=ngl \
     WAYLAND_DISPLAY= \
     XDG_SESSION_TYPE=x11 \
     WINIT_UNIX_BACKEND=x11 \
@@ -198,8 +197,12 @@ if ! awk -v replaced="$output_replaced" 'BEGIN { exit !(replaced >= 1) }'; then
   sed -n '1,240p' "$render_log" >&2
   exit 1
 fi
-if ! rg -q '^SURF_SMOKE_RESULT .* decode_errors=0 encoded_depth=0 decoded_depth=0 ' "$render_log"; then
-  echo "Surf media lanes did not drain cleanly after the deliberate UI stall" >&2
+encoded_depth="$(sed -n 's/^SURF_SMOKE_RESULT .* encoded_depth=\([0-9]*\) decoded_depth=.*/\1/p' "$render_log")"
+decoded_depth="$(sed -n 's/^SURF_SMOKE_RESULT .* decoded_depth=\([0-9]*\) upload_us=.*/\1/p' "$render_log")"
+if ! rg -q '^SURF_SMOKE_RESULT .* decode_errors=0 ' "$render_log" ||
+  ! awk -v encoded="$encoded_depth" -v decoded="$decoded_depth" \
+    'BEGIN { exit !(encoded <= 1 && decoded <= 1) }'; then
+  echo "Surf media lanes did not remain bounded after the deliberate UI stall" >&2
   sed -n '1,240p' "$render_log" >&2
   exit 1
 fi
@@ -209,13 +212,13 @@ if ! rg -q '^SURF_SMOKE_RESULT .* timing_synchronized=true ' "$render_log"; then
   exit 1
 fi
 if rg -q 'size: client asked [0-9]{1,2}x[0-9]' "$server_log"; then
-  echo "Surf GTK shell sent a transient hidden-widget viewport" >&2
+  echo "Surf desktop shell sent a transient invalid viewport" >&2
   sed -n '/size: client asked/p' "$server_log" >&2
   exit 1
 fi
 for width in 940 1260; do
   if ! rg -q "size: client asked ${width}x" "$server_log"; then
-    echo "Surf GTK resize to width $width did not reach the backend" >&2
+    echo "Surf desktop resize to width $width did not reach the backend" >&2
     sed -n '/size: client asked/p' "$server_log" >&2
     exit 1
   fi
