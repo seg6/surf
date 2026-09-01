@@ -4,6 +4,9 @@ use std::ffi::{c_char, c_int, c_void};
 
 pub const SURF_CORE_ABI_VERSION: u32 = 1;
 pub const SURF_CORE_OK: c_int = 0;
+pub const SURF_FRAME_OK: c_int = 0;
+pub const SURF_RECONNECT_STOP: c_int = 0;
+pub const SURF_RECONNECT_RETRY: c_int = 1;
 pub const SURF_EVENT_RESET: c_int = 1;
 pub const SURF_EVENT_TABS: c_int = 2;
 pub const SURF_EVENT_URL: c_int = 3;
@@ -172,6 +175,37 @@ pub struct surf_snapshot_t {
     pub awaiting_page_frame: c_int,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct surf_frame_view_t {
+    pub type_: u8,
+    pub flags: u8,
+    pub sequence: u32,
+    pub source_sequence: u32,
+    pub width: u16,
+    pub height: u16,
+    pub interaction_id: u64,
+    pub source_receive_ns: u64,
+    pub encode_complete_ns: u64,
+    pub socket_write_ns: u64,
+    pub encoder_generation: u32,
+    pub input_receive_ns: u64,
+    pub cdp_accepted_ns: u64,
+    pub profile: u8,
+    pub payload: *const u8,
+    pub payload_length: usize,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct surf_reconnect_policy_t {
+    pub attempts: u8,
+    pub maximum_attempts: u8,
+    pub reserved: u16,
+    pub base_delay_ms: u32,
+    pub maximum_delay_ms: u32,
+}
+
 unsafe extern "C" {
     pub fn surf_core_config_init(config: *mut surf_core_config_t);
     pub fn surf_core_create(
@@ -191,6 +225,23 @@ unsafe extern "C" {
     pub fn surf_core_sizeof_config() -> usize;
     pub fn surf_core_sizeof_event() -> usize;
     pub fn surf_core_sizeof_snapshot() -> usize;
+    pub fn surf_frame_parse(
+        data: *const u8,
+        length: usize,
+        out_frame: *mut surf_frame_view_t,
+    ) -> c_int;
+    pub fn surf_frame_result_string(result: c_int) -> *const c_char;
+    pub fn surf_frame_sizeof_view() -> usize;
+    pub fn surf_reconnect_policy_init(policy: *mut surf_reconnect_policy_t);
+    pub fn surf_reconnect_policy_reset(policy: *mut surf_reconnect_policy_t);
+    pub fn surf_reconnect_policy_failure(
+        policy: *mut surf_reconnect_policy_t,
+        retryable: c_int,
+        connected_ms: u64,
+        out_attempt: *mut u8,
+        out_delay_ms: *mut u32,
+    ) -> c_int;
+    pub fn surf_reconnect_policy_sizeof() -> usize;
 }
 
 #[cfg(test)]
@@ -209,6 +260,11 @@ mod tests {
             assert_eq!(surf_core_sizeof_config(), size_of::<surf_core_config_t>());
             assert_eq!(surf_core_sizeof_event(), size_of::<surf_event_t>());
             assert_eq!(surf_core_sizeof_snapshot(), size_of::<surf_snapshot_t>());
+            assert_eq!(surf_frame_sizeof_view(), size_of::<surf_frame_view_t>());
+            assert_eq!(
+                surf_reconnect_policy_sizeof(),
+                size_of::<surf_reconnect_policy_t>()
+            );
         }
     }
 }

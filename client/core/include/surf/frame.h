@@ -50,6 +50,7 @@ typedef struct surf_frame_view {
 surf_frame_result_t surf_frame_parse(const uint8_t *data, size_t length,
                                      surf_frame_view_t *out_frame);
 const char *surf_frame_result_string(surf_frame_result_t result);
+size_t surf_frame_sizeof_view(void);
 
 #ifdef __cplusplus
 }

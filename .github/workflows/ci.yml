@@ -64,6 +64,12 @@ jobs:
           toolchain: "1.95"
           components: clippy, rustfmt
 
+      - name: Set up Go for secure-session integration
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
@@ -77,6 +83,12 @@ jobs:
 
       - name: Test desktop workspace
         run: cargo test --manifest-path client/desktop/Cargo.toml --workspace
+
+      - name: Check browser runtime for secure-session integration
+        run: google-chrome-stable --version || google-chrome --version
+
+      - name: Test real secure desktop session
+        run: client/desktop/test-secure-session.sh
 
       - name: Verify tracked files stayed clean
         run: git diff --exit-code

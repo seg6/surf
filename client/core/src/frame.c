@@ -84,3 +84,7 @@ const char *surf_frame_result_string(surf_frame_result_t result) {
         return "unknown frame error";
     }
 }
+
+size_t surf_frame_sizeof_view(void) {
+    return sizeof(surf_frame_view_t);
+}

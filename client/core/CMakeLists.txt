@@ -11,6 +11,7 @@ add_library(surf_client_core STATIC
     src/core.c
     src/frame.c
     src/h264.c
+    src/session.c
 )
 add_library(Surf::ClientCore ALIAS surf_client_core)
 
@@ -78,4 +79,5 @@ if(BUILD_TESTING)
     surf_core_test(surf_frame_test tests/frame_test.c)
     surf_core_test(surf_h264_test tests/h264_test.c)
     surf_core_test(surf_core_test tests/core_test.c)
+    surf_core_test(surf_session_test tests/session_test.c)
 endif()

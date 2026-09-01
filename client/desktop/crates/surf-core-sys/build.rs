@@ -4,7 +4,7 @@ fn main() {
     let manifest =
         PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set"));
     let core = manifest.join("../../../core");
-    let sources = ["src/core.c", "src/frame.c", "src/h264.c"];
+    let sources = ["src/core.c", "src/frame.c", "src/h264.c", "src/session.c"];
 
     let mut build = cc::Build::new();
     build
@@ -31,6 +31,10 @@ fn main() {
     println!(
         "cargo:rerun-if-changed={}",
         core.join("include/surf/h264.h").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        core.join("include/surf/session.h").display()
     );
     build.compile("surf_client_core");
 }

@@ -36,6 +36,25 @@ impl Error {
         }
     }
 
+    fn from_frame_code(code: c_int) -> Self {
+        let message = unsafe {
+            let pointer = sys::surf_frame_result_string(code);
+            if pointer.is_null() {
+                "unknown frame error".to_owned()
+            } else {
+                CStr::from_ptr(pointer).to_string_lossy().into_owned()
+            }
+        };
+        Self { code, message }
+    }
+
+    fn invariant(message: &str) -> Self {
+        Self {
+            code: -1,
+            message: message.to_owned(),
+        }
+    }
+
     pub fn code(&self) -> i32 {
         self.code
     }
@@ -48,6 +67,141 @@ impl fmt::Display for Error {
 }
 
 impl StdError for Error {}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RetryDecision {
+    pub attempt: u8,
+    pub maximum: u8,
+    pub delay: std::time::Duration,
+}
+
+pub struct ReconnectPolicy {
+    raw: sys::surf_reconnect_policy_t,
+}
+
+impl ReconnectPolicy {
+    pub fn new() -> Self {
+        let mut raw = std::mem::MaybeUninit::<sys::surf_reconnect_policy_t>::uninit();
+        // SAFETY: the C initializer writes every field of the non-null output.
+        unsafe { sys::surf_reconnect_policy_init(raw.as_mut_ptr()) };
+        // SAFETY: `surf_reconnect_policy_init` initializes the complete value.
+        let raw = unsafe { raw.assume_init() };
+        Self { raw }
+    }
+
+    pub fn failure(
+        &mut self,
+        retryable: bool,
+        connected_for: std::time::Duration,
+    ) -> Result<Option<RetryDecision>, Error> {
+        let mut attempt = 0_u8;
+        let mut delay_ms = 0_u32;
+        // SAFETY: all pointers refer to initialized, uniquely borrowed values.
+        let result = unsafe {
+            sys::surf_reconnect_policy_failure(
+                &mut self.raw,
+                i32::from(retryable),
+                u64::try_from(connected_for.as_millis()).unwrap_or(u64::MAX),
+                &mut attempt,
+                &mut delay_ms,
+            )
+        };
+        match result {
+            sys::SURF_RECONNECT_RETRY => Ok(Some(RetryDecision {
+                attempt,
+                maximum: self.raw.maximum_attempts,
+                delay: std::time::Duration::from_millis(u64::from(delay_ms)),
+            })),
+            sys::SURF_RECONNECT_STOP => Ok(None),
+            code => Err(Error::invariant(&format!(
+                "reconnect policy failed with code {code}"
+            ))),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        // SAFETY: `self.raw` is a valid, uniquely borrowed policy.
+        unsafe { sys::surf_reconnect_policy_reset(&mut self.raw) };
+    }
+}
+
+impl Default for ReconnectPolicy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FrameKind {
+    Video,
+    Audio,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Frame<'a> {
+    pub kind: FrameKind,
+    pub idr: bool,
+    pub sequence: u32,
+    pub source_sequence: u32,
+    pub width: u16,
+    pub height: u16,
+    pub interaction_id: u64,
+    pub source_receive_ns: u64,
+    pub encode_complete_ns: u64,
+    pub socket_write_ns: u64,
+    pub encoder_generation: u32,
+    pub input_receive_ns: u64,
+    pub cdp_accepted_ns: u64,
+    pub profile: u8,
+    pub payload: &'a [u8],
+}
+
+impl<'a> Frame<'a> {
+    pub fn parse(data: &'a [u8]) -> Result<Self, Error> {
+        let mut raw = std::mem::MaybeUninit::<sys::surf_frame_view_t>::uninit();
+        // SAFETY: the parser receives exactly the valid extent of `data` and
+        // writes `raw` only when it returns SURF_FRAME_OK.
+        let result = unsafe { sys::surf_frame_parse(data.as_ptr(), data.len(), raw.as_mut_ptr()) };
+        if result != sys::SURF_FRAME_OK {
+            return Err(Error::from_frame_code(result));
+        }
+        // SAFETY: SURF_FRAME_OK guarantees initialized output.
+        let raw = unsafe { raw.assume_init() };
+        let kind = match raw.type_ {
+            3 => FrameKind::Video,
+            4 => FrameKind::Audio,
+            _ => return Err(Error::invariant("unsupported frame type")),
+        };
+        let input_start = data.as_ptr() as usize;
+        let payload_start = raw.payload as usize;
+        let payload_offset = payload_start
+            .checked_sub(input_start)
+            .ok_or_else(|| Error::invariant("frame payload precedes input"))?;
+        let payload_end = payload_offset
+            .checked_add(raw.payload_length)
+            .ok_or_else(|| Error::invariant("frame payload overflow"))?;
+        if payload_end > data.len() {
+            return Err(Error::invariant("frame payload escaped its input"));
+        }
+        Ok(Self {
+            kind,
+            idr: raw.flags & 1 != 0,
+            sequence: raw.sequence,
+            source_sequence: raw.source_sequence,
+            width: raw.width,
+            height: raw.height,
+            interaction_id: raw.interaction_id,
+            source_receive_ns: raw.source_receive_ns,
+            encode_complete_ns: raw.encode_complete_ns,
+            socket_write_ns: raw.socket_write_ns,
+            encoder_generation: raw.encoder_generation,
+            input_receive_ns: raw.input_receive_ns,
+            cdp_accepted_ns: raw.cdp_accepted_ns,
+            profile: raw.profile,
+            payload: &data[payload_offset..payload_end],
+        })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tab {
@@ -435,5 +589,63 @@ mod tests {
         .unwrap();
         title.replace_range(.., "Changed!");
         assert_eq!(core.snapshot().unwrap().active_title, "Original");
+    }
+
+    #[test]
+    fn binary_frame_view_borrows_validated_payload() {
+        let mut data = vec![0_u8; 87];
+        data[0..4].copy_from_slice(b"RBR1");
+        data[4] = 3;
+        data[5] = 1;
+        data[7] = 84;
+        data[11] = 7;
+        data[19] = 2;
+        data[23] = 3;
+        data[84..].copy_from_slice(&[1, 2, 3]);
+        let frame = Frame::parse(&data).unwrap();
+        assert_eq!(frame.kind, FrameKind::Video);
+        assert!(frame.idr);
+        assert_eq!(frame.sequence, 7);
+        assert_eq!(frame.height, 2);
+        assert_eq!(frame.payload, &[1, 2, 3]);
+    }
+
+    #[test]
+    fn reconnect_policy_is_shared_with_platform_hosts() {
+        let mut policy = ReconnectPolicy::new();
+        let delays: Vec<_> = (0..5)
+            .map(|_| {
+                policy
+                    .failure(true, std::time::Duration::ZERO)
+                    .unwrap()
+                    .unwrap()
+                    .delay
+                    .as_millis()
+            })
+            .collect();
+        assert_eq!(delays, vec![250, 500, 1000, 2000, 4000]);
+        assert_eq!(
+            policy.failure(true, std::time::Duration::ZERO).unwrap(),
+            None
+        );
+        policy.reset();
+        assert_eq!(
+            policy
+                .failure(true, std::time::Duration::ZERO)
+                .unwrap()
+                .unwrap()
+                .delay
+                .as_millis(),
+            250
+        );
+        assert_eq!(
+            policy.failure(false, std::time::Duration::ZERO).unwrap(),
+            None
+        );
+        let stable = policy
+            .failure(true, std::time::Duration::from_secs(30))
+            .unwrap()
+            .unwrap();
+        assert_eq!(stable.attempt, 1);
     }
 }

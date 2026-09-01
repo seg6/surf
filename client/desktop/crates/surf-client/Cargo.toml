@@ -9,3 +9,5 @@ repository.workspace = true
 [dependencies]
 eframe.workspace = true
 surf-core.workspace = true
+surf-protocol.workspace = true
+surf-session.workspace = true
