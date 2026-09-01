@@ -23,6 +23,11 @@ servers, touch and keyboard input, video and audio, rotation, and synchronized
 page/native fullscreen; the phone layout is also exercised there through a
 disposable compatibility-mode package.
 
+A real Rust/egui Linux client now exercises the same portable C99 behavior core
+through an ordinary paired Surf session. It is a developer preview, initially
+integration-tested on X11/x86-64; it is not yet part of the normal end-user
+release promise.
+
 ## Compatibility
 
 One universal, rootful `iphoneos-arm` package contains both client
@@ -240,7 +245,9 @@ steps.
 
 - [Backend configuration and deployment](docs/backend.md)
 - [Client architecture](docs/client-architecture.md)
+- [Porting clients and platform support tiers](docs/porting-clients.md)
 - [Client protocol contract](docs/protocol.md)
+- [Versioning, compatibility, and rollback](docs/versioning.md)
 - [Native client build](docs/native-build.md)
 - [Security model](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)

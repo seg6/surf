@@ -26,6 +26,10 @@ The currently released config handshake continues to use `VERSION`,
 and capability representation is introduced. Migration must remain compatible
 with release clients throughout.
 
+The authoritative release rules, including embedded-package validation, core
+ABI changes, and rollback, are documented in
+[Versioning and Compatibility](versioning.md).
+
 `pointer-input` is the first negotiated desktop-input capability. When present,
 the client may send normalized `pointer` and `wheel` commands with a nonzero
 surface generation and monotonically increasing sequence. Coordinates and

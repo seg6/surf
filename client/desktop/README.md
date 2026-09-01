@@ -3,6 +3,11 @@
 This workspace contains the real Rust/egui Surf client, initially certified on
 Linux. It embeds the same portable C99 core used by the native iOS host.
 
+Current status: the preview is integration-verified on X11/x86-64. Wayland,
+AccessKit, clipboard, HiDPI-aware coordinates, and IME support are compiled in;
+IME/input semantics have automated coverage, while a compositor-backed Wayland
+runtime remains build-supported rather than certified.
+
 This is a genuine usable client rather than a replay shell. It discovers nearby
 servers (with manual entry as a fallback), persists a per-server device
 identity, completes phrase-confirmed pairing, pins the exact server

@@ -27,14 +27,16 @@ APIs:
 | `RBInteractionTracker` | `client/core` owns causal IDs, timestamps, and input sequencing |
 | `RBSession` | `client/core` owns connection epochs and reconnect policy |
 | `RBRootViewController` | `client/core` owns tabs, navigation, loading, title, security, and editable state |
+| UIKit modal/list lifecycle | `client/core` owns semantic presence, completion, and stale-state cleanup |
 | `RBMediaPipeline` | `client/core` owns generation/gap/recovery admission policy |
 | `RBDiagnostics` | `client/core` owns rolling metrics and health classification |
 
 `RBRootViewController` still coordinates UIKit presentation, as intended. It
 renders copied semantic snapshots and executes platform effects; original wire
-bytes are strictly decoded in C before UIKit receives a valid control event.
-Rich collection and modal widget models remain host-owned adapters because
-their lifetime and interaction mechanics are platform presentation concerns.
+bytes are strictly decoded and reduced in C before UIKit receives a valid
+control event. Rich collection contents and modal widgets remain host-owned
+typed adapters, while the core owns their presence, identity, counts, control
+values, completion, and connection/page cleanup.
 
 ## Repository layout
 
@@ -139,7 +141,12 @@ surf_core_result_t surf_core_snapshot(const surf_core_t *core,
 6. Raw plus safe Rust bindings and direct YUV OpenGL presentation.
 7. Genuine Linux pairing, pinned transport, bounded media, and browser UI.
 8. Atomic history-preserving UIKit relocation to `client/ios`.
+9. Shared rich semantic lifecycle and actual-presented-frame generation scope.
 
 No step requires a trace file or simulated connection for normal use. Trace
 capture may support deterministic tests, but the desktop milestone is a real
 Surf client paired to an ordinary backend.
+
+See [Porting Surf Clients](porting-clients.md) for the host-adapter contract and
+platform bring-up gates, and [Versioning and Compatibility](versioning.md) for
+the independent release, wire, capability, and ABI dimensions.

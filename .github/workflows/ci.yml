@@ -95,6 +95,14 @@ jobs:
       - name: Test real secure desktop session
         run: client/desktop/test-secure-session.sh
 
+      - name: Build Linux desktop preview package
+        run: |
+          archive="$(client/desktop/package-linux.sh)"
+          test -f "$archive"
+          contents="$(mktemp)"
+          tar -tzf "$archive" > "$contents"
+          grep -q '/bin/surf-client$' "$contents"
+
       - name: Verify tracked files stayed clean
         run: git diff --exit-code
 

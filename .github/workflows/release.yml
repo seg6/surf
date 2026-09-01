@@ -30,7 +30,7 @@ jobs:
   release:
     name: Release build ${{ inputs.tag || github.ref_name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -216,6 +216,27 @@ jobs:
           test -s "${client_debs[0]}"
           install -m 0644 "${client_debs[0]}" dist/native/
 
+      - name: Build and verify Linux client preview
+        if: env.CACHE_ONLY != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev libavcodec-dev libavformat-dev libavutil-dev
+          rustup toolchain install 1.95.0 --profile minimal
+          rustup override set 1.95.0
+          test "$(rustc --version | awk '{print $2}')" = "1.95.0"
+
+          archive="$(client/desktop/package-linux.sh)"
+          version="$(tr -d '[:space:]' < VERSION)"
+          test "$archive" = "$GITHUB_WORKSPACE/dist/surf-desktop-${version}-linux-amd64.tar.gz"
+          test -s "$archive"
+          contents="$RUNNER_TEMP/surf-desktop-preview.contents"
+          tar -tzf "$archive" > "$contents"
+          grep -q '/bin/surf-client$' "$contents"
+
       - name: Prepare Go toolchain
         shell: bash
         run: |
@@ -369,9 +390,9 @@ jobs:
             END { if (!found) exit 1 }
           ' CHANGELOG.md > release-notes.md
           test -s release-notes.md
-          printf '\nNative iOS and unified Linux, Windows, and macOS packages are attached. Launch `surf` for the desktop app or run `surf serve` under a service manager for a headless backend.\n' >> release-notes.md
+          printf '\nNative iOS and unified Linux, Windows, and macOS backend packages are attached. The separate Linux client preview exercises the portable client core and remains experimental. Launch `surf` for the normal desktop backend or run `surf serve` under a service manager.\n' >> release-notes.md
 
-          sha256sum dist/native/*.deb update.json
+          sha256sum dist/native/*.deb dist/surf-desktop-*-linux-amd64.tar.gz update.json
 
       - name: Publish verified release
         if: env.CACHE_ONLY != 'true'
@@ -398,6 +419,7 @@ jobs:
             CHANGELOG.md
             update.json
             "dist/native/$native_asset"
+            "dist/surf-desktop-${version}-linux-amd64.tar.gz"
             "dist/packages/surf-${version}-linux-amd64.tar.gz"
             "dist/packages/surf-${version}-linux-amd64.AppImage"
             "dist/packages/surf-${version}-linux-arm64.tar.gz"
@@ -410,6 +432,7 @@ jobs:
             CHANGELOG.md
             update.json
             "$native_asset"
+            "surf-desktop-${version}-linux-amd64.tar.gz"
             "surf-${version}-linux-amd64.tar.gz"
             "surf-${version}-linux-amd64.AppImage"
             "surf-${version}-linux-arm64.tar.gz"
@@ -418,7 +441,7 @@ jobs:
             "surf-${version}-darwin-amd64.tar.gz"
             "surf-${version}-darwin-arm64.tar.gz"
           )
-          test "${#assets[@]}" -eq 10
+          test "${#assets[@]}" -eq 11
           test "${#expected_names[@]}" -eq "${#assets[@]}"
           gh release upload "$RELEASE_TAG" --clobber "${assets[@]}"
 

@@ -6,10 +6,11 @@ audio dependencies.
 
 The core owns the binary media envelope, H.264 Annex-B helpers, the complete
 typed control-event decoder and command encoder, deterministic browser state,
-immutable snapshots, platform effects, reconnect/media/input policy, NTP-style
-clock synchronization, and rolling pipeline diagnostics. The JSON decoder is
-strict and allocation-free after a host supplies one reusable workspace;
-decoded strings and collections remain valid until that workspace is reused.
+immutable navigation and rich-semantic snapshots, modal completion, platform
+effects, reconnect/media/input policy, NTP-style clock synchronization, and
+rolling pipeline diagnostics. The JSON decoder is strict and allocation-free
+after a host supplies one reusable workspace; decoded strings and collections
+remain valid until that workspace is reused.
 
 Build and test it directly:
 
@@ -29,3 +30,5 @@ make client-core-sanitize
 
 Public interfaces live under `include/surf`. Large media payloads remain owned
 by the platform host; parsers return borrowed views and never copy access units.
+See [Porting Surf Clients](../../docs/porting-clients.md) for the complete
+adapter and threading contract.

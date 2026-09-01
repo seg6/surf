@@ -8,7 +8,8 @@ UIKit owns presentation, lifecycle, Keychain/Security integration, pinned TLS,
 the hand-rolled old-iOS WebSocket adapter, VideoToolbox/OpenGL rendering,
 AudioQueue output, files, clipboard, and device-specific input. `client/core`
 owns the bounded wire formats, deterministic navigation/editable state,
-connection epochs, input/media admission policy, and shared diagnostics.
+rich semantic lifecycle, connection epochs, input/media admission policy, and
+shared diagnostics.
 
 Build and verify the universal package from the repository root:
 
