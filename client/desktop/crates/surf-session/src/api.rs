@@ -1,9 +1,12 @@
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures_util::StreamExt as _;
 use reqwest::{Client, Method, StatusCode};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncWriteExt as _;
 use url::Url;
 
 use crate::identity::DeviceIdentity;
@@ -284,6 +287,83 @@ pub(crate) async fn authenticate(
         ));
     }
     Ok(config)
+}
+
+pub(crate) async fn upload_files(verified: &VerifiedEndpoint, paths: &[PathBuf]) -> Result<usize> {
+    let mut form = reqwest::multipart::Form::new();
+    for path in paths {
+        let part = reqwest::multipart::Part::file(path).await?;
+        form = form.part("file", part);
+    }
+    let response = verified
+        .client
+        .post(join(&verified.endpoint, "/api/v1/uploads")?)
+        .timeout(Duration::from_secs(120))
+        .multipart(form)
+        .send()
+        .await?;
+    let status = response.status();
+    #[derive(Deserialize)]
+    struct UploadResult {
+        ok: bool,
+        n: usize,
+    }
+    let result: UploadResult = decode_response(response, status).await?;
+    if !result.ok {
+        return Err(SessionError::Protocol(
+            "server rejected the upload".to_owned(),
+        ));
+    }
+    Ok(result.n)
+}
+
+pub(crate) async fn download_file(
+    verified: &VerifiedEndpoint,
+    name: &str,
+    destination: &Path,
+) -> Result<()> {
+    let safe_name = Path::new(name)
+        .file_name()
+        .filter(|value| *value == name)
+        .ok_or_else(|| SessionError::Protocol("invalid download name".to_owned()))?;
+    let mut url = join(&verified.endpoint, "/api/v1/downloads/")?;
+    url.path_segments_mut()
+        .map_err(|()| SessionError::Endpoint("download endpoint has no path".to_owned()))?
+        .push(&safe_name.to_string_lossy());
+    let response = verified
+        .client
+        .get(url)
+        .timeout(Duration::from_secs(120))
+        .send()
+        .await?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(status_error(response, status).await);
+    }
+    let parent = destination
+        .parent()
+        .ok_or_else(|| SessionError::Storage("download destination has no parent".to_owned()))?;
+    tokio::fs::create_dir_all(parent).await?;
+    let temporary = destination.with_extension("surf-part");
+    let result = async {
+        let mut file = tokio::fs::File::create(&temporary).await?;
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            file.write_all(&chunk?).await?;
+        }
+        file.flush().await?;
+        drop(file);
+        if destination.exists() {
+            tokio::fs::remove_file(destination).await?;
+        }
+        tokio::fs::rename(&temporary, destination).await?;
+        Ok(())
+    }
+    .await;
+    if result.is_err() {
+        let _ = tokio::fs::remove_file(&temporary).await;
+    }
+    result
 }
 
 fn client(config: Arc<rustls::ClientConfig>) -> Result<Client> {

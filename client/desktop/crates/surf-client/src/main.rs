@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -17,14 +18,18 @@ use surf_session::{
 };
 
 const LUCIDE: &[u8] = include_bytes!("../../../../../native/client/Resources/Lucide.ttf");
+const APP_ICON: &[u8] = include_bytes!("../../../../../backend/cmd/surf/surf-icon.png");
 const ICON_FONT: &str = "surf-lucide";
 
+mod browser_ui;
+mod theme;
 mod video_surface;
 
 use video_surface::VideoSurface;
 
 mod page_input;
 
+use browser_ui::{BrowserUi, DialogPrompt, ReaderDocument, reader_text};
 use page_input::PageInput;
 
 mod icon {
@@ -38,6 +43,13 @@ mod icon {
     pub const LOCK: char = '\u{e531}';
     pub const WARNING: char = '\u{e193}';
     pub const STAR: char = '\u{e176}';
+    pub const BOOK: char = '\u{e05f}';
+    pub const SEARCH: char = '\u{e151}';
+    pub const READER: char = '\u{e348}';
+    pub const MEDIA: char = '\u{e080}';
+    pub const SETTINGS: char = '\u{e29a}';
+    pub const EXPAND: char = '\u{e112}';
+    pub const GAUGE: char = '\u{e1bf}';
 }
 
 fn main() -> eframe::Result {
@@ -47,7 +59,8 @@ fn main() -> eframe::Result {
             .with_title("Surf")
             .with_inner_size([1180.0, 760.0])
             .with_min_inner_size([720.0, 480.0])
-            .with_app_id("space.seg6.surf.client"),
+            .with_app_id("space.seg6.surf.client")
+            .with_icon(load_app_icon()),
         ..Default::default()
     };
     eframe::run_native(
@@ -55,6 +68,18 @@ fn main() -> eframe::Result {
         options,
         Box::new(|creation| Ok(Box::new(SurfDesktop::new(creation)))),
     )
+}
+
+fn load_app_icon() -> Arc<egui::IconData> {
+    let icon = image::load_from_memory(APP_ICON)
+        .expect("bundled Surf icon decodes")
+        .into_rgba8();
+    let (width, height) = icon.dimensions();
+    Arc::new(egui::IconData {
+        rgba: icon.into_raw(),
+        width,
+        height,
+    })
 }
 
 struct SurfDesktop {
@@ -97,12 +122,16 @@ struct SurfDesktop {
     pipeline_diagnostics: PipelineDiagnostics,
     latest_diagnostics: Option<DiagnosticsReport>,
     page_input: PageInput,
+    dark_mode: bool,
+    mobile_mode: bool,
+    browser: BrowserUi,
+    forget_server: Option<SavedServer>,
 }
 
 impl SurfDesktop {
     fn new(creation: &eframe::CreationContext<'_>) -> Self {
         install_fonts(&creation.egui_ctx);
-        install_style(&creation.egui_ctx);
+        theme::apply(&creation.egui_ctx, true);
         let mut core = Core::new().expect("portable Surf core initializes");
         core.dispatch(&CoreEvent::Tabs(vec![Tab {
             id: 1,
@@ -198,6 +227,10 @@ impl SurfDesktop {
             pipeline_diagnostics: PipelineDiagnostics::new(),
             latest_diagnostics: None,
             page_input: PageInput::new(),
+            dark_mode: true,
+            mobile_mode: false,
+            browser: preview_browser_ui(),
+            forget_server: None,
         };
         if let Some(endpoint) = startup_endpoint {
             client.inspect(endpoint, true);
@@ -307,6 +340,14 @@ impl SurfDesktop {
                     self.status = format!("Connected securely to {}", info.name);
                     self.pairing = None;
                     self.remote_viewport = None;
+                    self.send(SessionAction::Send(Command::Dark {
+                        on: self.dark_mode,
+                        causal: Causal::default(),
+                    }));
+                    self.send(SessionAction::Send(Command::Mobile {
+                        on: self.mobile_mode,
+                        causal: Causal::default(),
+                    }));
                     if self.audio_available {
                         self.send(SessionAction::Send(Command::Audio {
                             on: true,
@@ -347,6 +388,26 @@ impl SurfDesktop {
                     );
                 }
                 SessionEvent::Control(event) => self.apply_control(event),
+                SessionEvent::Transfer {
+                    kind,
+                    name,
+                    ok,
+                    message,
+                } => {
+                    let operation = match kind {
+                        surf_session::TransferKind::Upload => "Upload",
+                        surf_session::TransferKind::Download => "Download",
+                    };
+                    self.status = if ok {
+                        format!("{operation} finished: {name}")
+                    } else {
+                        format!("{operation} failed for {name}: {message}")
+                    };
+                    if kind == surf_session::TransferKind::Download {
+                        self.browser.pending_downloads.retain(|item| item != &name);
+                    }
+                    self.browser.toast(self.status.clone());
+                }
                 SessionEvent::Disconnected(message) => {
                     self.connected = false;
                     self.clock_available = false;
@@ -494,7 +555,187 @@ impl SurfDesktop {
             WireEvent::Security { state } => Some(CoreEvent::Security(state)),
             WireEvent::Starred { on } => Some(CoreEvent::Starred(on)),
             WireEvent::PageFrame { source_seq } => Some(CoreEvent::PageFrame(source_seq)),
-            _ => None,
+            WireEvent::Hello { vw, vh } => {
+                self.remote_viewport = Some((vw, vh));
+                None
+            }
+            WireEvent::VideoConfig { state, reason, .. } => {
+                if state != "ready" && !reason.is_empty() {
+                    self.status = format!("Video: {reason}");
+                }
+                None
+            }
+            WireEvent::AudioConfig { ok, .. } => {
+                self.audio_available = ok;
+                None
+            }
+            WireEvent::Found { on } => {
+                self.browser.find_found = Some(on);
+                None
+            }
+            WireEvent::Toast { text } => {
+                self.browser.toast(text);
+                None
+            }
+            WireEvent::Download { name } => {
+                let destination = default_download_path(&name);
+                self.send(SessionAction::Download {
+                    name: name.clone(),
+                    destination,
+                });
+                self.browser.pending_downloads.push(name);
+                None
+            }
+            WireEvent::DownloadProgress { name, pct } => {
+                self.browser.download_progress.insert(name, pct);
+                None
+            }
+            WireEvent::Suggest { items } => {
+                self.browser.suggestions = items;
+                None
+            }
+            WireEvent::Library {
+                hist,
+                bookmarks,
+                starred,
+            } => {
+                self.browser.history = hist;
+                self.browser.bookmarks = bookmarks;
+                Some(CoreEvent::Starred(starred))
+            }
+            WireEvent::History { items, .. } => {
+                self.browser.history = items;
+                None
+            }
+            WireEvent::Downloads { items } => {
+                self.browser.downloads = items;
+                None
+            }
+            WireEvent::Dialog {
+                kind,
+                text,
+                default,
+            } => {
+                self.browser.dialog = Some(DialogPrompt {
+                    kind,
+                    text,
+                    input: default,
+                });
+                None
+            }
+            WireEvent::DialogDone => {
+                self.browser.dialog = None;
+                None
+            }
+            WireEvent::FileChooser { multiple } => {
+                self.browser.upload_multiple = Some(multiple);
+                self.browser.upload_paths.clear();
+                None
+            }
+            WireEvent::PageError {
+                url,
+                starred,
+                security,
+            } => {
+                self.browser.page_error = Some(url.clone());
+                if !self.address_focused {
+                    self.address.clone_from(&url);
+                }
+                if let Err(error) = self.core.dispatch(&CoreEvent::Starred(starred)) {
+                    self.status = error.to_string();
+                }
+                Some(CoreEvent::Url {
+                    url,
+                    security,
+                    starred,
+                })
+            }
+            WireEvent::Reader {
+                ok,
+                title,
+                html,
+                url,
+            } => {
+                if ok {
+                    self.browser.reader = Some(ReaderDocument {
+                        title,
+                        url,
+                        text: reader_text(&html),
+                    });
+                    self.browser.reader_open = true;
+                } else {
+                    self.browser
+                        .toast("Reader mode is not available for this page");
+                }
+                None
+            }
+            WireEvent::Select {
+                id,
+                title,
+                multiple,
+                options,
+                ..
+            } => {
+                self.browser.open_select(id, title, multiple, options);
+                None
+            }
+            WireEvent::MediaState {
+                available,
+                count,
+                paused,
+                muted,
+                volume,
+                current_time,
+                duration,
+                title,
+            } => {
+                self.browser.media = browser_ui::MediaState {
+                    available,
+                    count,
+                    paused,
+                    muted,
+                    volume,
+                    current_time,
+                    duration,
+                    title,
+                };
+                None
+            }
+            WireEvent::Clipboard { id, text, .. } => {
+                self.browser.pending_clipboard = Some((id, text));
+                None
+            }
+            WireEvent::ClipboardSync {
+                enabled,
+                known,
+                text,
+            } => {
+                self.browser.clipboard_sync = enabled;
+                self.browser.clipboard_known = known;
+                self.browser.clipboard_text.clone_from(&text);
+                if enabled && known {
+                    self.browser.pending_clipboard = Some((String::new(), text));
+                }
+                None
+            }
+            WireEvent::LogRequest => {
+                self.send_command(Command::LogRecord {
+                    record: serde_json::json!({
+                        "source": "desktop",
+                        "level": "info",
+                        "message": "Surf Desktop is connected",
+                        "version": include_str!("../../../../../VERSION").trim(),
+                    }),
+                    causal: Causal::default(),
+                });
+                None
+            }
+            WireEvent::LogClear => {
+                self.send_command(Command::LogCleared {
+                    causal: Causal::default(),
+                });
+                None
+            }
         };
         if let Some(event) = mapped {
             if let Err(error) = self.core.dispatch(&event) {
@@ -579,18 +820,19 @@ impl SurfDesktop {
     }
 
     fn chrome(&mut self, root: &mut egui::Ui) {
+        let colors = theme::palette(self.dark_mode);
         egui::Panel::top("browser_chrome")
             .frame(
                 Frame::new()
-                    .fill(theme::CHROME)
+                    .fill(colors.chrome)
                     .inner_margin(Margin::same(0))
-                    .stroke(Stroke::new(1.0, theme::SEPARATOR)),
+                    .stroke(Stroke::new(1.0, colors.separator)),
             )
             .show(root, |ui| {
                 self.tab_runway(ui);
                 ui.separator();
                 Frame::new()
-                    .fill(theme::COMMAND_RAIL)
+                    .fill(colors.command_rail)
                     .inner_margin(Margin::symmetric(12, 6))
                     .show(ui, |ui| self.command_rail(ui));
                 if self.snapshot.loading {
@@ -605,7 +847,7 @@ impl SurfDesktop {
                             egui::vec2(width, 2.0),
                         ),
                         CornerRadius::ZERO,
-                        theme::ACCENT,
+                        colors.accent,
                     );
                 }
             });
@@ -637,6 +879,7 @@ impl SurfDesktop {
     }
 
     fn command_rail(&mut self, ui: &mut egui::Ui) {
+        let colors = theme::palette(self.dark_mode);
         ui.set_height(34.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
@@ -677,14 +920,14 @@ impl SurfDesktop {
             let address_width = (ui.available_width() - 86.0).max(220.0);
             let focused = self.address_editing || self.address_focused;
             Frame::new()
-                .fill(theme::FIELD)
+                .fill(colors.field)
                 .corner_radius(CornerRadius::same(9))
                 .stroke(Stroke::new(
                     1.0,
                     if focused {
-                        theme::ACCENT
+                        colors.accent
                     } else {
-                        theme::FIELD_BORDER
+                        colors.field_border
                     },
                 ))
                 .inner_margin(Margin::symmetric(11, 4))
@@ -697,11 +940,11 @@ impl SurfDesktop {
                             icon::LOCK
                         };
                         let security_color = if self.snapshot.security == "dangerous" {
-                            theme::DANGER
+                            colors.danger
                         } else if self.snapshot.current_url.starts_with("https://") {
-                            theme::ACCENT_TEXT
+                            colors.accent_text
                         } else {
-                            theme::MUTED
+                            colors.muted
                         };
                         ui.label(
                             RichText::new(security_icon.to_string())
@@ -719,6 +962,13 @@ impl SurfDesktop {
                                     .frame(Frame::NONE),
                             );
                             self.address_focused = response.has_focus();
+                            if response.changed() {
+                                self.send_command(Command::Suggest {
+                                    q: self.address.clone(),
+                                    offset: 0,
+                                    causal: Causal::default(),
+                                });
+                            }
                             let enter = ui.input(|input| input.key_pressed(egui::Key::Enter));
                             let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
                             if enter {
@@ -737,7 +987,7 @@ impl SurfDesktop {
                             let response = ui.add_sized(
                                 [ui.available_width(), 24.0],
                                 egui::Button::new(
-                                    RichText::new(display).size(14.0).color(theme::TEXT),
+                                    RichText::new(display).size(14.0).color(colors.text),
                                 )
                                 .frame(false),
                             );
@@ -766,15 +1016,18 @@ impl SurfDesktop {
                     causal: Causal::default(),
                 });
             }
-            chrome_icon(ui, icon::MORE, false, "Browser tools");
+            if chrome_icon(ui, icon::MORE, true, "Browser tools") {
+                self.browser.menu_open = !self.browser.menu_open;
+            }
         });
     }
 
     fn tab(&mut self, ui: &mut egui::Ui, tab: &Tab, width: f32) {
+        let colors = theme::palette(self.dark_mode);
         let fill = if tab.active {
-            theme::TAB_ACTIVE
+            colors.tab_active
         } else {
-            theme::CHROME
+            colors.chrome
         };
         let inner = Frame::new()
             .fill(fill)
@@ -782,7 +1035,7 @@ impl SurfDesktop {
             .stroke(Stroke::new(
                 1.0,
                 if tab.active {
-                    theme::TAB_BORDER
+                    colors.tab_border
                 } else {
                     Color32::TRANSPARENT
                 },
@@ -800,9 +1053,9 @@ impl SurfDesktop {
                     ui.add_sized(
                         [(ui.available_width() - 24.0).max(50.0), 24.0],
                         egui::Label::new(RichText::new(title).size(12.5).color(if tab.active {
-                            theme::TEXT
+                            colors.text
                         } else {
-                            theme::MUTED
+                            colors.muted
                         }))
                         .truncate(),
                     );
@@ -812,7 +1065,7 @@ impl SurfDesktop {
                                 RichText::new(icon::CLOSE.to_string())
                                     .family(icon_family())
                                     .size(11.0)
-                                    .color(theme::MUTED),
+                                    .color(colors.muted),
                             )
                             .frame(false)
                             .min_size(Vec2::splat(22.0)),
@@ -910,13 +1163,27 @@ impl SurfDesktop {
                 input.key_pressed(egui::Key::R),
                 input.key_pressed(egui::Key::F5),
                 input.key_pressed(egui::Key::D),
+                input.key_pressed(egui::Key::F),
                 input.key_pressed(egui::Key::ArrowLeft),
                 input.key_pressed(egui::Key::ArrowRight),
                 input.key_pressed(egui::Key::Escape),
             )
         });
-        let (command, _shift, alt, key_l, key_t, key_w, key_r, key_f5, key_d, left, right, escape) =
-            input;
+        let (
+            command,
+            _shift,
+            alt,
+            key_l,
+            key_t,
+            key_w,
+            key_r,
+            key_f5,
+            key_d,
+            key_f,
+            left,
+            right,
+            escape,
+        ) = input;
         if command && key_l {
             self.address.clone_from(&self.snapshot.current_url);
             self.address_editing = true;
@@ -939,6 +1206,10 @@ impl SurfDesktop {
                 causal: Causal::default(),
             });
         }
+        if command && key_f {
+            self.browser.find_open = true;
+            context.memory_mut(|memory| memory.request_focus(egui::Id::new("find_query")));
+        }
         if alt && left && self.snapshot.can_go_back {
             self.send_command(Command::Back {
                 causal: Causal::default(),
@@ -949,6 +1220,9 @@ impl SurfDesktop {
                 causal: Causal::default(),
             });
         }
+        if escape && self.browser.close_transient_overlays() {
+            return;
+        }
         if escape && self.snapshot.loading && !self.address_editing {
             self.send_command(Command::Stop {
                 causal: Causal::default(),
@@ -956,17 +1230,833 @@ impl SurfDesktop {
         }
     }
 
+    fn browser_overlays(&mut self, context: &egui::Context) {
+        self.tools_menu(context);
+        self.find_overlay(context);
+        self.suggestions_overlay(context);
+        self.library_window(context);
+        self.reader_window(context);
+        self.media_window(context);
+        self.settings_window(context);
+        self.forget_server_window(context);
+        self.diagnostics_window(context);
+        self.dialog_window(context);
+        self.select_window(context);
+        self.upload_window(context);
+        self.page_error_overlay(context);
+        self.toast_overlay(context);
+    }
+
+    fn tools_menu(&mut self, context: &egui::Context) {
+        if !self.browser.menu_open {
+            return;
+        }
+        let mut open = true;
+        let mut action = None;
+        egui::Window::new("Browser tools")
+            .id(egui::Id::new("browser_tools"))
+            .anchor(egui::Align2::RIGHT_TOP, [-12.0, 82.0])
+            .open(&mut open)
+            .title_bar(false)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(248.0)
+            .show(context, |ui| {
+                ui.spacing_mut().item_spacing.y = 3.0;
+                for (glyph, title, value) in [
+                    (icon::BOOK, "Library", "library"),
+                    (icon::READER, "Reader", "reader"),
+                    (icon::SEARCH, "Find on page", "find"),
+                    (icon::MEDIA, "Media controls", "media"),
+                    (icon::EXPAND, "Fullscreen", "fullscreen"),
+                    (icon::GAUGE, "Performance", "diagnostics"),
+                    (icon::SETTINGS, "Settings", "settings"),
+                ] {
+                    if tool_row(ui, glyph, title) {
+                        action = Some(value);
+                    }
+                }
+            });
+        if action.is_some() {
+            open = false;
+        }
+        self.browser.menu_open = open;
+        match action {
+            Some("library") => {
+                self.browser.library_open = true;
+                self.send_command(Command::Library {
+                    causal: Causal::default(),
+                });
+                self.send_command(Command::Downloads {
+                    causal: Causal::default(),
+                });
+            }
+            Some("reader") => {
+                self.browser.toast("Preparing reader…");
+                self.send_command(Command::Reader {
+                    causal: Causal::default(),
+                });
+            }
+            Some("find") => {
+                self.browser.find_open = true;
+                context.memory_mut(|memory| memory.request_focus(egui::Id::new("find_query")));
+            }
+            Some("media") => {
+                self.browser.media_open = true;
+                self.send_command(Command::MediaQuery {
+                    causal: Causal::default(),
+                });
+            }
+            Some("fullscreen") => self.send_command(Command::Fullscreen {
+                on: !self.snapshot.fullscreen,
+                causal: Causal::default(),
+            }),
+            Some("diagnostics") => self.browser.diagnostics_open = true,
+            Some("settings") => self.browser.settings_open = true,
+            _ => {}
+        }
+    }
+
+    fn find_overlay(&mut self, context: &egui::Context) {
+        if !self.browser.find_open {
+            return;
+        }
+        let colors = theme::palette(self.dark_mode);
+        let mut close = false;
+        let mut direction = None;
+        egui::Area::new(egui::Id::new("find_overlay"))
+            .anchor(egui::Align2::RIGHT_TOP, [-14.0, 88.0])
+            .order(egui::Order::Foreground)
+            .show(context, |ui| {
+                Frame::new()
+                    .fill(colors.surface)
+                    .stroke(Stroke::new(1.0, colors.separator))
+                    .corner_radius(CornerRadius::same(9))
+                    .inner_margin(Margin::symmetric(10, 7))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            let response = ui.add_sized(
+                                [240.0, 28.0],
+                                TextEdit::singleline(&mut self.browser.find_query)
+                                    .id_source("find_query")
+                                    .hint_text("Find on page"),
+                            );
+                            if response.changed() {
+                                direction = Some(1);
+                            }
+                            let label = match self.browser.find_found {
+                                Some(true) => "Found",
+                                Some(false) => "No match",
+                                None => "",
+                            };
+                            ui.label(RichText::new(label).size(11.0).color(colors.muted));
+                            if ui.small_button("↑").clicked() {
+                                direction = Some(-1);
+                            }
+                            if ui.small_button("↓").clicked()
+                                || (response.has_focus()
+                                    && ui.input(|input| input.key_pressed(egui::Key::Enter)))
+                            {
+                                direction = Some(1);
+                            }
+                            if ui.small_button("×").clicked() {
+                                close = true;
+                            }
+                        });
+                    });
+            });
+        if let Some(dir) = direction {
+            self.send_command(Command::Find {
+                q: self.browser.find_query.clone(),
+                dir,
+                causal: Causal::default(),
+            });
+        }
+        if close {
+            self.browser.find_open = false;
+        }
+    }
+
+    fn suggestions_overlay(&mut self, context: &egui::Context) {
+        if !self.address_editing || self.browser.suggestions.is_empty() {
+            return;
+        }
+        let colors = theme::palette(self.dark_mode);
+        let mut selected = None;
+        egui::Area::new(egui::Id::new("address_suggestions"))
+            .anchor(egui::Align2::CENTER_TOP, [0.0, 92.0])
+            .order(egui::Order::Foreground)
+            .show(context, |ui| {
+                Frame::new()
+                    .fill(colors.surface)
+                    .stroke(Stroke::new(1.0, colors.separator))
+                    .corner_radius(CornerRadius::same(9))
+                    .inner_margin(Margin::symmetric(8, 7))
+                    .show(ui, |ui| {
+                        ui.set_width(620.0_f32.min(context.content_rect().width() - 40.0));
+                        for item in self.browser.suggestions.iter().take(8) {
+                            if ui
+                                .add_sized(
+                                    [ui.available_width(), 34.0],
+                                    egui::Button::new(
+                                        RichText::new(if item.title.trim().is_empty() {
+                                            compact_address(&item.url)
+                                        } else {
+                                            item.title.clone()
+                                        })
+                                        .size(13.0),
+                                    )
+                                    .frame(false),
+                                )
+                                .on_hover_text(&item.url)
+                                .clicked()
+                            {
+                                selected = Some(item.url.clone());
+                            }
+                        }
+                    });
+            });
+        if let Some(url) = selected {
+            self.address = url;
+            self.navigate();
+            self.address_editing = false;
+            self.browser.suggestions.clear();
+        }
+    }
+
+    fn library_window(&mut self, context: &egui::Context) {
+        if !self.browser.library_open {
+            return;
+        }
+        let mut open = true;
+        let mut navigate = None;
+        let mut remove_history = None;
+        let mut remove_bookmark = None;
+        let mut save_download = None;
+        egui::Window::new("Library")
+            .id(egui::Id::new("library"))
+            .open(&mut open)
+            .default_size([520.0, 500.0])
+            .min_size([360.0, 300.0])
+            .show(context, |ui| {
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut self.browser.library_section, 0, "History");
+                    ui.selectable_value(&mut self.browser.library_section, 1, "Bookmarks");
+                    ui.selectable_value(&mut self.browser.library_section, 2, "Downloads");
+                });
+                ui.separator();
+                egui::ScrollArea::vertical().show(ui, |ui| match self.browser.library_section {
+                    0 => {
+                        for item in self.browser.history.clone() {
+                            library_row(ui, &item.title, &item.url, |choice| match choice {
+                                0 => navigate = Some(item.url.clone()),
+                                _ => remove_history = Some((item.url.clone(), item.ts)),
+                            });
+                        }
+                    }
+                    1 => {
+                        for item in self.browser.bookmarks.clone() {
+                            library_row(ui, &item.title, &item.url, |choice| match choice {
+                                0 => navigate = Some(item.url.clone()),
+                                _ => remove_bookmark = Some(item.url.clone()),
+                            });
+                        }
+                    }
+                    _ => {
+                        for item in self.browser.downloads.clone() {
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.label(RichText::new(&item.name).strong());
+                                    let progress = self.browser.download_progress.get(&item.name);
+                                    let detail = progress.map_or_else(
+                                        || format_bytes(item.size),
+                                        |pct| format!("{} · {pct}%", format_bytes(item.size)),
+                                    );
+                                    ui.small(detail);
+                                });
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    if ui.button("Save").clicked() {
+                                        save_download = Some(item.name.clone());
+                                    }
+                                });
+                            });
+                            ui.separator();
+                        }
+                    }
+                });
+            });
+        self.browser.library_open = open;
+        if let Some(url) = navigate {
+            self.send_command(Command::Navigate {
+                url,
+                causal: Causal::default(),
+            });
+        }
+        if let Some((url, ts)) = remove_history {
+            self.send_command(Command::HistoryDelete {
+                url,
+                ts,
+                causal: Causal::default(),
+            });
+            self.send_command(Command::Library {
+                causal: Causal::default(),
+            });
+        }
+        if let Some(url) = remove_bookmark {
+            self.send_command(Command::BookmarkDelete {
+                url,
+                causal: Causal::default(),
+            });
+            self.send_command(Command::Library {
+                causal: Causal::default(),
+            });
+        }
+        if let Some(name) = save_download {
+            self.send(SessionAction::Download {
+                destination: default_download_path(&name),
+                name,
+            });
+        }
+    }
+
+    fn reader_window(&mut self, context: &egui::Context) {
+        if !self.browser.reader_open {
+            return;
+        }
+        let Some(document) = self.browser.reader.clone() else {
+            self.browser.reader_open = false;
+            return;
+        };
+        let mut open = true;
+        let mut navigate = false;
+        egui::Window::new(if document.title.is_empty() {
+            "Reader"
+        } else {
+            &document.title
+        })
+        .id(egui::Id::new("reader"))
+        .open(&mut open)
+        .default_size([680.0, 620.0])
+        .show(context, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(compact_address(&document.url)).weak());
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    navigate = ui.button("Open page").clicked();
+                });
+            });
+            ui.separator();
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(&document.text)
+                            .size(17.0)
+                            .line_height(Some(25.0)),
+                    )
+                    .wrap(),
+                );
+            });
+        });
+        self.browser.reader_open = open;
+        if navigate {
+            self.send_command(Command::Navigate {
+                url: document.url,
+                causal: Causal::default(),
+            });
+            self.browser.reader_open = false;
+        }
+    }
+
+    fn media_window(&mut self, context: &egui::Context) {
+        if !self.browser.media_open {
+            return;
+        }
+        let mut open = true;
+        let mut play_pause = false;
+        let mut mute = false;
+        let mut volume = self.browser.media.volume;
+        egui::Window::new("Media")
+            .id(egui::Id::new("media"))
+            .open(&mut open)
+            .resizable(false)
+            .default_width(340.0)
+            .show(context, |ui| {
+                if !self.browser.media.available {
+                    ui.label("No controllable media on this page.");
+                    return;
+                }
+                let title = if self.browser.media.title.is_empty() {
+                    format!("{} media element(s)", self.browser.media.count)
+                } else {
+                    self.browser.media.title.clone()
+                };
+                ui.label(RichText::new(title).strong());
+                ui.label(format!(
+                    "{} / {}",
+                    format_time(self.browser.media.current_time),
+                    format_time(self.browser.media.duration)
+                ));
+                ui.horizontal(|ui| {
+                    play_pause = ui
+                        .button(if self.browser.media.paused {
+                            "Play"
+                        } else {
+                            "Pause"
+                        })
+                        .clicked();
+                    mute = ui
+                        .button(if self.browser.media.muted {
+                            "Unmute"
+                        } else {
+                            "Mute"
+                        })
+                        .clicked();
+                });
+                ui.add(egui::Slider::new(&mut volume, 0.0..=1.0).text("Volume"));
+            });
+        self.browser.media_open = open;
+        if play_pause {
+            self.send_command(Command::MediaPlayPause {
+                causal: Causal::default(),
+            });
+        }
+        if mute {
+            self.send_command(Command::MediaMute {
+                causal: Causal::default(),
+            });
+        }
+        if (volume - self.browser.media.volume).abs() > f64::EPSILON {
+            self.browser.media.volume = volume;
+            self.send_command(Command::MediaVolume {
+                value: volume,
+                causal: Causal::default(),
+            });
+        }
+    }
+
+    fn settings_window(&mut self, context: &egui::Context) {
+        if !self.browser.settings_open {
+            return;
+        }
+        let mut open = true;
+        let mut dark = self.dark_mode;
+        let mut mobile = self.mobile_mode;
+        let mut disconnect = false;
+        let mut clear_history = false;
+        let mut forget = None;
+        egui::Window::new("Surf settings")
+            .id(egui::Id::new("settings"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(460.0)
+            .show(context, |ui| {
+                section_label(ui, "Appearance");
+                setting_toggle(
+                    ui,
+                    "Dark appearance",
+                    "Apply the same color preference to Surf and remote websites.",
+                    &mut dark,
+                );
+                setting_toggle(
+                    ui,
+                    "Mobile websites",
+                    "Ask Chromium for compact mobile versions where available.",
+                    &mut mobile,
+                );
+                ui.add_space(16.0);
+                section_label(ui, "Privacy");
+                clear_history = ui
+                    .add_sized(
+                        [ui.available_width(), 36.0],
+                        egui::Button::new("Clear browsing history"),
+                    )
+                    .clicked();
+                ui.add_space(16.0);
+                section_label(ui, "Connection");
+                Frame::group(ui.style())
+                    .inner_margin(Margin::symmetric(12, 10))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.label(RichText::new(&self.status).size(13.0));
+                    });
+                for server in self.saved_servers.clone() {
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(RichText::new(&server.name).strong());
+                            ui.label(
+                                RichText::new(server.endpoint.trim_start_matches("https://"))
+                                    .small()
+                                    .weak(),
+                            );
+                        });
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.small_button("Forget").clicked() {
+                                forget = Some(server.clone());
+                            }
+                        });
+                    });
+                }
+                disconnect = ui
+                    .add_sized(
+                        [ui.available_width(), 36.0],
+                        egui::Button::new("Disconnect from server"),
+                    )
+                    .clicked();
+                ui.add_space(16.0);
+                ui.separator();
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(format!(
+                        "Surf {} · C99 portable core",
+                        include_str!("../../../../../VERSION").trim()
+                    ))
+                    .monospace()
+                    .weak(),
+                );
+            });
+        self.browser.settings_open = open;
+        if forget.is_some() {
+            self.forget_server = forget;
+        }
+        if dark != self.dark_mode {
+            self.dark_mode = dark;
+            theme::apply(context, dark);
+            self.send_command(Command::Dark {
+                on: dark,
+                causal: Causal::default(),
+            });
+        }
+        if mobile != self.mobile_mode {
+            self.mobile_mode = mobile;
+            self.send_command(Command::Mobile {
+                on: mobile,
+                causal: Causal::default(),
+            });
+        }
+        if clear_history {
+            self.send_command(Command::Clear {
+                what: "history".to_owned(),
+                causal: Causal::default(),
+            });
+            self.browser.toast("Browsing history cleared");
+        }
+        if disconnect {
+            self.send(SessionAction::Disconnect);
+        }
+    }
+
+    fn forget_server_window(&mut self, context: &egui::Context) {
+        let Some(server) = self.forget_server.clone() else {
+            return;
+        };
+        let mut cancel = false;
+        let mut confirm = false;
+        egui::Window::new("Forget server?")
+            .id(egui::Id::new("forget_server"))
+            .collapsible(false)
+            .resizable(false)
+            .default_width(380.0)
+            .show(context, |ui| {
+                ui.label(format!(
+                    "Surf will remove {} and this computer's private pairing key for it.",
+                    server.name
+                ));
+                ui.add_space(8.0);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    confirm = ui.button("Forget server").clicked();
+                    cancel = ui.button("Cancel").clicked();
+                });
+            });
+        if cancel {
+            self.forget_server = None;
+        } else if confirm {
+            let connected_to_server = self
+                .inspected
+                .as_ref()
+                .is_some_and(|info| info.server_id == server.server_id);
+            match Storage::system().and_then(|storage| storage.forget_server(&server.server_id)) {
+                Ok(()) => {
+                    if connected_to_server {
+                        self.send(SessionAction::Disconnect);
+                    }
+                    self.saved_servers
+                        .retain(|saved| saved.server_id != server.server_id);
+                    self.browser.toast(format!("Forgot {}", server.name));
+                }
+                Err(error) => self.browser.toast(error.to_string()),
+            }
+            self.forget_server = None;
+        }
+    }
+
+    fn diagnostics_window(&mut self, context: &egui::Context) {
+        if !self.browser.diagnostics_open {
+            return;
+        }
+        let mut open = true;
+        let report = self.latest_diagnostics.unwrap_or_default();
+        let media = self
+            .media
+            .as_ref()
+            .map(MediaPipeline::diagnostics)
+            .unwrap_or_default();
+        egui::Window::new("Performance")
+            .id(egui::Id::new("diagnostics"))
+            .open(&mut open)
+            .resizable(false)
+            .default_width(380.0)
+            .show(context, |ui| {
+                ui.horizontal(|ui| {
+                    metric(
+                        ui,
+                        "Presented",
+                        format!("{:.1} fps", report.presentation_fps),
+                    );
+                    metric(ui, "Decoded", format!("{:.1} fps", report.decode_fps));
+                    metric(ui, "Dropped", format!("{:.1}%", report.drop_percent));
+                });
+                ui.separator();
+                egui::Grid::new("diagnostics_grid")
+                    .num_columns(2)
+                    .spacing([18.0, 5.0])
+                    .show(ui, |ui| {
+                        diagnostic_row(ui, "Decode", report.decode_us, "µs");
+                        diagnostic_row(ui, "GPU upload", report.upload_us, "µs");
+                        diagnostic_row(ui, "Frame age", report.frame_age_us, "µs");
+                        diagnostic_row(ui, "Network", report.network_us, "µs");
+                        diagnostic_row(ui, "Round trip", report.rtt_us, "µs");
+                        ui.label("Queues");
+                        ui.monospace(format!(
+                            "{} / {} / {}",
+                            report.encoded_video_depth,
+                            report.decoded_video_depth,
+                            report.audio_depth
+                        ));
+                        ui.end_row();
+                    });
+                ui.separator();
+                ui.monospace(format!(
+                    "health {:?} · gaps {} · decode errors {} · ingress {}",
+                    report.health, report.sequence_gaps, report.decode_errors, media.ingress_frames
+                ));
+            });
+        self.browser.diagnostics_open = open;
+    }
+
+    fn dialog_window(&mut self, context: &egui::Context) {
+        let Some(mut prompt) = self.browser.dialog.clone() else {
+            return;
+        };
+        let mut reply = None;
+        egui::Window::new("This page says")
+            .id(egui::Id::new("page_dialog"))
+            .collapsible(false)
+            .resizable(false)
+            .default_width(420.0)
+            .show(context, |ui| {
+                ui.label(&prompt.text);
+                if prompt.kind == "prompt" {
+                    ui.add_sized(
+                        [ui.available_width(), 30.0],
+                        TextEdit::singleline(&mut prompt.input),
+                    );
+                }
+                ui.add_space(8.0);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.button("OK").clicked() {
+                        reply = Some(true);
+                    }
+                    if prompt.kind != "alert" && ui.button("Cancel").clicked() {
+                        reply = Some(false);
+                    }
+                });
+            });
+        if let Some(accept) = reply {
+            self.send_command(Command::DialogReply {
+                accept,
+                text: if accept { prompt.input } else { String::new() },
+                causal: Causal::default(),
+            });
+            self.browser.dialog = None;
+        } else {
+            self.browser.dialog = Some(prompt);
+        }
+    }
+
+    fn select_window(&mut self, context: &egui::Context) {
+        let Some(mut prompt) = self.browser.select.clone() else {
+            return;
+        };
+        let mut submit = false;
+        let mut cancel = false;
+        egui::Window::new(if prompt.title.is_empty() {
+            "Choose an option"
+        } else {
+            &prompt.title
+        })
+        .id(egui::Id::new("page_select"))
+        .collapsible(false)
+        .default_width(420.0)
+        .show(context, |ui| {
+            egui::ScrollArea::vertical()
+                .max_height(420.0)
+                .show(ui, |ui| {
+                    for (index, option) in prompt.options.iter().enumerate() {
+                        let selected = prompt.selected[index];
+                        let response = ui.add_enabled(
+                            !option.disabled,
+                            egui::Button::selectable(selected, &option.label),
+                        );
+                        if response.clicked() {
+                            if prompt.multiple {
+                                prompt.selected[index] = !selected;
+                            } else {
+                                prompt.selected.fill(false);
+                                prompt.selected[index] = true;
+                                submit = true;
+                            }
+                        }
+                    }
+                });
+            ui.separator();
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if prompt.multiple && ui.button("Choose").clicked() {
+                    submit = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    cancel = true;
+                }
+            });
+        });
+        if submit || cancel {
+            let indices = prompt
+                .selected
+                .iter()
+                .enumerate()
+                .filter_map(|(index, selected)| selected.then_some(index as i32))
+                .collect();
+            self.send_command(Command::SelectReply {
+                id: prompt.id,
+                cancel,
+                indices,
+                causal: Causal::default(),
+            });
+            self.browser.select = None;
+        } else {
+            self.browser.select = Some(prompt);
+        }
+    }
+
+    fn upload_window(&mut self, context: &egui::Context) {
+        let Some(multiple) = self.browser.upload_multiple else {
+            return;
+        };
+        let mut upload = false;
+        let mut cancel = false;
+        egui::Window::new("Choose file")
+            .id(egui::Id::new("file_chooser"))
+            .collapsible(false)
+            .resizable(false)
+            .default_width(480.0)
+            .show(context, |ui| {
+                ui.label(if multiple {
+                    "Enter one local file path per line."
+                } else {
+                    "Enter a local file path."
+                });
+                ui.add_sized(
+                    [ui.available_width(), if multiple { 100.0 } else { 30.0 }],
+                    TextEdit::multiline(&mut self.browser.upload_paths)
+                        .hint_text("/home/me/Documents/file.pdf"),
+                );
+                ui.horizontal(|ui| {
+                    upload = ui.button("Upload").clicked();
+                    cancel = ui.button("Cancel").clicked();
+                });
+            });
+        if upload {
+            let mut paths: Vec<PathBuf> = self
+                .browser
+                .upload_paths
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(PathBuf::from)
+                .collect();
+            if !multiple {
+                paths.truncate(1);
+            }
+            if paths.is_empty() || paths.iter().any(|path| !path.is_file()) {
+                self.browser.toast("Choose an existing local file");
+            } else {
+                self.send(SessionAction::Upload(paths));
+                self.browser.upload_multiple = None;
+            }
+        } else if cancel {
+            self.send(SessionAction::CancelUpload);
+            self.browser.upload_multiple = None;
+        }
+    }
+
+    fn page_error_overlay(&mut self, context: &egui::Context) {
+        let Some(url) = self.browser.page_error.clone() else {
+            return;
+        };
+        let mut retry = false;
+        let mut dismiss = false;
+        egui::Area::new(egui::Id::new("page_error"))
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 20.0])
+            .order(egui::Order::Foreground)
+            .show(context, |ui| {
+                Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_width(420.0);
+                    ui.heading("This page is unavailable");
+                    ui.label(compact_address(&url));
+                    ui.horizontal(|ui| {
+                        retry = ui.button("Try again").clicked();
+                        dismiss = ui.button("Dismiss").clicked();
+                    });
+                });
+            });
+        if retry {
+            self.send_command(Command::Reload {
+                causal: Causal::default(),
+            });
+            self.browser.page_error = None;
+        } else if dismiss {
+            self.browser.page_error = None;
+        }
+    }
+
+    fn toast_overlay(&self, context: &egui::Context) {
+        let Some(toast) = &self.browser.toast else {
+            return;
+        };
+        egui::Area::new(egui::Id::new("toast"))
+            .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -22.0])
+            .order(egui::Order::Tooltip)
+            .interactable(false)
+            .show(context, |ui| {
+                Frame::popup(ui.style())
+                    .inner_margin(Margin::symmetric(14, 9))
+                    .show(ui, |ui| {
+                        ui.label(&toast.text);
+                    });
+            });
+    }
+
     fn content(&mut self, root: &mut egui::Ui) {
+        let colors = theme::palette(self.dark_mode);
         egui::CentralPanel::default()
             .frame(
                 Frame::new()
-                    .fill(theme::BACKGROUND)
+                    .fill(colors.background)
                     .inner_margin(Margin::same(0)),
             )
             .show(root, |ui| {
                 let available = ui.available_rect_before_wrap();
                 let painter = ui.painter();
-                painter.rect_filled(available, CornerRadius::ZERO, theme::BACKGROUND);
+                painter.rect_filled(available, CornerRadius::ZERO, colors.background);
 
                 if self.connected {
                     let surface = available;
@@ -1007,7 +2097,7 @@ impl SurfDesktop {
                             egui::Align2::LEFT_TOP,
                             label,
                             FontId::proportional(13.0),
-                            theme::MUTED,
+                            colors.muted,
                         );
                     }
                     let response = ui.interact(
@@ -1060,21 +2150,21 @@ impl SurfDesktop {
                 };
                 let card = egui::Rect::from_center_size(center, Vec2::new(500.0, desired_height))
                     .intersect(available.shrink(20.0));
-                painter.rect_filled(card, CornerRadius::same(18), theme::SURFACE);
+                painter.rect_filled(card, CornerRadius::same(18), colors.surface);
                 painter.rect_stroke(
                     card,
                     CornerRadius::same(18),
-                    Stroke::new(1.0, theme::SEPARATOR),
+                    Stroke::new(1.0, colors.separator),
                     egui::StrokeKind::Inside,
                 );
                 ui.scope_builder(egui::UiBuilder::new().max_rect(card.shrink(30.0)), |ui| {
                     ui.with_layout(Layout::top_down(Align::Min), |ui| {
                         ui.vertical_centered(|ui| {
-                            ui.label(RichText::new("Surf").size(31.0).strong().color(theme::TEXT));
+                            ui.label(RichText::new("Surf").size(31.0).strong().color(colors.text));
                             ui.label(
                                 RichText::new("Pair once. Browse through a faster machine.")
                                     .size(14.0)
-                                    .color(theme::MUTED),
+                                    .color(colors.muted),
                             );
                         });
                         ui.add_space(18.0);
@@ -1083,7 +2173,7 @@ impl SurfDesktop {
                             ui.label(
                                 RichText::new("PAIRED SERVERS")
                                     .size(10.0)
-                                    .color(theme::MUTED),
+                                    .color(colors.muted),
                             );
                             ui.horizontal_wrapped(|ui| {
                                 for server in &self.saved_servers {
@@ -1102,7 +2192,7 @@ impl SurfDesktop {
                             ui.add_space(8.0);
                         }
                         if !self.discovered_servers.is_empty() {
-                            ui.label(RichText::new("NEARBY").size(10.0).color(theme::MUTED));
+                            ui.label(RichText::new("NEARBY").size(10.0).color(colors.muted));
                             ui.horizontal_wrapped(|ui| {
                                 for server in &self.discovered_servers {
                                     if ui
@@ -1121,7 +2211,7 @@ impl SurfDesktop {
                         ui.label(
                             RichText::new("Server address")
                                 .size(12.0)
-                                .color(theme::MUTED),
+                                .color(colors.muted),
                         );
                         ui.add_sized(
                             [ui.available_width(), 34.0],
@@ -1143,7 +2233,7 @@ impl SurfDesktop {
                         if let Some(pairing) = self.pairing.clone() {
                             ui.add_space(12.0);
                             Frame::new()
-                                .fill(theme::ACCENT_SOFT)
+                                .fill(colors.accent_soft)
                                 .corner_radius(CornerRadius::same(10))
                                 .inner_margin(Margin::symmetric(14, 12))
                                 .show(ui, |ui| {
@@ -1152,14 +2242,14 @@ impl SurfDesktop {
                                         RichText::new(pairing.phrase)
                                             .size(17.0)
                                             .strong()
-                                            .color(theme::ACCENT_TEXT),
+                                            .color(colors.accent_text),
                                     );
                                     ui.label(
                                         RichText::new(
                                             "Confirm only if the server shows the same words.",
                                         )
                                         .size(12.0)
-                                        .color(theme::MUTED),
+                                        .color(colors.muted),
                                     );
                                 });
                             ui.add_space(8.0);
@@ -1177,7 +2267,7 @@ impl SurfDesktop {
                             ui.label(
                                 RichText::new(format!("{} · Surf {}", info.name, info.version))
                                     .size(13.0)
-                                    .color(theme::TEXT),
+                                    .color(colors.text),
                             );
                             if self.paired {
                                 if ui
@@ -1215,17 +2305,17 @@ impl SurfDesktop {
 
                         ui.add_space(12.0);
                         if let Some(note) = &self.discovery_note {
-                            ui.label(RichText::new(note).size(11.0).color(theme::MUTED));
+                            ui.label(RichText::new(note).size(11.0).color(colors.muted));
                             ui.add_space(4.0);
                         }
                         Frame::new()
-                            .fill(theme::FIELD)
+                            .fill(colors.field)
                             .corner_radius(CornerRadius::same(9))
                             .inner_margin(Margin::symmetric(12, 9))
                             .show(ui, |ui| {
                                 ui.set_width(ui.available_width());
                                 ui.label(
-                                    RichText::new(&self.status).size(12.0).color(theme::MUTED),
+                                    RichText::new(&self.status).size(12.0).color(colors.muted),
                                 );
                             });
                     });
@@ -1238,6 +2328,17 @@ impl eframe::App for SurfDesktop {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let context = ui.ctx().clone();
         self.drain_session();
+        if let Some((request_id, text)) = self.browser.pending_clipboard.take() {
+            context.copy_text(text);
+            if !request_id.is_empty() {
+                self.send_command(Command::ClipboardResult {
+                    id: request_id,
+                    ok: true,
+                    causal: Causal::default(),
+                });
+            }
+        }
+        self.browser.prune();
         self.update_diagnostics();
         self.handle_shortcuts(&context);
         let title = self.snapshot.active_title.trim();
@@ -1248,6 +2349,7 @@ impl eframe::App for SurfDesktop {
         }));
         self.chrome(ui);
         self.content(ui);
+        self.browser_overlays(&context);
         let presented = self.video_surface.presented();
         if self.smoke_frame_target.is_some()
             && self.smoke_last_heartbeat.elapsed() >= Duration::from_secs(2)
@@ -1349,6 +2451,161 @@ fn bounded_i32(value: u64) -> i32 {
     i32::try_from(value).unwrap_or(i32::MAX)
 }
 
+fn preview_browser_ui() -> BrowserUi {
+    let mut browser = BrowserUi::default();
+    match std::env::var("SURF_DESKTOP_PREVIEW").as_deref() {
+        Ok("tools") => browser.menu_open = true,
+        Ok("settings") => browser.settings_open = true,
+        Ok("performance") => browser.diagnostics_open = true,
+        _ => {}
+    }
+    browser
+}
+
+fn tool_row(ui: &mut egui::Ui, glyph: char, title: &str) -> bool {
+    let colors = theme::palette(ui.visuals().dark_mode);
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(glyph.to_string())
+                .family(icon_family())
+                .size(16.0)
+                .color(colors.muted),
+        );
+        ui.add_sized(
+            [(ui.available_width() - 4.0).max(120.0), 32.0],
+            egui::Button::new(RichText::new(title).size(14.0)).frame(false),
+        )
+        .clicked()
+    })
+    .inner
+}
+
+fn library_row(ui: &mut egui::Ui, title: &str, subtitle: &str, mut action: impl FnMut(u8)) {
+    ui.horizontal(|ui| {
+        ui.vertical(|ui| {
+            let title = if title.trim().is_empty() {
+                compact_address(subtitle)
+            } else {
+                title.to_owned()
+            };
+            if ui.link(RichText::new(title).strong()).clicked() {
+                action(0);
+            }
+            ui.add(egui::Label::new(RichText::new(subtitle).weak().small()).truncate());
+        });
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if ui.small_button("Remove").clicked() {
+                action(1);
+            }
+        });
+    });
+    ui.separator();
+}
+
+fn format_bytes(bytes: i64) -> String {
+    let value = bytes.max(0) as f64;
+    if value >= 1024.0 * 1024.0 * 1024.0 {
+        format!("{:.1} GB", value / (1024.0 * 1024.0 * 1024.0))
+    } else if value >= 1024.0 * 1024.0 {
+        format!("{:.1} MB", value / (1024.0 * 1024.0))
+    } else if value >= 1024.0 {
+        format!("{:.1} KB", value / 1024.0)
+    } else {
+        format!("{} B", value as u64)
+    }
+}
+
+fn format_time(seconds: f64) -> String {
+    let seconds = seconds.max(0.0).round() as u64;
+    format!("{}:{:02}", seconds / 60, seconds % 60)
+}
+
+fn metric(ui: &mut egui::Ui, name: &str, value: String) {
+    Frame::group(ui.style()).show(ui, |ui| {
+        ui.set_min_width(96.0);
+        ui.label(RichText::new(value).monospace().strong());
+        ui.small(name);
+    });
+}
+
+fn section_label(ui: &mut egui::Ui, text: &str) {
+    let colors = theme::palette(ui.visuals().dark_mode);
+    ui.label(
+        RichText::new(text.to_uppercase())
+            .size(10.0)
+            .strong()
+            .color(colors.muted),
+    );
+    ui.add_space(2.0);
+}
+
+fn setting_toggle(ui: &mut egui::Ui, title: &str, detail: &str, value: &mut bool) {
+    let colors = theme::palette(ui.visuals().dark_mode);
+    Frame::new()
+        .fill(colors.field)
+        .stroke(Stroke::new(1.0, colors.field_border))
+        .corner_radius(CornerRadius::same(8))
+        .inner_margin(Margin::symmetric(12, 10))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(title).size(14.0).strong());
+                    ui.label(RichText::new(detail).size(11.5).color(colors.muted));
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui
+                        .add(egui::Button::selectable(
+                            *value,
+                            if *value { "On" } else { "Off" },
+                        ))
+                        .clicked()
+                    {
+                        *value = !*value;
+                    }
+                });
+            });
+        });
+}
+
+fn diagnostic_row(ui: &mut egui::Ui, name: &str, value: u64, unit: &str) {
+    ui.label(name);
+    ui.monospace(format!("{value} {unit}"));
+    ui.end_row();
+}
+
+fn default_download_path(name: &str) -> PathBuf {
+    let directory = directories::UserDirs::new()
+        .and_then(|dirs| dirs.download_dir().map(Path::to_path_buf))
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let safe_name = Path::new(name)
+        .file_name()
+        .filter(|part| !part.is_empty())
+        .unwrap_or_else(|| std::ffi::OsStr::new("download"));
+    let initial = directory.join(safe_name);
+    if !initial.exists() {
+        return initial;
+    }
+    let source = Path::new(safe_name);
+    let stem = source
+        .file_stem()
+        .unwrap_or_else(|| std::ffi::OsStr::new("download"))
+        .to_string_lossy();
+    let extension = source.extension().map(|value| value.to_string_lossy());
+    for index in 2..10_000 {
+        let candidate_name = match &extension {
+            Some(extension) => format!("{stem} ({index}).{extension}"),
+            None => format!("{stem} ({index})"),
+        };
+        let candidate = directory.join(candidate_name);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    directory.join(format!("{stem}-surf-download"))
+}
+
 fn compact_address(url: &str) -> String {
     let value = url.trim();
     if value.is_empty() || value.starts_with("about:blank") {
@@ -1375,13 +2632,14 @@ fn compact_address(url: &str) -> String {
 }
 
 fn chrome_icon(ui: &mut egui::Ui, glyph: char, enabled: bool, label: &str) -> bool {
+    let colors = theme::palette(ui.visuals().dark_mode);
     let text = RichText::new(glyph.to_string())
         .family(icon_family())
         .size(18.0)
         .color(if enabled {
-            theme::TEXT
+            colors.text
         } else {
-            theme::DISABLED
+            colors.disabled
         });
     ui.add_enabled(
         enabled,
@@ -1407,40 +2665,6 @@ fn install_fonts(context: &egui::Context) {
         .families
         .insert(icon_family(), vec![ICON_FONT.to_owned()]);
     context.set_fonts(fonts);
-}
-
-fn install_style(context: &egui::Context) {
-    context.set_theme(egui::ThemePreference::Dark);
-    let mut style = (*context.style_of(egui::Theme::Dark)).clone();
-    style.spacing.item_spacing = Vec2::new(8.0, 8.0);
-    style.visuals.dark_mode = true;
-    style.visuals.window_fill = theme::SURFACE;
-    style.visuals.panel_fill = theme::BACKGROUND;
-    style.visuals.override_text_color = Some(theme::TEXT);
-    style.visuals.selection.bg_fill = theme::ACCENT;
-    style.visuals.selection.stroke = Stroke::new(1.0, theme::ACCENT_TEXT);
-    context.set_style_of(egui::Theme::Dark, style);
-}
-
-mod theme {
-    use eframe::egui::Color32;
-
-    pub const BACKGROUND: Color32 = Color32::from_rgb(23, 23, 25);
-    pub const CHROME: Color32 = Color32::from_rgb(29, 29, 32);
-    pub const COMMAND_RAIL: Color32 = Color32::from_rgb(32, 32, 35);
-    pub const FIELD: Color32 = Color32::from_rgb(42, 42, 46);
-    pub const FIELD_BORDER: Color32 = Color32::from_rgb(68, 68, 74);
-    pub const SURFACE: Color32 = Color32::from_rgb(35, 35, 38);
-    pub const TAB_ACTIVE: Color32 = Color32::from_rgb(46, 46, 50);
-    pub const TAB_BORDER: Color32 = Color32::from_rgb(77, 77, 84);
-    pub const SEPARATOR: Color32 = Color32::from_rgb(55, 55, 60);
-    pub const TEXT: Color32 = Color32::from_rgb(244, 244, 245);
-    pub const MUTED: Color32 = Color32::from_rgb(165, 165, 172);
-    pub const DISABLED: Color32 = Color32::from_rgb(94, 94, 101);
-    pub const ACCENT: Color32 = Color32::from_rgb(90, 200, 216);
-    pub const ACCENT_SOFT: Color32 = Color32::from_rgb(37, 63, 67);
-    pub const ACCENT_TEXT: Color32 = Color32::from_rgb(142, 220, 229);
-    pub const DANGER: Color32 = Color32::from_rgb(241, 116, 116);
 }
 
 #[cfg(test)]

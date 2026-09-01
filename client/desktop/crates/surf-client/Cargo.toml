@@ -7,9 +7,12 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+directories.workspace = true
 eframe.workspace = true
 egui_glow.workspace = true
+image.workspace = true
 surf-core.workspace = true
 surf-media.workspace = true
 surf-protocol.workspace = true
 surf-session.workspace = true
+serde_json.workspace = true

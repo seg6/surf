@@ -6,7 +6,7 @@ mod tls;
 
 use std::fs::{self, OpenOptions};
 use std::io::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
@@ -138,6 +138,9 @@ pub enum SessionAction {
     ConfirmPairing,
     Connect,
     Send(Command),
+    Upload(Vec<PathBuf>),
+    CancelUpload,
+    Download { name: String, destination: PathBuf },
     Disconnect,
     Shutdown,
 }
@@ -168,8 +171,20 @@ pub enum SessionEvent {
         reason: String,
     },
     Control(Event),
+    Transfer {
+        kind: TransferKind,
+        name: String,
+        ok: bool,
+        message: String,
+    },
     Disconnected(String),
     Failure(SessionFailure),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TransferKind {
+    Upload,
+    Download,
 }
 
 /// Receives validated wire frames without making the network task wait for
@@ -374,7 +389,10 @@ async fn driver(
                         "verify a server before connecting".to_owned(),
                     )),
                 },
-                SessionAction::Send(_) => Err(SessionError::Protocol(
+                SessionAction::Send(_)
+                | SessionAction::Upload(_)
+                | SessionAction::CancelUpload
+                | SessionAction::Download { .. } => Err(SessionError::Protocol(
                     "browser command sent while disconnected".to_owned(),
                 )),
                 SessionAction::Disconnect => {
@@ -538,6 +556,15 @@ async fn run_socket(
         tokio::select! {
             action = actions.recv() => match action {
                 Some(SessionAction::Send(command)) => send_command(&mut writer, &command).await?,
+                Some(SessionAction::Upload(paths)) => {
+                    spawn_upload(server.clone(), paths, events.clone());
+                }
+                Some(SessionAction::CancelUpload) => {
+                    spawn_upload(server.clone(), Vec::new(), events.clone());
+                }
+                Some(SessionAction::Download { name, destination }) => {
+                    spawn_download(server.clone(), name, destination, events.clone());
+                }
                 Some(SessionAction::Disconnect) => {
                     writer.send(Message::Close(None)).await?;
                     frame_sink.clear();
@@ -577,6 +604,52 @@ async fn run_socket(
             }
         }
     }
+}
+
+fn spawn_upload(server: VerifiedEndpoint, paths: Vec<PathBuf>, events: SyncSender<SessionEvent>) {
+    tokio::spawn(async move {
+        let label = if paths.is_empty() {
+            "File selection".to_owned()
+        } else if paths.len() == 1 {
+            paths[0]
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "File".to_owned())
+        } else {
+            format!("{} files", paths.len())
+        };
+        let outcome = api::upload_files(&server, &paths).await;
+        let _ = events.try_send(SessionEvent::Transfer {
+            kind: TransferKind::Upload,
+            name: label,
+            ok: outcome.is_ok(),
+            message: match outcome {
+                Ok(0) => "File selection cancelled".to_owned(),
+                Ok(count) => format!("Attached {count} file(s)"),
+                Err(error) => error.to_string(),
+            },
+        });
+    });
+}
+
+fn spawn_download(
+    server: VerifiedEndpoint,
+    name: String,
+    destination: PathBuf,
+    events: SyncSender<SessionEvent>,
+) {
+    tokio::spawn(async move {
+        let outcome = api::download_file(&server, &name, &destination).await;
+        let _ = events.try_send(SessionEvent::Transfer {
+            kind: TransferKind::Download,
+            name,
+            ok: outcome.is_ok(),
+            message: match outcome {
+                Ok(()) => format!("Saved to {}", destination.display()),
+                Err(error) => error.to_string(),
+            },
+        });
+    });
 }
 
 async fn send_command<S>(writer: &mut S, command: &Command) -> Result<()>

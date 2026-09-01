@@ -1,4 +1,4 @@
-.PHONY: test client-core-build client-core-test client-core-sanitize desktop-build desktop-test desktop-run surf-binary surf-dist surf-release-dist native-sdk native-package
+.PHONY: test client-core-build client-core-test client-core-sanitize desktop-build desktop-test desktop-run desktop-package surf-binary surf-dist surf-release-dist native-sdk native-package
 
 VERSION := $(shell tr -d '[:space:]' < VERSION)
 COMPATIBILITY_VERSION := $(shell tr -d '[:space:]' < COMPATIBILITY_VERSION)
@@ -50,6 +50,9 @@ desktop-test:
 desktop-run:
 	CARGO_TARGET_DIR="$(CURDIR)/.local/build/desktop" \
 		cargo run --manifest-path client/desktop/Cargo.toml -p surf-client
+
+desktop-package:
+	client/desktop/package-linux.sh
 
 # Surf's tray implementation binds native desktop APIs without cgo, so every
 # supported target cross-compiles from the same Go toolchain.

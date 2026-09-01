@@ -71,6 +71,28 @@ impl Storage {
         servers.retain(|saved| saved.server_id != server.server_id);
         servers.push(server);
         servers.sort_by(|left, right| left.name.cmp(&right.name));
+        self.write_servers(servers)
+    }
+
+    pub fn forget_server(&self, server_id: &str) -> Result<()> {
+        if server_id.len() != 64 || !server_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(SessionError::Storage("invalid saved server ID".to_owned()));
+        }
+        let mut servers = self.servers()?;
+        servers.retain(|saved| saved.server_id != server_id);
+        self.write_servers(servers)?;
+        let identity = self
+            .root
+            .join("identities")
+            .join(format!("{server_id}.pem"));
+        match fs::remove_file(identity) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    fn write_servers(&self, servers: Vec<SavedServer>) -> Result<()> {
         let mut data = serde_json::to_vec_pretty(&ServerFile {
             version: 1,
             servers,
@@ -107,5 +129,40 @@ mod tests {
         server.name = "Updated".to_owned();
         storage.save_server(server.clone()).unwrap();
         assert_eq!(storage.servers().unwrap(), vec![server]);
+    }
+
+    #[test]
+    fn forgetting_a_server_removes_its_record_and_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let storage = Storage::at(temp.path());
+        let server_id = "a".repeat(64);
+        storage
+            .save_server(SavedServer {
+                server_id: server_id.clone(),
+                fingerprint: "fingerprint".to_owned(),
+                name: "One".to_owned(),
+                endpoint: "https://127.0.0.1:18080".to_owned(),
+                transport: String::new(),
+            })
+            .unwrap();
+        std::fs::create_dir_all(temp.path().join("identities")).unwrap();
+        std::fs::write(
+            temp.path()
+                .join("identities")
+                .join(format!("{server_id}.pem")),
+            "private",
+        )
+        .unwrap();
+
+        storage.forget_server(&server_id).unwrap();
+
+        assert!(storage.servers().unwrap().is_empty());
+        assert!(
+            !temp
+                .path()
+                .join("identities")
+                .join(format!("{server_id}.pem"))
+                .exists()
+        );
     }
 }

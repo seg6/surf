@@ -10,10 +10,10 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.15.5"
 edition = "2024"
 rust-version = "1.95"
-license = "AGPL-3.0-only"
+license = "MIT"
 repository = "https://github.com/seg6/surf"
 
 [workspace.dependencies]
@@ -25,10 +25,11 @@ directories = "6.0.0"
 egui_glow = "0.36.1"
 ffmpeg-the-third = { version = "6.0.0", default-features = false, features = ["format"] }
 futures-util = "0.3.31"
+image = { version = "0.25.9", default-features = false, features = ["png"] }
 hex = "0.4.3"
 mdns-sd = { version = "0.21.1", default-features = false }
 rand = "0.8.5"
-reqwest = { version = "0.13.4", default-features = false, features = ["cookies", "json", "rustls"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["cookies", "json", "multipart", "rustls", "stream"] }
 rsa = { version = "0.9.8", features = ["sha2"] }
 rustls = { version = "0.23.40", default-features = true }
 serde = { version = "1.0.229", features = ["derive"] }
@@ -40,6 +41,6 @@ surf-media = { path = "crates/surf-media" }
 surf-protocol = { path = "crates/surf-protocol" }
 surf-session = { path = "crates/surf-session" }
 thiserror = "2.0.17"
-tokio = { version = "1.48.0", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1.48.0", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-native-roots"] }
 url = { version = "2.5.7", features = ["serde"] }

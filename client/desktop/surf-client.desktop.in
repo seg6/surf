@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Surf Client
+Comment=Browse through your Surf server
+Exec=surf-client
+Icon=space.seg6.surf.client
+Terminal=false
+Categories=Network;WebBrowser;
+StartupWMClass=space.seg6.surf.client
