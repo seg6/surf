@@ -673,3 +673,23 @@ const char *surf_core_result_string(surf_core_result_t result) {
         return "unknown core error";
     }
 }
+
+uint32_t surf_core_abi_version(void) {
+    return SURF_CORE_ABI_VERSION;
+}
+
+size_t surf_core_sizeof_string_view(void) {
+    return sizeof(surf_string_view_t);
+}
+
+size_t surf_core_sizeof_config(void) {
+    return sizeof(surf_core_config_t);
+}
+
+size_t surf_core_sizeof_event(void) {
+    return sizeof(surf_event_t);
+}
+
+size_t surf_core_sizeof_snapshot(void) {
+    return sizeof(surf_snapshot_t);
+}

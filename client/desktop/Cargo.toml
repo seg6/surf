@@ -1,0 +1,19 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/surf-client",
+    "crates/surf-core",
+    "crates/surf-core-sys",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "AGPL-3.0-only"
+repository = "https://github.com/seg6/surf"
+
+[workspace.dependencies]
+eframe = { version = "0.36.1", default-features = false, features = ["accesskit", "default_fonts", "glow", "wayland", "x11"] }
+surf-core = { path = "crates/surf-core" }
+surf-core-sys = { path = "crates/surf-core-sys" }

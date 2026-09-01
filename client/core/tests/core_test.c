@@ -275,6 +275,14 @@ static void test_configuration(void) {
     SURF_CHECK(surf_core_create(&config, &core) == SURF_CORE_ERROR_LIMIT);
 }
 
+static void test_abi_layout(void) {
+    SURF_CHECK(surf_core_abi_version() == SURF_CORE_ABI_VERSION);
+    SURF_CHECK(surf_core_sizeof_string_view() == sizeof(surf_string_view_t));
+    SURF_CHECK(surf_core_sizeof_config() == sizeof(surf_core_config_t));
+    SURF_CHECK(surf_core_sizeof_event() == sizeof(surf_event_t));
+    SURF_CHECK(surf_core_sizeof_snapshot() == sizeof(surf_snapshot_t));
+}
+
 int main(void) {
     test_initial_state();
     test_tabs_and_titles();
@@ -283,6 +291,7 @@ int main(void) {
     test_invalid_tabs_are_atomic();
     test_allocator_failure();
     test_configuration();
+    test_abi_layout();
     puts("surf_core: all tests passed");
     return EXIT_SUCCESS;
 }

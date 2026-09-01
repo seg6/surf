@@ -13,3 +13,4 @@ native/buildenv/sdk/
 /dist/
 .env
 .local/
+client/desktop/target/

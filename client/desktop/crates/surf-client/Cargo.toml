@@ -1,0 +1,11 @@
+[package]
+name = "surf-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+eframe.workspace = true
+surf-core.workspace = true

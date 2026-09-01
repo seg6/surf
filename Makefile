@@ -1,4 +1,4 @@
-.PHONY: test client-core-build client-core-test client-core-sanitize surf-binary surf-dist surf-release-dist native-sdk native-package
+.PHONY: test client-core-build client-core-test client-core-sanitize desktop-build desktop-test desktop-run surf-binary surf-dist surf-release-dist native-sdk native-package
 
 VERSION := $(shell tr -d '[:space:]' < VERSION)
 COMPATIBILITY_VERSION := $(shell tr -d '[:space:]' < COMPATIBILITY_VERSION)
@@ -22,6 +22,7 @@ endif
 
 test: client-core-test
 	cd backend && go test ./...
+	$(MAKE) desktop-test
 
 client-core-build:
 	cmake -S client/core -B "$(CLIENT_CORE_BUILD_DIR)" \
@@ -37,6 +38,18 @@ client-core-sanitize:
 		-DSURF_CORE_SANITIZE=ON
 	cmake --build "$(CLIENT_CORE_SANITIZE_DIR)"
 	ctest --test-dir "$(CLIENT_CORE_SANITIZE_DIR)" --output-on-failure
+
+desktop-build:
+	CARGO_TARGET_DIR="$(CURDIR)/.local/build/desktop" \
+		cargo build --manifest-path client/desktop/Cargo.toml --workspace
+
+desktop-test:
+	CARGO_TARGET_DIR="$(CURDIR)/.local/build/desktop" \
+		cargo test --manifest-path client/desktop/Cargo.toml --workspace
+
+desktop-run:
+	CARGO_TARGET_DIR="$(CURDIR)/.local/build/desktop" \
+		cargo run --manifest-path client/desktop/Cargo.toml -p surf-client
 
 # Surf's tray implementation binds native desktop APIs without cgo, so every
 # supported target cross-compiles from the same Go toolchain.

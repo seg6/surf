@@ -164,6 +164,14 @@ surf_core_result_t surf_core_snapshot(const surf_core_t *core,
 int surf_core_next_effect(surf_core_t *core, surf_effect_t *out_effect);
 const char *surf_core_result_string(surf_core_result_t result);
 
+/* Runtime layout probes used by language bindings to fail fast if their raw
+ * declarations drift from the C compiler's ABI. */
+uint32_t surf_core_abi_version(void);
+size_t surf_core_sizeof_string_view(void);
+size_t surf_core_sizeof_config(void);
+size_t surf_core_sizeof_event(void);
+size_t surf_core_sizeof_snapshot(void);
+
 #ifdef __cplusplus
 }
 #endif
