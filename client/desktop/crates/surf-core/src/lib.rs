@@ -745,6 +745,7 @@ pub enum Effect {
     RequestLibrary,
     ShowKeyboard,
     HideKeyboard,
+    ClearPagePresentation,
     Unknown(i32),
 }
 
@@ -899,7 +900,10 @@ impl Core {
         unsafe { sys::surf_core_stale_event_count(self.raw.as_ptr()) }
     }
 
-    pub fn dispatch_wire_event(&mut self, event: &surf_protocol::Event) -> Result<(), Error> {
+    pub fn dispatch_wire_event(
+        &mut self,
+        event: &surf_protocol::Event,
+    ) -> Result<Vec<Effect>, Error> {
         let json = event
             .encode()
             .map_err(|error| Error::invariant(&format!("control event encode failed: {error}")))?;
@@ -911,7 +915,8 @@ impl Core {
                 json.as_ptr().cast(),
                 json.len(),
             )
-        })
+        })?;
+        Ok(self.drain_effects())
     }
 
     pub fn present_frame(
@@ -1198,6 +1203,7 @@ impl Core {
                 1 => Effect::RequestLibrary,
                 2 => Effect::ShowKeyboard,
                 3 => Effect::HideKeyboard,
+                sys::SURF_EFFECT_CLEAR_PAGE_PRESENTATION => Effect::ClearPagePresentation,
                 other => Effect::Unknown(other),
             });
         }
@@ -1311,23 +1317,32 @@ mod tests {
     #[test]
     fn typed_wire_events_drive_shared_semantic_state() {
         let mut core = Core::new().unwrap();
-        core.dispatch_wire_event(&surf_protocol::Event::Dialog {
-            kind: "prompt".to_owned(),
-            text: "Your name?".to_owned(),
-            default: "Surf".to_owned(),
-        })
-        .unwrap();
-        core.dispatch_wire_event(&surf_protocol::Event::MediaState {
-            available: true,
-            count: 1,
-            paused: false,
-            muted: false,
-            volume: 0.75,
-            current_time: 3.0,
-            duration: 42.0,
-            title: "Player".to_owned(),
-        })
-        .unwrap();
+        let _ = core
+            .dispatch_wire_event(&surf_protocol::Event::Url {
+                url: "https://one.test/".to_owned(),
+                starred: false,
+                security: "secure".to_owned(),
+            })
+            .unwrap();
+        let _ = core
+            .dispatch_wire_event(&surf_protocol::Event::Dialog {
+                kind: "prompt".to_owned(),
+                text: "Your name?".to_owned(),
+                default: "Surf".to_owned(),
+            })
+            .unwrap();
+        let _ = core
+            .dispatch_wire_event(&surf_protocol::Event::MediaState {
+                available: true,
+                count: 1,
+                paused: false,
+                muted: false,
+                volume: 0.75,
+                current_time: 3.0,
+                duration: 42.0,
+                title: "Player".to_owned(),
+            })
+            .unwrap();
         let semantic = core.semantic_snapshot().unwrap();
         assert!(semantic.dialog_active && semantic.media_available);
         assert_eq!(semantic.dialog_text, "Your name?");
@@ -1335,6 +1350,24 @@ mod tests {
         assert_eq!(semantic.media_volume, 0.75);
         core.complete_semantic(SemanticCompletion::Dialog).unwrap();
         assert!(!core.semantic_snapshot().unwrap().dialog_active);
+
+        let _ = core
+            .dispatch_wire_event(&surf_protocol::Event::Dialog {
+                kind: "alert".to_owned(),
+                text: "Old page".to_owned(),
+                default: String::new(),
+            })
+            .unwrap();
+        let effects = core
+            .dispatch_wire_event(&surf_protocol::Event::Url {
+                url: "https://two.test/".to_owned(),
+                starred: false,
+                security: "secure".to_owned(),
+            })
+            .unwrap();
+        assert_eq!(effects, vec![Effect::ClearPagePresentation]);
+        let semantic = core.semantic_snapshot().unwrap();
+        assert!(!semantic.dialog_active && !semantic.media_available);
     }
 
     #[test]

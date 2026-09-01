@@ -414,6 +414,7 @@ static surf_core_result_t surf_dispatch_tabs(surf_core_t *core,
     size_t active_count = 0;
     int64_t active_id = 0;
     int active_changed;
+    int had_active_page;
     surf_core_result_t result;
 
     memset(&active_title, 0, sizeof(active_title));
@@ -502,6 +503,7 @@ static surf_core_result_t surf_dispatch_tabs(surf_core_t *core,
     }
     active_changed = core->has_active_tab != (active_count == 1) ||
                      (active_count == 1 && core->active_tab_id != active_id);
+    had_active_page = core->has_active_tab;
     surf_owned_tabs_clear(core, core->tabs, core->tab_count, core->tab_views);
     core->tabs = tabs;
     core->tab_views = views;
@@ -513,6 +515,13 @@ static surf_core_result_t surf_dispatch_tabs(surf_core_t *core,
     surf_refresh_tab_views(core);
     if (active_changed) {
         surf_clear_page_transients(core);
+        if (had_active_page) {
+            result = surf_queue_effect(core,
+                                       SURF_EFFECT_CLEAR_PAGE_PRESENTATION);
+            if (result != SURF_CORE_OK) {
+                return result;
+            }
+        }
         if (core->keyboard_visible) {
             result = surf_queue_effect(core, SURF_EFFECT_HIDE_KEYBOARD);
             if (result != SURF_CORE_OK) {
@@ -528,6 +537,7 @@ static surf_core_result_t surf_dispatch_url(surf_core_t *core,
     surf_owned_string_t next_url;
     surf_owned_string_t next_security;
     int new_tab;
+    int page_changed;
     surf_core_result_t result;
     memset(&next_url, 0, sizeof(next_url));
     memset(&next_security, 0, sizeof(next_security));
@@ -542,6 +552,19 @@ static surf_core_result_t surf_dispatch_url(surf_core_t *core,
     if (result != SURF_CORE_OK) {
         surf_owned_string_clear(core, &next_url);
         return result;
+    }
+    page_changed = core->current_url.length != 0 &&
+                   !surf_string_equal(surf_owned_string_view(&core->current_url),
+                                      event->data.url.url);
+    if (page_changed) {
+        surf_clear_semantic_transients(core);
+        result = surf_queue_effect(core,
+                                   SURF_EFFECT_CLEAR_PAGE_PRESENTATION);
+        if (result != SURF_CORE_OK) {
+            surf_owned_string_clear(core, &next_url);
+            surf_owned_string_clear(core, &next_security);
+            return result;
+        }
     }
     surf_owned_string_clear(core, &core->current_url);
     surf_owned_string_clear(core, &core->security);

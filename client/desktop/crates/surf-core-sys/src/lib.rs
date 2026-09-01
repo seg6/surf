@@ -29,6 +29,7 @@ pub const SURF_EVENT_STARRED: c_int = 9;
 pub const SURF_EVENT_PAGE_FRAME: c_int = 10;
 pub const SURF_EVENT_FRAME_PRESENTED: c_int = 11;
 pub const SURF_EVENT_KEYBOARD_VISIBILITY: c_int = 12;
+pub const SURF_EFFECT_CLEAR_PAGE_PRESENTATION: c_int = 4;
 pub const SURF_SEMANTIC_COMPLETE_DIALOG: c_int = 1;
 pub const SURF_SEMANTIC_COMPLETE_SELECT: c_int = 2;
 pub const SURF_SEMANTIC_COMPLETE_FILE_CHOOSER: c_int = 3;

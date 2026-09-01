@@ -107,7 +107,8 @@ typedef struct surf_event {
 typedef enum surf_effect_kind {
     SURF_EFFECT_REQUEST_LIBRARY = 1,
     SURF_EFFECT_SHOW_KEYBOARD,
-    SURF_EFFECT_HIDE_KEYBOARD
+    SURF_EFFECT_HIDE_KEYBOARD,
+    SURF_EFFECT_CLEAR_PAGE_PRESENTATION
 } surf_effect_kind_t;
 
 typedef struct surf_effect {

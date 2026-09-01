@@ -3,7 +3,8 @@
 typedef NS_ENUM(NSInteger, RBCoreEffect) {
     RBCoreEffectRequestLibrary = 1,
     RBCoreEffectShowKeyboard,
-    RBCoreEffectHideKeyboard
+    RBCoreEffectHideKeyboard,
+    RBCoreEffectClearPagePresentation
 };
 
 // Objective-C ownership adapter for Surf's portable C99 browser model. String

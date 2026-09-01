@@ -7,8 +7,8 @@ use eframe::egui::{
     Layout, Margin, RichText, Sense, Stroke, TextEdit, Vec2,
 };
 use surf_core::{
-    ClockSync, Core, DiagnosticsReport, DiagnosticsSample, Event as CoreEvent, PipelineDiagnostics,
-    SemanticCompletion, Snapshot, Tab, monotonic_ns,
+    ClockSync, Core, DiagnosticsReport, DiagnosticsSample, Effect, Event as CoreEvent,
+    PipelineDiagnostics, SemanticCompletion, Snapshot, Tab, monotonic_ns,
 };
 use surf_media::{MediaEvent, MediaPipeline};
 use surf_protocol::{Causal, Command, Event as WireEvent};
@@ -257,6 +257,28 @@ impl SurfDesktop {
             self.status = format!("portable core rejected presented frame: {error}");
         }
         self.refresh();
+    }
+
+    fn clear_page_presentation(&mut self) {
+        if self.browser.dialog.is_some() {
+            self.send_command(Command::DialogReply {
+                accept: false,
+                text: String::new(),
+                causal: Causal::default(),
+            });
+        }
+        if let Some(request_id) = self.browser.select.as_ref().map(|select| select.id.clone()) {
+            self.send_command(Command::SelectReply {
+                id: request_id,
+                cancel: true,
+                indices: Vec::new(),
+                causal: Causal::default(),
+            });
+        }
+        if self.browser.upload_multiple.is_some() {
+            self.send(SessionAction::CancelUpload);
+        }
+        self.browser.reset_page();
     }
 
     fn send(&mut self, action: SessionAction) {
@@ -524,9 +546,21 @@ impl SurfDesktop {
     }
 
     fn apply_control(&mut self, event: WireEvent) {
-        if let Err(error) = self.core.dispatch_wire_event(&event) {
-            self.status = format!("Rejected control event: {error}");
-            return;
+        let effects = match self.core.dispatch_wire_event(&event) {
+            Ok(effects) => effects,
+            Err(error) => {
+                self.status = format!("Rejected control event: {error}");
+                return;
+            }
+        };
+        for effect in effects {
+            match effect {
+                Effect::RequestLibrary => self.send_command(Command::Library {
+                    causal: Causal::default(),
+                }),
+                Effect::ClearPagePresentation => self.clear_page_presentation(),
+                Effect::ShowKeyboard | Effect::HideKeyboard | Effect::Unknown(_) => {}
+            }
         }
         match event {
             WireEvent::Clock { c0, s1, s2 } => {

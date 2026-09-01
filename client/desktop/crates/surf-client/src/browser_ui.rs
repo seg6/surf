@@ -92,18 +92,12 @@ pub struct BrowserUi {
 }
 
 impl BrowserUi {
-    pub fn reset_connection(&mut self) {
-        self.menu_open = false;
+    pub fn reset_page(&mut self) {
         self.find_open = false;
         self.find_query.clear();
         self.find_found = None;
-        self.library_open = false;
         self.reader_open = false;
         self.media_open = false;
-        self.history.clear();
-        self.bookmarks.clear();
-        self.downloads.clear();
-        self.download_progress.clear();
         self.suggestions.clear();
         self.dialog = None;
         self.select = None;
@@ -112,6 +106,16 @@ impl BrowserUi {
         self.upload_paths.clear();
         self.page_error = None;
         self.media = MediaState::default();
+    }
+
+    pub fn reset_connection(&mut self) {
+        self.menu_open = false;
+        self.reset_page();
+        self.library_open = false;
+        self.history.clear();
+        self.bookmarks.clear();
+        self.downloads.clear();
+        self.download_progress.clear();
         self.clipboard_sync = false;
         self.clipboard_known = false;
         self.clipboard_text.clear();

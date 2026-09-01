@@ -217,6 +217,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
 - (CGSize)constrainedSelectPopoverSize:(RBSelectController *)controller;
 - (void)presentSelectMessage:(NSDictionary *)message;
 - (void)dismissSelectControllerSendingCancel:(BOOL)sendCancel;
+- (void)clearPagePresentation;
 - (BOOL)browserBarAtBottom;
 - (UIPopoverArrowDirection)browserChromeArrowDirection;
 - (void)applyAppearance;
@@ -1243,6 +1244,27 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
 
 // ------------------------------------------------------- control messages
 
+- (void)clearPagePresentation {
+    [self.suggestPanel hide];
+    self.findVisible = NO;
+    [self dismissSelectControllerSendingCancel:YES];
+    BOOL dialogPending = self.dialogAlert != nil;
+    [self dismissDialogSilently];
+    if (dialogPending)
+        [self.session sendMessage:@{ @"t": @"dialogreply", @"accept": @NO }];
+    [self hideErrorCard];
+    self.readerPending = NO;
+    if ([self.presentedViewController isKindOfClass:[RBReaderController class]])
+        [self dismissViewControllerAnimated:NO completion:nil];
+    if (self.pageMediaController) [self dismissPopover];
+    if (self.chooserPending) {
+        self.chooserPending = NO;
+        [self dismissUploadPopover];
+        [self postUploadData:nil filename:nil];
+    }
+    [self.view setNeedsLayout];
+}
+
 - (void)session:(RBSession *)session didReceiveControlData:(NSData *)data
           message:(NSDictionary *)message {
     NSError *coreError = nil;
@@ -1257,6 +1279,9 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
     }
     if ([self.diagnostics consumeControlMessage:message]) return;
     BOOL coreValid = coreHandled && !coreError;
+    if (coreValid &&
+        [self.clientCore consumeEffect:RBCoreEffectClearPagePresentation])
+        [self clearPagePresentation];
     NSString *t = [message objectForKey:@"t"];
     if ([t isEqualToString:@"url"]) {
         NSString *url = coreValid ? self.clientCore.currentURL : [message objectForKey:@"url"];

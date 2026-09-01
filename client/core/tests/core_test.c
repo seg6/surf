@@ -132,6 +132,8 @@ static void test_active_switch_clears_transients(void) {
     SURF_CHECK(!state.editable_has_rect && state.editable_rect[0] == 0.0);
     SURF_CHECK(!state.awaiting_page_frame);
     SURF_CHECK(surf_core_next_effect(core, &effect));
+    SURF_CHECK(effect.kind == SURF_EFFECT_CLEAR_PAGE_PRESENTATION);
+    SURF_CHECK(surf_core_next_effect(core, &effect));
     SURF_CHECK(effect.kind == SURF_EFFECT_HIDE_KEYBOARD);
     SURF_CHECK(!surf_core_next_effect(core, &effect));
     surf_core_destroy(core);
@@ -154,6 +156,12 @@ static void test_url_history_and_page_frame(void) {
     SURF_CHECK(view_is(state.security, "local"));
     SURF_CHECK(surf_core_next_effect(core, &effect));
     SURF_CHECK(effect.kind == SURF_EFFECT_REQUEST_LIBRARY);
+
+    event.data.url.url = surf_string_from_cstr("https://example.test/");
+    event.data.url.security = surf_string_from_cstr("secure");
+    dispatch_ok(core, &event);
+    SURF_CHECK(surf_core_next_effect(core, &effect));
+    SURF_CHECK(effect.kind == SURF_EFFECT_CLEAR_PAGE_PRESENTATION);
 
     memset(&event, 0, sizeof(event));
     event.kind = SURF_EVENT_HISTORY_STATE;
