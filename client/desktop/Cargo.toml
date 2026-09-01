@@ -4,6 +4,7 @@ members = [
     "crates/surf-client",
     "crates/surf-core",
     "crates/surf-core-sys",
+    "crates/surf-protocol",
 ]
 
 [workspace.package]
@@ -15,5 +16,9 @@ repository = "https://github.com/seg6/surf"
 
 [workspace.dependencies]
 eframe = { version = "0.36.1", default-features = false, features = ["accesskit", "default_fonts", "glow", "wayland", "x11"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.145"
 surf-core = { path = "crates/surf-core" }
 surf-core-sys = { path = "crates/surf-core-sys" }
+surf-protocol = { path = "crates/surf-protocol" }
+thiserror = "2.0.17"
