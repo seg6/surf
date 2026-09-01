@@ -39,7 +39,7 @@ Interface glyphs come from the bundled Lucide icon font instead of ad-hoc
 drawing code. Their weight, optical proportions, highlighted state, disabled
 state, and accessibility labels are centralized in `RBTheme`.
 
-The application mark is the Deta Surf icon pinned in `native/client/Artwork`.
+The application mark is the Deta Surf icon pinned in `client/ios/Artwork`.
 iOS 6's 57- and 72-point icon slots preserve the original pre-rendered RGBA
 composition, where the paper plane visibly escapes the rounded blue tile.
 iOS 7 and later select dedicated 60-, 76-, and 83.5-point opaque icons: the
@@ -50,7 +50,7 @@ and connection states use a separate transparent `brand-mark.png`.
 The high-resolution production icon and separate plane silhouette are pinned
 to the same upstream revision. Source checksums and complete license texts are
 recorded in `THIRD_PARTY_NOTICES.md` and shipped in the app bundle.
-Run `native/client/Artwork/generate-assets.sh` with ImageMagick 7 to reproduce
+Run `client/ios/Artwork/generate-assets.sh` with ImageMagick 7 to reproduce
 every derived PNG from the pinned master.
 
 ## Settings and diagnostics

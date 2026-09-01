@@ -17,7 +17,7 @@ use surf_session::{
     SessionClient, SessionEvent, Storage,
 };
 
-const LUCIDE: &[u8] = include_bytes!("../../../../../native/client/Resources/Lucide.ttf");
+const LUCIDE: &[u8] = include_bytes!("../../../../../client/ios/Resources/Lucide.ttf");
 const APP_ICON: &[u8] = include_bytes!("../../../../../backend/cmd/surf/surf-icon.png");
 const ICON_FONT: &str = "surf-lucide";
 

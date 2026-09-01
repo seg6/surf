@@ -1,11 +1,10 @@
 # Client Architecture
 
 Surf consists of a computer-side Go backend and one or more remote browser
-clients. The released client is currently the native iOS application under
-`native/client`. This document records its current ownership and the target
-portable-client boundary.
+clients. The native iOS application lives under `client/ios`. This document
+records the portable-client boundary established by the rework.
 
-## Current client
+## Platform hosts
 
 The current client has several strong platform components:
 
@@ -18,24 +17,26 @@ The current client has several strong platform components:
 - UIKit controllers implement phone/tablet chrome, pairing, settings, library,
   dialogs, selects, sharing, and platform lifecycle.
 
-Portable responsibilities are currently mixed into those components:
+Portable responsibilities now enter those components through explicit core
+APIs:
 
-| Current owner | Mixed responsibility to extract |
+| Former platform owner | Portable owner now |
 | --- | --- |
-| `RBProtocol` | 84-byte `RBR1` parsing and bounds validation |
-| `rb_h264` | Annex-B and H.264 configuration helpers; already pure C |
-| `RBInteractionTracker` | causal interaction IDs and timestamps |
-| `RBSession` | session generations, compatibility decisions, and reconnect policy |
-| `RBRootViewController` | browser/tab/loading/title/editable/dialog state and control-event dispatch |
-| `RBMediaPipeline` | frame-generation, sequencing, gap, recovery, and health policy |
-| `RBDiagnostics` | portable metric aggregation and health classification |
+| `RBProtocol` | `client/core` validates the 84-byte `RBR1` envelope |
+| `rb_h264` | `client/core` owns Annex-B/configuration helpers |
+| `RBInteractionTracker` | `client/core` owns causal IDs, timestamps, and input sequencing |
+| `RBSession` | `client/core` owns connection epochs and reconnect policy |
+| `RBRootViewController` | `client/core` owns tabs, navigation, loading, title, security, and editable state |
+| `RBMediaPipeline` | `client/core` owns generation/gap/recovery admission policy |
+| `RBDiagnostics` | `client/core` owns rolling metrics and health classification |
 
-`RBRootViewController` also coordinates most UIKit presentation. The goal is
-not to eliminate that coordination entirely. It should become a platform host
-that renders a semantic snapshot and executes platform effects instead of
-being the source of browser protocol truth.
+`RBRootViewController` still coordinates UIKit presentation, as intended. It
+renders copied semantic snapshots and executes platform effects; original wire
+bytes are strictly decoded in C before UIKit receives a valid control event.
+Rich collection and modal widget models remain host-owned adapters because
+their lifetime and interaction mechanics are platform presentation concerns.
 
-## Target repository layout
+## Repository layout
 
 ```text
 client/
@@ -44,11 +45,12 @@ client/
   ios/        Objective-C/UIKit old-iOS host
 ```
 
-The physical move from `native/client` to `client/ios` occurs only after the
-core build boundary is stable. It will be one history-preserving commit that
-also updates Theos, buildenv, packaging, documentation, and CI paths.
+The UIKit host was moved from `native/client` to `client/ios` only after the
+core build boundary stabilized. The history-preserving move updated Theos,
+buildenv, packaging, documentation, and CI paths together; toolchain support
+continues to live under `native/buildenv`.
 
-## Target runtime boundaries
+## Runtime boundaries
 
 ```text
                          semantic actions
@@ -90,15 +92,16 @@ The exact ABI will evolve behind tests, but it follows these rules:
 ```c
 typedef struct surf_core surf_core_t;
 
-surf_result_t surf_core_create(const surf_core_config_t *config,
-                               surf_core_t **out_core);
+surf_core_result_t surf_core_create(const surf_core_config_t *config,
+                                    surf_core_t **out_core);
 void surf_core_destroy(surf_core_t *core);
 
-surf_result_t surf_core_dispatch(surf_core_t *core,
-                                 const surf_event_t *event);
+surf_core_result_t surf_core_dispatch_scoped(surf_core_t *core,
+                                             uint64_t connection_generation,
+                                             const surf_event_t *event);
 int surf_core_next_effect(surf_core_t *core, surf_effect_t *out_effect);
-surf_result_t surf_core_snapshot(const surf_core_t *core,
-                                 surf_snapshot_t *out_snapshot);
+surf_core_result_t surf_core_snapshot(const surf_core_t *core,
+                                      surf_snapshot_t *out_snapshot);
 ```
 
 - Public structs begin with a size/version field where ABI extension requires
@@ -126,16 +129,16 @@ surf_result_t surf_core_snapshot(const surf_core_t *core,
 | UI layout and theme | No | UIKit | egui |
 | Clipboard/files/dialog widgets | Requested | UIKit services | desktop services |
 
-## Migration sequence
+## Completed initial migration
 
-1. Add build/test guardrails and document the boundary.
-2. Extract binary framing and existing pure-C H.264 helpers.
-3. Establish Go/C protocol-contract fixtures.
-4. Add typed browser reducer, effects, and snapshots.
-5. Run the core in iOS shadow mode, compare state, then cut over slices.
-6. Add safe Rust bindings and verify custom 60 FPS egui presentation.
-7. Build genuine desktop pairing, transport, media, and browser interaction.
-8. Move the stable iOS host to `client/ios` atomically.
+1. Build/test guardrails and ownership documentation.
+2. Binary framing and pure-C H.264 helpers.
+3. Complete two-way Go/C typed protocol contracts.
+4. Browser reducer, effects, immutable snapshots, and connection epochs.
+5. iOS shadow comparison followed by navigation/editable-state cutover.
+6. Raw plus safe Rust bindings and direct YUV OpenGL presentation.
+7. Genuine Linux pairing, pinned transport, bounded media, and browser UI.
+8. Atomic history-preserving UIKit relocation to `client/ios`.
 
 No step requires a trace file or simulated connection for normal use. Trace
 capture may support deterministic tests, but the desktop milestone is a real

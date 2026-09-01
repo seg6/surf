@@ -57,4 +57,4 @@ LABEL org.opencontainers.image.source="https://github.com/seg6/surf" \
 
 WORKDIR /src
 ENTRYPOINT ["surf-build"]
-CMD ["make", "-C", "/src/native/client", "package"]
+CMD ["make", "-C", "/src/client/ios", "package"]

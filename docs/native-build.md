@@ -52,7 +52,7 @@ version.
 ```sh
 docker build -t surf-buildenv native/buildenv
 docker run --rm -v "$PWD:/src" surf-buildenv bash -c \
-  'make -C /src/native/client clean package DEBUG=0 && bash /src/native/client/verify-package.sh'
+  'make -C /src/client/ios clean package DEBUG=0 && bash /src/client/ios/verify-package.sh'
 ```
 
 The build environment pins Theos to commit
@@ -76,13 +76,13 @@ the build directly without installing GNU Make on Windows:
 docker build -t surf-buildenv native/buildenv
 $repoMount = "${PWD}:/src"
 docker run --rm --network host -v $repoMount surf-buildenv bash -c `
-  'make -C /src/native/client clean package DEBUG=0 && bash /src/native/client/verify-package.sh'
+  'make -C /src/client/ios clean package DEBUG=0 && bash /src/client/ios/verify-package.sh'
 ```
 
 `make native-package` renders generated native metadata from `VERSION` and
 `COMPATIBILITY_VERSION`, then verifies the resulting package. Do not edit
-generated `native/client/control` or
-`native/client/Resources/Info.plist` by hand.
+generated `client/ios/control` or
+`client/ios/Resources/Info.plist` by hand.
 
 Increment `VERSION` for every client release or physical-device test build. The
 render script derives an ordered `CFBundleVersion`, so it does not need a second
@@ -143,13 +143,13 @@ to bootstrap that helper.
 The package is written to:
 
 ```text
-native/client/packages/
+client/ios/packages/
 ```
 
 Theos records the exact package produced by the latest build in:
 
 ```text
-native/client/.theos/last_package
+client/ios/.theos/last_package
 ```
 
 ## Verify
@@ -161,9 +161,9 @@ plane-break icons, opaque iOS 7+ icons, the registered Lucide font, bundled
 third-party notices, and the updater's root/setuid mode:
 
 ```sh
-docker run --rm -v "$PWD:/src" surf-buildenv bash /src/native/client/verify-package.sh
+docker run --rm -v "$PWD:/src" surf-buildenv bash /src/client/ios/verify-package.sh
 docker run --rm -v "$PWD:/src" surf-buildenv bash -c \
-  'dpkg-deb -c /src/native/client/packages/*.deb'
+  'dpkg-deb -c /src/client/ios/packages/*.deb'
 ```
 
 For device acceptance, verify both idioms rather than resizing one layout:
@@ -201,6 +201,6 @@ For device acceptance, verify both idioms rather than resizing one layout:
 To build the unified release binary with a matching client package embedded:
 
 ```sh
-client_deb="$(cat native/client/.theos/last_package)"
-make surf-binary CLIENT_DEB="native/client/${client_deb#./}"
+client_deb="$(cat client/ios/.theos/last_package)"
+make surf-binary CLIENT_DEB="client/ios/${client_deb#./}"
 ```

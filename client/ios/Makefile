@@ -1,4 +1,4 @@
-SDK_DROP := $(abspath $(CURDIR)/../buildenv/sdk)
+SDK_DROP := $(abspath $(CURDIR)/../../native/buildenv/sdk)
 REPO_ROOT := $(abspath $(CURDIR)/../..)
 VERSION := $(shell tr -d '[:space:]' < $(REPO_ROOT)/VERSION)
 COMPATIBILITY_VERSION := $(shell tr -d '[:space:]' < $(REPO_ROOT)/COMPATIBILITY_VERSION)

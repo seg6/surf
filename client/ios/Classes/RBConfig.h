@@ -1,10 +1,10 @@
 #import <Foundation/Foundation.h>
 
 #ifndef RBCompatibilityVersion
-#error RBCompatibilityVersion must be supplied by native/client/Makefile from COMPATIBILITY_VERSION
+#error RBCompatibilityVersion must be supplied by client/ios/Makefile from COMPATIBILITY_VERSION
 #endif
 #ifndef RBAppVersion
-#error RBAppVersion must be supplied by native/client/Makefile from VERSION
+#error RBAppVersion must be supplied by client/ios/Makefile from VERSION
 #endif
 #define RBLogDirectory @"/var/mobile/Library/Surf"
 #define RBLogFile @"/var/mobile/Library/Surf/surf.log"

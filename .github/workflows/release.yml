@@ -199,15 +199,15 @@ jobs:
           version="$(tr -d '[:space:]' < VERSION)"
           compatibility_version="$(tr -d '[:space:]' < COMPATIBILITY_VERSION)"
           VERSION="$version" COMPATIBILITY_VERSION="$compatibility_version" \
-            native/client/render-versioned-files.sh
+            client/ios/render-versioned-files.sh
           git diff --exit-code -- \
-            native/client/control native/client/Resources/Info.plist
+            client/ios/control client/ios/Resources/Info.plist
 
           make native-sdk
           make native-package
 
           mkdir -p dist/native
-          mapfile -t client_debs < <(find native/client/packages \
+          mapfile -t client_debs < <(find client/ios/packages \
             -name "space.seg6.surf_${version}-*_iphoneos-arm.deb" -type f -print)
           test "${#client_debs[@]}" -eq 1 || {
             echo "expected exactly one native client package" >&2
@@ -346,9 +346,9 @@ jobs:
           client_deb="$(find dist/native -name '*.deb' -type f -print -quit)"
 
           VERSION="$version" COMPATIBILITY_VERSION="$compatibility_version" \
-            native/client/render-versioned-files.sh
+            client/ios/render-versioned-files.sh
           git diff --exit-code -- \
-            native/client/control native/client/Resources/Info.plist
+            client/ios/control client/ios/Resources/Info.plist
 
           (
             cd backend

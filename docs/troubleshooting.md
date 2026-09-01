@@ -101,7 +101,7 @@ Run the package verifier from the repository root:
 
 ```sh
 docker run --rm -v "$PWD:/src" surf-buildenv \
-  bash /src/native/client/verify-package.sh
+  bash /src/client/ios/verify-package.sh
 ```
 
 The package must contain armv7 and arm64 slices, declare device families 1 and

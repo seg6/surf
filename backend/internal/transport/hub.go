@@ -206,7 +206,7 @@ func (c *Client) DeviceID() string        { return c.deviceID }
 // by a reverse proxy), and Go's net package defaults
 // TCP_NODELAY to true for every TCPConn (net/tcpsock.go: newTCPConn calls
 // setNoDelay(fd, true)). Nagle is already off on this side; the client's
-// hand-rolled socket (native/client/Classes/RBSocket.m) is the one that
+// hand-rolled socket (client/ios/Classes/RBSocket.m) is the one that
 // needed an explicit setsockopt.
 func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.ServeHTTPForDevice(w, r, "")

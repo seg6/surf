@@ -339,7 +339,7 @@
 
 + (unichar)codepointForIcon:(RBIcon)icon {
     // Codepoints from lucide-static 1.34.0. The source package and complete
-    // ISC/MIT notices are retained in native/client/Artwork.
+    // ISC/MIT notices are retained in client/ios/Artwork.
     switch (icon) {
         case RBIconBack: return 57454;
         case RBIconForward: return 57455;
