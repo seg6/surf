@@ -6,9 +6,10 @@ audio dependencies.
 
 The current slice owns the binary media envelope, H.264 Annex-B helpers, typed
 browser events, deterministic tab/navigation/editable state, immutable
-snapshots, and platform effects. As the migration proceeds it will add the
-remaining control messages, session state, interaction sequencing, media
-policy, and portable diagnostics.
+snapshots, platform effects, reconnect/media admission policy, NTP-style clock
+synchronization, and rolling pipeline diagnostics. As the migration proceeds
+it will add the remaining control messages, session state, and interaction
+sequencing.
 
 Build and test it directly:
 

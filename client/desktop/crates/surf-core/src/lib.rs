@@ -10,6 +10,21 @@ use std::{
 
 use surf_core_sys as sys;
 
+/// Process-local monotonic time used for protocol timestamps and media
+/// diagnostics. Its epoch is intentionally opaque and only differences or a
+/// synchronized backend-clock translation are meaningful.
+pub fn monotonic_ns() -> u64 {
+    static EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    u64::try_from(
+        EPOCH
+            .get_or_init(std::time::Instant::now)
+            .elapsed()
+            .as_nanos(),
+    )
+    .unwrap_or(u64::MAX)
+    .saturating_add(1)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Error {
     code: c_int,
@@ -126,6 +141,269 @@ impl ReconnectPolicy {
 }
 
 impl Default for ReconnectPolicy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub struct ClockSync {
+    raw: sys::surf_clock_sync_t,
+}
+
+impl ClockSync {
+    pub fn new() -> Self {
+        let mut raw = std::mem::MaybeUninit::<sys::surf_clock_sync_t>::uninit();
+        // SAFETY: the C initializer writes the complete non-null value.
+        unsafe { sys::surf_clock_sync_init(raw.as_mut_ptr()) };
+        // SAFETY: the complete value was initialized above.
+        Self {
+            raw: unsafe { raw.assume_init() },
+        }
+    }
+
+    pub fn reset(&mut self) {
+        // SAFETY: `self.raw` is a valid, uniquely borrowed clock state.
+        unsafe { sys::surf_clock_sync_reset(&mut self.raw) };
+    }
+
+    pub fn probe(&mut self, now_ns: u64) -> Option<u64> {
+        let mut client_send_ns = 0_u64;
+        // SAFETY: both pointers are valid and uniquely borrowed.
+        let result =
+            unsafe { sys::surf_clock_sync_probe(&mut self.raw, now_ns, &mut client_send_ns) };
+        (result == 1).then_some(client_send_ns)
+    }
+
+    pub fn consume(
+        &mut self,
+        client_send_ns: u64,
+        backend_receive_ns: u64,
+        backend_send_ns: u64,
+        client_receive_ns: u64,
+    ) -> bool {
+        // SAFETY: `self.raw` is valid and uniquely borrowed; times are values.
+        unsafe {
+            sys::surf_clock_sync_consume(
+                &mut self.raw,
+                client_send_ns,
+                backend_receive_ns,
+                backend_send_ns,
+                client_receive_ns,
+            ) == 1
+        }
+    }
+
+    pub fn synchronized(&self) -> bool {
+        self.raw.synchronized != 0
+    }
+
+    pub fn rtt_ns(&self) -> Option<u64> {
+        self.synchronized().then_some(self.raw.best_rtt_ns)
+    }
+
+    pub fn server_minus_client_ns(&self) -> Option<i64> {
+        self.synchronized()
+            .then_some(self.raw.server_minus_client_ns)
+    }
+
+    pub fn server_to_client_ns(&self, server_ns: u64) -> Option<u64> {
+        let mut client_ns = 0_u64;
+        // SAFETY: both pointers are valid and the output is uniquely borrowed.
+        let converted =
+            unsafe { sys::surf_clock_sync_server_to_client(&self.raw, server_ns, &mut client_ns) };
+        (converted == 1).then_some(client_ns)
+    }
+}
+
+impl Default for ClockSync {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum DiagnosticsHealth {
+    Offline,
+    #[default]
+    Smooth,
+    Delayed,
+    Unstable,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum DiagnosticsReason {
+    #[default]
+    None,
+    Offline,
+    DecodeError,
+    VideoBacklog,
+    Network,
+    FrameAge,
+    DecodeTime,
+    AudioUnderrun,
+    FrameDrops,
+    PresentationGap,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct DiagnosticsSample {
+    pub now_ns: u64,
+    pub video_packets: u64,
+    pub decoded_frames: u64,
+    pub presented_frames: u64,
+    pub ingress_replaced: u64,
+    pub output_replaced: u64,
+    pub presentation_replaced: u64,
+    pub sequence_gaps: u64,
+    pub decode_errors: u64,
+    pub audio_underruns: u64,
+    pub backend_capture_to_encode_us: u64,
+    pub backend_encode_to_write_us: u64,
+    pub network_us: u64,
+    pub decode_us: u64,
+    pub upload_us: u64,
+    pub frame_age_us: u64,
+    pub rtt_us: u64,
+    pub clock_uncertainty_us: u64,
+    pub maximum_presentation_gap_us: u64,
+    pub encoded_video_depth: u32,
+    pub decoded_video_depth: u32,
+    pub audio_depth: u32,
+    pub timing_synchronized: bool,
+    pub connected: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct DiagnosticsReport {
+    pub window_ms: f64,
+    pub video_fps: f64,
+    pub decode_fps: f64,
+    pub presentation_fps: f64,
+    pub drop_percent: f64,
+    pub dropped_frames: u64,
+    pub sequence_gaps: u64,
+    pub decode_errors: u64,
+    pub audio_underruns: u64,
+    pub backend_capture_to_encode_us: u64,
+    pub backend_encode_to_write_us: u64,
+    pub network_us: u64,
+    pub decode_us: u64,
+    pub upload_us: u64,
+    pub frame_age_us: u64,
+    pub rtt_us: u64,
+    pub clock_uncertainty_us: u64,
+    pub maximum_presentation_gap_us: u64,
+    pub encoded_video_depth: u32,
+    pub decoded_video_depth: u32,
+    pub audio_depth: u32,
+    pub timing_synchronized: bool,
+    pub health: DiagnosticsHealth,
+    pub reason: DiagnosticsReason,
+}
+
+pub struct PipelineDiagnostics {
+    raw: sys::surf_diagnostics_t,
+}
+
+impl PipelineDiagnostics {
+    pub fn new() -> Self {
+        let mut raw = std::mem::MaybeUninit::<sys::surf_diagnostics_t>::uninit();
+        // SAFETY: the C initializer writes the complete non-null value.
+        unsafe { sys::surf_diagnostics_init(raw.as_mut_ptr()) };
+        // SAFETY: the complete value was initialized above.
+        Self {
+            raw: unsafe { raw.assume_init() },
+        }
+    }
+
+    pub fn reset(&mut self) {
+        // SAFETY: `self.raw` is a valid, uniquely borrowed diagnostics state.
+        unsafe { sys::surf_diagnostics_reset(&mut self.raw) };
+    }
+
+    pub fn update(&mut self, sample: DiagnosticsSample) -> Option<DiagnosticsReport> {
+        let raw_sample = sys::surf_diagnostics_sample_t {
+            now_ns: sample.now_ns,
+            video_packets: sample.video_packets,
+            decoded_frames: sample.decoded_frames,
+            presented_frames: sample.presented_frames,
+            ingress_replaced: sample.ingress_replaced,
+            output_replaced: sample.output_replaced,
+            presentation_replaced: sample.presentation_replaced,
+            sequence_gaps: sample.sequence_gaps,
+            decode_errors: sample.decode_errors,
+            audio_underruns: sample.audio_underruns,
+            backend_capture_to_encode_us: sample.backend_capture_to_encode_us,
+            backend_encode_to_write_us: sample.backend_encode_to_write_us,
+            network_us: sample.network_us,
+            decode_us: sample.decode_us,
+            upload_us: sample.upload_us,
+            frame_age_us: sample.frame_age_us,
+            rtt_us: sample.rtt_us,
+            clock_uncertainty_us: sample.clock_uncertainty_us,
+            maximum_presentation_gap_us: sample.maximum_presentation_gap_us,
+            encoded_video_depth: sample.encoded_video_depth,
+            decoded_video_depth: sample.decoded_video_depth,
+            audio_depth: sample.audio_depth,
+            timing_synchronized: i32::from(sample.timing_synchronized),
+            connected: i32::from(sample.connected),
+        };
+        let mut raw_report = sys::surf_diagnostics_report_t::default();
+        // SAFETY: all pointers refer to initialized values with the required
+        // exclusive access to the diagnostics state and output.
+        let result =
+            unsafe { sys::surf_diagnostics_update(&mut self.raw, &raw_sample, &mut raw_report) };
+        if result != 1 {
+            return None;
+        }
+        Some(DiagnosticsReport {
+            window_ms: raw_report.window_ms,
+            video_fps: raw_report.video_fps,
+            decode_fps: raw_report.decode_fps,
+            presentation_fps: raw_report.presentation_fps,
+            drop_percent: raw_report.drop_percent,
+            dropped_frames: raw_report.dropped_frames,
+            sequence_gaps: raw_report.sequence_gaps,
+            decode_errors: raw_report.decode_errors,
+            audio_underruns: raw_report.audio_underruns,
+            backend_capture_to_encode_us: raw_report.backend_capture_to_encode_us,
+            backend_encode_to_write_us: raw_report.backend_encode_to_write_us,
+            network_us: raw_report.network_us,
+            decode_us: raw_report.decode_us,
+            upload_us: raw_report.upload_us,
+            frame_age_us: raw_report.frame_age_us,
+            rtt_us: raw_report.rtt_us,
+            clock_uncertainty_us: raw_report.clock_uncertainty_us,
+            maximum_presentation_gap_us: raw_report.maximum_presentation_gap_us,
+            encoded_video_depth: raw_report.encoded_video_depth,
+            decoded_video_depth: raw_report.decoded_video_depth,
+            audio_depth: raw_report.audio_depth,
+            timing_synchronized: raw_report.timing_synchronized != 0,
+            health: match raw_report.health {
+                sys::SURF_DIAGNOSTICS_OFFLINE => DiagnosticsHealth::Offline,
+                sys::SURF_DIAGNOSTICS_SMOOTH => DiagnosticsHealth::Smooth,
+                sys::SURF_DIAGNOSTICS_DELAYED => DiagnosticsHealth::Delayed,
+                _ => DiagnosticsHealth::Unstable,
+            },
+            reason: match raw_report.reason {
+                0 => DiagnosticsReason::None,
+                1 => DiagnosticsReason::Offline,
+                2 => DiagnosticsReason::DecodeError,
+                3 => DiagnosticsReason::VideoBacklog,
+                4 => DiagnosticsReason::Network,
+                5 => DiagnosticsReason::FrameAge,
+                6 => DiagnosticsReason::DecodeTime,
+                7 => DiagnosticsReason::AudioUnderrun,
+                8 => DiagnosticsReason::FrameDrops,
+                9 => DiagnosticsReason::PresentationGap,
+                _ => DiagnosticsReason::Unknown,
+            },
+        })
+    }
+}
+
+impl Default for PipelineDiagnostics {
     fn default() -> Self {
         Self::new()
     }
@@ -729,6 +1007,46 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(stable.attempt, 1);
+    }
+
+    #[test]
+    fn clock_and_pipeline_diagnostics_are_shared_with_platform_hosts() {
+        let mut clock = ClockSync::new();
+        let first = clock.probe(1_000_000_000).unwrap();
+        assert!(clock.consume(first, 6_005_000_000, 6_006_000_000, 1_011_000_000));
+        let second = clock.probe(2_011_000_000).unwrap();
+        assert!(clock.consume(second, 7_015_000_000, 7_016_000_000, 2_023_000_000));
+        assert!(clock.synchronized());
+        assert_eq!(clock.rtt_ns(), Some(10_000_000));
+        assert_eq!(
+            clock.server_to_client_ns(8_000_000_000),
+            Some(3_000_000_000)
+        );
+
+        let mut diagnostics = PipelineDiagnostics::new();
+        assert!(
+            diagnostics
+                .update(DiagnosticsSample {
+                    now_ns: 1_000_000_000,
+                    connected: true,
+                    ..DiagnosticsSample::default()
+                })
+                .is_none()
+        );
+        let report = diagnostics
+            .update(DiagnosticsSample {
+                now_ns: 3_100_000_000,
+                video_packets: 126,
+                decoded_frames: 126,
+                presented_frames: 125,
+                decode_us: 3_000,
+                frame_age_us: 18_000,
+                connected: true,
+                ..DiagnosticsSample::default()
+            })
+            .unwrap();
+        assert_eq!(report.video_fps, 60.0);
+        assert_eq!(report.health, DiagnosticsHealth::Smooth);
     }
 
     #[test]

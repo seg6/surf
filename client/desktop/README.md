@@ -30,6 +30,7 @@ client/desktop/test-secure-session.sh
 When exactly one paired server is saved, the desktop client verifies and
 reconnects to it automatically. The integration test builds an ordinary Surf
 backend, performs real phrase-confirmed pairing, receives real PCM, and decodes
-a live browser frame. Its headless OpenGL run then presents 240 unique animated
-frames at no less than 55 FPS while resizing twice and actively editing the
-omnibox.
+a live browser frame. Its headless OpenGL run then presents 600 unique animated
+frames at no less than 55 FPS while resizing twice, actively editing the
+omnibox, and draining cleanly after a deliberate 180 ms UI stall forces the
+bounded decoded-frame slot to replace stale output.

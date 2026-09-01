@@ -4,7 +4,17 @@ use std::time::Instant;
 
 use eframe::egui;
 use egui_glow::glow::{self, HasContext as _};
+use surf_core::monotonic_ns;
 use surf_media::{ColorMatrix, ColorRange, DecodedFrame};
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SurfaceDiagnostics {
+    pub presented: u64,
+    pub replaced: u64,
+    pub latest_upload_us: u64,
+    pub latest_frame_age_us: u64,
+    pub latest_presentation_gap_us: u64,
+}
 
 pub struct VideoSurface {
     pending: Mutex<Option<DecodedFrame>>,
@@ -14,6 +24,9 @@ pub struct VideoSurface {
     presented: AtomicU64,
     replaced: AtomicU64,
     latest_upload_us: AtomicU64,
+    latest_frame_age_us: AtomicU64,
+    last_presentation_ns: AtomicU64,
+    latest_presentation_gap_us: AtomicU64,
 }
 
 impl VideoSurface {
@@ -26,6 +39,9 @@ impl VideoSurface {
             presented: AtomicU64::new(0),
             replaced: AtomicU64::new(0),
             latest_upload_us: AtomicU64::new(0),
+            latest_frame_age_us: AtomicU64::new(0),
+            last_presentation_ns: AtomicU64::new(0),
+            latest_presentation_gap_us: AtomicU64::new(0),
         })
     }
 
@@ -40,6 +56,9 @@ impl VideoSurface {
 
     pub fn clear(&self) {
         self.visible.store(false, Ordering::Release);
+        self.last_presentation_ns.store(0, Ordering::Release);
+        self.latest_presentation_gap_us.store(0, Ordering::Release);
+        self.latest_frame_age_us.store(0, Ordering::Release);
         if let Ok(mut pending) = self.pending.lock() {
             *pending = None;
         }
@@ -61,6 +80,16 @@ impl VideoSurface {
 
     pub fn latest_upload_us(&self) -> u64 {
         self.latest_upload_us.load(Ordering::Relaxed)
+    }
+
+    pub fn diagnostics(&self) -> SurfaceDiagnostics {
+        SurfaceDiagnostics {
+            presented: self.presented.load(Ordering::Relaxed),
+            replaced: self.replaced.load(Ordering::Relaxed),
+            latest_upload_us: self.latest_upload_us.load(Ordering::Relaxed),
+            latest_frame_age_us: self.latest_frame_age_us.load(Ordering::Relaxed),
+            latest_presentation_gap_us: self.latest_presentation_gap_us.swap(0, Ordering::AcqRel),
+        }
     }
 
     pub fn take_error(&self) -> Option<String> {
@@ -103,6 +132,21 @@ impl VideoSurface {
                 }
                 return;
             }
+            let presented_ns = monotonic_ns();
+            let previous_ns = self
+                .last_presentation_ns
+                .swap(presented_ns, Ordering::AcqRel);
+            if previous_ns > 0 {
+                self.latest_presentation_gap_us.fetch_max(
+                    presented_ns.saturating_sub(previous_ns) / 1_000,
+                    Ordering::Relaxed,
+                );
+            }
+            let origin_ns = frame.source_client_ns.unwrap_or(frame.ingress_receive_ns);
+            self.latest_frame_age_us.store(
+                presented_ns.saturating_sub(origin_ns) / 1_000,
+                Ordering::Relaxed,
+            );
             uploaded = true;
         }
         unsafe { resources.draw(gl) };

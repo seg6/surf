@@ -5,7 +5,10 @@ use eframe::egui::{
     self, Align, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Frame,
     Layout, Margin, RichText, Sense, Stroke, TextEdit, Vec2,
 };
-use surf_core::{Core, Event as CoreEvent, Snapshot, Tab};
+use surf_core::{
+    ClockSync, Core, DiagnosticsReport, DiagnosticsSample, Event as CoreEvent, PipelineDiagnostics,
+    Snapshot, Tab, monotonic_ns,
+};
 use surf_media::{MediaEvent, MediaPipeline};
 use surf_protocol::{Causal, Command, Event as WireEvent};
 use surf_session::{
@@ -72,10 +75,18 @@ struct SurfDesktop {
     startup_navigation_sent: bool,
     smoke_frame_target: Option<u64>,
     smoke_started: Option<Instant>,
+    smoke_last_heartbeat: Instant,
     smoke_reported: bool,
     smoke_interaction: bool,
     smoke_interaction_step: u8,
+    smoke_stall_ms: Option<u64>,
+    smoke_stalled: bool,
     audio_available: bool,
+    clock_available: bool,
+    media_stats_available: bool,
+    clock_sync: ClockSync,
+    pipeline_diagnostics: PipelineDiagnostics,
+    latest_diagnostics: Option<DiagnosticsReport>,
 }
 
 impl SurfDesktop {
@@ -133,6 +144,10 @@ impl SurfDesktop {
                     .is_some()
                     .then_some(1)
             });
+        let smoke_stall_ms = std::env::var("SURF_SMOKE_STALL_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0);
         let mut client = Self {
             core,
             snapshot,
@@ -159,10 +174,18 @@ impl SurfDesktop {
             startup_navigation_sent: false,
             smoke_frame_target,
             smoke_started: None,
+            smoke_last_heartbeat: Instant::now(),
             smoke_reported: false,
             smoke_interaction: std::env::var_os("SURF_SMOKE_INTERACTION").is_some(),
             smoke_interaction_step: 0,
+            smoke_stall_ms,
+            smoke_stalled: false,
             audio_available: false,
+            clock_available: false,
+            media_stats_available: false,
+            clock_sync: ClockSync::new(),
+            pipeline_diagnostics: PipelineDiagnostics::new(),
+            latest_diagnostics: None,
         };
         if let Some(endpoint) = startup_endpoint {
             client.inspect(endpoint, true);
@@ -255,8 +278,14 @@ impl SurfDesktop {
                     self.saved_servers
                         .sort_by(|left, right| left.name.cmp(&right.name));
                 }
-                SessionEvent::Connected { info, .. } => {
+                SessionEvent::Connected { info, config } => {
                     self.connected = true;
+                    self.clock_available =
+                        config.caps.iter().any(|capability| capability == "clock");
+                    self.media_stats_available = config
+                        .caps
+                        .iter()
+                        .any(|capability| capability == "media-stats");
                     self.status = format!("Connected securely to {}", info.name);
                     self.pairing = None;
                     self.remote_viewport = None;
@@ -284,6 +313,14 @@ impl SurfDesktop {
                     reason,
                 } => {
                     self.connected = false;
+                    self.clock_available = false;
+                    self.media_stats_available = false;
+                    self.latest_diagnostics = None;
+                    self.clock_sync.reset();
+                    self.pipeline_diagnostics.reset();
+                    if let Some(media) = &self.media {
+                        media.set_clock_offset(None);
+                    }
                     self.video_surface.clear();
                     self.status = format!(
                         "Connection interrupted. Retrying {attempt}/{maximum} in {:.1}s — {reason}",
@@ -293,6 +330,14 @@ impl SurfDesktop {
                 SessionEvent::Control(event) => self.apply_control(event),
                 SessionEvent::Disconnected(message) => {
                     self.connected = false;
+                    self.clock_available = false;
+                    self.media_stats_available = false;
+                    self.latest_diagnostics = None;
+                    self.clock_sync.reset();
+                    self.pipeline_diagnostics.reset();
+                    if let Some(media) = &self.media {
+                        media.set_clock_offset(None);
+                    }
                     self.video_surface.clear();
                     self.remote_viewport = None;
                     self.status = message;
@@ -301,6 +346,14 @@ impl SurfDesktop {
                 }
                 SessionEvent::Failure(failure) => {
                     self.connected = false;
+                    self.clock_available = false;
+                    self.media_stats_available = false;
+                    self.latest_diagnostics = None;
+                    self.clock_sync.reset();
+                    self.pipeline_diagnostics.reset();
+                    if let Some(media) = &self.media {
+                        media.set_clock_offset(None);
+                    }
                     self.video_surface.clear();
                     self.remote_viewport = None;
                     let heading = match failure.kind {
@@ -367,6 +420,14 @@ impl SurfDesktop {
 
     fn apply_control(&mut self, event: WireEvent) {
         let mapped = match event {
+            WireEvent::Clock { c0, s1, s2 } => {
+                if self.clock_sync.consume(c0, s1, s2, monotonic_ns())
+                    && let Some(media) = &self.media
+                {
+                    media.set_clock_offset(self.clock_sync.server_minus_client_ns());
+                }
+                None
+            }
             WireEvent::Tabs { tabs } => Some(CoreEvent::Tabs(
                 tabs.into_iter()
                     .map(|tab| Tab {
@@ -419,6 +480,80 @@ impl SurfDesktop {
                 self.status = format!("portable core rejected server state: {error}");
             }
             self.refresh();
+        }
+    }
+
+    fn update_diagnostics(&mut self) {
+        let now_ns = monotonic_ns();
+        if self.connected
+            && self.clock_available
+            && let Some(client_send_ns) = self.clock_sync.probe(now_ns)
+        {
+            self.send(SessionAction::Send(Command::Clock {
+                c0: client_send_ns,
+                causal: Causal::default(),
+            }));
+        }
+        let media = self
+            .media
+            .as_ref()
+            .map(MediaPipeline::diagnostics)
+            .unwrap_or_default();
+        let surface = self.video_surface.diagnostics();
+        let sample = DiagnosticsSample {
+            now_ns,
+            video_packets: media.video_packets,
+            decoded_frames: media.decoded_frames,
+            presented_frames: surface.presented,
+            ingress_replaced: media.ingress_replaced,
+            output_replaced: media.output_replaced,
+            presentation_replaced: surface.replaced,
+            sequence_gaps: media.gaps,
+            decode_errors: media.decode_errors,
+            audio_underruns: media.audio_underruns,
+            backend_capture_to_encode_us: media.latest_backend_capture_to_encode_us,
+            backend_encode_to_write_us: media.latest_backend_encode_to_write_us,
+            network_us: media.latest_network_us,
+            decode_us: media.latest_decode_us,
+            upload_us: surface.latest_upload_us,
+            frame_age_us: surface.latest_frame_age_us,
+            rtt_us: self.clock_sync.rtt_ns().unwrap_or(0) / 1_000,
+            clock_uncertainty_us: self.clock_sync.rtt_ns().unwrap_or(0) / 2_000,
+            maximum_presentation_gap_us: surface.latest_presentation_gap_us,
+            encoded_video_depth: media.encoded_video_depth,
+            decoded_video_depth: media.decoded_video_depth,
+            audio_depth: media.audio_depth,
+            timing_synchronized: self.clock_sync.synchronized(),
+            connected: self.connected,
+        };
+        let Some(report) = self.pipeline_diagnostics.update(sample) else {
+            return;
+        };
+        self.latest_diagnostics = Some(report);
+        if self.connected && self.media_stats_available {
+            self.send(SessionAction::Send(Command::MediaStats {
+                fps: report.presentation_fps,
+                presented_fps: report.presentation_fps,
+                decode_fps: report.decode_fps,
+                au_rate: report.video_fps,
+                renderer: "glow-yuv".to_owned(),
+                renderer_fps: report.presentation_fps,
+                renderer_ms: report.upload_us as f64 / 1_000.0,
+                renderer_backpressure: bounded_i32(report.dropped_frames),
+                renderer_recoveries: 0,
+                renderer_failures: 0,
+                callback_ms: report.decode_us as f64 / 1_000.0,
+                gap_ms: report.maximum_presentation_gap_us as f64 / 1_000.0,
+                frame_age_ms: report.frame_age_us as f64 / 1_000.0,
+                window_ms: report.window_ms,
+                drop_pct: report.drop_percent,
+                queue: bounded_i32(
+                    u64::from(report.encoded_video_depth) + u64::from(report.decoded_video_depth),
+                ),
+                decode_errors: bounded_i32(report.decode_errors),
+                memory_warn: false,
+                causal: Causal::default(),
+            }));
         }
     }
 
@@ -848,12 +983,31 @@ impl eframe::App for SurfDesktop {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let context = ui.ctx().clone();
         self.drain_session();
+        self.update_diagnostics();
         if context.input(|input| input.modifiers.command && input.key_pressed(egui::Key::L)) {
             context.memory_mut(|memory| memory.request_focus(egui::Id::new("address")));
         }
         self.chrome(ui);
         self.content(ui);
         let presented = self.video_surface.presented();
+        if self.smoke_frame_target.is_some()
+            && self.smoke_last_heartbeat.elapsed() >= Duration::from_secs(2)
+        {
+            self.smoke_last_heartbeat = Instant::now();
+            let media = self
+                .media
+                .as_ref()
+                .map(MediaPipeline::diagnostics)
+                .unwrap_or_default();
+            eprintln!(
+                "SURF_SMOKE_HEARTBEAT presented={presented} decoded={} ingress={} encoded_depth={} decoded_depth={} connected={}",
+                media.decoded_frames,
+                media.ingress_frames,
+                media.encoded_video_depth,
+                media.decoded_video_depth,
+                self.connected,
+            );
+        }
         if presented > 0 && self.smoke_started.is_none() {
             self.smoke_started = Some(Instant::now());
             eprintln!("SURF_SMOKE_STEP first-frame presented={presented}");
@@ -876,6 +1030,14 @@ impl eframe::App for SurfDesktop {
                     .send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(1_260.0, 800.0)));
             }
         }
+        if !self.smoke_stalled
+            && presented >= 165
+            && let Some(stall_ms) = self.smoke_stall_ms
+        {
+            self.smoke_stalled = true;
+            eprintln!("SURF_SMOKE_STEP ui-stall presented={presented} ms={stall_ms}");
+            std::thread::sleep(Duration::from_millis(stall_ms));
+        }
         if !self.smoke_reported
             && self
                 .smoke_frame_target
@@ -897,20 +1059,35 @@ impl eframe::App for SurfDesktop {
                 .as_ref()
                 .map(MediaPipeline::diagnostics)
                 .unwrap_or_default();
+            let diagnostics = self.latest_diagnostics.unwrap_or_default();
+            let surface = self.video_surface.diagnostics();
             println!(
-                "SURF_SMOKE_RESULT presented={presented} elapsed_ms={} fps={fps:.2} decoded={} ingress_replaced={} output_replaced={} gaps={} decode_errors={} upload_us={}",
+                "SURF_SMOKE_RESULT presented={presented} elapsed_ms={} fps={fps:.2} decoded={} ingress_replaced={} output_replaced={} presentation_replaced={} gaps={} decode_errors={} encoded_depth={} decoded_depth={} upload_us={} rtt_us={} network_us={} clock_uncertainty_us={} frame_age_us={} timing_synchronized={} health={:?}",
                 elapsed.as_millis(),
                 media.decoded_frames,
                 media.ingress_replaced,
                 media.output_replaced,
+                surface.replaced,
                 media.gaps,
                 media.decode_errors,
+                media.encoded_video_depth,
+                media.decoded_video_depth,
                 self.video_surface.latest_upload_us(),
+                diagnostics.rtt_us,
+                diagnostics.network_us,
+                diagnostics.clock_uncertainty_us,
+                diagnostics.frame_age_us,
+                diagnostics.timing_synchronized,
+                diagnostics.health,
             );
             context.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         context.request_repaint_after(Duration::from_millis(16));
     }
+}
+
+fn bounded_i32(value: u64) -> i32 {
+    i32::try_from(value).unwrap_or(i32::MAX)
 }
 
 fn chrome_icon(ui: &mut egui::Ui, glyph: char, enabled: bool, label: &str) -> bool {

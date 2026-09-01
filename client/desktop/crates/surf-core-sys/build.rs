@@ -6,6 +6,7 @@ fn main() {
     let core = manifest.join("../../../core");
     let sources = [
         "src/core.c",
+        "src/diagnostics.c",
         "src/frame.c",
         "src/h264.c",
         "src/media.c",
@@ -26,6 +27,10 @@ fn main() {
         println!("cargo:rerun-if-changed={}", path.display());
         build.file(path);
     }
+    println!(
+        "cargo:rerun-if-changed={}",
+        core.join("include/surf/diagnostics.h").display()
+    );
     println!(
         "cargo:rerun-if-changed={}",
         core.join("include/surf/core.h").display()

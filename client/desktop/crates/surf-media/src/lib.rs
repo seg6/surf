@@ -5,7 +5,7 @@
 //! form an unbounded queue behind another lane.
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
 use std::thread;
@@ -15,7 +15,7 @@ use bytes::Bytes;
 use cpal::SizedSample;
 use cpal::traits::{DeviceTrait as _, HostTrait as _, StreamTrait as _};
 use ffmpeg_the_third as ffmpeg;
-use surf_core::{Frame, FrameKind, MediaAction, MediaAdmissionPolicy};
+use surf_core::{Frame, FrameKind, MediaAction, MediaAdmissionPolicy, monotonic_ns};
 use surf_session::FrameSink;
 use thiserror::Error;
 
@@ -70,6 +70,12 @@ pub struct Diagnostics {
     pub waiting_for_idr: u64,
     pub keyframe_requests: u64,
     pub latest_decode_us: u64,
+    pub latest_backend_capture_to_encode_us: u64,
+    pub latest_backend_encode_to_write_us: u64,
+    pub latest_network_us: u64,
+    pub encoded_video_depth: u32,
+    pub decoded_video_depth: u32,
+    pub audio_depth: u32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -92,6 +98,8 @@ struct PacketMeta {
     interaction_id: u64,
     width: u16,
     height: u16,
+    source_client_ns: Option<u64>,
+    ingress_receive_ns: u64,
 }
 
 #[derive(Default)]
@@ -138,6 +146,8 @@ pub struct DecodedFrame {
     pub color_range: ColorRange,
     pub color_matrix: ColorMatrix,
     pub decode_time: Duration,
+    pub source_client_ns: Option<u64>,
+    pub ingress_receive_ns: u64,
 }
 
 impl std::fmt::Debug for DecodedFrame {
@@ -194,6 +204,9 @@ struct Counters {
     waiting_for_idr: AtomicU64,
     keyframe_requests: AtomicU64,
     latest_decode_us: AtomicU64,
+    latest_backend_capture_to_encode_us: AtomicU64,
+    latest_backend_encode_to_write_us: AtomicU64,
+    latest_network_us: AtomicU64,
 }
 
 impl Counters {
@@ -216,12 +229,23 @@ impl Counters {
             waiting_for_idr: self.waiting_for_idr.load(Ordering::Relaxed),
             keyframe_requests: self.keyframe_requests.load(Ordering::Relaxed),
             latest_decode_us: self.latest_decode_us.load(Ordering::Relaxed),
+            latest_backend_capture_to_encode_us: self
+                .latest_backend_capture_to_encode_us
+                .load(Ordering::Relaxed),
+            latest_backend_encode_to_write_us: self
+                .latest_backend_encode_to_write_us
+                .load(Ordering::Relaxed),
+            latest_network_us: self.latest_network_us.load(Ordering::Relaxed),
+            encoded_video_depth: 0,
+            decoded_video_depth: 0,
+            audio_depth: 0,
         }
     }
 }
 
 struct EncodedFrame {
     epoch: u64,
+    received_ns: u64,
     bytes: Bytes,
 }
 
@@ -350,6 +374,8 @@ struct Shared {
     audio: AudioPlayback,
     output: Mutex<Option<DecodedFrame>>,
     epoch: AtomicU64,
+    clock_synchronized: AtomicBool,
+    server_minus_client_ns: AtomicI64,
     shutdown: AtomicBool,
     counters: Counters,
 }
@@ -363,6 +389,8 @@ impl Shared {
             audio: AudioPlayback::new(),
             output: Mutex::new(None),
             epoch: AtomicU64::new(1),
+            clock_synchronized: AtomicBool::new(false),
+            server_minus_client_ns: AtomicI64::new(0),
             shutdown: AtomicBool::new(false),
             counters: Counters::default(),
         }
@@ -384,6 +412,7 @@ impl FrameSink for Shared {
         };
         let encoded = EncodedFrame {
             epoch,
+            received_ns: monotonic_ns(),
             bytes: frame,
         };
         match kind {
@@ -473,7 +502,33 @@ impl MediaPipeline {
     }
 
     pub fn diagnostics(&self) -> Diagnostics {
-        self.shared.counters.snapshot()
+        let mut diagnostics = self.shared.counters.snapshot();
+        if let Ok(ingress) = self.shared.ingress.try_lock() {
+            diagnostics.encoded_video_depth = u32::from(ingress.video.is_some());
+            diagnostics.audio_depth = u32::try_from(ingress.audio.len()).unwrap_or(u32::MAX);
+        }
+        if let Ok(output) = self.shared.output.try_lock() {
+            diagnostics.decoded_video_depth = u32::from(output.is_some());
+        }
+        diagnostics
+    }
+
+    pub fn set_clock_offset(&self, server_minus_client_ns: Option<i64>) {
+        if let Some(offset) = server_minus_client_ns {
+            self.shared
+                .clock_synchronized
+                .store(false, Ordering::Release);
+            self.shared
+                .server_minus_client_ns
+                .store(offset, Ordering::Release);
+            self.shared
+                .clock_synchronized
+                .store(true, Ordering::Release);
+        } else {
+            self.shared
+                .clock_synchronized
+                .store(false, Ordering::Release);
+        }
     }
 
     pub fn clear(&self) {
@@ -605,7 +660,30 @@ fn decoder_worker(shared: Arc<Shared>, events: SyncSender<MediaEvent>) {
             interaction_id: frame.interaction_id,
             width: frame.width,
             height: frame.height,
+            source_client_ns: translate_server_time(&shared, frame.source_receive_ns),
+            ingress_receive_ns: encoded.received_ns,
         };
+        shared.counters.latest_backend_capture_to_encode_us.store(
+            frame
+                .encode_complete_ns
+                .saturating_sub(frame.source_receive_ns)
+                / 1_000,
+            Ordering::Relaxed,
+        );
+        shared.counters.latest_backend_encode_to_write_us.store(
+            frame
+                .socket_write_ns
+                .saturating_sub(frame.encode_complete_ns)
+                / 1_000,
+            Ordering::Relaxed,
+        );
+        if let Some(socket_write_client_ns) = translate_server_time(&shared, frame.socket_write_ns)
+        {
+            shared.counters.latest_network_us.store(
+                encoded.received_ns.saturating_sub(socket_write_client_ns) / 1_000,
+                Ordering::Relaxed,
+            );
+        }
         let started = Instant::now();
         let packet = ffmpeg::Packet::borrow(frame.payload);
         match decoder.send_packet(&packet) {
@@ -973,7 +1051,21 @@ fn copy_video_frame(
         color_range,
         color_matrix,
         decode_time,
+        source_client_ns: metadata.source_client_ns,
+        ingress_receive_ns: metadata.ingress_receive_ns,
     })
+}
+
+fn translate_server_time(shared: &Shared, server_ns: u64) -> Option<u64> {
+    if !shared.clock_synchronized.load(Ordering::Acquire) || server_ns == 0 {
+        return None;
+    }
+    let offset = shared.server_minus_client_ns.load(Ordering::Acquire);
+    if offset >= 0 {
+        server_ns.checked_sub(offset as u64)
+    } else {
+        server_ns.checked_add(offset.unsigned_abs())
+    }
 }
 
 fn copy_plane(

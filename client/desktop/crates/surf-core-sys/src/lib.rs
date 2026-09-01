@@ -11,6 +11,10 @@ pub const SURF_MEDIA_OK: c_int = 0;
 pub const SURF_MEDIA_ACTION_DROP_REQUEST_KEYFRAME: c_int = 0;
 pub const SURF_MEDIA_ACTION_DECODE: c_int = 1;
 pub const SURF_MEDIA_ACTION_RESET_AND_DECODE: c_int = 2;
+pub const SURF_DIAGNOSTICS_OFFLINE: c_int = 0;
+pub const SURF_DIAGNOSTICS_SMOOTH: c_int = 1;
+pub const SURF_DIAGNOSTICS_DELAYED: c_int = 2;
+pub const SURF_DIAGNOSTICS_UNSTABLE: c_int = 3;
 pub const SURF_EVENT_RESET: c_int = 1;
 pub const SURF_EVENT_TABS: c_int = 2;
 pub const SURF_EVENT_URL: c_int = 3;
@@ -229,6 +233,88 @@ pub struct surf_media_admission_t {
     pub sequence_gap: c_int,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct surf_clock_sync_t {
+    pub pending_client_send_ns: u64,
+    pub last_probe_ns: u64,
+    pub best_rtt_ns: u64,
+    pub server_minus_client_ns: i64,
+    pub sample_rtt_ns: [u64; 8],
+    pub sample_offset_ns: [i64; 8],
+    pub sample_count: u8,
+    pub next_sample: u8,
+    pub awaiting_reply: u8,
+    pub synchronized: u8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct surf_diagnostics_sample_t {
+    pub now_ns: u64,
+    pub video_packets: u64,
+    pub decoded_frames: u64,
+    pub presented_frames: u64,
+    pub ingress_replaced: u64,
+    pub output_replaced: u64,
+    pub presentation_replaced: u64,
+    pub sequence_gaps: u64,
+    pub decode_errors: u64,
+    pub audio_underruns: u64,
+    pub backend_capture_to_encode_us: u64,
+    pub backend_encode_to_write_us: u64,
+    pub network_us: u64,
+    pub decode_us: u64,
+    pub upload_us: u64,
+    pub frame_age_us: u64,
+    pub rtt_us: u64,
+    pub clock_uncertainty_us: u64,
+    pub maximum_presentation_gap_us: u64,
+    pub encoded_video_depth: u32,
+    pub decoded_video_depth: u32,
+    pub audio_depth: u32,
+    pub timing_synchronized: c_int,
+    pub connected: c_int,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct surf_diagnostics_report_t {
+    pub window_ms: f64,
+    pub video_fps: f64,
+    pub decode_fps: f64,
+    pub presentation_fps: f64,
+    pub drop_percent: f64,
+    pub dropped_frames: u64,
+    pub sequence_gaps: u64,
+    pub decode_errors: u64,
+    pub audio_underruns: u64,
+    pub backend_capture_to_encode_us: u64,
+    pub backend_encode_to_write_us: u64,
+    pub network_us: u64,
+    pub decode_us: u64,
+    pub upload_us: u64,
+    pub frame_age_us: u64,
+    pub rtt_us: u64,
+    pub clock_uncertainty_us: u64,
+    pub maximum_presentation_gap_us: u64,
+    pub encoded_video_depth: u32,
+    pub decoded_video_depth: u32,
+    pub audio_depth: u32,
+    pub timing_synchronized: c_int,
+    pub health: c_int,
+    pub reason: c_int,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct surf_diagnostics_t {
+    pub baseline: surf_diagnostics_sample_t,
+    pub maximum_presentation_gap_us: u64,
+    pub initialized: u8,
+    pub reserved: [u8; 7],
+}
+
 unsafe extern "C" {
     pub fn surf_core_config_init(config: *mut surf_core_config_t);
     pub fn surf_core_create(
@@ -276,6 +362,38 @@ unsafe extern "C" {
     ) -> c_int;
     pub fn surf_media_policy_sizeof() -> usize;
     pub fn surf_media_admission_sizeof() -> usize;
+    pub fn surf_clock_sync_init(sync: *mut surf_clock_sync_t);
+    pub fn surf_clock_sync_reset(sync: *mut surf_clock_sync_t);
+    pub fn surf_clock_sync_probe(
+        sync: *mut surf_clock_sync_t,
+        now_ns: u64,
+        out_client_send_ns: *mut u64,
+    ) -> c_int;
+    pub fn surf_clock_sync_consume(
+        sync: *mut surf_clock_sync_t,
+        client_send_ns: u64,
+        backend_receive_ns: u64,
+        backend_send_ns: u64,
+        client_receive_ns: u64,
+    ) -> c_int;
+    pub fn surf_clock_sync_server_to_client(
+        sync: *const surf_clock_sync_t,
+        server_ns: u64,
+        out_client_ns: *mut u64,
+    ) -> c_int;
+    pub fn surf_clock_sync_sizeof() -> usize;
+    pub fn surf_diagnostics_init(diagnostics: *mut surf_diagnostics_t);
+    pub fn surf_diagnostics_reset(diagnostics: *mut surf_diagnostics_t);
+    pub fn surf_diagnostics_update(
+        diagnostics: *mut surf_diagnostics_t,
+        sample: *const surf_diagnostics_sample_t,
+        out_report: *mut surf_diagnostics_report_t,
+    ) -> c_int;
+    pub fn surf_diagnostics_health_string(health: c_int) -> *const c_char;
+    pub fn surf_diagnostics_reason_string(reason: c_int) -> *const c_char;
+    pub fn surf_diagnostics_sizeof() -> usize;
+    pub fn surf_diagnostics_sample_sizeof() -> usize;
+    pub fn surf_diagnostics_report_sizeof() -> usize;
 }
 
 #[cfg(test)]
@@ -303,6 +421,16 @@ mod tests {
             assert_eq!(
                 surf_media_admission_sizeof(),
                 size_of::<surf_media_admission_t>()
+            );
+            assert_eq!(surf_clock_sync_sizeof(), size_of::<surf_clock_sync_t>());
+            assert_eq!(surf_diagnostics_sizeof(), size_of::<surf_diagnostics_t>());
+            assert_eq!(
+                surf_diagnostics_sample_sizeof(),
+                size_of::<surf_diagnostics_sample_t>()
+            );
+            assert_eq!(
+                surf_diagnostics_report_sizeof(),
+                size_of::<surf_diagnostics_report_t>()
             );
         }
     }
