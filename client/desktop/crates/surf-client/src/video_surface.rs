@@ -53,6 +53,10 @@ impl VideoSurface {
     }
 
     pub fn render(&mut self, gl: &glow::Context, viewport: [i32; 4]) -> Option<PresentedFrame> {
+        let viewport = self
+            .resources
+            .dimensions
+            .map_or(viewport, |source| aspect_fit_viewport(viewport, source));
         // SAFETY: the event loop owns the current framebuffer and these
         // resources belong to the same glutin context.
         unsafe {
@@ -115,6 +119,34 @@ impl VideoSurface {
     pub fn take_error(&mut self) -> Option<String> {
         self.error.take()
     }
+}
+
+fn aspect_fit_viewport(target: [i32; 4], source: (u32, u32)) -> [i32; 4] {
+    let target_width = u64::try_from(target[2].max(1)).unwrap_or(1);
+    let target_height = u64::try_from(target[3].max(1)).unwrap_or(1);
+    let source_width = u64::from(source.0.max(1));
+    let source_height = u64::from(source.1.max(1));
+    let (width, height) = if target_width.saturating_mul(source_height)
+        > target_height.saturating_mul(source_width)
+    {
+        (
+            target_height.saturating_mul(source_width) / source_height,
+            target_height,
+        )
+    } else {
+        (
+            target_width,
+            target_width.saturating_mul(source_height) / source_width,
+        )
+    };
+    let width = i32::try_from(width.max(1)).unwrap_or(i32::MAX);
+    let height = i32::try_from(height.max(1)).unwrap_or(i32::MAX);
+    [
+        target[0] + (target[2] - width) / 2,
+        target[1] + (target[3] - height) / 2,
+        width,
+        height,
+    ]
 }
 
 struct GlResources {
@@ -395,5 +427,26 @@ unsafe fn compile_program(
             return Err(format!("YUV shader link failed: {error}"));
         }
         Ok(program)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::aspect_fit_viewport;
+
+    #[test]
+    fn stale_frames_keep_their_shape_during_resize() {
+        assert_eq!(
+            aspect_fit_viewport([0, 32, 768, 992], (1180, 728)),
+            [0, 291, 768, 473]
+        );
+        assert_eq!(
+            aspect_fit_viewport([10, 20, 1200, 700], (768, 1024)),
+            [347, 20, 525, 700]
+        );
+        assert_eq!(
+            aspect_fit_viewport([0, 0, 768, 992], (768, 992)),
+            [0, 0, 768, 992]
+        );
     }
 }

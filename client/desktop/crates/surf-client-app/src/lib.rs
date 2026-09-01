@@ -649,6 +649,9 @@ impl ClientController {
             } => {
                 if state == "ready" {
                     self.video_dimensions = Some((w, h));
+                } else if state == "starting" {
+                    self.video_dimensions = None;
+                    effects.push(HostEffect::ClearVideo);
                 } else if !reason.is_empty() {
                     self.status = format!("Video: {reason}");
                 }

@@ -166,6 +166,7 @@ struct PendingFullscreen {
     command_sent: bool,
 }
 
+#[derive(Clone, Copy)]
 struct WindowSizeRequest {
     label: &'static str,
     size: [u32; 2],
@@ -1907,8 +1908,8 @@ impl DesktopApp {
         let initial = self.viewport_committed.is_none();
         if self.viewport_committed != Some(candidate)
             && (initial || self.viewport_candidate_since.elapsed() >= VIEWPORT_SETTLE)
-            && self.controller.set_viewport(candidate.0, candidate.1)
         {
+            let _ = self.controller.set_viewport(candidate.0, candidate.1);
             self.viewport_committed = Some(candidate);
         }
         let fullscreen_to_send = self.fullscreen_pending.as_ref().and_then(|pending| {
@@ -2010,21 +2011,41 @@ impl DesktopApp {
         let current = logical_window_size(window);
         let result = self.pending_window_size.as_ref().and_then(|pending| {
             if window_size_matches(current, pending.request.size) {
-                Some(format!(
-                    "{}: {} x {} pt",
-                    pending.request.label, pending.request.size[0], pending.request.size[1]
+                Some((
+                    Some(pending.request),
+                    format!(
+                        "{}: {} x {} pt",
+                        pending.request.label, pending.request.size[0], pending.request.size[1]
+                    ),
                 ))
             } else if pending.started.elapsed() >= WINDOW_RESIZE_TIMEOUT {
-                Some(format!(
-                    "Window manager kept {} x {} pt; float the window and apply again",
-                    current[0], current[1]
+                Some((
+                    None,
+                    format!(
+                        "Window manager kept {} x {} pt; float the window and apply again",
+                        current[0], current[1]
+                    ),
                 ))
             } else {
                 None
             }
         });
-        if let Some(message) = result {
+        if let Some((applied, message)) = result {
             self.pending_window_size = None;
+            if applied.is_some() && self.controller.connected {
+                // Applying a device preset is one transaction: resize the host,
+                // then explicitly commit the browser viewport beneath its chrome.
+                // A static page must not remain on the previous video generation.
+                let candidate = viewport_for_window(current, window.scale_factor());
+                self.viewport_candidate = Some(candidate);
+                self.viewport_candidate_since = Instant::now();
+                let changed = self.controller.set_viewport(candidate.0, candidate.1);
+                self.viewport_committed = Some(candidate);
+                if changed {
+                    self.video.clear();
+                    self.page_input.reset();
+                }
+            }
             self.controller.browser.toast(message);
         }
     }
@@ -2080,6 +2101,15 @@ fn logical_window_size(window: &Window) -> [u32; 2] {
         size.width.round().max(1.0) as u32,
         size.height.round().max(1.0) as u32,
     ]
+}
+
+fn viewport_for_window(window: [u32; 2], scale: f64) -> (i32, i32) {
+    (
+        (f64::from(window[0]) * scale).round().max(64.0) as i32,
+        ((f64::from(window[1]) - f64::from(BAR_HEIGHT)) * scale)
+            .round()
+            .max(64.0) as i32,
+    )
 }
 
 fn window_size_matches(current: [u32; 2], requested: [u32; 2]) -> bool {
@@ -2311,7 +2341,7 @@ fn utf16_offset(text: &str, bytes: usize) -> i32 {
 mod tests {
     use super::{
         DEVICE_PRESETS, Key, Modifiers, NamedKey, format_bytes, plain_key_text, truncate,
-        utf16_offset, window_size_matches,
+        utf16_offset, viewport_for_window, window_size_matches,
     };
 
     #[test]
@@ -2351,5 +2381,11 @@ mod tests {
     fn compositor_rounding_allows_one_logical_point() {
         assert!(window_size_matches([767, 1025], [768, 1024]));
         assert!(!window_size_matches([766, 1024], [768, 1024]));
+    }
+
+    #[test]
+    fn preset_window_maps_to_the_page_below_chrome() {
+        assert_eq!(viewport_for_window([768, 1024], 1.0), (768, 992));
+        assert_eq!(viewport_for_window([375, 667], 2.0), (750, 1270));
     }
 }
