@@ -1,0 +1,15 @@
+[package]
+name = "surf-client-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+directories.workspace = true
+serde_json.workspace = true
+surf-core.workspace = true
+surf-media.workspace = true
+surf-protocol.workspace = true
+surf-session.workspace = true

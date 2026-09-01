@@ -3996,6 +3996,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "surf-client-app"
+version = "0.15.5"
+dependencies = [
+ "directories",
+ "serde_json",
+ "surf-core",
+ "surf-media",
+ "surf-protocol",
+ "surf-session",
+]
+
+[[package]]
 name = "surf-core"
 version = "0.15.5"
 dependencies = [
