@@ -1,0 +1,92 @@
+name: Continuous Integration
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-test:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Test all backend packages
+        run: make test
+
+      - name: Verify the test tree stayed clean
+        run: git diff --exit-code
+
+  backend-cross-build:
+    name: Backend ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Cross-build backend
+        run: make surf-binary SURF_GOOS=${{ matrix.goos }} SURF_GOARCH=${{ matrix.goarch }} CLIENT_DEB=
+
+  native-package:
+    name: iOS 6/7 universal package
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Cache verified iOS SDK
+        uses: actions/cache@v4
+        with:
+          path: native/buildenv/sdk
+          key: native-sdk-${{ hashFiles('native/buildenv/fetch-sdk.sh') }}
+
+      - name: Fetch and verify iOS SDK
+        run: make native-sdk
+
+      - name: Build pinned Theos environment
+        run: docker build -t surf-buildenv native/buildenv
+
+      - name: Build and verify package
+        run: make native-package
+
+      - name: Verify tracked files stayed clean
+        run: git diff --exit-code

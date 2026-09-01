@@ -239,6 +239,8 @@ steps.
 ## Documentation
 
 - [Backend configuration and deployment](docs/backend.md)
+- [Client architecture](docs/client-architecture.md)
+- [Client protocol contract](docs/protocol.md)
 - [Native client build](docs/native-build.md)
 - [Security model](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)
