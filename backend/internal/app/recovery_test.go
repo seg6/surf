@@ -18,8 +18,16 @@ func TestBrowserRecoveryRequiresRepeatedFailureAndHasCooldown(t *testing.T) {
 	if err != nil || !recover {
 		t.Fatalf("second failure recover=%v err=%v", recover, err)
 	}
+	// A failed quarantine must remain eligible in the next server generation.
+	recover, err = noteBrowserStartupFailure(home, filepath.Join(home, "profile"), now.Add(2*time.Second))
+	if err != nil || !recover {
+		t.Fatalf("unconsumed recovery recover=%v err=%v", recover, err)
+	}
+	if err := markBrowserStartupRecovery(home, filepath.Join(home, "profile"), now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
 	for attempt := 0; attempt < 3; attempt++ {
-		recover, err = noteBrowserStartupFailure(home, filepath.Join(home, "profile"), now.Add(time.Duration(attempt+2)*time.Second))
+		recover, err = noteBrowserStartupFailure(home, filepath.Join(home, "profile"), now.Add(time.Duration(attempt+3)*time.Second))
 		if err != nil || recover {
 			t.Fatalf("cooldown attempt %d recover=%v err=%v", attempt, recover, err)
 		}

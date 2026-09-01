@@ -268,6 +268,7 @@ func (b *Controller) handleMobileLayout(on bool) {
 	if !changed {
 		return
 	}
+	b.scheduleSessionSave()
 	b.touch.cancel(true)
 	for _, session := range sessions {
 		_ = b.cdp.Dispatch(session, "Network.enable", nil)
@@ -324,6 +325,7 @@ func (b *Controller) handleDarkMode(on bool) {
 	if !changed {
 		return
 	}
+	b.scheduleSessionSave()
 	for _, session := range sessions {
 		b.applyDarkMode(session, on)
 	}

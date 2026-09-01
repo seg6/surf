@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // NativeVersion gates the WS handshake: the Surf app and the server must agree,
@@ -56,7 +55,6 @@ type Config struct {
 	ContentBlocker     bool
 	ContentBlockerPath string
 	AdaptiveVideo      bool
-	BrowserIdleTimeout time.Duration
 
 	// H.264 lane. The encoder only runs while a native client is subscribed.
 	StreamScale     string // STREAM_SCALE, optional maximum; empty = client size
@@ -93,18 +91,6 @@ func envBool(key string, def bool) bool {
 	}
 }
 
-func envDuration(key string, def time.Duration) time.Duration {
-	v := strings.TrimSpace(os.Getenv(key))
-	if v == "" {
-		return def
-	}
-	d, err := time.ParseDuration(v)
-	if err != nil || d < 0 {
-		return def
-	}
-	return d
-}
-
 func surfHome() string {
 	if v := os.Getenv("SURF_HOME"); v != "" {
 		return v
@@ -128,26 +114,25 @@ func load() (*Config, error) {
 	viewW := envInt("VW", 768)
 	viewH := envInt("VH", 934)
 	cfg := &Config{
-		SurfHome:           home,
-		BindAddr:           envStr("BIND_ADDR", "0.0.0.0"),
-		Port:               envInt("PORT", 18080),
-		ChromePath:         os.Getenv("CHROME"),
-		StartURL:           envStr("START_URL", "https://www.google.com"),
-		Profile:            envStr("PROFILE", filepath.Join(home, "profile")),
-		ViewW:              viewW,
-		ViewH:              viewH,
-		ServerName:         envStr("SURF_SERVER_NAME", "Surf"),
-		PublicAddress:      os.Getenv("SURF_PUBLIC_ADDRESS"),
-		TunnelHost:         strings.ToLower(strings.TrimSpace(os.Getenv("SURF_TUNNEL_HOST"))),
-		DownloadsDir:       envStr("DOWNLOADS", filepath.Join(home, "downloads")),
-		UploadsDir:         envStr("UPLOADS", filepath.Join(home, "uploads")),
-		ChromeNoSandbox:    envBool("CHROME_NO_SANDBOX", os.Geteuid() == 0),
-		ContentBlocker:     envBool("SURF_CONTENT_BLOCKER", true),
-		AdaptiveVideo:      envBool("SURF_ADAPTIVE_VIDEO", false),
-		BrowserIdleTimeout: envDuration("SURF_BROWSER_IDLE_TIMEOUT", 2*time.Minute),
-		StreamScale:        envStr("STREAM_SCALE", ""),
-		StreamBitrateK:     envInt("STREAM_BITRATE", 16000),
-		StreamQuantizer:    envInt("STREAM_QUANTIZER", 12),
+		SurfHome:        home,
+		BindAddr:        envStr("BIND_ADDR", "0.0.0.0"),
+		Port:            envInt("PORT", 18080),
+		ChromePath:      os.Getenv("CHROME"),
+		StartURL:        envStr("START_URL", "https://www.google.com"),
+		Profile:         envStr("PROFILE", filepath.Join(home, "profile")),
+		ViewW:           viewW,
+		ViewH:           viewH,
+		ServerName:      envStr("SURF_SERVER_NAME", "Surf"),
+		PublicAddress:   os.Getenv("SURF_PUBLIC_ADDRESS"),
+		TunnelHost:      strings.ToLower(strings.TrimSpace(os.Getenv("SURF_TUNNEL_HOST"))),
+		DownloadsDir:    envStr("DOWNLOADS", filepath.Join(home, "downloads")),
+		UploadsDir:      envStr("UPLOADS", filepath.Join(home, "uploads")),
+		ChromeNoSandbox: envBool("CHROME_NO_SANDBOX", os.Geteuid() == 0),
+		ContentBlocker:  envBool("SURF_CONTENT_BLOCKER", true),
+		AdaptiveVideo:   envBool("SURF_ADAPTIVE_VIDEO", false),
+		StreamScale:     envStr("STREAM_SCALE", ""),
+		StreamBitrateK:  envInt("STREAM_BITRATE", 16000),
+		StreamQuantizer: envInt("STREAM_QUANTIZER", 12),
 	}
 	return cfg, nil
 }

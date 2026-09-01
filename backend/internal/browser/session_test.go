@@ -1,9 +1,11 @@
 package browser
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"surf-backend/internal/config"
 )
@@ -57,6 +59,53 @@ func TestEmptyControllerDoesNotEraseBrowserSession(t *testing.T) {
 	}
 	if string(got) != string(want) {
 		t.Fatalf("empty controller replaced session with %q", got)
+	}
+}
+
+func TestSurfNewTabReplacesPreviousBrowserSession(t *testing.T) {
+	home := t.TempDir()
+	path := browserSessionPath(home)
+	if err := os.WriteFile(path, []byte(`{"version":1,"tabs":["https://github.com/cloud-hypervisor/cloud-hypervisor"],"active":0}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	controller := &Controller{
+		cfg:      &config.Config{SurfHome: home},
+		tabs:     map[int]*Tab{1: {ID: 1, URL: "about:blank#surf-new"}},
+		activeID: 1,
+	}
+	if err := controller.SaveSession(); err != nil {
+		t.Fatal(err)
+	}
+	session := loadBrowserSession(home)
+	if len(session.Tabs) != 1 || session.Tabs[0] != "about:blank#surf-new" || session.Active != 0 {
+		t.Fatalf("new-tab session was not saved: %#v", session)
+	}
+}
+
+func TestChangedBrowserSessionIsSavedBeforeShutdown(t *testing.T) {
+	home := t.TempDir()
+	controller := &Controller{
+		cfg:      &config.Config{SurfHome: home},
+		tabs:     map[int]*Tab{1: {ID: 1, URL: "https://example.com/changed"}},
+		activeID: 1,
+	}
+	controller.scheduleSessionSave()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		data, err := os.ReadFile(browserSessionPath(home))
+		if err == nil {
+			var session browserSession
+			if json.Unmarshal(data, &session) == nil && len(session.Tabs) == 1 && session.Tabs[0] == "https://example.com/changed" {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("changed session was not saved by the debounce deadline")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := controller.flushSession(); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -2,6 +2,13 @@ package cdp
 
 import (
 	"encoding/json"
+	"errors"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -25,6 +32,9 @@ func TestLaunchArgsSandboxDefault(t *testing.T) {
 	}
 	if hasArg(args, "--mute-audio") {
 		t.Fatalf("global mute makes tab-capture PCM silent: %v", args)
+	}
+	if !hasArg(args, "--disable-background-mode") {
+		t.Fatalf("browser background mode was not disabled: %v", args)
 	}
 	if !hasArg(args, "--enable-gpu") || hasArg(args, "--disable-gpu") {
 		t.Fatalf("GPU auto path not enabled: %v", args)
@@ -146,5 +156,81 @@ func TestActivePortStateRejectsStaleEndpoint(t *testing.T) {
 	fresh := activePortState{data: "9223\n/devtools/browser/new", modTime: stamp, exists: true}
 	if !fresh.changedFrom(previous) {
 		t.Fatal("new DevToolsActivePort was rejected")
+	}
+}
+
+func TestWaitForURLAcceptsEndpointAfterLauncherExit(t *testing.T) {
+	urls := make(chan string, 1)
+	done := make(chan error, 1)
+	done <- nil
+	close(done)
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		urls <- "ws://127.0.0.1:9222/devtools/browser/delegated"
+	}()
+	got, err := waitForURLWithin(urls, t.TempDir(), activePortState{}, done, 100*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "ws://127.0.0.1:9222/devtools/browser/delegated" {
+		t.Fatalf("URL=%q", got)
+	}
+}
+
+func TestWaitForURLAcceptsActivePortAfterLauncherExit(t *testing.T) {
+	want := "ws://127.0.0.1/devtools/browser/delegated"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"webSocketDebuggerUrl": want})
+	}))
+	defer server.Close()
+	_, port, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := t.TempDir()
+	done := make(chan error, 1)
+	done <- nil
+	close(done)
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		_ = os.WriteFile(filepath.Join(profile, "DevToolsActivePort"), []byte(port+"\n/devtools/browser/delegated\n"), 0o600)
+	}()
+	got, err := waitForURLWithin(make(chan string), profile, activePortState{}, done, 500*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("URL=%q, want %q", got, want)
+	}
+}
+
+func TestWaitForURLReportsLauncherResultOnlyAtDeadline(t *testing.T) {
+	urls := make(chan string)
+	done := make(chan error, 1)
+	done <- errors.New("exit status 1")
+	close(done)
+	started := time.Now()
+	_, err := waitForURLWithin(urls, t.TempDir(), activePortState{}, done, 25*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "launcher exited: exit status 1") {
+		t.Fatalf("error=%v", err)
+	}
+	if elapsed := time.Since(started); elapsed < 20*time.Millisecond {
+		t.Fatalf("launcher exit ended endpoint wait after %s", elapsed)
+	}
+}
+
+func TestBoundedLineTail(t *testing.T) {
+	var tail boundedLineTail
+	for i := 0; i < stderrTailLines+4; i++ {
+		tail.add(strings.Repeat("x", stderrTailLineBytes+20) + string(rune('a'+i)))
+	}
+	lines := strings.Split(tail.string(), " | ")
+	if len(lines) != stderrTailLines {
+		t.Fatalf("tail lines=%d, want %d", len(lines), stderrTailLines)
+	}
+	for _, line := range lines {
+		if len(line) > stderrTailLineBytes {
+			t.Fatalf("tail line has %d bytes", len(line))
+		}
 	}
 }

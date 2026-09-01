@@ -71,6 +71,11 @@ type Controller struct {
 	restoreOrder        map[string]int
 	restoreActiveTarget string
 	restoreActiveID     int
+	sessionWriteMu      sync.Mutex
+	sessionTimerMu      sync.Mutex
+	sessionTimer        *time.Timer
+	sessionTimerGen     uint64
+	sessionClosed       bool
 
 	store        *Store
 	icons        map[string]*favicon // origin -> icon, guarded by b.mu
@@ -364,6 +369,9 @@ func (b *Controller) Shutdown() {
 		b.alive = false
 		b.lifecycleMu.Unlock()
 		close(b.stop)
+		if err := b.flushSession(); err != nil {
+			log.Printf("browser: save session at shutdown: %v", err)
+		}
 		b.resizeMu.Lock()
 		b.resizeClosed = true
 		b.resizeGen++
@@ -387,10 +395,18 @@ func (b *Controller) Shutdown() {
 		if b.touch != nil {
 			b.touch.close()
 		}
-		if b.cmd != nil {
-			if b.cdp != nil {
-				_, _ = b.cdp.Call("", "Browser.close", nil)
+		// CDP is the browser lifetime authority. The executable returned by the
+		// OS may have been only a bootstrapper, so request browser shutdown and
+		// wait for the actual DevTools connection to close before consulting the
+		// launcher handle as a best-effort process-tree cleanup mechanism.
+		if b.cdp != nil {
+			b.cdp.Send("", "Browser.close", nil)
+			select {
+			case <-b.cdp.Closed():
+			case <-time.After(time.Second):
 			}
+		}
+		if b.cmd != nil {
 			select {
 			case <-b.cmd.Done:
 			case <-time.After(time.Second):
@@ -426,16 +442,6 @@ func (b *Controller) send(client *transport.Client, event protocol.Event) {
 
 // Died signals that the Chromium connection is gone.
 func (b *Controller) Died() <-chan struct{} { return b.cdp.Closed() }
-
-// IdleSafe reports whether Chromium can be parked without interrupting a
-// download. Media subscriptions are removed synchronously when the final
-// client disconnects, so downloads are the only browser-owned work allowed
-// to extend the idle deadline.
-func (b *Controller) IdleSafe() bool {
-	b.dlMu.Lock()
-	defer b.dlMu.Unlock()
-	return len(b.dlNames) == 0
-}
 
 // Stats is the /api/v1/health?stats=1 runtime snapshot: enough to see
 // what the server thinks is happening without ssh + log spelunking.

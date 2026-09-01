@@ -91,7 +91,6 @@ Surf reads configuration from environment variables:
 | `STREAM_SCALE` | empty | Optional maximum stream size |
 | `SURF_CONTENT_BLOCKER` | `1` | Manage uBlock Origin Lite |
 | `SURF_ADAPTIVE_VIDEO` | `0` | Experimental adaptive cadence governor; set `1` to enable |
-| `SURF_BROWSER_IDLE_TIMEOUT` | `2m` | Stop Chromium after the final native client disconnects; `0` keeps it warm |
 | `CHROME_NO_SANDBOX` | automatic for root | Disable Chromium sandbox where required |
 
 There is no password variable and no plaintext mode.
@@ -124,13 +123,17 @@ The browser profile, downloads, uploads, managed browser, updates, and desktop
 configuration also live below `SURF_HOME`. Back up the entire directory if you
 want to preserve the server identity and existing pairings.
 
-The Surf daemon does not keep Chromium resident just to provide pairing,
-management, logs, updates, or clipboard services. The first authenticated
-native WebSocket starts Chromium. Media stops as soon as the last socket
-disconnects, and Chromium exits after `SURF_BROWSER_IDLE_TIMEOUT` unless a
-download is still active. Reconnecting during that grace period cancels the
-shutdown. Tabs, the active tab, mobile-site mode, dark appearance, cookies, and site storage are
-restored on the next connection.
+The Surf server and its Chromium process tree form one runtime generation.
+Chromium starts with the server and remains resident until that server stops;
+video capture, encoding, audio, and transport still stop independently as soon
+as the last native client disconnects. If Chromium or its DevTools connection
+dies, the server generation exits so the desktop tray or an external service
+manager can restart the complete contained process tree. Tabs, the active tab,
+mobile-site mode, dark appearance, cookies, and site storage are restored after
+the restart. Surf writes its small tab/session snapshot atomically shortly after
+tabs, URLs, the active tab, website mode, or appearance changes, then performs a
+final synchronous flush during graceful shutdown. A sudden process loss therefore
+does not normally resurrect an older browsing session.
 
 ## Logs and clipboard
 

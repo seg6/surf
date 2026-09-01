@@ -70,6 +70,42 @@ type envelope struct {
 
 var devtoolsRe = regexp.MustCompile(`DevTools listening on (ws://\S+)`)
 
+const (
+	browserStartupTimeout = 30 * time.Second
+	stderrTailLines       = 12
+	stderrTailLineBytes   = 1024
+)
+
+// boundedLineTail preserves enough Chromium stderr to explain a failed
+// launch without allowing a noisy browser process to grow Surf's memory or
+// durable logs without bound.
+type boundedLineTail struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (t *boundedLineTail) add(line string) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return
+	}
+	if len(line) > stderrTailLineBytes {
+		line = line[len(line)-stderrTailLineBytes:]
+	}
+	t.mu.Lock()
+	t.lines = append(t.lines, line)
+	if len(t.lines) > stderrTailLines {
+		t.lines = append([]string(nil), t.lines[len(t.lines)-stderrTailLines:]...)
+	}
+	t.mu.Unlock()
+}
+
+func (t *boundedLineTail) string() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return strings.Join(t.lines, " | ")
+}
+
 type LaunchConfig struct {
 	ChromePath     string
 	Profile        string
@@ -87,6 +123,9 @@ func (cfg LaunchConfig) Args() []string {
 		"--disable-blink-features=AutomationControlled",
 		"--disable-popup-blocking", "--no-first-run", "--no-default-browser-check",
 		"--disable-session-crashed-bubble", "--hide-crash-restore-bubble", "--noerrdialogs",
+		// Surf owns the complete browser lifetime. Chromium background mode can
+		// otherwise retain a profile-owning process after Browser.close.
+		"--disable-background-mode",
 		"--hide-scrollbars",
 		"--disable-sync",
 		// The anti-throttling set puppeteer always passed: without these,
@@ -142,11 +181,16 @@ func Launch(cfg LaunchConfig) (*Client, *process.Started, error) {
 	}
 
 	wsURL := make(chan string, 1)
+	stderrTail := &boundedLineTail{}
+	stderrDone := make(chan struct{})
 	go func() {
+		defer close(stderrDone)
 		sc := bufio.NewScanner(started.Stderr)
 		sc.Buffer(make([]byte, 64*1024), 1024*1024)
 		for sc.Scan() {
-			if m := devtoolsRe.FindStringSubmatch(sc.Text()); m != nil {
+			line := sc.Text()
+			stderrTail.add(line)
+			if m := devtoolsRe.FindStringSubmatch(line); m != nil {
 				select {
 				case wsURL <- m[1]:
 				default:
@@ -158,6 +202,13 @@ func Launch(cfg LaunchConfig) (*Client, *process.Started, error) {
 	url, err := waitForURL(wsURL, cfg.Profile, previousEndpoint, started.Done)
 	if err != nil {
 		process.Kill(started.Process.Pid)
+		select {
+		case <-stderrDone:
+		case <-time.After(250 * time.Millisecond):
+		}
+		if detail := stderrTail.string(); detail != "" {
+			err = fmt.Errorf("%w; chromium stderr: %s", err, detail)
+		}
 		return nil, nil, err
 	}
 	c, err := Dial(url)
@@ -250,20 +301,46 @@ func waitForURL(
 	previous activePortState,
 	processDone <-chan error,
 ) (string, error) {
-	deadline := time.After(30 * time.Second)
+	return waitForURLWithin(fromStderr, profile, previous, processDone, browserStartupTimeout)
+}
+
+func waitForURLWithin(
+	fromStderr <-chan string,
+	profile string,
+	previous activePortState,
+	processDone <-chan error,
+	timeout time.Duration,
+) (string, error) {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
 	tick := time.NewTicker(200 * time.Millisecond)
 	defer tick.Stop()
+	var launcherExited bool
+	var launcherErr error
 	for {
 		select {
 		case u := <-fromStderr:
-			return u, nil
-		case err := <-processDone:
-			if err == nil {
-				return "", fmt.Errorf("chromium exited before exposing a DevTools endpoint")
+			if u != "" {
+				return u, nil
 			}
-			return "", fmt.Errorf("chromium exited before exposing a DevTools endpoint: %w", err)
-		case <-deadline:
-			return "", fmt.Errorf("chromium did not expose a DevTools endpoint within 30s")
+		case err, ok := <-processDone:
+			if ok {
+				launcherExited = true
+				launcherErr = err
+			}
+			// Chrome-family executables may be bootstrap processes which hand the
+			// requested profile to another process and exit before that process
+			// publishes DevToolsActivePort. The endpoint, not this PID, is the
+			// startup authority, so retain the result only for timeout diagnostics.
+			processDone = nil
+		case <-deadline.C:
+			if !launcherExited {
+				return "", fmt.Errorf("chromium did not expose a DevTools endpoint within %s", timeout)
+			}
+			if launcherErr != nil {
+				return "", fmt.Errorf("chromium did not expose a DevTools endpoint within %s (launcher exited: %w)", timeout, launcherErr)
+			}
+			return "", fmt.Errorf("chromium did not expose a DevTools endpoint within %s (launcher exited cleanly)", timeout)
 		case <-tick.C:
 			state := readActivePortState(profile)
 			if !state.changedFrom(previous) {

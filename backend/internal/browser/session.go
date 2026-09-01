@@ -3,15 +3,20 @@ package browser
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"surf-backend/internal/atomicfile"
 )
 
-const browserSessionVersion = 1
+const (
+	browserSessionVersion = 1
+	sessionSaveDelay      = 250 * time.Millisecond
+)
 
 type browserSession struct {
 	Version int      `json:"version"`
@@ -42,8 +47,11 @@ func loadBrowserSession(home string) browserSession {
 
 // SaveSession records browser UI state outside Chromium's profile. Chromium
 // normally restores its own tabs, while this small file supplies a reliable
-// fallback after a clean idle shutdown or an unexpected browser exit.
+// fallback after a server restart or an unexpected browser exit.
 func (b *Controller) SaveSession() error {
+	b.sessionWriteMu.Lock()
+	defer b.sessionWriteMu.Unlock()
+
 	b.mu.Lock()
 	ids := make([]int, 0, len(b.tabs))
 	for id := range b.tabs {
@@ -85,7 +93,53 @@ func (b *Controller) SaveSession() error {
 
 func restorableURL(raw string) bool {
 	raw = strings.TrimSpace(raw)
-	return strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") || raw == "about:blank"
+	return strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") ||
+		raw == "about:blank" || raw == "about:blank#surf-new"
+}
+
+// scheduleSessionSave keeps the durable snapshot close to the live browser
+// state without writing for every event in a navigation. A hard process kill
+// can lose at most this short debounce window; graceful shutdown always flushes
+// synchronously through flushSession.
+func (b *Controller) scheduleSessionSave() {
+	b.sessionTimerMu.Lock()
+	defer b.sessionTimerMu.Unlock()
+	if b.sessionClosed {
+		return
+	}
+	if b.sessionTimer != nil {
+		b.sessionTimer.Stop()
+	}
+	b.sessionTimerGen++
+	generation := b.sessionTimerGen
+	b.sessionTimer = time.AfterFunc(sessionSaveDelay, func() {
+		b.runScheduledSessionSave(generation)
+	})
+}
+
+func (b *Controller) runScheduledSessionSave(generation uint64) {
+	b.sessionTimerMu.Lock()
+	if b.sessionClosed || generation != b.sessionTimerGen {
+		b.sessionTimerMu.Unlock()
+		return
+	}
+	b.sessionTimer = nil
+	b.sessionTimerMu.Unlock()
+	if err := b.SaveSession(); err != nil {
+		log.Printf("browser: save changed session: %v", err)
+	}
+}
+
+func (b *Controller) flushSession() error {
+	b.sessionTimerMu.Lock()
+	b.sessionClosed = true
+	b.sessionTimerGen++
+	if b.sessionTimer != nil {
+		b.sessionTimer.Stop()
+		b.sessionTimer = nil
+	}
+	b.sessionTimerMu.Unlock()
+	return b.SaveSession()
 }
 
 // prepareStartupSession lets Chromium's native profile restore win when it

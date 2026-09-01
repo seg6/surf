@@ -261,6 +261,7 @@ func (b *Controller) attachTarget(info targetInfo) {
 	b.installCompatScripts(s)
 	b.setupEditableAutoAttach(s)
 	b.setupFeatures(t)
+	b.scheduleSessionSave()
 	// The compatibility override must be queued before the first real
 	// navigation; otherwise the initial request and document expose different
 	// user agents.
@@ -324,6 +325,7 @@ func (b *Controller) dropTarget(targetID string) {
 		}
 	}
 	b.broadcastTabs()
+	b.scheduleSessionSave()
 }
 
 func (b *Controller) targetInfoChanged(info targetInfo) {
@@ -357,6 +359,9 @@ func (b *Controller) targetInfoChanged(info targetInfo) {
 	active := t.ID == b.activeID
 	url := t.URL
 	b.mu.Unlock()
+	if urlChanged {
+		b.scheduleSessionSave()
+	}
 
 	if urlChanged && active {
 		b.setTouchMode(t.Session)
@@ -574,6 +579,7 @@ func (b *Controller) switchActive(id int) {
 	if !b.isActiveGeneration(id, generation) {
 		return
 	}
+	b.scheduleSessionSave()
 	if b.capture != nil {
 		b.capture.SwitchActive()
 	}

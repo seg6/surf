@@ -89,25 +89,35 @@ func ServeContext(parent context.Context, ready chan<- control.Descriptor) error
 			log.Printf("remove revoked device log: %v", err)
 		}
 	})
-	b := browser.NewManager(cfg, hub)
-	b.SetStartupRecovery(func(startErr error) bool {
+	b, err := browser.New(cfg, hub)
+	if err != nil {
+		return err
+	}
+	hub.SetHandler(b)
+	defer b.Shutdown()
+	if err := b.Start(); err != nil {
 		recoverProfile, recoveryErr := noteBrowserStartupFailure(cfg.SurfHome, cfg.Profile, time.Now())
 		if recoveryErr != nil {
 			log.Printf("browser recovery state: %v", recoveryErr)
 		}
 		if !recoverProfile {
-			return false
+			return fmt.Errorf("start browser: %w", err)
 		}
 		backup, backupErr := chromium.QuarantineProfile(cfg.Profile)
 		if backupErr != nil {
-			log.Printf("browser startup failed: %v; profile recovery failed: %v", startErr, backupErr)
-			return false
+			// Do not consume the recovery attempt. Returning ends this complete
+			// server/browser process generation; its containment boundary then
+			// releases any process still holding the profile before the tray or
+			// service manager starts the next generation.
+			return fmt.Errorf("start browser: %w; profile recovery deferred: %v", err, backupErr)
 		}
-		log.Printf("browser startup failed twice; profile preserved at %s", backup)
-		return true
-	}, func() { clearBrowserStartupFailures(cfg.SurfHome) })
-	hub.SetHandler(b)
-	defer b.Shutdown()
+		if markErr := markBrowserStartupRecovery(cfg.SurfHome, cfg.Profile, time.Now()); markErr != nil {
+			return fmt.Errorf("start browser: %w; profile preserved at %s but recovery state failed: %v", err, backup, markErr)
+		}
+		log.Printf("browser startup failed repeatedly; profile preserved at %s", backup)
+		return fmt.Errorf("start browser: %w; profile was preserved and reset for the next server generation", err)
+	}
+	clearBrowserStartupFailures(cfg.SurfHome)
 	srv := web.New(cfg, a, ident, hub)
 	srv.SetServerLog(serverLog)
 	srv.StartClipboardSync(ctx)
@@ -172,6 +182,8 @@ func ServeContext(parent context.Context, ready chan<- control.Descriptor) error
 	select {
 	case err := <-serverErr:
 		return err
+	case <-b.Died():
+		return fmt.Errorf("browser connection lost")
 	case <-ctx.Done():
 		log.Printf("server shutdown requested")
 		return nil
