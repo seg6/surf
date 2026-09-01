@@ -1,13 +1,21 @@
 #import <Foundation/Foundation.h>
 
-#ifndef RBNativeVersion
-#error RBNativeVersion must be supplied by native/client/Makefile from PROTOCOL_VERSION
+#ifndef RBCompatibilityVersion
+#error RBCompatibilityVersion must be supplied by native/client/Makefile from COMPATIBILITY_VERSION
 #endif
 #ifndef RBAppVersion
 #error RBAppVersion must be supplied by native/client/Makefile from VERSION
 #endif
 #define RBLogDirectory @"/var/mobile/Library/Surf"
 #define RBLogFile @"/var/mobile/Library/Surf/surf.log"
+
+// Surf 0.15.4 identifies compatibility generation 1 with this legacy token.
+// Sending it beside the ordered generation keeps new clients compatible with
+// the published 0.15.4 backend during the migration.
+static inline NSString *RBWireCompatibilityVersion(void) {
+    return [RBCompatibilityVersion isEqualToString:@"1"] ? @"20260831-1"
+                                                          : RBCompatibilityVersion;
+}
 
 // NSUserDefaults keys (settings screen).
 #define RBLegacyDefaultsServerURLKey @"RBServerURL"

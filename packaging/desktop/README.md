@@ -19,3 +19,7 @@ Platform packages preserve `SURF_HOME` across updates. That directory contains
 the long-lived server identity and pairing registry; deleting it intentionally
 creates a new server identity which existing clients will reject until they
 forget and pair again.
+
+Use `surf quit` when a command-line shutdown is preferable to the tray's
+**Quit Surf** action. It closes the desktop manager, backend, and managed
+Chromium process tree as one graceful operation.

@@ -32,16 +32,16 @@ type Asset struct {
 
 type ClientAsset struct {
 	Asset
-	Protocol string `json:"protocol"`
+	Compatibility string `json:"protocol"` // JSON name retained for pre-0.16 desktop updaters.
 }
 
 type Manifest struct {
-	Schema   int              `json:"schema"`
-	Version  string           `json:"version"`
-	Protocol string           `json:"protocol"`
-	Assets   map[string]Asset `json:"assets"`
-	Packages map[string]Asset `json:"packages,omitempty"`
-	Client   *ClientAsset     `json:"client,omitempty"`
+	Schema        int              `json:"schema"`
+	Version       string           `json:"version"`
+	Compatibility string           `json:"protocol"` // Kept on the wire for manifest schema 1.
+	Assets        map[string]Asset `json:"assets"`
+	Packages      map[string]Asset `json:"packages,omitempty"`
+	Client        *ClientAsset     `json:"client,omitempty"`
 }
 
 type Release struct {
@@ -79,7 +79,7 @@ func (c Client) Check(ctx context.Context, currentVersion string) (Release, erro
 	if err := decoder.Decode(&manifest); err != nil {
 		return Release{}, fmt.Errorf("decode update manifest: %w", err)
 	}
-	if manifest.Schema != 1 || manifest.Version == "" || manifest.Protocol == "" {
+	if manifest.Schema != 1 || manifest.Version == "" || manifest.Compatibility == "" {
 		return Release{}, errors.New("invalid update manifest")
 	}
 	asset, ok := manifest.Assets[runtime.GOOS+"-"+runtime.GOARCH]

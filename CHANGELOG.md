@@ -4,7 +4,29 @@ This is the user-facing history of Surf. Each entry starts with what changed in
 the experience; lower-level details are included when they explain compatibility,
 performance, security, or troubleshooting.
 
-A **protocol change** means the Surf client and server must be updated together.
+A **compatibility change** means the Surf client and server need matching
+generations. Ordinary app releases do not force both sides to update together.
+
+## 0.15.5 - 2026-09-01
+
+*Clearer updates, compatibility, and shutdown behavior.*
+
+- **Upgrade in place; do not uninstall first.** Install Surf 0.15.5 over the
+  existing desktop and iPad packages. Browser data, settings, paired-device
+  keys, and server identity remain intact; no re-pairing is required.
+- **Stopped patch releases from blocking connections.** Client and server app
+  versions may now differ as long as their compatibility generation matches.
+- **Made required updates directional.** An older iPad receives the exact client
+  package embedded in its backend; a newer iPad asks for a backend update and is
+  never silently downgraded. A newer compatible iPad app appears as an optional
+  update in Settings.
+- **Verified the embedded iPad installer.** Builds check the package identity,
+  app version, compatibility generation, byte size, and SHA-256 hash. Surf
+  disables an invalid package instead of advertising an update it cannot safely
+  install.
+- **Added `surf quit`.** It gracefully closes either the desktop tray and its
+  managed browser or a foreground Surf server, so users no longer need to hunt
+  down several wrapper and child processes.
 
 ## 0.15.4 - 2026-09-01
 
@@ -74,7 +96,7 @@ A **protocol change** means the Surf client and server must be updated together.
   display size and a detail-focused 16 Mbit/s variable bitrate. Unnecessary key
   frames and competition between ordinary controls and incoming media were
   removed.
-- **Compatibility:** protocol `20260831-1`; update the client and server together.
+- **Compatibility:** generation 1 (originally identified as `20260831-1`).
 
 ## 0.14.0 - 2026-08-31
 
@@ -102,8 +124,8 @@ A **protocol change** means the Surf client and server must be updated together.
 
 - Reorganized Settings into readable groups for browsing, performance, data,
   server controls, and version information. Explanations wrap instead of being
-  clipped, unavailable actions say why, and the client and protocol versions are
-  always visible.
+  clipped, unavailable actions say why, and the client version and compatibility
+  identifier are always visible.
 - Rebuilt the Performance Monitor as a compact translucent panel. It shows the
   important health readings first, can reveal round-trip and pipeline details,
   never scrolls inside itself, and never resizes the browser stream.
@@ -125,7 +147,7 @@ A **protocol change** means the Surf client and server must be updated together.
 - Standardized headings and controls on the native system font from iOS 6 through
   14, with more reliable touch targets, separators, selected states, and compact
   layouts on both phones and tablets.
-- **Compatibility:** protocol `20260826-1`; update the client and server together.
+- **Compatibility:** legacy generation `20260826-1`; client and server must match.
 
 ## 0.13.7 - 2026-08-21
 

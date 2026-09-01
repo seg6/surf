@@ -117,12 +117,12 @@ jobs:
           test "$(git rev-parse HEAD)" = "$tag_commit"
 
           version="$(tr -d '[:space:]' < VERSION)"
-          protocol_version="$(tr -d '[:space:]' < PROTOCOL_VERSION)"
+          compatibility_version="$(tr -d '[:space:]' < COMPATIBILITY_VERSION)"
           test "$RELEASE_TAG" = "v$version" || {
             echo "$RELEASE_TAG does not match VERSION $version" >&2
             exit 1
           }
-          test -n "$protocol_version"
+          [[ "$compatibility_version" =~ ^[1-9][0-9]*$ ]]
           git diff --exit-code
           echo "commit=$tag_commit" >> "$GITHUB_OUTPUT"
           echo "Verified $RELEASE_TAG at $tag_commit"
@@ -197,8 +197,8 @@ jobs:
           set -euo pipefail
 
           version="$(tr -d '[:space:]' < VERSION)"
-          protocol_version="$(tr -d '[:space:]' < PROTOCOL_VERSION)"
-          VERSION="$version" PROTOCOL_VERSION="$protocol_version" \
+          compatibility_version="$(tr -d '[:space:]' < COMPATIBILITY_VERSION)"
+          VERSION="$version" COMPATIBILITY_VERSION="$compatibility_version" \
             native/client/render-versioned-files.sh
           git diff --exit-code -- \
             native/client/control native/client/Resources/Info.plist
@@ -342,10 +342,10 @@ jobs:
           set -euo pipefail
 
           version="$(tr -d '[:space:]' < VERSION)"
-          protocol_version="$(tr -d '[:space:]' < PROTOCOL_VERSION)"
+          compatibility_version="$(tr -d '[:space:]' < COMPATIBILITY_VERSION)"
           client_deb="$(find dist/native -name '*.deb' -type f -print -quit)"
 
-          VERSION="$version" PROTOCOL_VERSION="$protocol_version" \
+          VERSION="$version" COMPATIBILITY_VERSION="$compatibility_version" \
             native/client/render-versioned-files.sh
           git diff --exit-code -- \
             native/client/control native/client/Resources/Info.plist
@@ -353,12 +353,12 @@ jobs:
           (
             cd backend
             go run ./tools/updatemanifest ../dist/packages \
-              "../$client_deb" "$version" "$protocol_version" ../update.json
+              "../$client_deb" "$version" "$compatibility_version" ../update.json
           )
           jq -e \
             --arg version "$version" \
-            --arg protocol "$protocol_version" \
-            '.version == $version and .protocol == $protocol and
+            --arg compatibility "$compatibility_version" \
+            '.version == $version and .protocol == $compatibility and
              (.assets | length) == 5 and (.packages | length) == 2' \
             update.json >/dev/null
 

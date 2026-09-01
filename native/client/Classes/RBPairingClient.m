@@ -73,10 +73,6 @@
         if (error && !*error) *error = [NSError errorWithDomain:@"SurfPairing" code:2 userInfo:@{NSLocalizedDescriptionKey: @"The server identity did not match its certificate"}];
         return nil;
     }
-    if (![[server objectForKey:@"protocol"] isEqualToString:RBNativeVersion]) {
-        if (error) *error = [NSError errorWithDomain:@"SurfPairing" code:3 userInfo:@{NSLocalizedDescriptionKey: @"This Surf server requires a different client version"}];
-        return nil;
-    }
     NSMutableDictionary *result = [server mutableCopy];
     [result setObject:endpoint forKey:@"endpoint"];
     RBLogEvent(@"verification", @"info",

@@ -682,9 +682,9 @@ static UIColor *RBInspectorMutedColor(void) {
         row.accessibilityValue = [NSString stringWithFormat:@"%@. %@",
             row.valueLabel.text, row.detailLabel.text];
     }
-    self.footerLabel.text = [NSString stringWithFormat:@"%@ · %@ · %@\nprotocol %@",
+    self.footerLabel.text = [NSString stringWithFormat:@"%@ · %@ · %@\ncompatibility %@",
         snapshot.server ?: @"Surf", snapshot.state ?: @"idle",
-        snapshot.streamState ?: @"video idle", snapshot.protocolVersion ?: @"—"];
+        snapshot.streamState ?: @"video idle", snapshot.compatibilityVersion ?: @"—"];
 }
 
 @end

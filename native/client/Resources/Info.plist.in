@@ -37,7 +37,9 @@
   <key>CFBundleShortVersionString</key>
   <string>@VERSION@</string>
   <key>CFBundleVersion</key>
-  <string>64</string>
+  <string>@BUNDLE_VERSION@</string>
+  <key>SurfCompatibilityVersion</key>
+  <integer>@COMPATIBILITY_VERSION@</integer>
   <key>CFBundleSupportedPlatforms</key>
   <array>
     <string>iPhoneOS</string>

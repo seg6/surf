@@ -106,6 +106,13 @@ manager can supervise it. In another terminal, `surf status`, `surf pair`, and
 `surf devices ...` connect to that one running server. Surf listens on port
 `18080` by default. Windows archives contain `surf.exe`.
 
+Run `surf quit` to close either the desktop tray and its managed browser or a
+headless backend gracefully.
+
+Install updates in place. Do not remove Surf, delete `SURF_HOME`, or pair again:
+desktop profiles and device keys survive normal updates, and the backend can
+deliver a required compatible iPad package over the existing pinned connection.
+
 ### 2. Install the iOS client
 
 Open the [Surf package repository](https://seg6.space/surf/) on the jailbroken

@@ -33,25 +33,28 @@ var ErrNotRunning = errors.New("Surf server is not running")
 // the permission-restricted descriptor rather than in command-line arguments
 // or the environment, where it could be exposed by process inspection.
 type Descriptor struct {
-	Schema     int       `json:"schema"`
-	PID        int       `json:"pid"`
-	ControlURL string    `json:"controlURL"`
-	PublicPort int       `json:"publicPort"`
-	ServerID   string    `json:"serverID"`
+	Schema     int    `json:"schema"`
+	PID        int    `json:"pid"`
+	ControlURL string `json:"controlURL"`
+	PublicPort int    `json:"publicPort"`
+	ServerID   string `json:"serverID"`
+	// Protocol is the legacy schema-1 JSON slot used to carry the ordered
+	// compatibility generation. Keep its wire name so a new CLI can still
+	// manage a backend started before this migration.
 	Protocol   string    `json:"protocol"`
 	StartedAt  time.Time `json:"startedAt"`
 	AdminToken string    `json:"adminToken"`
 }
 
 // New creates a descriptor for one server lifetime.
-func New(controlURL, serverID, protocol string, publicPort int) (Descriptor, error) {
+func New(controlURL, serverID, compatibility string, publicPort int) (Descriptor, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return Descriptor{}, fmt.Errorf("generate admin token: %w", err)
 	}
 	descriptor := Descriptor{
 		Schema: Schema, PID: os.Getpid(), ControlURL: controlURL,
-		PublicPort: publicPort, ServerID: serverID, Protocol: protocol,
+		PublicPort: publicPort, ServerID: serverID, Protocol: compatibility,
 		StartedAt: time.Now().UTC(), AdminToken: base64.RawURLEncoding.EncodeToString(raw),
 	}
 	if err := descriptor.Validate(); err != nil {
@@ -81,7 +84,7 @@ func (d Descriptor) Validate() error {
 	}
 	serverID, err := hex.DecodeString(d.ServerID)
 	if err != nil || len(serverID) != sha256.Size || strings.TrimSpace(d.Protocol) == "" {
-		return errors.New("server identity or protocol is missing")
+		return errors.New("server identity or compatibility is missing")
 	}
 	if decoded, err := base64.RawURLEncoding.DecodeString(d.AdminToken); err != nil || len(decoded) != 32 {
 		return errors.New("invalid server admin token")

@@ -401,7 +401,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
 
     [NSTimer scheduledTimerWithTimeInterval:1.0 target:self selector:@selector(watchdogTick:) userInfo:nil repeats:YES];
 
-    RBLogEvent(@"application", @"info", @{@"protocol": RBNativeVersion ?: @""}, @"Browser interface loaded");
+    RBLogEvent(@"application", @"info", @{@"compatibility": RBCompatibilityVersion ?: @""}, @"Browser interface loaded");
 }
 
 - (void)applyAppearance {
@@ -726,6 +726,12 @@ static CGFloat RBEvenExtent(CGFloat value) {
     self.currentServer = normalized;
     [RBServerStore saveServer:normalized select:YES];
     [self leaveVideoMode];
+    if (self.updateAlert) {
+        self.updateAlert.delegate = nil;
+        [self.updateAlert dismissWithClickedButtonIndex:self.updateAlert.cancelButtonIndex animated:NO];
+        self.updateAlert = nil;
+    }
+    self.pendingClientUpdate = nil;
     RBSession *oldSession = self.session;
     oldSession.delegate = nil;
     [oldSession shutdown];
@@ -749,6 +755,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
     settings.delegate = self;
     settings.connected = self.session.state == RBSessionStateOpen;
     settings.diagnosticsVisible = self.debugVisible;
+    settings.availableClientUpdate = self.pendingClientUpdate;
     self.settingsController = settings;
     UINavigationController *nav = [[RBModalNavigationController alloc] initWithRootViewController:settings];
     nav.modalPresentationStyle = RBIsPad() ? UIModalPresentationFormSheet : UIModalPresentationFullScreen;
@@ -822,6 +829,25 @@ static CGFloat RBEvenExtent(CGFloat value) {
         [self setDebugVisible:YES];
         self.diagnosticsOverlay.displayMode = RBDiagnosticsOverlayExpanded;
         [self layoutDiagnosticsOverlayAnimated:YES];
+    }];
+}
+
+- (void)settingsWantsClientUpdate:(RBSettingsController *)settings {
+    NSDictionary *update = settings.availableClientUpdate;
+    if (!update || self.updateAlert) return;
+    self.pendingClientUpdate = update;
+    self.settingsController = nil;
+    self.serversController = nil;
+    self.modalNavigationController = nil;
+    [self dismissViewControllerAnimated:YES completion:^{
+        double megabytes = [[update objectForKey:@"size"] doubleValue] / (1024.0 * 1024.0);
+        NSString *message = [NSString stringWithFormat:@"Surf %@ is available for this iPad (%0.1f MB).",
+                             [update objectForKey:@"version"] ?: @"?", megabytes];
+        self.updateAlert = [[UIAlertView alloc] initWithTitle:@"Surf Update Available"
+                                                      message:message delegate:self
+                                            cancelButtonTitle:@"Not Now"
+                                            otherButtonTitles:@"Update", nil];
+        [self.updateAlert show];
     }];
 }
 
@@ -967,6 +993,7 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
 
 - (void)sessionDidAuthenticate:(RBSession *)session {
     if (session != self.session) return;
+    self.pendingClientUpdate = session.availableClientUpdate;
     NSMutableDictionary *updated = [self.currentServer mutableCopy];
     [updated setObject:[NSDate date] forKey:@"lastConnected"];
     self.currentServer = updated;
@@ -1003,8 +1030,8 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
     self.pendingClientUpdate = update;
     double megabytes = [[update objectForKey:@"size"] doubleValue] / (1024.0 * 1024.0);
     NSString *message = [NSString stringWithFormat:
-                         @"This server requires Surf %@ (%0.1f MB).",
-                         [update objectForKey:@"version"] ?: @"?", megabytes];
+                         @"This iPad has Surf %@. Update to Surf %@ (%0.1f MB) to connect.",
+                         RBAppVersion, [update objectForKey:@"version"] ?: @"?", megabytes];
     self.updateAlert = [[UIAlertView alloc] initWithTitle:@"Surf Update Required"
                                                   message:message delegate:self
                                         cancelButtonTitle:@"Cancel"
@@ -2931,7 +2958,7 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
     if (server.length == 0) server = @"Surf";
     RBDiagnosticsSnapshot *snapshot = [self.diagnostics overlaySnapshotForServer:server
                                                                           version:RBAppVersion
-                                                                         protocol:RBNativeVersion
+                                                                    compatibility:RBCompatibilityVersion
                                                                            stream:lane
                                                                             state:state
                                                                           latency:self.session.interactionTracker.lastInteractionToPresentMS

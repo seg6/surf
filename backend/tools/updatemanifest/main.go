@@ -31,13 +31,13 @@ var requiredPackages = []string{
 
 func main() {
 	if len(os.Args) != 6 {
-		fmt.Fprintln(os.Stderr, "usage: updatemanifest ASSET_DIR CLIENT_DEB VERSION PROTOCOL OUTPUT")
+		fmt.Fprintln(os.Stderr, "usage: updatemanifest ASSET_DIR CLIENT_DEB VERSION COMPATIBILITY OUTPUT")
 		os.Exit(2)
 	}
-	directory, clientPath, version, protocol, output := os.Args[1], os.Args[2], os.Args[3], os.Args[4], os.Args[5]
+	directory, clientPath, version, compatibility, output := os.Args[1], os.Args[2], os.Args[3], os.Args[4], os.Args[5]
 	base := "https://github.com/seg6/surf/releases/download/v" + version + "/"
 	manifest := updater.Manifest{
-		Schema: 1, Version: version, Protocol: protocol,
+		Schema: 1, Version: version, Compatibility: compatibility,
 		Assets: map[string]updater.Asset{}, Packages: map[string]updater.Asset{},
 	}
 	entries, err := os.ReadDir(directory)
@@ -54,7 +54,7 @@ func main() {
 		}
 	}
 	client := inspect(clientPath, base)
-	manifest.Client = &updater.ClientAsset{Asset: client, Protocol: protocol}
+	manifest.Client = &updater.ClientAsset{Asset: client, Compatibility: compatibility}
 	check(requirePlatforms("Surf archives", manifest.Assets, requiredArchives))
 	check(requirePlatforms("Surf desktop packages", manifest.Packages, requiredPackages))
 	data, err := json.MarshalIndent(manifest, "", "  ")

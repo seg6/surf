@@ -1,7 +1,7 @@
 .PHONY: test surf-binary surf-dist surf-release-dist native-sdk native-package
 
 VERSION := $(shell tr -d '[:space:]' < VERSION)
-PROTOCOL_VERSION := $(shell tr -d '[:space:]' < PROTOCOL_VERSION)
+COMPATIBILITY_VERSION := $(shell tr -d '[:space:]' < COMPATIBILITY_VERSION)
 SURF_GOOS ?= $(shell go env GOOS)
 SURF_GOARCH ?= $(shell go env GOARCH)
 # Local rebuilds retain client updating whenever a package for the exact Surf
@@ -27,6 +27,10 @@ surf-binary:
 	if [ -n "$(CLIENT_DEB)" ]; then \
 		test -f "$(CLIENT_DEB)"; \
 		cp "$(CLIENT_DEB)" backend/internal/web/client/client.deb; \
+		cd backend && go run ./tools/clientbundlemeta \
+			--deb "../$(CLIENT_DEB)" --version "$(VERSION)" \
+			--compatibility "$(COMPATIBILITY_VERSION)" \
+			--output internal/web/client/client.json; \
 	fi
 	if [ "$(SURF_GOOS)" = "windows" ]; then \
 		cd backend/cmd/surf && go run github.com/tc-hib/go-winres@v0.3.1 simply \
@@ -37,7 +41,7 @@ surf-binary:
 	fi
 	cd backend && $(SURF_CGO_ENV) GOOS=$(SURF_GOOS) GOARCH=$(SURF_GOARCH) go build -trimpath \
 		$(if $(CLIENT_DEB),-tags=client_bundle) \
-		-ldflags="-s -w $(if $(filter windows,$(SURF_GOOS)),-H=windowsgui) -X surf-backend/internal/config.AppVersion=$(VERSION) -X surf-backend/internal/config.NativeVersion=$(PROTOCOL_VERSION)" \
+		-ldflags="-s -w $(if $(filter windows,$(SURF_GOOS)),-H=windowsgui) -X surf-backend/internal/config.AppVersion=$(VERSION) -X surf-backend/internal/config.CompatibilityVersion=$(COMPATIBILITY_VERSION)" \
 		-o "$(SURF_EXE)" ./cmd/surf
 
 surf-dist: surf-binary

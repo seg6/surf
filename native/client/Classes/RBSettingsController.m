@@ -33,7 +33,8 @@ enum {
 
 enum {
     RBSettingsAboutClientRow = 0,
-    RBSettingsAboutProtocolRow,
+    RBSettingsAboutCompatibilityRow,
+    RBSettingsAboutUpdateRow,
     RBSettingsAboutLicensesRow
 };
 
@@ -260,6 +261,7 @@ static const CGFloat kRBSettingsRowHeight = 66.0;
     if (section == RBSettingsAppearanceSection) {
         return UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad ? 2 : 1;
     }
+    if (section == RBSettingsAboutSection) return 4;
     return 3;
 }
 
@@ -438,10 +440,26 @@ static const CGFloat kRBSettingsRowHeight = 66.0;
         cell = [self cellWithIdentifier:@"about" title:@"Surf Client" detail:RBAppVersion
                                   icon:RBIconGear iconColor:accent enabled:YES];
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    } else if (row == RBSettingsAboutProtocolRow) {
-        cell = [self cellWithIdentifier:@"about" title:@"Native Protocol" detail:RBNativeVersion
+    } else if (row == RBSettingsAboutCompatibilityRow) {
+        cell = [self cellWithIdentifier:@"about" title:@"Compatibility" detail:RBCompatibilityVersion
                                   icon:RBIconServer iconColor:accent enabled:YES];
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    } else if (row == RBSettingsAboutUpdateRow) {
+        NSDictionary *update = self.availableClientUpdate;
+        if (update) {
+            double megabytes = [[update objectForKey:@"size"] doubleValue] / (1024.0 * 1024.0);
+            cell = [self cellWithIdentifier:@"action"
+                                      title:[NSString stringWithFormat:@"Update to Surf %@",
+                                             [update objectForKey:@"version"] ?: @"?"]
+                                     detail:[NSString stringWithFormat:@"Optional client update · %0.1f MB", megabytes]
+                                       icon:RBIconDownload iconColor:accent enabled:YES];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else {
+            cell = [self cellWithIdentifier:@"about" title:@"Client Updates"
+                                     detail:[NSString stringWithFormat:@"Surf %@ is current", RBAppVersion]
+                                       icon:RBIconDownload iconColor:accent enabled:YES];
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        }
     } else {
         cell = [self cellWithIdentifier:@"action" title:@"Third-Party Licenses"
             detail:@"Deta Surf artwork and Lucide icons" icon:RBIconBook
@@ -460,7 +478,8 @@ static const CGFloat kRBSettingsRowHeight = 66.0;
         indexPath.row == RBSettingsPerformanceOverlayRow) return nil;
     if (indexPath.section == RBSettingsDataSection && !self.connected) return nil;
     if (indexPath.section == RBSettingsAboutSection &&
-        indexPath.row != RBSettingsAboutLicensesRow) return nil;
+        indexPath.row != RBSettingsAboutLicensesRow &&
+        !(indexPath.row == RBSettingsAboutUpdateRow && self.availableClientUpdate)) return nil;
     return indexPath;
 }
 
@@ -495,6 +514,13 @@ static const CGFloat kRBSettingsRowHeight = 66.0;
     }
     if (indexPath.section == RBSettingsDataSection) {
         [self requestClearDataAtRow:indexPath.row];
+        return;
+    }
+    if (indexPath.section == RBSettingsAboutSection &&
+        indexPath.row == RBSettingsAboutUpdateRow && self.availableClientUpdate) {
+        if ([self.delegate respondsToSelector:@selector(settingsWantsClientUpdate:)]) {
+            [self.delegate settingsWantsClientUpdate:self];
+        }
         return;
     }
     if (indexPath.section == RBSettingsAboutSection &&

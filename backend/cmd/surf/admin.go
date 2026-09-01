@@ -21,6 +21,7 @@ import (
 
 	"surf-backend/internal/auth"
 	"surf-backend/internal/clipboard"
+	"surf-backend/internal/config"
 	"surf-backend/internal/control"
 	"surf-backend/internal/logstore"
 	"surf-backend/internal/web"
@@ -121,10 +122,11 @@ func runStatusCommand() error {
 		return err
 	}
 	var server struct {
-		Name     string `json:"name"`
-		ServerID string `json:"serverID"`
-		Protocol string `json:"protocol"`
-		Version  string `json:"version"`
+		Name                string `json:"name"`
+		ServerID            string `json:"serverID"`
+		Compatibility       int    `json:"compatibilityVersion"`
+		LegacyCompatibility string `json:"protocol"`
+		Version             string `json:"version"`
 	}
 	if err := admin.request(http.MethodGet, web.APIRoot+"/server", nil, &server); err != nil {
 		return err
@@ -139,9 +141,52 @@ func runStatusCommand() error {
 	fmt.Printf("Name: %s\n", terminalText(server.Name))
 	fmt.Printf("PID: %d\n", admin.descriptor.PID)
 	fmt.Printf("Port: %d\n", admin.descriptor.PublicPort)
-	fmt.Printf("Version: %s\nProtocol: %s\n", server.Version, server.Protocol)
+	compatibility := server.LegacyCompatibility
+	if server.Compatibility > 0 {
+		compatibility = fmt.Sprint(server.Compatibility)
+	} else if generation, ok := config.ParseClientCompatibility("", server.LegacyCompatibility); ok {
+		compatibility = fmt.Sprint(generation)
+	}
+	if compatibility == "" {
+		compatibility = "unknown"
+	}
+	fmt.Printf("Version: %s\nCompatibility: %s\n", server.Version, compatibility)
 	fmt.Printf("Server ID: %s\n", server.ServerID)
 	fmt.Printf("Paired devices: %d\n", len(devices.Devices))
+	return nil
+}
+
+func runQuitCommand() error {
+	home, err := surfHome()
+	if err != nil {
+		return err
+	}
+	lock, primary, err := acquireDesktopInstance(home)
+	if err != nil {
+		return err
+	}
+	if !primary {
+		if err := quitDesktopInstance(home); err != nil {
+			return err
+		}
+		fmt.Println("Surf is closing.")
+		return nil
+	}
+	if err := lock.Close(); err != nil {
+		return err
+	}
+	admin, err := newLocalAdmin()
+	if errors.Is(err, control.ErrNotRunning) {
+		fmt.Println("Surf is not running.")
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := admin.request(http.MethodPost, web.APIRoot+"/admin/shutdown", nil, nil); err != nil {
+		return err
+	}
+	fmt.Println("Surf is closing.")
 	return nil
 }
 

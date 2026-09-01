@@ -8,13 +8,53 @@ import (
 	"strings"
 )
 
-// NativeVersion gates the WS handshake: the Surf app and the server must agree,
-// so a stale client can never talk a mismatched protocol. Release builds inject
-// this from PROTOCOL_VERSION with Go linker flags.
-var NativeVersion = "dev"
+// CompatibilityVersion is an ordered generation shared by the Surf backend
+// and native client. Release versions may differ while this value remains the
+// same; increment it only when the older side must not connect.
+//
+// Release builds inject this from COMPATIBILITY_VERSION with Go linker flags.
+var CompatibilityVersion = "1"
 
 // AppVersion is injected from VERSION in release builds.
 var AppVersion = "dev"
+
+// The published 0.15.4 client predates the ordered compatibility field and
+// identifies generation 1 with this opaque native-protocol token. Keep the
+// alias on the wire while generation 1 is supported so old and new builds can
+// connect in both directions.
+const legacyCompatibilityOne = "20260831-1"
+
+func CompatibilityGeneration() int {
+	value, err := strconv.Atoi(CompatibilityVersion)
+	if err != nil || value < 1 {
+		return 0
+	}
+	return value
+}
+
+func WireCompatibilityVersion() string {
+	if CompatibilityGeneration() == 1 {
+		return legacyCompatibilityOne
+	}
+	return CompatibilityVersion
+}
+
+// ParseClientCompatibility accepts the ordered generation used by new clients
+// and the one legacy token shipped in Surf 0.15.4.
+func ParseClientCompatibility(value, legacy string) (int, bool) {
+	if value != "" {
+		generation, err := strconv.Atoi(value)
+		return generation, err == nil && generation > 0
+	}
+	if legacy == legacyCompatibilityOne {
+		return 1, true
+	}
+	if legacy != "" {
+		generation, err := strconv.Atoi(legacy)
+		return generation, err == nil && generation > 0
+	}
+	return 0, false
+}
 
 // Caps enumerates optional server capabilities for /api/v1/config. The client
 // feature-gates on these instead of parsing version strings, so server and app

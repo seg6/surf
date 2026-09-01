@@ -23,6 +23,7 @@ static NSString *RBURLEscape(NSString *s);
 @property(nonatomic, assign) NSUInteger generation;
 @property(nonatomic, strong, readwrite) RBInteractionTracker *interactionTracker;
 @property(nonatomic, strong) NSDictionary *requiredClientUpdate;
+@property(nonatomic, strong, readwrite) NSDictionary *availableClientUpdate;
 @property(nonatomic, copy) NSString *requiredServerVersion;
 @property(nonatomic, assign, readwrite) BOOL requiresPairing;
 @property(nonatomic, assign) unsigned long long touchSequence;
@@ -70,6 +71,7 @@ static NSString *RBURLEscape(NSString *s);
     self.socketOpen = NO;
     self.active = YES;
     self.requiredClientUpdate = nil;
+    self.availableClientUpdate = nil;
     self.requiredServerVersion = nil;
     self.requiresPairing = NO;
     [self moveToState:RBSessionStateConnecting];
@@ -236,8 +238,9 @@ static NSString *RBURLEscape(NSString *s);
 }
 
 - (BOOL)fetchNativeConfig:(NSString **)error {
-    NSString *path = [NSString stringWithFormat:@"/api/v1/config?av=%@&nv=%@",
-                      RBURLEscape(RBAppVersion), RBURLEscape(RBNativeVersion)];
+    NSString *path = [NSString stringWithFormat:@"/api/v1/config?av=%@&cv=%@&nv=%@",
+                      RBURLEscape(RBAppVersion), RBURLEscape(RBCompatibilityVersion),
+                      RBURLEscape(RBWireCompatibilityVersion())];
     NSDictionary *json = [self sendJSONPath:path method:@"GET" body:nil status:nil error:error];
     if (!json) return NO;
     self.wsTicket = [json objectForKey:@"ticket"];
@@ -248,6 +251,8 @@ static NSString *RBURLEscape(NSString *s);
         self.viewHeight = serverHeight;
     }
     NSString *nv = [json objectForKey:@"nv"];
+    NSInteger serverCompatibility = [[json objectForKey:@"compatibilityVersion"] integerValue];
+    if (serverCompatibility <= 0 && [nv isEqualToString:@"20260831-1"]) serverCompatibility = 1;
     NSString *compatibility = [json objectForKey:@"compatibility"];
     if ([compatibility isEqualToString:@"client-update-required"]) {
         NSDictionary *update = [json objectForKey:@"clientUpdate"];
@@ -260,11 +265,21 @@ static NSString *RBURLEscape(NSString *s);
         if (error) *error = @"This server must be updated";
         return NO;
     }
-    if (!self.wsTicket || ![nv isEqualToString:RBNativeVersion]) {
-        if (error) *error = [NSString stringWithFormat:@"version mismatch app=%@ server=%@", RBNativeVersion, nv ?: @"?"];
+    if (!self.wsTicket || serverCompatibility != [RBCompatibilityVersion integerValue]) {
+        if (error) *error = [NSString stringWithFormat:@"compatibility mismatch client=%@ server=%ld",
+                             RBCompatibilityVersion, (long)serverCompatibility];
         return NO;
     }
-    RBLogEvent(@"session", @"info", @{@"viewport_width": @(self.viewWidth), @"viewport_height": @(self.viewHeight), @"protocol": nv ?: @""}, @"Native configuration accepted");
+    NSDictionary *availableUpdate = [json objectForKey:@"clientUpdate"];
+    if ([availableUpdate isKindOfClass:[NSDictionary class]] &&
+        ![[availableUpdate objectForKey:@"required"] boolValue]) {
+        self.availableClientUpdate = availableUpdate;
+    }
+    RBLogEvent(@"session", @"info", @{@"viewport_width": @(self.viewWidth),
+               @"viewport_height": @(self.viewHeight),
+               @"compatibility": @(serverCompatibility),
+               @"server_version": [json objectForKey:@"version"] ?: @""},
+               @"Native configuration accepted");
     return YES;
 }
 
@@ -283,7 +298,9 @@ static NSString *RBURLEscape(NSString *s) {
     NSString *host = [self.baseURL host];
     NSInteger port = [[self.baseURL port] integerValue];
     if (port == 0) port = [[[self.baseURL scheme] lowercaseString] isEqualToString:@"https"] ? 443 : 80;
-    NSString *path = [NSString stringWithFormat:@"/api/v1/ws?ticket=%@&nv=%@", RBURLEscape(self.wsTicket ?: @""), RBURLEscape(RBNativeVersion)];
+    NSString *path = [NSString stringWithFormat:@"/api/v1/ws?ticket=%@&cv=%@&nv=%@",
+                      RBURLEscape(self.wsTicket ?: @""), RBURLEscape(RBCompatibilityVersion),
+                      RBURLEscape(RBWireCompatibilityVersion())];
     BOOL tunneled = [RBSecureHTTPClient endpoint:self.baseURLString usesTunnelInServer:self.server];
     if (tunneled) {
         self.socket = [[RBSocket alloc] initWithHost:host port:port path:path secure:YES

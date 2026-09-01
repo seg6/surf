@@ -389,6 +389,26 @@ func TestDesktopMutationGateAllowsAuthenticatedPut(t *testing.T) {
 	}
 }
 
+func TestManagementQuitRequiresDesktopMutationHeader(t *testing.T) {
+	app := &desktopApp{}
+	for _, authorized := range []bool{false, true} {
+		request := httptest.NewRequest(http.MethodPost, "/api/quit", nil)
+		request.RemoteAddr = "127.0.0.1:12345"
+		if authorized {
+			request.Header.Set("X-Surf-Desktop", "1")
+		}
+		response := httptest.NewRecorder()
+		app.managementHandler().ServeHTTP(response, request)
+		want := http.StatusForbidden
+		if authorized {
+			want = http.StatusAccepted
+		}
+		if response.Code != want {
+			t.Fatalf("authorized=%t code=%d want=%d", authorized, response.Code, want)
+		}
+	}
+}
+
 func testDaemonDescriptor(t *testing.T, home string, handler func(http.ResponseWriter, *http.Request, string)) (*httptest.Server, control.Descriptor) {
 	t.Helper()
 	wantToken := ""

@@ -5,6 +5,31 @@ import (
 	"testing"
 )
 
+func TestCompatibilityGenerationAcceptsPublishedLegacyToken(t *testing.T) {
+	original := CompatibilityVersion
+	defer func() { CompatibilityVersion = original }()
+	CompatibilityVersion = "1"
+	if CompatibilityGeneration() != 1 || WireCompatibilityVersion() != "20260831-1" {
+		t.Fatalf("generation=%d wire=%q", CompatibilityGeneration(), WireCompatibilityVersion())
+	}
+	for _, test := range []struct {
+		value, legacy string
+		want          int
+		ok            bool
+	}{
+		{"1", "", 1, true},
+		{"", "20260831-1", 1, true},
+		{"2", "20260831-1", 2, true},
+		{"", "unknown", 0, false},
+	} {
+		got, ok := ParseClientCompatibility(test.value, test.legacy)
+		if got != test.want || ok != test.ok {
+			t.Errorf("ParseClientCompatibility(%q, %q)=(%d,%t), want (%d,%t)",
+				test.value, test.legacy, got, ok, test.want, test.ok)
+		}
+	}
+}
+
 func clearConfigEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{

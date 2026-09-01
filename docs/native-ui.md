@@ -58,7 +58,7 @@ every derived PNG from the pinned master.
 Settings is a readable, single-column grouped list in both iPad form sheets and
 narrow iPhone layouts. Server, Appearance, Browsing, Performance, Data &
 Privacy, and About controls remain on the main page; descriptions may wrap and
-the Surf client and protocol versions are always visible. Dark Mode immediately
+the Surf client version and compatibility generation are always visible. Dark Mode immediately
 rethemes the live native interface and tells every current and future Chromium
 tab to advertise the standard `prefers-color-scheme: dark` preference. Sites
 which do not author a dark appearance are left unchanged.

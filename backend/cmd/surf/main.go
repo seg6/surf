@@ -59,6 +59,12 @@ func main() {
 		} else {
 			err = runStatusCommand()
 		}
+	case "quit":
+		if len(args) != 1 {
+			err = fmt.Errorf("usage: surf quit")
+		} else {
+			err = runQuitCommand()
+		}
 	case "doctor":
 		if len(args) != 1 {
 			err = fmt.Errorf("usage: surf doctor")
@@ -76,7 +82,7 @@ func main() {
 			err = fmt.Errorf("usage: surf version")
 			break
 		}
-		fmt.Printf("surf %s\nprotocol %s\n", config.AppVersion, config.NativeVersion)
+		fmt.Printf("surf %s\ncompatibility %s\n", config.AppVersion, config.CompatibilityVersion)
 		return
 	case "pair":
 		if len(args) != 1 {
@@ -91,7 +97,7 @@ func main() {
 	case "clipboard":
 		err = runClipboardCommand(args[1:])
 	default:
-		fmt.Fprintln(os.Stderr, "Usage: surf [--home PATH] [serve|status|pair|devices|clipboard|logs|doctor|update|version]")
+		fmt.Fprintln(os.Stderr, "Usage: surf [--home PATH] [serve|status|quit|pair|devices|clipboard|logs|doctor|update|version]")
 		err = fmt.Errorf("unknown command %q", args[0])
 	}
 	if err != nil {

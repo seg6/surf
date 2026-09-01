@@ -8,7 +8,7 @@
 @interface RBDiagnosticsSnapshot ()
 @property(nonatomic, readwrite, copy) NSString *server;
 @property(nonatomic, readwrite, copy) NSString *version;
-@property(nonatomic, readwrite, copy) NSString *protocolVersion;
+@property(nonatomic, readwrite, copy) NSString *compatibilityVersion;
 @property(nonatomic, readwrite, copy) NSString *streamState;
 @property(nonatomic, readwrite, copy) NSString *state;
 @property(nonatomic, readwrite, assign) RBDiagnosticsHealth health;
@@ -242,7 +242,7 @@ static NSUInteger RBMetricDelta(NSUInteger current, NSUInteger previous) {
 
 - (RBDiagnosticsSnapshot *)overlaySnapshotForServer:(NSString *)server
                                             version:(NSString *)version
-                                           protocol:(NSString *)protocolVersion
+                                      compatibility:(NSString *)compatibilityVersion
                                              stream:(NSString *)streamState
                                               state:(NSString *)state
                                             latency:(double)latency
@@ -276,7 +276,7 @@ static NSUInteger RBMetricDelta(NSUInteger current, NSUInteger previous) {
     RBDiagnosticsSnapshot *snapshot = [[RBDiagnosticsSnapshot alloc] init];
     snapshot.server = server ?: @"Surf";
     snapshot.version = version ?: @"";
-    snapshot.protocolVersion = protocolVersion ?: @"";
+    snapshot.compatibilityVersion = compatibilityVersion ?: @"";
     snapshot.streamState = streamState ?: @"";
     snapshot.state = state ?: @"idle";
     snapshot.rendererMode = self.pipeline.rendererMode;

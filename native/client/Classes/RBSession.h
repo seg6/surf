@@ -35,6 +35,7 @@ typedef enum {
 // (for example after it was revoked). The saved server is still trustworthy;
 // it only needs a fresh pairing approval.
 @property(nonatomic, readonly) BOOL requiresPairing;
+@property(nonatomic, readonly) NSDictionary *availableClientUpdate;
 
 - (id)initWithServer:(NSDictionary *)server;
 - (void)start;

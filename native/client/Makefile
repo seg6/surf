@@ -1,8 +1,8 @@
 SDK_DROP := $(abspath $(CURDIR)/../buildenv/sdk)
 REPO_ROOT := $(abspath $(CURDIR)/../..)
 VERSION := $(shell tr -d '[:space:]' < $(REPO_ROOT)/VERSION)
-PROTOCOL_VERSION := $(shell tr -d '[:space:]' < $(REPO_ROOT)/PROTOCOL_VERSION)
-$(shell cd $(CURDIR) && VERSION='$(VERSION)' PROTOCOL_VERSION='$(PROTOCOL_VERSION)' ./render-versioned-files.sh >/dev/null)
+COMPATIBILITY_VERSION := $(shell tr -d '[:space:]' < $(REPO_ROOT)/COMPATIBILITY_VERSION)
+$(shell cd $(CURDIR) && VERSION='$(VERSION)' COMPATIBILITY_VERSION='$(COMPATIBILITY_VERSION)' ./render-versioned-files.sh >/dev/null)
 
 ifeq ($(wildcard $(SDK_DROP)/iPhoneOS8.0.sdk),)
 $(error Missing $(SDK_DROP)/iPhoneOS8.0.sdk. Run native/buildenv/fetch-sdk.sh or see docs/native-build.md)
@@ -20,7 +20,7 @@ TOOL_NAME := surf-update-v2
 Surf_FILES := $(wildcard Classes/*.m) $(wildcard Classes/*.c) $(wildcard Classes/quirc/*.c)
 # VideoToolbox is intentionally absent: private on iOS 6, resolved via dlopen.
 Surf_FRAMEWORKS := UIKit CoreGraphics QuartzCore ImageIO Security CFNetwork AudioToolbox CoreMedia CoreVideo OpenGLES MessageUI AVFoundation
-Surf_CFLAGS := -fobjc-arc -Wall -Werror=return-type -Wno-deprecated-declarations -DRBAppVersion='@"$(VERSION)"' -DRBNativeVersion='@"$(PROTOCOL_VERSION)"'
+Surf_CFLAGS := -fobjc-arc -Wall -Werror=return-type -Wno-deprecated-declarations -DRBAppVersion='@"$(VERSION)"' -DRBCompatibilityVersion='@"$(COMPATIBILITY_VERSION)"'
 Surf_CODESIGN_FLAGS := -SResources/Surf.entitlements
 surf-update-v2_FILES := Updater/main.c
 surf-update-v2_INSTALL_PATH := /usr/libexec

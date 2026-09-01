@@ -15,7 +15,7 @@ typedef enum {
 @interface RBDiagnosticsSnapshot : NSObject
 @property(nonatomic, readonly, copy) NSString *server;
 @property(nonatomic, readonly, copy) NSString *version;
-@property(nonatomic, readonly, copy) NSString *protocolVersion;
+@property(nonatomic, readonly, copy) NSString *compatibilityVersion;
 @property(nonatomic, readonly, copy) NSString *streamState;
 @property(nonatomic, readonly, copy) NSString *state;
 @property(nonatomic, readonly, assign) RBDiagnosticsHealth health;
@@ -87,7 +87,7 @@ typedef enum {
 - (RBDiagnosticsReport *)reportAtTime:(CFTimeInterval)now age:(double)age;
 - (RBDiagnosticsSnapshot *)overlaySnapshotForServer:(NSString *)server
                                             version:(NSString *)version
-                                           protocol:(NSString *)protocolVersion
+                                      compatibility:(NSString *)compatibilityVersion
                                              stream:(NSString *)streamState
                                               state:(NSString *)state
                                             latency:(double)latency

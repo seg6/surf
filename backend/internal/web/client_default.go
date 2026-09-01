@@ -2,4 +2,5 @@
 
 package web
 
-func embeddedPackage() []byte { return nil }
+func embeddedPackage() []byte         { return nil }
+func embeddedPackageMetadata() []byte { return nil }

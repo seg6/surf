@@ -16,6 +16,7 @@ terminal:
 ./surf serve
 ./surf status
 ./surf pair
+./surf quit
 ```
 
 Pairing is closed by default. The desktop button or `surf pair` creates one
@@ -307,8 +308,12 @@ Editable focus is event-driven. A runtime binding listens to `focusin` and
 `focusout`, follows the active element through open shadow roots, and tells the
 client when to show its native keyboard. Plain insertions use Chromium text
 insertion; marked iOS text uses IME composition update/commit/cancel messages.
-The protocol is gated by the exact value in `PROTOCOL_VERSION`; obsolete input
-commands are not accepted.
+Client/backend compatibility is an ordered generation in
+`COMPATIBILITY_VERSION`. Releases in the same generation connect normally even
+when their Surf versions differ. If the iPad is older, the backend offers its
+verified embedded client package. If the iPad is newer, Surf asks for a backend
+update instead of downgrading the device. Increment the generation only for a
+wire change that cannot safely interoperate with the preceding generation.
 
 Surf does not distribute Widevine. A working CDM supplied by the selected host
 browser may be used, subject to each service's DRM and output-protection rules.
@@ -320,5 +325,8 @@ On Windows, the installer closes the installed Surf process tree before
 replacing the executable and starts the new version after a silent update.
 The native `.deb` update travels over its already authenticated, pinned Surf
 connection and is verified again before the privileged installer applies it.
+Both are in-place updates: uninstalling Surf or deleting `SURF_HOME` is neither
+required nor recommended, because doing so discards browser state or pairing
+identity without improving compatibility.
 See [Security](security.md#updates) for what that protects and which host trust
 boundary remains.

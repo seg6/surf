@@ -71,10 +71,12 @@ func New(cfg *config.Config, manager *auth.Manager, ident *identity.Identity, hu
 	}
 	hub.SetAuxHandler(s.handleAuxCommand)
 	hub.SetConnectHandler(s.handleClientConnected)
-	if client := embeddedClientPackage(); client != nil {
+	if client, err := embeddedClientPackage(); err != nil {
+		log.Printf("updates: embedded iOS client disabled: %v", err)
+	} else if client != nil {
 		s.client = client
 		s.extra[APIRoot+"/updates/client"] = client.ServeHTTP
-		log.Printf("updates: embedded iOS client %s protocol %s (%d bytes)", client.Version, client.Protocol, len(client.Data))
+		log.Printf("updates: embedded iOS client %s compatibility %d (%d bytes)", client.Version, client.Compatibility, len(client.Data))
 	}
 	return s
 }
@@ -217,7 +219,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleServerInfo(w http.ResponseWriter, r *http.Request) {
 	info := map[string]any{
 		"api": "v1", "name": s.cfg.ServerName, "serverID": s.identity.Fingerprint,
-		"fingerprint": s.identity.Fingerprint, "protocol": config.NativeVersion, "version": config.AppVersion,
+		"fingerprint": s.identity.Fingerprint, "protocol": config.WireCompatibilityVersion(),
+		"compatibilityVersion": config.CompatibilityGeneration(), "version": config.AppVersion,
 		"pairing": s.auth.PairingAvailable(),
 	}
 	host := strings.ToLower(r.Host)
@@ -361,38 +364,57 @@ func (s *Server) handleAuthComplete(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	deviceID, ok := s.auth.VerifyWSTicket(query.Get("ticket"))
-	if !ok || query.Get("nv") != config.NativeVersion {
-		log.Printf("ws rejected: bad ticket or version nv=%q from %s", query.Get("nv"), r.RemoteAddr)
+	clientCompatibility, versionOK := config.ParseClientCompatibility(query.Get("cv"), query.Get("nv"))
+	if !ok || !versionOK || clientCompatibility != config.CompatibilityGeneration() {
+		log.Printf("ws rejected: bad ticket or compatibility client=%d cv=%q nv=%q server=%s from %s",
+			clientCompatibility, query.Get("cv"), query.Get("nv"), config.CompatibilityVersion, r.RemoteAddr)
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	log.Printf("ws connected device=%s nv=%s from %s", shortID(deviceID), query.Get("nv"), r.RemoteAddr)
+	log.Printf("ws connected device=%s compatibility=%d from %s", shortID(deviceID), clientCompatibility, r.RemoteAddr)
 	s.hub.ServeHTTPForDevice(w, r, deviceID)
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request, deviceID string) {
 	clientVersion := r.URL.Query().Get("av")
-	clientProtocol := r.URL.Query().Get("nv")
+	clientCompatibility, suppliedCompatibility := config.ParseClientCompatibility(
+		r.URL.Query().Get("cv"), r.URL.Query().Get("nv"))
+	serverCompatibility := config.CompatibilityGeneration()
 	compatibility := "compatible"
 	var update map[string]any
-	if clientVersion != "" && s.client != nil && s.client.Protocol == config.NativeVersion && updater.CompareVersions(s.client.Version, clientVersion) > 0 {
-		compatibility = "client-update-required"
-		update = map[string]any{
-			"version": s.client.Version, "protocol": s.client.Protocol,
-			"size": len(s.client.Data), "sha256": s.client.SHA256,
-			"url": APIRoot + "/updates/client",
+	if !suppliedCompatibility || clientCompatibility < serverCompatibility {
+		if s.client != nil && s.client.Compatibility == serverCompatibility {
+			compatibility = "client-update-required"
+			update = s.client.updatePayload(true)
+		} else {
+			// A release backend must carry its matching client. If it does not,
+			// the server is the component that needs repair; never advertise a
+			// package from another generation.
+			compatibility = "server-update-required"
 		}
-	} else if clientProtocol != "" && clientProtocol != config.NativeVersion {
+	} else if suppliedCompatibility && clientCompatibility > serverCompatibility {
 		compatibility = "server-update-required"
+	} else if clientVersion != "" && s.client != nil &&
+		s.client.Compatibility == serverCompatibility &&
+		updater.CompareVersions(s.client.Version, clientVersion) > 0 {
+		update = s.client.updatePayload(false)
 	}
 	response := map[string]any{
 		"ticket": s.auth.WSTicket(deviceID), "vw": s.cfg.ViewW, "vh": s.cfg.ViewH,
-		"nv": config.NativeVersion, "version": config.AppVersion, "host": r.Host,
+		"nv": config.WireCompatibilityVersion(), "compatibilityVersion": serverCompatibility,
+		"version": config.AppVersion, "host": r.Host,
 		"caps": config.Caps, "compatibility": compatibility,
 	}
 	if update != nil {
 		response["clientUpdate"] = update
 	}
+	embeddedVersion, embeddedCompatibility := "none", 0
+	if s.client != nil {
+		embeddedVersion, embeddedCompatibility = s.client.Version, s.client.Compatibility
+	}
+	log.Printf("compatibility: device=%s client=%q generation=%d supplied=%t server=%s generation=%d embedded=%s generation=%d decision=%s",
+		shortID(deviceID), clientVersion, clientCompatibility, suppliedCompatibility,
+		config.AppVersion, serverCompatibility, embeddedVersion, embeddedCompatibility, compatibility)
 	writeJSON(w, http.StatusOK, response)
 }
 

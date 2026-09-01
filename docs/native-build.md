@@ -67,17 +67,23 @@ docker run --rm --network host -v $repoMount surf-buildenv bash -c `
   'make -C /src/native/client clean package DEBUG=0 && bash /src/native/client/verify-package.sh'
 ```
 
-`make native-package` renders generated native metadata from `VERSION`, compiles
-the native protocol gate from `PROTOCOL_VERSION`, and verifies the resulting
-package. Do not edit generated `native/client/control` or
+`make native-package` renders generated native metadata from `VERSION` and
+`COMPATIBILITY_VERSION`, then verifies the resulting package. Do not edit
+generated `native/client/control` or
 `native/client/Resources/Info.plist` by hand.
 
-For every physical-device test iteration, increment `VERSION` before packaging
-and increment `CFBundleVersion` in `Resources/Info.plist.in`. Theos package
-revisions such as `-2` are useful artifact identifiers, but they do not trigger
-Surf's in-app updater: the client and backend compare the app version from
-`VERSION`. Rebuild the backend with that exact new `.deb` embedded before
-reconnecting the device.
+Increment `VERSION` for every client release or physical-device test build. The
+render script derives an ordered `CFBundleVersion`, so it does not need a second
+manual edit. Theos package revisions such as `-2` identify a rebuilt artifact,
+but Surf's updater compares the app version from `VERSION`. Build the backend
+with that exact `.deb`: the build records and verifies its app version,
+compatibility generation, size, and SHA-256 hash before embedding it.
+
+Only increment `COMPATIBILITY_VERSION` when a client/backend wire change makes
+the previous generation impossible or unsafe to support. Patch releases within
+one compatibility generation connect normally. An older-generation client is
+offered the backend's matching embedded package; a newer-generation client asks
+for a backend update and is never automatically downgraded.
 
 ## Compatibility
 

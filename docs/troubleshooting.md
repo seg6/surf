@@ -61,7 +61,8 @@ Manual pairing also uses the six-word identity comparison.
 - Rotation and fullscreen reconfiguration should recover automatically. Use
   **Retry Video** only if that recovery ultimately reports video unavailable.
 - Check the desktop logs for Chromium capture or WebCodecs errors.
-- Make sure the client and backend have the same Surf/protocol release.
+- Compare the client and backend compatibility values in Settings and
+  `surf status`. Surf release versions may differ when compatibility matches.
 
 Surf's active-tab capture handles audio and video directly. Installing FFmpeg,
 PulseAudio, or a virtual audio device will not help this path.
@@ -75,8 +76,8 @@ leaves both states; Back and Forward are intentionally hidden in fullscreen.
 After rotation or a fullscreen change, the backend log should report the exact
 even-sized client surface and one settled tab-encoder resize. Intermediate
 orientation sizes are coalesced and must not close the WebSocket or require
-**Retry Video**. If the client reconnects, confirm the client and backend use
-the same protocol build, then collect both logs around the transition.
+**Retry Video**. If the client reconnects, confirm the client and backend report
+the same compatibility generation, then collect both logs around the transition.
 
 ## Widevine or streaming-site sign-in
 

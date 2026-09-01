@@ -23,6 +23,14 @@ func writeDesktopInstance(home, url string) error {
 }
 
 func activateDesktopInstance(home string) error {
+	return requestDesktopInstance(home, "/api/activate")
+}
+
+func quitDesktopInstance(home string) error {
+	return requestDesktopInstance(home, "/api/quit")
+}
+
+func requestDesktopInstance(home, path string) error {
 	data, err := os.ReadFile(filepath.Join(home, "desktop-instance.json"))
 	if err != nil {
 		return fmt.Errorf("Surf is already running")
@@ -32,13 +40,18 @@ func activateDesktopInstance(home string) error {
 		return errors.New("Surf is already running but its Settings address is unavailable")
 	}
 	client := &http.Client{Timeout: 3 * time.Second}
-	response, err := client.Post(instance.URL+"/api/activate", "text/plain", nil)
+	request, err := http.NewRequest(http.MethodPost, instance.URL+path, nil)
 	if err != nil {
-		return fmt.Errorf("activate running Surf: %w", err)
+		return err
+	}
+	request.Header.Set("X-Surf-Desktop", "1")
+	response, err := client.Do(request)
+	if err != nil {
+		return fmt.Errorf("contact running Surf: %w", err)
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("activate running Surf: HTTP %d", response.StatusCode)
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("contact running Surf: HTTP %d", response.StatusCode)
 	}
 	return nil
 }

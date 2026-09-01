@@ -196,7 +196,7 @@ func TestSignedAuthenticationEndpointsIssueUsableSession(t *testing.T) {
 	if complete.Code != http.StatusNoContent || len(complete.Result().Cookies()) != 1 {
 		t.Fatalf("complete = %d cookies=%d: %s", complete.Code, len(complete.Result().Cookies()), complete.Body.String())
 	}
-	request := httptest.NewRequest(http.MethodGet, APIRoot+"/config?nv="+config.NativeVersion, nil)
+	request := httptest.NewRequest(http.MethodGet, APIRoot+"/config?nv="+config.WireCompatibilityVersion(), nil)
 	request.AddCookie(complete.Result().Cookies()[0])
 	configured := httptest.NewRecorder()
 	server.Handler().ServeHTTP(configured, request)
@@ -314,7 +314,7 @@ func TestAdminClipboardDeliversAndWaitsForNativeAcknowledgement(t *testing.T) {
 	defer host.Close()
 	ticket := manager.WSTicket(deviceID)
 	wsURL := "ws" + strings.TrimPrefix(host.URL, "http") + APIRoot + "/ws?ticket=" +
-		url.QueryEscape(ticket) + "&nv=" + url.QueryEscape(config.NativeVersion)
+		url.QueryEscape(ticket) + "&nv=" + url.QueryEscape(config.WireCompatibilityVersion())
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -361,7 +361,7 @@ func TestClipboardSyncAcceptsDeviceChangesAndBroadcastsThem(t *testing.T) {
 	defer host.Close()
 	ticket := manager.WSTicket(deviceID)
 	wsURL := "ws" + strings.TrimPrefix(host.URL, "http") + APIRoot + "/ws?ticket=" +
-		url.QueryEscape(ticket) + "&nv=" + url.QueryEscape(config.NativeVersion)
+		url.QueryEscape(ticket) + "&nv=" + url.QueryEscape(config.WireCompatibilityVersion())
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -403,7 +403,7 @@ func TestDeviceLogRecordIsImmediatelyRetrievable(t *testing.T) {
 	defer host.Close()
 	ticket := manager.WSTicket(deviceID)
 	wsURL := "ws" + strings.TrimPrefix(host.URL, "http") + APIRoot + "/ws?ticket=" +
-		url.QueryEscape(ticket) + "&nv=" + url.QueryEscape(config.NativeVersion)
+		url.QueryEscape(ticket) + "&nv=" + url.QueryEscape(config.WireCompatibilityVersion())
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -602,7 +602,7 @@ func TestPairingAndAuthenticatedConfig(t *testing.T) {
 	}
 
 	cookie := pairedCookie(t, manager)
-	configRequest := httptest.NewRequest(http.MethodGet, APIRoot+"/config?av=0.10.0&nv="+config.NativeVersion, nil)
+	configRequest := httptest.NewRequest(http.MethodGet, APIRoot+"/config?av=0.10.0&nv="+config.WireCompatibilityVersion(), nil)
 	configRequest.AddCookie(cookie)
 	configured := httptest.NewRecorder()
 	server.Handler().ServeHTTP(configured, configRequest)
@@ -739,7 +739,8 @@ func TestFifthWrongPairingCodeMapsToTooManyRequests(t *testing.T) {
 
 func TestClientPackageRouteIsAuthenticatedAndVersioned(t *testing.T) {
 	server, manager := newTestServer(t)
-	server.setClientPackage(&clientPackage{Version: "0.10.0", Protocol: config.NativeVersion, Data: []byte("!<arch>\npackage")})
+	server.setClientPackage(&clientPackage{Version: "0.10.0", PackageVersion: "0.10.0-1",
+		Compatibility: config.CompatibilityGeneration(), Data: []byte("!<arch>\npackage")})
 	request := httptest.NewRequest(http.MethodGet, APIRoot+"/updates/client", nil)
 	unauthorized := httptest.NewRecorder()
 	server.Handler().ServeHTTP(unauthorized, request)
@@ -752,5 +753,81 @@ func TestClientPackageRouteIsAuthenticatedAndVersioned(t *testing.T) {
 	server.Handler().ServeHTTP(authorized, request)
 	if authorized.Code != http.StatusOK {
 		t.Fatalf("authorized update = %d", authorized.Code)
+	}
+}
+
+func TestCompatibilityDecisionsUseGenerationNotReleaseVersion(t *testing.T) {
+	originalVersion, originalCompatibility := config.AppVersion, config.CompatibilityVersion
+	defer func() {
+		config.AppVersion, config.CompatibilityVersion = originalVersion, originalCompatibility
+	}()
+	config.AppVersion, config.CompatibilityVersion = "0.16.0", "2"
+	server, manager := newTestServer(t)
+	server.setClientPackage(&clientPackage{
+		Version: "0.16.0", PackageVersion: "0.16.0-1", Compatibility: 2,
+		SHA256: strings.Repeat("a", 64), Data: []byte("!<arch>\npackage"),
+	})
+	cookie := pairedCookie(t, manager)
+
+	requestConfig := func(query string) map[string]any {
+		request := httptest.NewRequest(http.MethodGet, APIRoot+"/config?"+query, nil)
+		request.AddCookie(cookie)
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("config %q = %d: %s", query, response.Code, response.Body.String())
+		}
+		var body map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body
+	}
+
+	compatibleOlder := requestConfig("av=0.15.4&cv=2")
+	if compatibleOlder["compatibility"] != "compatible" {
+		t.Fatalf("same generation decision = %v", compatibleOlder)
+	}
+	optional, _ := compatibleOlder["clientUpdate"].(map[string]any)
+	if optional == nil || optional["required"] != false || optional["version"] != "0.16.0" {
+		t.Fatalf("optional update = %v", optional)
+	}
+
+	olderGeneration := requestConfig("av=0.15.4&cv=1")
+	required, _ := olderGeneration["clientUpdate"].(map[string]any)
+	if olderGeneration["compatibility"] != "client-update-required" ||
+		required == nil || required["required"] != true || required["compatibilityVersion"] != float64(2) {
+		t.Fatalf("older generation decision = %v", olderGeneration)
+	}
+
+	newerGeneration := requestConfig("av=0.17.0&cv=3")
+	if newerGeneration["compatibility"] != "server-update-required" || newerGeneration["clientUpdate"] != nil {
+		t.Fatalf("newer generation decision = %v", newerGeneration)
+	}
+
+	server.setClientPackage(nil)
+	missingGeneration := requestConfig("av=0.15.4")
+	if missingGeneration["compatibility"] != "server-update-required" || missingGeneration["clientUpdate"] != nil {
+		t.Fatalf("missing compatibility without embedded package = %v", missingGeneration)
+	}
+}
+
+func TestPublished0154CompatibilityTokenMapsToGenerationOne(t *testing.T) {
+	originalVersion, originalCompatibility := config.AppVersion, config.CompatibilityVersion
+	defer func() {
+		config.AppVersion, config.CompatibilityVersion = originalVersion, originalCompatibility
+	}()
+	config.AppVersion, config.CompatibilityVersion = "0.15.4", "1"
+	server, manager := newTestServer(t)
+	request := httptest.NewRequest(http.MethodGet,
+		APIRoot+"/config?av=0.15.3&nv="+url.QueryEscape("20260831-1"), nil)
+	request.AddCookie(pairedCookie(t, manager))
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	var body map[string]any
+	_ = json.Unmarshal(response.Body.Bytes(), &body)
+	if response.Code != http.StatusOK || body["compatibility"] != "compatible" ||
+		body["compatibilityVersion"] != float64(1) || body["nv"] != "20260831-1" {
+		t.Fatalf("legacy config = %d %v", response.Code, body)
 	}
 }

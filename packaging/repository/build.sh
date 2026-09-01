@@ -71,6 +71,12 @@ test "$(field Package)" = "space.seg6.surf"
 test "$(field Name)" = "Surf"
 test "$(field Architecture)" = "iphoneos-arm"
 test "$(field Version)" = "$package_version"
+compatibility_version="$(field X-Surf-Compatibility)"
+if [ -n "$compatibility_version" ] &&
+   { [[ ! "$compatibility_version" =~ ^[1-9][0-9]*$ ]]; }; then
+  echo "invalid package compatibility generation: $compatibility_version" >&2
+  exit 1
+fi
 
 mkdir -p "$output_dir"
 if find "$output_dir" -mindepth 1 -print -quit | grep -q .; then

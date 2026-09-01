@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VERSION="$(tr -d '[:space:]' < "$ROOT/../../VERSION")"
+COMPATIBILITY_VERSION="$(tr -d '[:space:]' < "$ROOT/../../COMPATIBILITY_VERSION")"
 LAST_PACKAGE="$ROOT/.theos/last_package"
 
 if [ ! -f "$LAST_PACKAGE" ]; then
@@ -26,6 +27,10 @@ if [ "$(dpkg-deb -f "$package" Package)" != "space.seg6.surf" ]; then
 fi
 if [ "$(dpkg-deb -f "$package" Architecture)" != "iphoneos-arm" ]; then
   echo "Unexpected package architecture in $package" >&2
+  exit 1
+fi
+if [ "$(dpkg-deb -f "$package" X-Surf-Compatibility)" != "$COMPATIBILITY_VERSION" ]; then
+  echo "Package compatibility does not match $COMPATIBILITY_VERSION" >&2
   exit 1
 fi
 package_version="$(dpkg-deb -f "$package" Version)"
@@ -114,6 +119,20 @@ esac
 plist="$tmp/Applications/Surf.app/Info.plist"
 plist_xml="$tmp/Info.xml"
 plistutil -i "$plist" -f xml -o "$plist_xml"
+core_version="${VERSION%%[-+]*}"
+IFS=. read -r major minor patch <<< "$core_version"
+bundle_version=$((10#$major * 1000000 + 10#$minor * 1000 + 10#$patch))
+if ! sed -n '/<key>CFBundleVersion<\/key>/{n;p;}' "$plist_xml" |
+     grep -Fq "<string>$bundle_version</string>"; then
+  echo "Info.plist bundle version does not match $bundle_version" >&2
+  exit 1
+fi
+if ! grep -A1 -q "<key>SurfCompatibilityVersion</key>.*" "$plist_xml" ||
+   ! sed -n '/<key>SurfCompatibilityVersion<\/key>/{n;p;}' "$plist_xml" |
+     grep -Fq "<integer>$COMPATIBILITY_VERSION</integer>"; then
+  echo "Info.plist compatibility does not match $COMPATIBILITY_VERSION" >&2
+  exit 1
+fi
 device_families="$(sed -n '/<key>UIDeviceFamily<\/key>/,/<\/array>/p' "$plist_xml")"
 phone_family_count="$(printf '%s\n' "$device_families" | grep -c '<integer>1</integer>' || true)"
 tablet_family_count="$(printf '%s\n' "$device_families" | grep -c '<integer>2</integer>' || true)"

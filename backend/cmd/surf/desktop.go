@@ -672,6 +672,14 @@ func (a *desktopApp) managementHandler() http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 		go a.openManagement("")
 	})
+	mux.HandleFunc("/api/quit", func(w http.ResponseWriter, r *http.Request) {
+		if !validDesktopMutation(r) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		go a.quitTray()
+	})
 	mux.HandleFunc("/settings", a.managementSettings)
 	proxy := &httputil.ReverseProxy{
 		Director: func(request *http.Request) {

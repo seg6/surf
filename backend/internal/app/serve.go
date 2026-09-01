@@ -135,7 +135,7 @@ func ServeContext(parent context.Context, ready chan<- control.Descriptor) error
 		return fmt.Errorf("listen for local control: %w", err)
 	}
 	defer controlListener.Close()
-	descriptor, err := control.New("https://"+controlListener.Addr().String(), ident.Fingerprint, config.NativeVersion, cfg.Port)
+	descriptor, err := control.New("https://"+controlListener.Addr().String(), ident.Fingerprint, config.CompatibilityVersion, cfg.Port)
 	if err != nil {
 		return err
 	}
@@ -162,7 +162,8 @@ func ServeContext(parent context.Context, ready chan<- control.Descriptor) error
 			port = value
 		}
 		ad, err := discovery.Register(cfg.ServerName, port,
-			[]string{"path=" + web.APIRoot, "proto=https", "api=v1", "id=" + ident.Fingerprint, "name=" + cfg.ServerName, "nv=" + config.NativeVersion})
+			[]string{"path=" + web.APIRoot, "proto=https", "api=v1", "id=" + ident.Fingerprint,
+				"name=" + cfg.ServerName, "nv=" + config.WireCompatibilityVersion(), "cv=" + config.CompatibilityVersion})
 		if err != nil {
 			log.Printf("bonjour advertise failed: %v", err)
 		} else {
