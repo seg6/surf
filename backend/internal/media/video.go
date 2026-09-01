@@ -154,12 +154,11 @@ func (s *VideoPipeline) Subscribe() *VideoSubscription {
 	}
 	if !s.running {
 		s.startLocked()
-	} else if time.Since(s.lastKeyframeReq) >= keyframeCooldown {
-		s.lastKeyframeReq = time.Now()
-		if s.cfg.Keyframe != nil {
-			s.cfg.Keyframe()
-		}
-		s.resetSubsForGenLocked()
+	} else {
+		// Every fresh subscriber begins behind an IDR dependency boundary. If
+		// another recovery request just consumed the rate limit, coalesce this
+		// one into the guaranteed timer rather than dropping it forever.
+		s.ensureKeyframeLocked(time.Now())
 	}
 	if _, exists := s.subs[sub]; exists {
 		sub.resetForGen(s.gen)
@@ -355,10 +354,13 @@ func (s *VideoPipeline) SetProfile(maxWidth, maxHeight, bitrateK, quantizer, fra
 func (s *VideoPipeline) RequestKeyframe() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.ensureKeyframeLocked(time.Now())
+}
+
+func (s *VideoPipeline) ensureKeyframeLocked(now time.Time) {
 	if !s.running {
 		return
 	}
-	now := time.Now()
 	remaining := keyframeCooldown - now.Sub(s.lastKeyframeReq)
 	if remaining > 0 {
 		// Recovery requests are coalesced, never discarded. With event-driven

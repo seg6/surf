@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -27,6 +27,7 @@ pub struct VideoSurface {
     latest_frame_age_us: AtomicU64,
     last_presentation_ns: AtomicU64,
     latest_presentation_gap_us: AtomicU64,
+    surface_generation: AtomicU32,
 }
 
 impl VideoSurface {
@@ -42,6 +43,7 @@ impl VideoSurface {
             latest_frame_age_us: AtomicU64::new(0),
             last_presentation_ns: AtomicU64::new(0),
             latest_presentation_gap_us: AtomicU64::new(0),
+            surface_generation: AtomicU32::new(0),
         })
     }
 
@@ -59,6 +61,7 @@ impl VideoSurface {
         self.last_presentation_ns.store(0, Ordering::Release);
         self.latest_presentation_gap_us.store(0, Ordering::Release);
         self.latest_frame_age_us.store(0, Ordering::Release);
+        self.surface_generation.store(0, Ordering::Release);
         if let Ok(mut pending) = self.pending.lock() {
             *pending = None;
         }
@@ -80,6 +83,10 @@ impl VideoSurface {
 
     pub fn latest_upload_us(&self) -> u64 {
         self.latest_upload_us.load(Ordering::Relaxed)
+    }
+
+    pub fn surface_generation(&self) -> u32 {
+        self.surface_generation.load(Ordering::Acquire)
     }
 
     pub fn diagnostics(&self) -> SurfaceDiagnostics {
@@ -147,6 +154,8 @@ impl VideoSurface {
                 presented_ns.saturating_sub(origin_ns) / 1_000,
                 Ordering::Relaxed,
             );
+            self.surface_generation
+                .store(frame.generation, Ordering::Release);
             uploaded = true;
         }
         unsafe { resources.draw(gl) };

@@ -100,6 +100,12 @@ fi
 (
   cd "$repository_root/client/desktop"
   SURF_CLIENT_HOME="$client_home" cargo run -q -p surf-session --example probe -- \
+    "127.0.0.1:$port" --expect-input
+)
+
+(
+  cd "$repository_root/client/desktop"
+  SURF_CLIENT_HOME="$client_home" cargo run -q -p surf-session --example probe -- \
     "127.0.0.1:$port" --expect-reconnect
 ) >"$reconnect_log" 2>&1 &
 reconnect_pid="$!"

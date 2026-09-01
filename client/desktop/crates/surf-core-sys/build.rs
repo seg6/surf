@@ -9,6 +9,7 @@ fn main() {
         "src/diagnostics.c",
         "src/frame.c",
         "src/h264.c",
+        "src/input.c",
         "src/media.c",
         "src/session.c",
     ];
@@ -42,6 +43,10 @@ fn main() {
     println!(
         "cargo:rerun-if-changed={}",
         core.join("include/surf/h264.h").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        core.join("include/surf/input.h").display()
     );
     println!(
         "cargo:rerun-if-changed={}",

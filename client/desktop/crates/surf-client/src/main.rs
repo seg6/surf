@@ -23,6 +23,10 @@ mod video_surface;
 
 use video_surface::VideoSurface;
 
+mod page_input;
+
+use page_input::PageInput;
+
 mod icon {
     pub const BACK: char = '\u{e06e}';
     pub const FORWARD: char = '\u{e06f}';
@@ -87,6 +91,7 @@ struct SurfDesktop {
     clock_sync: ClockSync,
     pipeline_diagnostics: PipelineDiagnostics,
     latest_diagnostics: Option<DiagnosticsReport>,
+    page_input: PageInput,
 }
 
 impl SurfDesktop {
@@ -186,6 +191,7 @@ impl SurfDesktop {
             clock_sync: ClockSync::new(),
             pipeline_diagnostics: PipelineDiagnostics::new(),
             latest_diagnostics: None,
+            page_input: PageInput::new(),
         };
         if let Some(endpoint) = startup_endpoint {
             client.inspect(endpoint, true);
@@ -286,6 +292,12 @@ impl SurfDesktop {
                         .caps
                         .iter()
                         .any(|capability| capability == "media-stats");
+                    self.page_input.set_native_pointer(
+                        config
+                            .caps
+                            .iter()
+                            .any(|capability| capability == "pointer-input"),
+                    );
                     self.status = format!("Connected securely to {}", info.name);
                     self.pairing = None;
                     self.remote_viewport = None;
@@ -318,6 +330,7 @@ impl SurfDesktop {
                     self.latest_diagnostics = None;
                     self.clock_sync.reset();
                     self.pipeline_diagnostics.reset();
+                    self.page_input.reset();
                     if let Some(media) = &self.media {
                         media.set_clock_offset(None);
                     }
@@ -335,6 +348,7 @@ impl SurfDesktop {
                     self.latest_diagnostics = None;
                     self.clock_sync.reset();
                     self.pipeline_diagnostics.reset();
+                    self.page_input.reset();
                     if let Some(media) = &self.media {
                         media.set_clock_offset(None);
                     }
@@ -351,6 +365,7 @@ impl SurfDesktop {
                     self.latest_diagnostics = None;
                     self.clock_sync.reset();
                     self.pipeline_diagnostics.reset();
+                    self.page_input.reset();
                     if let Some(media) = &self.media {
                         media.set_clock_offset(None);
                     }
@@ -789,6 +804,41 @@ impl SurfDesktop {
                             FontId::proportional(13.0),
                             theme::MUTED,
                         );
+                    }
+                    let response = ui.interact(
+                        surface,
+                        egui::Id::new("remote_page_surface"),
+                        Sense::click_and_drag(),
+                    );
+                    let events = ui.input(|input| input.events.clone());
+                    let pressed_inside = events.iter().any(|event| {
+                        matches!(
+                            event,
+                            egui::Event::PointerButton {
+                                pos,
+                                pressed: true,
+                                ..
+                            } if surface.contains(*pos)
+                        )
+                    });
+                    if pressed_inside {
+                        response.request_focus();
+                    }
+                    let keyboard_focused = response.has_focus() && !self.address_focused;
+                    match self.page_input.translate(
+                        &events,
+                        surface,
+                        self.video_surface.surface_generation(),
+                        keyboard_focused,
+                    ) {
+                        Ok(commands) => {
+                            for command in commands {
+                                self.send_command(command);
+                            }
+                        }
+                        Err(error) => {
+                            self.status = format!("Input: {error}");
+                        }
                     }
                     return;
                 }

@@ -74,6 +74,7 @@ var Caps = []string{
 	"media-stats",    // client decode/presentation health for adaptive profiles
 	"live-logs",      // authenticated native log records mirrored live to the host
 	"clipboard-sync", // owner-controlled bidirectional system clipboard bridge
+	"pointer-input",  // native desktop pointer, hover, buttons, and wheel input
 }
 
 type Config struct {

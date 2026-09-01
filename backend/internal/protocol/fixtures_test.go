@@ -29,8 +29,8 @@ func loadFixtures(t *testing.T, name string) []json.RawMessage {
 
 func TestCanonicalCommandFixturesDecode(t *testing.T) {
 	fixtures := loadFixtures(t, "commands.json")
-	if len(fixtures) != 41 {
-		t.Fatalf("command fixture count = %d, want 41", len(fixtures))
+	if len(fixtures) != 43 {
+		t.Fatalf("command fixture count = %d, want 43", len(fixtures))
 	}
 	for _, fixture := range fixtures {
 		if _, err := DecodeCommand(fixture); err != nil {

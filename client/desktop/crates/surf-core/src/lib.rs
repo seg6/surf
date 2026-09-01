@@ -146,6 +146,146 @@ impl Default for ReconnectPolicy {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CausalStamp {
+    pub interaction_id: u64,
+    pub client_ns: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct InputSample {
+    pub sequence: u64,
+    pub interaction_id: u64,
+    pub client_ns: u64,
+    pub event_ns: u64,
+    pub surface_generation: u32,
+    pub x: f64,
+    pub y: f64,
+    pub delta_x: f64,
+    pub delta_y: f64,
+}
+
+pub struct InputState {
+    raw: sys::surf_input_state_t,
+}
+
+impl InputState {
+    pub fn new() -> Self {
+        let mut raw = std::mem::MaybeUninit::<sys::surf_input_state_t>::uninit();
+        // SAFETY: the C initializer writes the complete non-null value.
+        unsafe { sys::surf_input_state_init(raw.as_mut_ptr()) };
+        // SAFETY: the complete value was initialized above.
+        Self {
+            raw: unsafe { raw.assume_init() },
+        }
+    }
+
+    pub fn set_surface(&mut self, generation: u32) {
+        // SAFETY: `self.raw` is valid and uniquely borrowed.
+        unsafe { sys::surf_input_set_surface(&mut self.raw, generation) };
+    }
+
+    pub fn causal(&mut self, timestamp_ns: u64) -> Result<CausalStamp, Error> {
+        let mut raw = std::mem::MaybeUninit::<sys::surf_input_causal_t>::uninit();
+        // SAFETY: both pointers are valid and uniquely borrowed. A successful
+        // result initializes the complete output value.
+        let result =
+            unsafe { sys::surf_input_next_causal(&mut self.raw, timestamp_ns, raw.as_mut_ptr()) };
+        if result != sys::SURF_INPUT_OK {
+            return Err(Error::invariant(&format!(
+                "input causal sequencing failed with code {result}"
+            )));
+        }
+        // SAFETY: SURF_INPUT_OK guarantees initialized output.
+        let raw = unsafe { raw.assume_init() };
+        Ok(CausalStamp {
+            interaction_id: raw.interaction_id,
+            client_ns: raw.client_ns,
+        })
+    }
+
+    pub fn pointer(
+        &mut self,
+        local: (f64, f64),
+        surface: (f64, f64),
+        timestamp_ns: u64,
+    ) -> Result<InputSample, Error> {
+        self.sample(local, (0.0, 0.0), surface, timestamp_ns, false)
+    }
+
+    pub fn wheel(
+        &mut self,
+        local: (f64, f64),
+        delta: (f64, f64),
+        surface: (f64, f64),
+        timestamp_ns: u64,
+    ) -> Result<InputSample, Error> {
+        self.sample(local, delta, surface, timestamp_ns, true)
+    }
+
+    fn sample(
+        &mut self,
+        local: (f64, f64),
+        delta: (f64, f64),
+        surface: (f64, f64),
+        timestamp_ns: u64,
+        wheel: bool,
+    ) -> Result<InputSample, Error> {
+        let mut raw = std::mem::MaybeUninit::<sys::surf_input_sample_t>::uninit();
+        // SAFETY: both pointers are valid and uniquely borrowed. The selected
+        // C function initializes the output only on success.
+        let result = unsafe {
+            if wheel {
+                sys::surf_input_wheel_sample(
+                    &mut self.raw,
+                    local.0,
+                    local.1,
+                    delta.0,
+                    delta.1,
+                    surface.0,
+                    surface.1,
+                    timestamp_ns,
+                    raw.as_mut_ptr(),
+                )
+            } else {
+                sys::surf_input_pointer_sample(
+                    &mut self.raw,
+                    local.0,
+                    local.1,
+                    surface.0,
+                    surface.1,
+                    timestamp_ns,
+                    raw.as_mut_ptr(),
+                )
+            }
+        };
+        if result != sys::SURF_INPUT_OK {
+            return Err(Error::invariant(&format!(
+                "input normalization failed with code {result}"
+            )));
+        }
+        // SAFETY: SURF_INPUT_OK guarantees initialized output.
+        let raw = unsafe { raw.assume_init() };
+        Ok(InputSample {
+            sequence: raw.sequence,
+            interaction_id: raw.interaction_id,
+            client_ns: raw.client_ns,
+            event_ns: raw.event_ns,
+            surface_generation: raw.surface_generation,
+            x: raw.x,
+            y: raw.y,
+            delta_x: raw.delta_x,
+            delta_y: raw.delta_y,
+        })
+    }
+}
+
+impl Default for InputState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct ClockSync {
     raw: sys::surf_clock_sync_t,
 }
@@ -1070,5 +1210,27 @@ mod tests {
         let generation = policy.admit(2, 1, true).unwrap();
         assert!(generation.generation_changed);
         assert_eq!(generation.action, MediaAction::ResetAndDecode);
+    }
+
+    #[test]
+    fn input_ordering_and_normalization_are_shared_with_platform_hosts() {
+        let mut input = InputState::new();
+        input.set_surface(7);
+        let first = input.pointer((50.0, 25.0), (100.0, 100.0), 100).unwrap();
+        assert_eq!(first.sequence, 1);
+        assert_eq!(first.interaction_id, 1);
+        assert_eq!((first.x, first.y), (0.5, 0.25));
+        let wheel = input
+            .wheel((20.0, 60.0), (-10.0, 30.0), (200.0, 100.0), 99)
+            .unwrap();
+        assert_eq!(wheel.sequence, 2);
+        assert_eq!(wheel.client_ns, 101);
+        assert_eq!((wheel.delta_x, wheel.delta_y), (-0.05, 0.3));
+        input.set_surface(8);
+        assert_eq!(
+            input.pointer((0.0, 0.0), (1.0, 1.0), 102).unwrap().sequence,
+            1
+        );
+        assert_eq!(input.causal(102).unwrap().client_ns, 103);
     }
 }

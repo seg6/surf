@@ -65,13 +65,43 @@ type TouchCommand struct {
 	TimestampNS uint64       `json:"ts"`
 	Points      []TouchPoint `json:"points"`
 }
+
+// PointerCommand preserves desktop mouse semantics. Coordinates are fractions
+// of the exact presented surface; button and modifier values use Chromium's
+// public DevTools Input domain vocabulary/bit masks.
+type PointerCommand struct {
+	CommandBase
+	Phase       string  `json:"phase"`
+	Sequence    uint64  `json:"seq"`
+	Surface     uint32  `json:"surface"`
+	TimestampNS uint64  `json:"ts"`
+	X           float64 `json:"x"`
+	Y           float64 `json:"y"`
+	Button      string  `json:"button"`
+	Buttons     int     `json:"buttons"`
+	Modifiers   int     `json:"mods"`
+	ClickCount  int     `json:"clicks"`
+}
+type WheelCommand struct {
+	CommandBase
+	Sequence    uint64  `json:"seq"`
+	Surface     uint32  `json:"surface"`
+	TimestampNS uint64  `json:"ts"`
+	X           float64 `json:"x"`
+	Y           float64 `json:"y"`
+	DeltaX      float64 `json:"dx"`
+	DeltaY      float64 `json:"dy"`
+	Buttons     int     `json:"buttons"`
+	Modifiers   int     `json:"mods"`
+}
 type KeyCommand struct {
 	CommandBase
-	Down    bool   `json:"down"`
-	Key     string `json:"key"`
-	Code    string `json:"code"`
-	KeyCode int    `json:"keyCode"`
-	Text    string `json:"text"`
+	Down      bool   `json:"down"`
+	Key       string `json:"key"`
+	Code      string `json:"code"`
+	KeyCode   int    `json:"keyCode"`
+	Text      string `json:"text"`
+	Modifiers int    `json:"mods,omitempty"`
 }
 type TextCommand struct {
 	CommandBase
@@ -181,6 +211,10 @@ func DecodeCommand(data []byte) (Command, error) {
 		dst = &ToggleCommand{}
 	case "touch":
 		dst = &TouchCommand{}
+	case "pointer":
+		dst = &PointerCommand{}
+	case "wheel":
+		dst = &WheelCommand{}
 	case "key":
 		dst = &KeyCommand{}
 	case "paste":

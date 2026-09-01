@@ -405,6 +405,7 @@ func (b *Controller) tabNavigated(session, url string) {
 	b.mu.Unlock()
 	if active {
 		b.touch.cancel(false)
+		b.pointer.cancel(false)
 		b.setTouchMode(session)
 		b.broadcast(b.urlMessage(url))
 		b.pushNavState()
@@ -555,6 +556,7 @@ func (b *Controller) isActiveSession(session string) bool {
 
 func (b *Controller) switchActive(id int) {
 	b.touch.cancel(true)
+	b.pointer.cancel(true)
 	b.mu.Lock()
 	next := b.tabs[id]
 	if next == nil {

@@ -11,6 +11,7 @@ pub const SURF_MEDIA_OK: c_int = 0;
 pub const SURF_MEDIA_ACTION_DROP_REQUEST_KEYFRAME: c_int = 0;
 pub const SURF_MEDIA_ACTION_DECODE: c_int = 1;
 pub const SURF_MEDIA_ACTION_RESET_AND_DECODE: c_int = 2;
+pub const SURF_INPUT_OK: c_int = 0;
 pub const SURF_DIAGNOSTICS_OFFLINE: c_int = 0;
 pub const SURF_DIAGNOSTICS_SMOOTH: c_int = 1;
 pub const SURF_DIAGNOSTICS_DELAYED: c_int = 2;
@@ -235,6 +236,38 @@ pub struct surf_media_admission_t {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct surf_input_state_t {
+    pub sequence: u64,
+    pub interaction_id: u64,
+    pub last_timestamp_ns: u64,
+    pub surface_generation: u32,
+    pub reserved: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct surf_input_causal_t {
+    pub interaction_id: u64,
+    pub client_ns: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct surf_input_sample_t {
+    pub sequence: u64,
+    pub interaction_id: u64,
+    pub client_ns: u64,
+    pub event_ns: u64,
+    pub surface_generation: u32,
+    pub reserved: u32,
+    pub x: f64,
+    pub y: f64,
+    pub delta_x: f64,
+    pub delta_y: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct surf_clock_sync_t {
     pub pending_client_send_ns: u64,
     pub last_probe_ns: u64,
@@ -362,6 +395,36 @@ unsafe extern "C" {
     ) -> c_int;
     pub fn surf_media_policy_sizeof() -> usize;
     pub fn surf_media_admission_sizeof() -> usize;
+    pub fn surf_input_state_init(state: *mut surf_input_state_t);
+    pub fn surf_input_set_surface(state: *mut surf_input_state_t, generation: u32);
+    pub fn surf_input_next_causal(
+        state: *mut surf_input_state_t,
+        timestamp_ns: u64,
+        out_causal: *mut surf_input_causal_t,
+    ) -> c_int;
+    pub fn surf_input_pointer_sample(
+        state: *mut surf_input_state_t,
+        local_x: f64,
+        local_y: f64,
+        surface_width: f64,
+        surface_height: f64,
+        timestamp_ns: u64,
+        out_sample: *mut surf_input_sample_t,
+    ) -> c_int;
+    pub fn surf_input_wheel_sample(
+        state: *mut surf_input_state_t,
+        local_x: f64,
+        local_y: f64,
+        delta_x: f64,
+        delta_y: f64,
+        surface_width: f64,
+        surface_height: f64,
+        timestamp_ns: u64,
+        out_sample: *mut surf_input_sample_t,
+    ) -> c_int;
+    pub fn surf_input_state_sizeof() -> usize;
+    pub fn surf_input_causal_sizeof() -> usize;
+    pub fn surf_input_sample_sizeof() -> usize;
     pub fn surf_clock_sync_init(sync: *mut surf_clock_sync_t);
     pub fn surf_clock_sync_reset(sync: *mut surf_clock_sync_t);
     pub fn surf_clock_sync_probe(
@@ -422,6 +485,9 @@ mod tests {
                 surf_media_admission_sizeof(),
                 size_of::<surf_media_admission_t>()
             );
+            assert_eq!(surf_input_state_sizeof(), size_of::<surf_input_state_t>());
+            assert_eq!(surf_input_causal_sizeof(), size_of::<surf_input_causal_t>());
+            assert_eq!(surf_input_sample_sizeof(), size_of::<surf_input_sample_t>());
             assert_eq!(surf_clock_sync_sizeof(), size_of::<surf_clock_sync_t>());
             assert_eq!(surf_diagnostics_sizeof(), size_of::<surf_diagnostics_t>());
             assert_eq!(

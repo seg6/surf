@@ -98,6 +98,32 @@ func TestKeyframeRequestDuringCooldownIsDeferred(t *testing.T) {
 	}
 }
 
+func TestFreshSubscriberDuringCooldownGetsDeferredKeyframe(t *testing.T) {
+	var keyframes atomic.Int64
+	s := NewVideoPipeline(VideoPipelineConfig{
+		W: 64, H: 64,
+		Start:    func(VideoStartConfig) error { return nil },
+		Keyframe: func() { keyframes.Add(1) },
+	})
+	first := s.Subscribe()
+	defer first.Close()
+	s.mu.Lock()
+	s.lastKeyframeReq = time.Now().Add(-keyframeCooldown + 40*time.Millisecond)
+	s.mu.Unlock()
+	second := s.Subscribe()
+	defer second.Close()
+	if keyframes.Load() != 0 {
+		t.Fatal("fresh subscriber bypassed keyframe cooldown")
+	}
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for keyframes.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if keyframes.Load() != 1 {
+		t.Fatalf("deferred subscriber keyframes=%d, want 1", keyframes.Load())
+	}
+}
+
 func TestSubscribeRetriesTransientEncoderStartFailure(t *testing.T) {
 	var starts atomic.Int64
 	s := NewVideoPipeline(VideoPipelineConfig{

@@ -14,6 +14,10 @@ another. Reconnect backoff is decided by the same C99 core policy available to
 other platform hosts. Signed 16-bit backend PCM travels through its own bounded
 lane and a 120 ms maximum jitter window; the CPAL device callback resamples and
 duplicates mono into the host's native output format without blocking video.
+The C99 core also owns surface-scoped input sequencing and normalized samples.
+On a server advertising `pointer-input`, egui mouse, wheel, modifier, keyboard,
+clipboard paste, and IME events use a bounded ordered desktop lane; older
+servers receive the established single-contact touch fallback.
 
 On Debian/Ubuntu development hosts, install the native media headers first:
 

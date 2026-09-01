@@ -26,6 +26,16 @@ The currently released config handshake continues to use `VERSION`,
 and capability representation is introduced. Migration must remain compatible
 with release clients throughout.
 
+`pointer-input` is the first negotiated desktop-input capability. When present,
+the client may send normalized `pointer` and `wheel` commands with a nonzero
+surface generation and monotonically increasing sequence. Coordinates and
+wheel deltas are normalized against the rendered page surface, so neither side
+depends on a desktop DPI scale. Button transitions, key events, composition,
+and paste share one backend input lane; replaceable pointer moves and wheel
+samples may coalesce under overload without allowing text to overtake the click
+that focused its target. A client that does not see the capability sends the
+existing touch commands and omits the additive key modifier field.
+
 ## Control JSON
 
 Client commands are defined by `backend/internal/protocol/commands.go`. The

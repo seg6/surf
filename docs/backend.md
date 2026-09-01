@@ -270,6 +270,15 @@ is synchronized to native fullscreen in both directions.
 
 ### Physical input and website mode
 
+Desktop clients negotiate `pointer-input` and send surface-generation-scoped,
+normalized mouse and wheel samples. Pointer moves and adjacent wheel samples
+coalesce in a bounded lane under overload, while button edges, keyboard input,
+paste, and IME composition remain ordered. This guarantees that typing cannot
+overtake the click which focused an element. Disconnect, navigation, tab
+switch, viewport changes, and website-mode changes cancel held buttons. Clients
+connected to an older compatible backend use the established one-contact touch
+fallback and omit additive key modifiers.
+
 The iOS `UIEvent` stream is the touch source of truth in both website modes.
 Each physical contact gets one stable client ID for its lifetime. Start/end/
 cancel edges are reliable ordered messages; move messages contain the complete

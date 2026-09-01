@@ -129,6 +129,35 @@ pub enum Command {
         #[serde(flatten)]
         causal: Causal,
     },
+    #[serde(rename = "pointer")]
+    Pointer {
+        phase: String,
+        seq: u64,
+        surface: u32,
+        ts: u64,
+        x: f64,
+        y: f64,
+        button: String,
+        buttons: i32,
+        mods: i32,
+        clicks: i32,
+        #[serde(flatten)]
+        causal: Causal,
+    },
+    #[serde(rename = "wheel")]
+    Wheel {
+        seq: u64,
+        surface: u32,
+        ts: u64,
+        x: f64,
+        y: f64,
+        dx: f64,
+        dy: f64,
+        buttons: i32,
+        mods: i32,
+        #[serde(flatten)]
+        causal: Causal,
+    },
     #[serde(rename = "key")]
     Key {
         down: bool,
@@ -137,6 +166,8 @@ pub enum Command {
         #[serde(rename = "keyCode")]
         key_code: i32,
         text: String,
+        #[serde(default, skip_serializing_if = "is_zero_i32")]
+        mods: i32,
         #[serde(flatten)]
         causal: Causal,
     },
@@ -553,24 +584,93 @@ impl Command {
     }
 
     fn validate(&self) -> Result<(), ProtocolError> {
-        if let Self::Touch { phase, points, .. } = self {
-            if !matches!(phase.as_str(), "start" | "move" | "end" | "cancel") {
-                return Err(ProtocolError::Invalid("touch phase"));
-            }
-            check_collection("touch points", points.len(), MAX_TOUCH_POINTS)?;
-            for point in points {
-                if !point.x.is_finite()
-                    || !point.y.is_finite()
-                    || !point.rx.is_finite()
-                    || !point.ry.is_finite()
-                    || !point.force.is_finite()
-                {
-                    return Err(ProtocolError::Invalid("finite touch coordinate"));
+        match self {
+            Self::Touch { phase, points, .. } => {
+                if !matches!(phase.as_str(), "start" | "move" | "end" | "cancel") {
+                    return Err(ProtocolError::Invalid("touch phase"));
+                }
+                check_collection("touch points", points.len(), MAX_TOUCH_POINTS)?;
+                for point in points {
+                    if !point.x.is_finite()
+                        || !point.y.is_finite()
+                        || !point.rx.is_finite()
+                        || !point.ry.is_finite()
+                        || !point.force.is_finite()
+                    {
+                        return Err(ProtocolError::Invalid("finite touch coordinate"));
+                    }
                 }
             }
+            Self::Pointer {
+                phase,
+                seq,
+                surface,
+                ts,
+                x,
+                y,
+                button,
+                buttons,
+                mods,
+                clicks,
+                ..
+            } => {
+                let valid_edge = match phase.as_str() {
+                    "move" | "leave" => button == "none" && *clicks == 0,
+                    "down" | "up" => button != "none" && *clicks > 0,
+                    _ => false,
+                };
+                if !valid_edge
+                    || !matches!(
+                        button.as_str(),
+                        "none" | "left" | "middle" | "right" | "back" | "forward"
+                    )
+                    || *seq == 0
+                    || *surface == 0
+                    || *ts == 0
+                    || !finite_unit(*x)
+                    || !finite_unit(*y)
+                    || !(0..=31).contains(buttons)
+                    || !(0..=15).contains(mods)
+                    || !(0..=3).contains(clicks)
+                {
+                    return Err(ProtocolError::Invalid("pointer command"));
+                }
+            }
+            Self::Wheel {
+                seq,
+                surface,
+                ts,
+                x,
+                y,
+                dx,
+                dy,
+                buttons,
+                mods,
+                ..
+            } => {
+                let valid = *seq != 0
+                    && *surface != 0
+                    && *ts != 0
+                    && finite_unit(*x)
+                    && finite_unit(*y)
+                    && dx.is_finite()
+                    && dy.is_finite()
+                    && (-4.0..=4.0).contains(dx)
+                    && (-4.0..=4.0).contains(dy)
+                    && (0..=31).contains(buttons)
+                    && (0..=15).contains(mods);
+                if !valid {
+                    return Err(ProtocolError::Invalid("wheel command"));
+                }
+            }
+            _ => {}
         }
         check_text_lengths(serde_json::to_value(self)?)
     }
+}
+
+fn finite_unit(value: f64) -> bool {
+    value.is_finite() && (0.0..=1.0).contains(&value)
 }
 
 impl Event {
@@ -705,5 +805,23 @@ mod tests {
         assert!(Event::decode(br#"{"t":"loading","on":true} {}"#).is_err());
         let huge = "x".repeat(super::MAX_TEXT_BYTES + 1);
         assert!(Event::Toast { text: huge }.encode().is_err());
+    }
+
+    #[test]
+    fn rejects_incoherent_pointer_edges_and_omits_legacy_key_modifiers() {
+        assert!(Command::decode(
+            br#"{"t":"pointer","phase":"down","seq":1,"surface":1,"ts":1,"x":0.5,"y":0.5,"button":"none","buttons":1,"mods":0,"clicks":1}"#
+        ).is_err());
+        let command = Command::Key {
+            down: true,
+            key: "Backspace".to_owned(),
+            code: "Backspace".to_owned(),
+            key_code: 8,
+            text: String::new(),
+            mods: 0,
+            causal: super::Causal::default(),
+        };
+        let encoded = String::from_utf8(command.encode().unwrap()).unwrap();
+        assert!(!encoded.contains("\"mods\""));
     }
 }

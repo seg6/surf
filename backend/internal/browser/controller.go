@@ -49,6 +49,7 @@ type Controller struct {
 	stop     chan struct{}
 	stopped  chan struct{}
 	touch    *touchInput
+	pointer  *pointerInput
 
 	mu                  sync.Mutex
 	tabs                map[int]*Tab
@@ -217,6 +218,7 @@ func New(cfg *config.Config, hub *transport.Hub) (*Controller, error) {
 	b.mobile = b.startupSession.Mobile
 	b.dark = b.startupSession.Dark
 	b.touch = newTouchInput(b)
+	b.pointer = newPointerInput(b)
 	go b.runController()
 	return b, nil
 }
@@ -394,6 +396,9 @@ func (b *Controller) Shutdown() {
 		}
 		if b.touch != nil {
 			b.touch.close()
+		}
+		if b.pointer != nil {
+			b.pointer.close()
 		}
 		// CDP is the browser lifetime authority. The executable returned by the
 		// OS may have been only a bootstrapper, so request browser shutdown and

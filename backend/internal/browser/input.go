@@ -74,12 +74,28 @@ func (b *Controller) ClientConnected(c *transport.Client) {
 	}
 }
 
-// HandleMessage implements transport.Handler. It runs on the client's read goroutine,
-// and only enqueues immutable typed commands. The controller goroutine is the
-// sole ordered executor (press before release, key order, tab commands).
+// HandleMessage implements transport.Handler. It runs on the client's read
+// goroutine and only enqueues immutable typed commands. The controller owns
+// browser actions; dedicated touch and desktop-input lanes preserve physical
+// input order without letting high-rate movement block browser state.
 func (b *Controller) HandleMessage(c *transport.Client, command protocol.Command) {
 	if touch, ok := command.(*protocol.TouchCommand); ok {
 		b.touch.enqueue(c, touch, telemetry.MonoNS())
+		return
+	}
+	if pointer, ok := command.(*protocol.PointerCommand); ok {
+		b.pointer.enqueuePointer(c, pointer, telemetry.MonoNS())
+		return
+	}
+	if wheel, ok := command.(*protocol.WheelCommand); ok {
+		b.pointer.enqueueWheel(c, wheel, telemetry.MonoNS())
+		return
+	}
+	switch command.(type) {
+	case *protocol.KeyCommand, *protocol.CompositionCommand, *protocol.TextCommand:
+		// Desktop pointer and text input share one ordered lane. A key event can
+		// therefore never overtake the click that focused its target element.
+		b.pointer.enqueueCommand(c, command, telemetry.MonoNS())
 		return
 	}
 	select {
@@ -168,6 +184,9 @@ func (b *Controller) handleCommand(c *transport.Client, command protocol.Command
 	b.mu.Lock()
 	s := t.Session
 	b.mu.Unlock()
+	if b.dispatchOrderedPageInput(s, command) {
+		return
+	}
 	switch m := command.(type) {
 	case *protocol.URLCommand:
 		if kind != "nav" {
@@ -209,45 +228,66 @@ func (b *Controller) handleCommand(c *transport.Client, command protocol.Command
 		}
 	case *protocol.VolumeCommand:
 		b.controlPageMedia(c, s, "volume", m.Value)
+	default:
+		b.handleFeatureMessage(c, t, s, command)
+	}
+}
+
+// dispatchOrderedPageInput is shared by the controller fallback and the
+// dedicated desktop input lane. It returns true only for recognized, valid
+// text-input commands.
+func (b *Controller) dispatchOrderedPageInput(session string, command protocol.Command) bool {
+	switch m := command.(type) {
 	case *protocol.KeyCommand:
-		if m.Text != "" {
-			// Key messages must stay ordered. cdp.Send launches a goroutine per
-			// command, which can race rapid typing before Chromium sees it.
-			_ = b.cdp.Dispatch(s, "Input.insertText", map[string]any{"text": m.Text})
-		} else {
-			typ := "keyUp"
-			if m.Down {
-				typ = "rawKeyDown"
-			}
-			params := map[string]any{
-				"type": typ, "key": m.Key, "code": m.Code,
-				"windowsVirtualKeyCode": m.KeyCode, "nativeVirtualKeyCode": m.KeyCode,
-			}
-			// Enter must be a full keyDown carrying \r, or Chromium never
-			// submits forms / activates default buttons (rawKeyDown skips
-			// text processing entirely).
-			if m.Down && m.KeyCode == 13 {
-				params["type"] = "keyDown"
-				params["text"] = "\r"
-				params["unmodifiedText"] = "\r"
-			}
-			_ = b.cdp.Dispatch(s, "Input.dispatchKeyEvent", params)
+		if m.Modifiers < 0 || m.Modifiers > 15 {
+			return false
 		}
+		if m.Text != "" {
+			_ = b.cdp.Dispatch(session, "Input.insertText", map[string]any{"text": m.Text})
+			return true
+		}
+		typ := "keyUp"
+		if m.Down {
+			typ = "rawKeyDown"
+		}
+		params := map[string]any{
+			"type": typ, "key": m.Key, "code": m.Code,
+			"windowsVirtualKeyCode": m.KeyCode, "nativeVirtualKeyCode": m.KeyCode,
+			"modifiers": m.Modifiers,
+		}
+		if m.Down && m.KeyCode == 13 {
+			params["type"] = "keyDown"
+			params["text"] = "\r"
+			params["unmodifiedText"] = "\r"
+		}
+		_ = b.cdp.Dispatch(session, "Input.dispatchKeyEvent", params)
+		return true
 	case *protocol.CompositionCommand:
 		switch m.Phase {
 		case "update":
-			_ = b.cdp.Dispatch(s, "Input.imeSetComposition", map[string]any{
+			_ = b.cdp.Dispatch(session, "Input.imeSetComposition", map[string]any{
 				"text": m.Text, "selectionStart": m.SelectionStart, "selectionEnd": m.SelectionEnd,
 			})
 		case "commit":
-			_ = b.cdp.Dispatch(s, "Input.insertText", map[string]any{"text": m.Text})
+			_ = b.cdp.Dispatch(session, "Input.insertText", map[string]any{"text": m.Text})
 		case "cancel":
-			_ = b.cdp.Dispatch(s, "Input.imeSetComposition", map[string]any{
+			_ = b.cdp.Dispatch(session, "Input.imeSetComposition", map[string]any{
 				"text": "", "selectionStart": 0, "selectionEnd": 0,
 			})
+		default:
+			return false
 		}
+		return true
+	case *protocol.TextCommand:
+		if command.Kind() != "paste" {
+			return false
+		}
+		if m.Text != "" {
+			_ = b.cdp.Dispatch(session, "Input.insertText", map[string]any{"text": m.Text})
+		}
+		return true
 	default:
-		b.handleFeatureMessage(c, t, s, command)
+		return false
 	}
 }
 
@@ -270,6 +310,7 @@ func (b *Controller) handleMobileLayout(on bool) {
 	}
 	b.scheduleSessionSave()
 	b.touch.cancel(true)
+	b.pointer.cancel(true)
 	for _, session := range sessions {
 		_ = b.cdp.Dispatch(session, "Network.enable", nil)
 		if userAgentParams != nil {
@@ -391,7 +432,7 @@ func (b *Controller) queryPageMedia(c *transport.Client, session string) {
 
 func renderCommand(t string) bool {
 	switch t {
-	case "touch", "key", "paste", "compose", "selectreply", "nav", "reload", "back", "fwd":
+	case "touch", "pointer", "wheel", "key", "paste", "compose", "selectreply", "nav", "reload", "back", "fwd":
 		return true
 	}
 	return false
@@ -628,7 +669,7 @@ func (b *Controller) noteAudioLatency(d time.Duration) {
 
 func otherInputCount(counts map[string]int) int {
 	known := map[string]bool{
-		"touch": true, "key": true, "compose": true, "nav": true, "size": true, "fullscreen": true,
+		"touch": true, "pointer": true, "wheel": true, "key": true, "compose": true, "nav": true, "size": true, "fullscreen": true,
 	}
 	n := 0
 	for k, v := range counts {
@@ -657,6 +698,7 @@ func (b *Controller) handleSize(m *protocol.SizeCommand) {
 		return
 	}
 	b.touch.cancel(true)
+	b.pointer.cancel(true)
 	b.scheduleViewportApply()
 }
 

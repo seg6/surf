@@ -21,7 +21,7 @@ SURF_CORE_DIR := $(REPO_ROOT)/client/core
 Surf_FILES := $(wildcard Classes/*.m) $(wildcard Classes/*.c) $(wildcard Classes/quirc/*.c) \
 	$(SURF_CORE_DIR)/src/core.c $(SURF_CORE_DIR)/src/diagnostics.c \
 	$(SURF_CORE_DIR)/src/frame.c \
-	$(SURF_CORE_DIR)/src/h264.c $(SURF_CORE_DIR)/src/media.c \
+	$(SURF_CORE_DIR)/src/h264.c $(SURF_CORE_DIR)/src/input.c $(SURF_CORE_DIR)/src/media.c \
 	$(SURF_CORE_DIR)/src/session.c
 # VideoToolbox is intentionally absent: private on iOS 6, resolved via dlopen.
 Surf_FRAMEWORKS := UIKit CoreGraphics QuartzCore ImageIO Security CFNetwork AudioToolbox CoreMedia CoreVideo OpenGLES MessageUI AVFoundation
