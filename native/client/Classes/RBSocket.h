@@ -5,7 +5,7 @@
 @protocol RBSocketDelegate <NSObject>
 - (void)socketDidOpen:(RBSocket *)socket;
 - (void)socket:(RBSocket *)socket didCloseWithError:(NSString *)error;
-- (void)socket:(RBSocket *)socket didReceiveText:(NSString *)text;
+- (void)socket:(RBSocket *)socket didReceiveTextData:(NSData *)data;
 - (void)socket:(RBSocket *)socket didReceiveBinary:(NSData *)data;
 @end
 

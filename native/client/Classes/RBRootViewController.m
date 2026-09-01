@@ -1241,16 +1241,19 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
 
 // ------------------------------------------------------- control messages
 
-- (void)session:(RBSession *)session didReceiveControlMessage:(NSDictionary *)message {
-    if ([self.diagnostics consumeControlMessage:message]) return;
+- (void)session:(RBSession *)session didReceiveControlData:(NSData *)data
+          message:(NSDictionary *)message {
     NSError *coreError = nil;
-    BOOL coreHandled = [self.clientCore consumeControlMessage:message error:&coreError];
+    BOOL coreHandled = [self.clientCore consumeControlData:data message:message
+                                                     error:&coreError];
     if (coreError) {
         RBLogEvent(@"client-core", @"error",
                    @{@"type": [message objectForKey:@"t"] ?: @"",
                      @"error": [coreError localizedDescription] ?: @""},
                    @"Portable browser state rejected a control event");
+        return;
     }
+    if ([self.diagnostics consumeControlMessage:message]) return;
     BOOL coreValid = coreHandled && !coreError;
     NSString *t = [message objectForKey:@"t"];
     if ([t isEqualToString:@"url"]) {

@@ -33,6 +33,11 @@ typedef NS_ENUM(NSInteger, RBCoreEffect) {
 
 // Returns YES when the message type belongs to the migrated core surface.
 - (BOOL)consumeControlMessage:(NSDictionary *)message error:(NSError **)error;
+// Preferred socket path. The C99 codec validates the original wire bytes before
+// Foundation or UIKit may act on them; `message` is retained only as a legacy
+// rendering adapter while surfaces migrate to typed snapshots.
+- (BOOL)consumeControlData:(NSData *)data message:(NSDictionary *)message
+                     error:(NSError **)error;
 - (void)notePresentedSourceSequence:(unsigned int)sourceSequence;
 - (void)noteKeyboardVisible:(BOOL)visible;
 - (void)reset;

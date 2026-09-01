@@ -1,11 +1,14 @@
 #import "RBCoreBridge.h"
 
 #include "surf/core.h"
+#include "surf/protocol.h"
 
 static NSString *const RBCoreBridgeErrorDomain = @"space.seg6.surf.core";
 
 @interface RBCoreBridge () {
     surf_core_t *_core;
+    void *_protocolMemory;
+    surf_protocol_workspace_t *_protocolWorkspace;
 }
 @property(nonatomic, copy, readwrite) NSArray *tabs;
 @property(nonatomic, copy, readwrite) NSString *activeTitle;
@@ -32,12 +35,6 @@ static NSString *const RBCoreBridgeErrorDomain = @"space.seg6.surf.core";
 
 @implementation RBCoreBridge
 
-static surf_string_view_t RBCoreStringView(NSString *string) {
-    if (![string isKindOfClass:[NSString class]]) return surf_string_view(NULL, 0);
-    return surf_string_view([string UTF8String],
-        [string lengthOfBytesUsingEncoding:NSUTF8StringEncoding]);
-}
-
 static NSString *RBStringFromCore(surf_string_view_t value) {
     if (!value.data || !value.length) return @"";
     NSString *string = [[NSString alloc] initWithBytes:value.data
@@ -51,6 +48,16 @@ static NSString *RBStringFromCore(surf_string_view_t value) {
         surf_core_config_t config;
         surf_core_config_init(&config);
         if (surf_core_create(&config, &_core) != SURF_CORE_OK) return nil;
+        size_t protocolSize = surf_protocol_workspace_size(NULL);
+        _protocolMemory = malloc(protocolSize);
+        if (!_protocolMemory ||
+            surf_protocol_workspace_init(&_protocolWorkspace, _protocolMemory,
+                                         protocolSize, NULL) != SURF_PROTOCOL_OK) {
+            surf_core_destroy(_core);
+            _core = NULL;
+            free(_protocolMemory);
+            return nil;
+        }
         self.pendingEffects = [NSMutableSet set];
         [self refreshSnapshot];
     }
@@ -60,6 +67,9 @@ static NSString *RBStringFromCore(surf_string_view_t value) {
 - (void)dealloc {
     surf_core_destroy(_core);
     _core = NULL;
+    free(_protocolMemory);
+    _protocolMemory = NULL;
+    _protocolWorkspace = NULL;
 }
 
 - (BOOL)dispatchEvent:(surf_event_t *)event error:(NSError **)error {
@@ -119,84 +129,73 @@ static NSString *RBStringFromCore(surf_string_view_t value) {
 }
 
 - (BOOL)consumeControlMessage:(NSDictionary *)message error:(NSError **)error {
+    NSData *data = [NSJSONSerialization dataWithJSONObject:message options:0 error:nil];
+    if (!data) return NO;
+    return [self consumeControlData:data message:message error:error];
+}
+
+- (BOOL)consumeControlData:(NSData *)data message:(NSDictionary *)message
+                     error:(NSError **)error {
+    surf_protocol_event_t protocolEvent;
+    surf_protocol_result_t decode = surf_protocol_decode_event(
+        _protocolWorkspace, [data bytes], [data length], &protocolEvent);
+    if (decode != SURF_PROTOCOL_OK) {
+        if (error) {
+            NSString *reason = [NSString stringWithUTF8String:
+                surf_protocol_result_string(decode)] ?: @"Invalid control event";
+            *error = [NSError errorWithDomain:RBCoreBridgeErrorDomain code:decode
+                userInfo:@{NSLocalizedDescriptionKey: reason}];
+        }
+        // The type may have looked familiar to Foundation, but malformed wire
+        // data is considered handled so UIKit never falls back to it.
+        return YES;
+    }
     NSString *type = [message objectForKey:@"t"];
     if (![type isKindOfClass:[NSString class]]) return NO;
     surf_event_t event;
     memset(&event, 0, sizeof(event));
 
-    if ([type isEqualToString:@"tabs"]) {
-        NSArray *items = [message objectForKey:@"tabs"];
-        if (![items isKindOfClass:[NSArray class]] || [items count] > SURF_CORE_HARD_MAX_TABS) {
-            if (error) *error = [NSError errorWithDomain:RBCoreBridgeErrorDomain
-                code:SURF_CORE_ERROR_LIMIT userInfo:@{NSLocalizedDescriptionKey: @"Invalid tab list"}];
-            return YES;
-        }
-        size_t count = [items count];
-        surf_tab_event_t *tabs = count ? calloc(count, sizeof(*tabs)) : NULL;
-        if (count && !tabs) {
-            if (error) *error = [NSError errorWithDomain:RBCoreBridgeErrorDomain
-                code:SURF_CORE_ERROR_ALLOCATE userInfo:@{NSLocalizedDescriptionKey: @"Could not allocate tab list"}];
-            return YES;
-        }
-        BOOL valid = YES;
-        for (size_t index = 0; index < count; index++) {
-            NSDictionary *item = [items objectAtIndex:index];
-            if (![item isKindOfClass:[NSDictionary class]]) { valid = NO; break; }
-            tabs[index].id = [[item objectForKey:@"id"] longLongValue];
-            tabs[index].title = RBCoreStringView([item objectForKey:@"title"]);
-            tabs[index].url = RBCoreStringView([item objectForKey:@"url"]);
-            tabs[index].icon = RBCoreStringView([item objectForKey:@"icon"]);
-            tabs[index].active = [[item objectForKey:@"active"] boolValue];
-        }
-        if (!valid) {
-            free(tabs);
-            if (error) *error = [NSError errorWithDomain:RBCoreBridgeErrorDomain
-                code:SURF_CORE_ERROR_ARGUMENT userInfo:@{NSLocalizedDescriptionKey: @"Invalid tab entry"}];
-            return YES;
-        }
+    if (protocolEvent.kind == SURF_PROTOCOL_EVENT_TABS) {
         event.kind = SURF_EVENT_TABS;
-        event.data.tabs.items = tabs;
-        event.data.tabs.count = count;
+        event.data.tabs.items = protocolEvent.data.tabs.items;
+        event.data.tabs.count = protocolEvent.data.tabs.count;
         [self dispatchEvent:&event error:error];
-        free(tabs);
         return YES;
     }
-    if ([type isEqualToString:@"url"]) {
+    if (protocolEvent.kind == SURF_PROTOCOL_EVENT_URL) {
         event.kind = SURF_EVENT_URL;
-        event.data.url.url = RBCoreStringView([message objectForKey:@"url"]);
-        event.data.url.security = RBCoreStringView([message objectForKey:@"security"]);
-        event.data.url.starred = [[message objectForKey:@"starred"] boolValue];
-    } else if ([type isEqualToString:@"histstate"]) {
+        event.data.url.url = protocolEvent.data.url.url;
+        event.data.url.security = protocolEvent.data.url.security;
+        event.data.url.starred = protocolEvent.data.url.starred;
+    } else if (protocolEvent.kind == SURF_PROTOCOL_EVENT_HISTORY_STATE) {
         event.kind = SURF_EVENT_HISTORY_STATE;
-        event.data.history.can_go_back = [[message objectForKey:@"back"] boolValue];
-        event.data.history.can_go_forward = [[message objectForKey:@"fwd"] boolValue];
-    } else if ([type isEqualToString:@"loading"]) {
+        event.data.history.can_go_back = protocolEvent.data.history_state.back;
+        event.data.history.can_go_forward = protocolEvent.data.history_state.forward;
+    } else if (protocolEvent.kind == SURF_PROTOCOL_EVENT_LOADING) {
         event.kind = SURF_EVENT_LOADING;
-        event.data.boolean.on = [[message objectForKey:@"on"] boolValue];
-    } else if ([type isEqualToString:@"editable"]) {
+        event.data.boolean.on = protocolEvent.data.boolean.on;
+    } else if (protocolEvent.kind == SURF_PROTOCOL_EVENT_EDITABLE) {
         event.kind = SURF_EVENT_EDITABLE;
-        event.data.editable.on = [[message objectForKey:@"on"] boolValue];
-        event.data.editable.show_keyboard = [[message objectForKey:@"show"] boolValue];
-        event.data.editable.kind = RBCoreStringView([message objectForKey:@"kind"]);
-        NSArray *rect = [message objectForKey:@"rect"];
-        if ([rect isKindOfClass:[NSArray class]] && [rect count] == 4) {
-            event.data.editable.has_rect = 1;
-            for (NSUInteger index = 0; index < 4; index++) {
-                event.data.editable.rect[index] = [[rect objectAtIndex:index] doubleValue];
-            }
-        }
-    } else if ([type isEqualToString:@"fullscreen"]) {
+        event.data.editable.on = protocolEvent.data.editable.on;
+        event.data.editable.show_keyboard =
+            protocolEvent.data.editable.show_keyboard;
+        event.data.editable.kind = protocolEvent.data.editable.kind;
+        event.data.editable.has_rect = protocolEvent.data.editable.has_rect;
+        memcpy(event.data.editable.rect, protocolEvent.data.editable.rect,
+               sizeof(event.data.editable.rect));
+    } else if (protocolEvent.kind == SURF_PROTOCOL_EVENT_FULLSCREEN) {
         event.kind = SURF_EVENT_FULLSCREEN;
-        event.data.boolean.on = [[message objectForKey:@"on"] boolValue];
-    } else if ([type isEqualToString:@"security"]) {
+        event.data.boolean.on = protocolEvent.data.boolean.on;
+    } else if (protocolEvent.kind == SURF_PROTOCOL_EVENT_SECURITY) {
         event.kind = SURF_EVENT_SECURITY;
-        event.data.security.state = RBCoreStringView([message objectForKey:@"state"]);
-    } else if ([type isEqualToString:@"starred"]) {
+        event.data.security.state = protocolEvent.data.security.state;
+    } else if (protocolEvent.kind == SURF_PROTOCOL_EVENT_STARRED) {
         event.kind = SURF_EVENT_STARRED;
-        event.data.boolean.on = [[message objectForKey:@"on"] boolValue];
-    } else if ([type isEqualToString:@"pageframe"]) {
+        event.data.boolean.on = protocolEvent.data.boolean.on;
+    } else if (protocolEvent.kind == SURF_PROTOCOL_EVENT_PAGE_FRAME) {
         event.kind = SURF_EVENT_PAGE_FRAME;
-        event.data.page_frame.source_sequence = [[message objectForKey:@"sourceSeq"] unsignedIntValue];
+        event.data.page_frame.source_sequence =
+            protocolEvent.data.page_frame.source_sequence;
     } else {
         return NO;
     }

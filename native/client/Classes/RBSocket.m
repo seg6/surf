@@ -587,7 +587,6 @@ static OSStatus RBSocketTLSWrite(SSLConnectionRef connection, const void *data, 
 
 - (void)deliverPayload:(NSData *)payload opcode:(unsigned char)opcode {
     if (opcode == 0x1) {
-        NSString *text = [[NSString alloc] initWithData:payload encoding:NSUTF8StringEncoding];
         NSDictionary *message = [NSJSONSerialization JSONObjectWithData:payload options:0 error:nil];
         NSString *kind = [message isKindOfClass:[NSDictionary class]] ?
             [message objectForKey:@"t"] : nil;
@@ -595,7 +594,8 @@ static OSStatus RBSocketTLSWrite(SSLConnectionRef connection, const void *data, 
             [kind isEqualToString:@"audio-config"];
         void (^deliver)(void) = ^{
             id<RBSocketDelegate> delegate = self.delegate;
-            if (self.running && [delegate respondsToSelector:@selector(socket:didReceiveText:)]) [delegate socket:self didReceiveText:text ?: @""];
+            if (self.running && [delegate respondsToSelector:@selector(socket:didReceiveTextData:)])
+                [delegate socket:self didReceiveTextData:payload];
         };
         // Only media configuration is a wire-order barrier: VideoToolbox and
         // AudioQueue must be configured before the immediately following

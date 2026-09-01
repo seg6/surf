@@ -100,7 +100,8 @@
     if (self.bridgeFD >= 0) shutdown(self.bridgeFD, SHUT_RDWR);
 }
 
-- (void)socket:(RBSocket *)socket didReceiveText:(NSString *)text {
+- (void)socket:(RBSocket *)socket didReceiveTextData:(NSData *)data {
+    (void)data;
     [self close];
 }
 

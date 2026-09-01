@@ -20,7 +20,8 @@ typedef enum {
 - (void)session:(RBSession *)session requiresClientUpdate:(NSDictionary *)update;
 - (void)sessionRequiresServerUpdate:(RBSession *)session serverVersion:(NSString *)version;
 - (void)session:(RBSession *)session didReceiveFrameData:(NSData *)data;
-- (void)session:(RBSession *)session didReceiveControlMessage:(NSDictionary *)message;
+- (void)session:(RBSession *)session didReceiveControlData:(NSData *)data
+          message:(NSDictionary *)message;
 @end
 
 @interface RBSession : NSObject

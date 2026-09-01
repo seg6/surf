@@ -395,12 +395,11 @@ static NSString *RBURLEscape(NSString *s) {
     }
 }
 
-- (void)socket:(RBSocket *)socket didReceiveText:(NSString *)text {
+- (void)socket:(RBSocket *)socket didReceiveTextData:(NSData *)data {
     if (socket != self.socket) return;
-    NSData *data = [text dataUsingEncoding:NSUTF8StringEncoding];
-    NSDictionary *json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+    NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
     if (![json isKindOfClass:[NSDictionary class]]) return;
-    [self.delegate session:self didReceiveControlMessage:json];
+    [self.delegate session:self didReceiveControlData:data message:json];
 }
 
 - (void)socket:(RBSocket *)socket didReceiveBinary:(NSData *)data {
