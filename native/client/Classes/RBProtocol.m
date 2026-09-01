@@ -1,5 +1,7 @@
 #import "RBProtocol.h"
 
+#include "surf/frame.h"
+
 @implementation RBFrame
 @end
 
@@ -20,60 +22,36 @@
 }
 @end
 
-static unsigned short RBReadBE16(const unsigned char *p) {
-    return (unsigned short)(((unsigned short)p[0] << 8) | (unsigned short)p[1]);
-}
-
-static unsigned int RBReadBE32(const unsigned char *p) {
-    return ((unsigned int)p[0] << 24) | ((unsigned int)p[1] << 16) | ((unsigned int)p[2] << 8) | (unsigned int)p[3];
-}
-
-static unsigned long long RBReadBE64(const unsigned char *p) {
-    return ((unsigned long long)RBReadBE32(p) << 32) | RBReadBE32(p + 4);
-}
-
 @implementation RBProtocol
 
 + (RBFrame *)frameFromData:(NSData *)data error:(NSString **)error {
-    static const NSUInteger RBFrameHeaderBytes = 84;
-    if ([data length] < RBFrameHeaderBytes) {
-        if (error) *error = @"short frame";
-        return nil;
-    }
-
-    const unsigned char *b = (const unsigned char *)[data bytes];
-    if (b[0] != 'R' || b[1] != 'B' || b[2] != 'R' || b[3] != '1') {
-        if (error) *error = @"bad magic";
-        return nil;
-    }
-
-    unsigned short headerLen = RBReadBE16(b + 6);
-    unsigned int payloadLen = RBReadBE32(b + 20);
-    if (headerLen != RBFrameHeaderBytes || (NSUInteger)headerLen > [data length]) {
-        if (error) *error = @"bad header length";
-        return nil;
-    }
-    if ((NSUInteger)headerLen + (NSUInteger)payloadLen != [data length]) {
-        if (error) *error = @"bad payload length";
+    surf_frame_view_t parsed;
+    surf_frame_result_t result = surf_frame_parse(
+        (const uint8_t *)[data bytes], [data length], &parsed);
+    if (result != SURF_FRAME_OK) {
+        if (error) {
+            *error = [NSString stringWithUTF8String:surf_frame_result_string(result)];
+        }
         return nil;
     }
 
     RBFrame *frame = [[RBFrame alloc] init];
-    frame.type = b[4];
-    frame.flags = b[5];
-    frame.seq = RBReadBE32(b + 8);
-    frame.sourceSeq = RBReadBE32(b + 12);
-    frame.width = RBReadBE16(b + 16);
-    frame.height = RBReadBE16(b + 18);
-    frame.interactionID = RBReadBE64(b + 24);
-    frame.sourceReceiveNS = RBReadBE64(b + 32);
-    frame.encodeCompleteNS = RBReadBE64(b + 40);
-    frame.socketWriteNS = RBReadBE64(b + 48);
-    frame.encoderGeneration = RBReadBE32(b + 56);
-    frame.inputReceiveNS = RBReadBE64(b + 64);
-    frame.cdpAcceptedNS = RBReadBE64(b + 72);
-    frame.profile = b[80];
-    frame.payload = [data subdataWithRange:NSMakeRange(headerLen, payloadLen)];
+    frame.type = parsed.type;
+    frame.flags = parsed.flags;
+    frame.seq = parsed.sequence;
+    frame.sourceSeq = parsed.source_sequence;
+    frame.width = parsed.width;
+    frame.height = parsed.height;
+    frame.interactionID = parsed.interaction_id;
+    frame.sourceReceiveNS = parsed.source_receive_ns;
+    frame.encodeCompleteNS = parsed.encode_complete_ns;
+    frame.socketWriteNS = parsed.socket_write_ns;
+    frame.encoderGeneration = parsed.encoder_generation;
+    frame.inputReceiveNS = parsed.input_receive_ns;
+    frame.cdpAcceptedNS = parsed.cdp_accepted_ns;
+    frame.profile = parsed.profile;
+    frame.payload = [data subdataWithRange:NSMakeRange(
+        SURF_FRAME_HEADER_BYTES, parsed.payload_length)];
     return frame;
 }
 

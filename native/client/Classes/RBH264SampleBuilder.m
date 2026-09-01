@@ -1,6 +1,6 @@
 #import "RBH264SampleBuilder.h"
 
-#include "rb_h264.h"
+#include "surf/h264.h"
 
 @interface RBH264SampleBuilder () {
     CMVideoFormatDescriptionRef _formatDescription;
@@ -33,26 +33,26 @@
     self.currentPPS = nil;
 }
 
-- (BOOL)updateFormatFromInfo:(const rb_au_info *)info
+- (BOOL)updateFormatFromInfo:(const surf_h264_au_info_t *)info
                      changed:(BOOL *)changed
                       status:(OSStatus *)statusOut {
     if (changed) *changed = NO;
     if (!info->sps || !info->pps) return _formatDescription != NULL;
 
-    NSData *sps = [NSData dataWithBytes:info->sps length:info->sps_len];
-    NSData *pps = [NSData dataWithBytes:info->pps length:info->pps_len];
+    NSData *sps = [NSData dataWithBytes:info->sps length:info->sps_length];
+    NSData *pps = [NSData dataWithBytes:info->pps length:info->pps_length];
     if (_formatDescription && [sps isEqualToData:self.currentSPS] &&
         [pps isEqualToData:self.currentPPS]) return YES;
 
-    size_t avccCapacity = 11 + info->sps_len + info->pps_len;
+    size_t avccCapacity = 11 + info->sps_length + info->pps_length;
     uint8_t *avcc = malloc(avccCapacity);
     if (!avcc) {
         if (statusOut) *statusOut = -108; // classic Mac/iOS memFullErr
         return NO;
     }
-    size_t avccLength = rb_avcc_build(info->sps, info->sps_len,
-                                      info->pps, info->pps_len,
-                                      avcc, avccCapacity);
+    size_t avccLength = surf_h264_build_avcc_config(
+        info->sps, info->sps_length, info->pps, info->pps_length,
+        avcc, avccCapacity);
     if (!avccLength) {
         free(avcc);
         if (statusOut) *statusOut = kCMFormatDescriptionError_InvalidParameter;
@@ -100,14 +100,14 @@
 
     const uint8_t *bytes = (const uint8_t *)[au bytes];
     size_t length = [au length];
-    rb_au_info info;
-    if (rb_au_scan(bytes, length, &info) != 0 || !info.has_slice) {
+    surf_h264_au_info_t info;
+    if (surf_h264_scan_annexb(bytes, length, &info) != 0 || !info.has_slice) {
         if (statusOut) *statusOut = kCMFormatDescriptionError_InvalidParameter;
         return NULL;
     }
     if (![self updateFormatFromInfo:&info changed:formatChanged status:statusOut]) return NULL;
 
-    size_t capacity = info.avcc_len;
+    size_t capacity = info.avcc_length;
     if (!capacity) {
         if (statusOut) *statusOut = kCMFormatDescriptionError_InvalidParameter;
         return NULL;
@@ -117,7 +117,8 @@
         if (statusOut) *statusOut = -108; // classic Mac/iOS memFullErr
         return NULL;
     }
-    size_t avccLength = rb_au_to_avcc(bytes, length, avccBytes, capacity);
+    size_t avccLength = surf_h264_annexb_to_avcc(
+        bytes, length, avccBytes, capacity);
     if (!avccLength) {
         free(avccBytes);
         if (statusOut) *statusOut = kCMFormatDescriptionError_InvalidParameter;

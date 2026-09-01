@@ -14,6 +14,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  client-core:
+    name: Client core (${{ matrix.compiler }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: GCC
+            cc: gcc
+            sanitize: "OFF"
+          - compiler: Clang sanitizers
+            cc: clang
+            sanitize: "ON"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Configure portable C99 core
+        env:
+          CC: ${{ matrix.cc }}
+        run: |
+          cmake -S client/core -B .local/build/client-core \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DSURF_CORE_WARNINGS_AS_ERRORS=ON \
+            -DSURF_CORE_SANITIZE=${{ matrix.sanitize }}
+
+      - name: Build portable core
+        run: cmake --build .local/build/client-core
+
+      - name: Test portable core
+        run: ctest --test-dir .local/build/client-core --output-on-failure
+
+      - name: Verify tracked files stayed clean
+        run: git diff --exit-code
+
   backend-test:
     name: Backend tests
     runs-on: ubuntu-latest

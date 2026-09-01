@@ -4,6 +4,18 @@ Most users should download the universal rootful `.deb` from GitHub Releases.
 Build the native client only if you are changing the app or packaging your own
 release. Surf does not produce an IPA.
 
+The native app links the platform-neutral C99 library under `client/core`.
+Exercise that library with ordinary host compilers before invoking the old-iOS
+toolchain:
+
+```sh
+make client-core-test
+make client-core-sanitize
+```
+
+The release-equivalent package build compiles the same core sources for armv7
+and arm64, providing an additional old-toolchain and 32-bit compatibility gate.
+
 ## SDK
 
 The iOS 8.0 SDK is downloaded into this ignored local path:

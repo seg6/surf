@@ -1,4 +1,4 @@
-.PHONY: test surf-binary surf-dist surf-release-dist native-sdk native-package
+.PHONY: test client-core-build client-core-test client-core-sanitize surf-binary surf-dist surf-release-dist native-sdk native-package
 
 VERSION := $(shell tr -d '[:space:]' < VERSION)
 COMPATIBILITY_VERSION := $(shell tr -d '[:space:]' < COMPATIBILITY_VERSION)
@@ -10,6 +10,8 @@ CLIENT_DEB ?= $(shell ls -1t native/client/packages/space.seg6.surf_$(VERSION)-*
 MAKENSIS ?= makensis
 SURF_DIST := surf-$(VERSION)-$(SURF_GOOS)-$(SURF_GOARCH)
 SURF_CGO_ENV := CGO_ENABLED=0
+CLIENT_CORE_BUILD_DIR ?= .local/build/client-core
+CLIENT_CORE_SANITIZE_DIR ?= .local/build/client-core-sanitize
 ifeq ($(SURF_GOOS),windows)
 SURF_EXE := surf.exe
 SURF_ARCHIVE := $(SURF_DIST).zip
@@ -18,8 +20,23 @@ SURF_EXE := surf
 SURF_ARCHIVE := $(SURF_DIST).tar.gz
 endif
 
-test:
+test: client-core-test
 	cd backend && go test ./...
+
+client-core-build:
+	cmake -S client/core -B "$(CLIENT_CORE_BUILD_DIR)" \
+		-DCMAKE_BUILD_TYPE=Debug -DSURF_CORE_WARNINGS_AS_ERRORS=ON
+	cmake --build "$(CLIENT_CORE_BUILD_DIR)"
+
+client-core-test: client-core-build
+	ctest --test-dir "$(CLIENT_CORE_BUILD_DIR)" --output-on-failure
+
+client-core-sanitize:
+	cmake -S client/core -B "$(CLIENT_CORE_SANITIZE_DIR)" \
+		-DCMAKE_BUILD_TYPE=Debug -DSURF_CORE_WARNINGS_AS_ERRORS=ON \
+		-DSURF_CORE_SANITIZE=ON
+	cmake --build "$(CLIENT_CORE_SANITIZE_DIR)"
+	ctest --test-dir "$(CLIENT_CORE_SANITIZE_DIR)" --output-on-failure
 
 # Surf's tray implementation binds native desktop APIs without cgo, so every
 # supported target cross-compiles from the same Go toolchain.
