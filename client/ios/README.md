@@ -1,23 +1,23 @@
-# Surf iOS Client
+# Surf iOS client
 
-This directory is the Objective-C/UIKit host for Surf's portable C99 client
-core. It deliberately supports both armv7/iOS 6 and arm64/iOS 7 deployment
-targets from one rootful package.
+This directory contains the Objective C and UIKit host for the shared C99
+client core. The rootful package includes an armv7 build for iOS 6 and an arm64
+build for iOS 7 and later.
 
-UIKit owns presentation, lifecycle, Keychain/Security integration, pinned TLS,
-the hand-rolled old-iOS WebSocket adapter, VideoToolbox/OpenGL rendering,
-AudioQueue output, files, clipboard, and device-specific input. `client/core`
-owns the bounded wire formats, deterministic navigation/editable state,
-rich semantic lifecycle, connection epochs, input/media admission policy, and
-shared diagnostics.
+UIKit handles presentation and lifecycle. Platform code handles Keychain
+storage, pinned TLS, WebSocket transport, VideoToolbox and OpenGL video,
+AudioQueue output, files, clipboard, and input. The C99 core handles the wire
+formats and shared browser, connection, input, and media state.
 
-Build and verify the universal package from the repository root:
+Build and verify the package from the repository root.
 
 ```sh
 make native-package
 ```
 
-Artifacts are written under `client/ios/packages/`; `.theos/`, generated
-`control`, and generated `Resources/Info.plist` are intentionally ignored or
-verified against their templates. See `docs/native-build.md` for the pinned
-SDK/toolchain setup and physical-device acceptance matrix.
+Packages are written to `client/ios/packages/`. The build generates
+`client/ios/control` and `client/ios/Resources/Info.plist` from their
+templates.
+
+See [Native Build](../../docs/native-build.md) for the toolchain and device
+checks.

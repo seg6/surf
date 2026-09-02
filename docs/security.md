@@ -1,97 +1,89 @@
 # Security
 
-Surf encrypts and authenticates the connection between a client and its
-backend without requiring a public certificate or reverse proxy. Its trust
-anchor is the server identity created under `SURF_HOME`.
+Surf encrypts the connection between a client and its backend. The trust anchor
+is the server identity stored in `SURF_HOME`.
 
-## Server identity and transport
+## Server identity
 
-On first launch, Surf creates a persistent RSA-2048 self-signed certificate.
-Its SHA-256 leaf fingerprint is the server ID. Paired clients pin that exact
-fingerprint instead of using the device's public CA store, which keeps TLS 1.2
-usable on iOS 6 and fails closed if the identity later changes.
+First launch creates an RSA 2048 self signed certificate. Its SHA 256 leaf
+fingerprint is the server ID. Clients save that fingerprint during pairing and
+reject later changes.
 
-The direct listener has no plaintext mode. Configuration, control messages,
-video, audio, metadata, uploads, downloads, diagnostics, and client updates
-travel over TLS. TLS 1.2 uses ECDHE-RSA suites supported by iOS 6; modern peers
-may negotiate TLS 1.3. Session resumption is disabled so every new transport
-presents the pinned certificate.
+The listener has no plaintext mode. Control messages, media, uploads,
+downloads, diagnostics, and client updates use TLS. Old clients can negotiate
+TLS 1.2 with ECDHE RSA. Newer peers may use TLS 1.3. Session resumption is
+disabled so each transport presents the certificate.
 
-Bonjour advertises an address and server ID but is only a locator. A spoofed
-advertisement cannot satisfy an existing certificate pin.
+Bonjour advertises an address and server ID. It does not replace certificate
+pinning.
 
-When `SURF_TUNNEL_HOST` is configured, Cloudflare terminates only the outer
-public WebSocket connection. That WebSocket transports an independent Surf TLS
-connection whose certificate is checked against the existing server pin.
-Cloudflare can observe connection metadata and encrypted byte volume, but not
-Surf control messages, media, credentials, browsing data, or client updates.
+With `SURF_TUNNEL_HOST`, a Cloudflare WebSocket carries a separate Surf TLS
+connection. Cloudflare can see connection metadata and encrypted traffic
+volume, but cannot read the Surf connection.
 
 ## Pairing
 
-Pairing is closed until the server owner chooses **Pair device** or runs
-`surf pair`. One invitation accepts one device and closes after use,
-cancellation, server restart, or five incorrect manual codes.
+Pairing is closed until **Pair device** or `surf pair` creates an invitation.
+An invitation closes after one device uses it, after cancellation, after a
+server restart, or after five wrong manual codes.
 
-- QR pairing carries the endpoint, a random 128-bit one-time token, and a
-  128-bit prefix of the expected certificate fingerprint. The client verifies
-  that prefix against the presented certificate and saves the full observed
-  SHA-256 pin.
-- Manual pairing uses the address and six-digit authorization code, followed
-  by a six-word comparison derived independently from the certificate and the
-  client's public key. The words must match on the server and client.
+QR pairing carries the endpoint, a random 128 bit token, and part of the
+expected certificate fingerprint. The client checks the presented certificate
+before saving its full fingerprint.
 
-The six words are important: a short numeric code authorizes one attempt, but
-by itself cannot prove that an active relay did not substitute a different
-self-signed endpoint. QR carries that identity out of band; manual pairing
-uses the word comparison instead. Cancel immediately if the words differ.
+Manual pairing uses an address and six digit code. The host and client then
+show six words derived from the certificate and client public key. Pairing must
+be cancelled when the words differ. The numeric code authorizes the request.
+The words confirm that both ends saw the same server identity.
 
-## Device authentication and revocation
+## Devices and sessions
 
-The client creates a separate RSA-2048 key for each server. Its private key is
-stored as a `ThisDeviceOnly` Keychain item; the backend stores only the public
-key. Each authentication signs a fresh 30-second challenge bound to API v1,
-the server ID, device ID, challenge ID, and random nonce.
+Each client creates a separate RSA 2048 key for every server. The private key is
+stored as a `ThisDeviceOnly` Keychain item. The backend stores its public key.
 
-Successful authentication issues a Secure, HttpOnly, SameSite session and a
-device-bound, single-use WebSocket ticket. Revocation removes the device,
-invalidates its outstanding challenges and tickets, and closes its active
-connections immediately.
+Authentication signs a fresh 30 second challenge bound to API v1, the server
+ID, device ID, challenge ID, and a random nonce. A successful authentication
+returns an HTTP session and a device bound, single use WebSocket ticket.
 
-Clipboard control is an owner-only loopback admin operation. When two-way sync
-is enabled, host clipboard changes and iOS pasteboard changes travel inside the
-paired device's pinned TLS/WebSocket session. A one-off send uses the same
-authenticated path and is cleared by the native client after two minutes if
-unchanged. Surf persists only the sync-enabled preference: it does not put
-clipboard text in command-line arguments, logs, or host storage. While text is
-present on either system clipboard, it has that operating system's normal
-clipboard trust boundary and may be readable by other software on that host or
-device.
+Revoking a device removes it, invalidates its challenges and tickets, and
+closes its connections.
 
-Protect `SURF_HOME`. It contains the TLS private key, session-signing key,
-paired public keys, browser profile, and browsing data. Copying the directory
-copies the server identity; deleting or replacing it intentionally makes saved
-clients report **Server Identity Changed**.
+## Clipboard
+
+Clipboard settings are available only through the local administration
+interface. Clipboard text travels through the authenticated Surf connection.
+
+Surf stores the sync setting, not clipboard contents. Text is not passed as a
+command argument or written to logs. A one time value expires after two minutes
+if it has not changed.
+
+Operating systems and other local software may read text while it remains on a
+system clipboard.
+
+## Host data
+
+`SURF_HOME` contains the TLS private key, session key, paired public keys,
+browser profile, and browsing data. A copy of the directory is a copy of the
+server identity. Replacing it causes saved clients to report **Server Identity
+Changed**.
 
 ## Updates
 
-The matching native `.deb` is offered only over an authenticated, pinned Surf
-connection. The client verifies the advertised byte length and SHA-256, and
-the privileged helper rechecks the hash plus package ID, version, architecture,
-and safe input path before installation.
+The backend offers the matching iOS package over an authenticated and pinned
+connection. The client checks its length and SHA 256 hash. The privileged
+helper checks the hash, package ID, version, architecture, and input path before
+installation.
 
-This protects the package against network substitution. It is not an
-independent publisher-signature system: a compromise of the trusted backend or
-its server identity can also replace the package and its advertised hash.
+This blocks network substitution. It does not protect against a compromised
+host or stolen server identity, since either can replace the package and its
+advertised hash.
 
-## Trust boundary
+## Boundary
 
-Surf is end-to-end encrypted between the device and the Surf backend, not
-between the device and a website. Chromium runs on the backend, where website
-TLS terminates and decoded pages, media, credentials, cookies, and downloads
-exist. Anyone who controls that host, its browser profile, or `SURF_HOME` is
-inside Surf's trust boundary.
+Surf encryption ends at the backend. Chromium handles website TLS and holds
+decoded pages, media, credentials, cookies, and downloads. Control of the host,
+browser profile, or `SURF_HOME` grants access to that data.
 
-The unauthenticated `/api/v1/health` and `/api/v1/server` endpoints expose only
-reachability and server metadata. New pairing requests are accepted only while
-an owner-created invitation is active. Browser configuration, media, files,
+The unauthenticated `/api/v1/health` and `/api/v1/server` endpoints return
+reachability and server metadata. Browser configuration, media, files,
 statistics, updates, and WebSockets require a paired device.

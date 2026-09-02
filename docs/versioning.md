@@ -1,116 +1,99 @@
-# Versioning and Compatibility
+# Versioning
 
-Surf has several version dimensions because a backend, an installed client,
-an embedded client package, and the portable core can evolve independently.
-Treating all of them as one number caused unnecessary update prompts in the
-past. The rules below are the release contract.
+Surf tracks releases, network compatibility, optional features, and the client
+core ABI separately.
 
-## The five dimensions
+## Version dimensions
 
-| Dimension | Source of truth | Purpose |
+| Dimension | Source | Purpose |
 | --- | --- | --- |
-| App version | `VERSION` | The user-facing Surf release, shared by the backend and packaged clients |
-| Compatibility generation | `COMPATIBILITY_VERSION` | An ordered safety gate for client/backend combinations that cannot interoperate |
-| Wire marker/range | `WireCompatibilityVersion` helpers and the `RBR1` header | The control and binary envelopes a component understands |
-| Capability set | `backend/internal/config/config.go` | Independently negotiated, additive features |
-| Core ABI | `SURF_CORE_ABI_VERSION` in `client/core/include/surf/core.h` | The native host-to-C binary interface |
+| App version | `VERSION` | Surf release shown by the backend and clients |
+| Compatibility generation | `COMPATIBILITY_VERSION` | Blocks client and backend pairs that cannot interoperate |
+| Wire marker or range | `WireCompatibilityVersion` and the `RBR1` header | Identifies control and media envelopes |
+| Capabilities | `backend/internal/config/config.go` | Negotiates optional features |
+| Core ABI | `SURF_CORE_ABI_VERSION` | Identifies the C interface used by native hosts |
 
-A future deterministic trace format must have its own schema number inside the
-trace. Logs are not protocol traces, and no trace version currently participates
-in connection compatibility.
+A future trace format needs its own schema number. Logs are not protocol traces.
 
-## App versions
+## App version
 
-`VERSION` uses `MAJOR.MINOR.PATCH`. One release revision supplies this value to
-the Go backend, iOS package metadata and UI, Rust workspace, desktop archives,
-embedded client metadata, and updater manifests.
+`VERSION` uses `MAJOR.MINOR.PATCH`. One value is used by the Go backend, iOS
+package, Rust workspace, desktop packages, embedded client metadata, and update
+manifest.
 
-An app-version difference is not a compatibility failure. A `0.15.4` client
-and `0.15.5` server may connect when their compatibility generation and wire
-marker agree. The server may still offer the newer client as a normal update.
+Different app versions may connect when their compatibility generation and
+wire marker agree. An iOS package suffix such as `0.15.5-4` is a package build
+revision, not a Surf or protocol version.
 
-The suffix after an iOS Debian version, such as `0.15.5-4`, is a package build
-revision. It distinguishes repeated local package builds; it does not change
-Surf's app version or protocol compatibility.
+## Compatibility generation
 
-## Compatibility generations
+`COMPATIBILITY_VERSION` is a positive integer. It changes only when an older
+peer cannot continue safely, such as after a mandatory authentication change or
+an incompatible wire interpretation.
 
-`COMPATIBILITY_VERSION` is a positive, ordered integer. Increment it only when
-continuing with the older peer would be impossible or unsafe—for example, a
-mandatory authentication change or a breaking interpretation that cannot be
-negotiated.
+| Client and server | Result |
+| --- | --- |
+| Equal generations | Connect |
+| Older client | Offer a verified embedded package for the server generation |
+| Newer client | Require a server update |
+| Missing or invalid generation | Reject the connection |
 
-- Equal generations connect.
-- An older client receives `client-update-required` only when the server has a
-  verified embedded package for the server's exact app version and generation.
-- A newer client receives `server-update-required`.
-- Missing or invalid generation metadata fails closed; it is never inferred
-  from the app version.
-
-Do not increment the generation for an optional command, UI change, new
-diagnostic, performance improvement, or additive field guarded by a capability.
+Optional commands, UI changes, diagnostics, performance changes, and additive
+capabilities do not change the generation.
 
 ## Wire markers and capabilities
 
-The current deployment exposes one wire marker for each compatibility
-generation. Generation 1 keeps the published legacy token `20260831-1`; its
-effective supported range is therefore that single marker. Binary media uses
-the independently validated `RBR1` header and its fixed header length.
+Generation 1 uses the published wire token `20260831-1`. Its supported range
+contains that marker only. Binary media uses the separate `RBR1` header.
 
-New optional behavior belongs in `caps`. A client uses a feature only when it
-understands it and the server advertises it. `pointer-input`, `clock`, and
-`media-stats` are examples. Removing or redefining an existing capability is a
-breaking change; adding one is not.
+Optional behavior belongs in `caps`. Current examples include
+`pointer-input`, `clock`, and `media-stats`. Adding a capability is
+compatible. Removing one or changing its meaning is not.
 
-If Surf later supports multiple breaking wire generations at once, the config
-response should expose explicit minimum and maximum wire generations. That
-range must not be derived from `VERSION`.
+If a later release supports several wire generations, the config response must
+state an explicit minimum and maximum. App versions do not define that range.
 
-## Portable core ABI
+## Core ABI
 
-The C99 core ABI starts at 1. Rust checks the sizes of every shared structure
-against functions compiled by the C compiler, while Objective-C builds the same
-headers directly. Additive implementation changes do not bump the ABI. An
-incompatible host-visible layout or calling-contract change must bump
-`SURF_CORE_ABI_VERSION` and update every binding in the same commit.
+The C99 core ABI starts at 1. Rust verifies shared structure sizes against the
+C build. Objective C uses the same headers.
 
-The core ABI is an in-process build boundary, not a client/backend network
-version. Released hosts statically build the matching core, so an ABI bump alone
-must never trigger a device update prompt.
+Internal and additive changes leave the ABI unchanged. An incompatible layout
+or calling convention change increments `SURF_CORE_ABI_VERSION` and updates
+all bindings in the same revision.
+
+The core ABI is a build boundary inside a client. It does not affect network
+compatibility or trigger an iOS update.
 
 ## Embedded iOS package
 
-A release backend may embed one signed iOS `.deb`. The build rejects the bundle
-unless all of these agree:
+A release backend may contain one iOS `.deb`. The build checks agreement
+between:
 
-1. root `VERSION` and the Surf-version prefix of the Debian package version;
-2. root `COMPATIBILITY_VERSION` and `X-Surf-Compatibility`;
-3. generated embedded metadata and the package SHA-256/size;
-4. the release backend's injected version and compatibility generation.
+1. `VERSION` and the version in the Debian package
+2. `COMPATIBILITY_VERSION` and `X-Surf-Compatibility`
+3. Embedded metadata, package length, and SHA 256
+4. The version and generation compiled into the backend
 
-This makes the backend's update offer evidence-based: the displayed version,
-downloaded bytes, and compatibility decision describe the same artifact.
+The update offer and downloaded package therefore refer to the same artifact.
 
-## Release and rollback procedure
+## Release
 
-For a normal release:
+1. Set the app version.
+2. Change compatibility only when older peers cannot continue safely.
+3. Build and verify the universal iOS package.
+4. Build the backend release with that package embedded.
+5. Build the Linux development client from the same revision.
+6. Run C sanitizers, Go tests, Rust tests, Clippy, session integration, package
+   verification, and hardware checks.
+7. Tag the tested revision.
 
-1. Choose the app version; change compatibility only for a real breaking gate.
-2. Build and verify the universal iOS package.
-3. Build the backend release set with that exact `.deb` embedded.
-4. Build the Linux desktop preview from the same Git revision.
-5. Run C sanitizers, Go tests, Rust tests/Clippy, secure-session integration,
-   package verification, and physical-device acceptance.
-6. Tag only that verified revision.
-
-To reproduce or roll back without disturbing current work, use a separate Git
-worktree:
+A previous release can be built in another worktree.
 
 ```sh
 git worktree add ../surf-v0.15.5 v0.15.5
 make -C ../surf-v0.15.5 native-package
 ```
 
-Do not reset a working tree or delete `SURF_HOME` to roll back. Server profiles,
-paired-device records, browser state, and client keys are data, not release
-artifacts. Installing a compatible older binary in place preserves them.
+Rollback replaces the program in place. `SURF_HOME` contains data and must not
+be deleted as part of a rollback.

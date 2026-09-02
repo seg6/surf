@@ -1,53 +1,48 @@
-# Native Build
+# Native build
 
-Most users should download the universal rootful `.deb` from GitHub Releases.
-Build the native client only if you are changing the app or packaging your own
-release. Surf does not produce an IPA.
+Released iOS packages are available from GitHub Releases. Source builds produce
+a universal rootful `.deb`, not an IPA.
 
-The native app links the platform-neutral C99 library under `client/core`.
-Exercise that library with ordinary host compilers before invoking the old-iOS
-toolchain:
+The app links the C99 library under `client/core`. Run its host tests before
+using the iOS toolchain.
 
 ```sh
 make client-core-test
 make client-core-sanitize
 ```
 
-The release-equivalent package build compiles the same core sources for armv7
-and arm64, providing an additional old-toolchain and 32-bit compatibility gate.
-
 ## SDK
 
-The iOS 8.0 SDK is downloaded into this ignored local path:
+The build uses the iOS 8.0 SDK because it contains armv7 and arm64 framework
+stubs. This does not set the minimum runtime version.
+
+The SDK is stored outside Git at:
 
 ```text
 native/buildenv/sdk/iPhoneOS8.0.sdk
 ```
 
-Fetch it with:
+Download it with:
 
 ```sh
 native/buildenv/fetch-sdk.sh
 ```
 
-The default source is:
+The default archive is:
 
 ```text
 https://github.com/GrowtopiaJaw/iPhoneOS-SDK/releases/download/v1.0/iPhoneOS8.0.sdk.zip
 ```
 
-The default archive must match this SHA-256:
+Its SHA 256 is:
 
 ```text
 5e770b202937ca31b8547aa4dbef7543e3aa261f6b744012745604588e927b05
 ```
 
-Set `SDK_URL` and `SDK_SHA256` together to use a mirror of the same archive.
-The iOS 8.0 SDK is used because its framework and library stubs contain both
-armv7 and arm64. The SDK version is a build input, not the minimum runtime
-version.
+A mirror requires both `SDK_URL` and `SDK_SHA256`.
 
-## Build Environment
+## Build environment
 
 ```sh
 docker build -t surf-buildenv native/buildenv
@@ -55,21 +50,17 @@ docker run --rm -v "$PWD:/src" surf-buildenv bash -c \
   'make -C /src/client/ios clean package DEBUG=0 && bash /src/client/ios/verify-package.sh'
 ```
 
-The build environment pins Theos to commit
-`16362d3aa83a0acd56df4493d575d34306d42478` and the iOS toolchain to release
-`test-210562a`, with SHA-256 verification for each host-architecture archive.
-It also builds libplist 2.3.0 at a pinned commit so Theos's `plistutil` has the
-ABI it expects on current Debian hosts; this keeps clean package builds and
-binary-plist verification reproducible.
+The image pins Theos commit
+`16362d3aa83a0acd56df4493d575d34306d42478`, iOS toolchain release
+`test-210562a`, and libplist 2.3.0. Downloads are checked by SHA 256.
 
-Or use the root make target:
+The root target runs the same build.
 
 ```sh
 make native-package
 ```
 
-From Windows PowerShell, Git Bash can fetch the SDK and Docker Desktop can run
-the build directly without installing GNU Make on Windows:
+On Windows, Git Bash can fetch the SDK and Docker Desktop can run the build.
 
 ```powershell
 & 'C:\Program Files\Git\bin\bash.exe' native/buildenv/fetch-sdk.sh
@@ -79,66 +70,39 @@ docker run --rm --network host -v $repoMount surf-buildenv bash -c `
   'make -C /src/client/ios clean package DEBUG=0 && bash /src/client/ios/verify-package.sh'
 ```
 
-`make native-package` renders generated native metadata from `VERSION` and
-`COMPATIBILITY_VERSION`, then verifies the resulting package. Do not edit
-generated `client/ios/control` or
-`client/ios/Resources/Info.plist` by hand.
+The build generates `client/ios/control` and
+`client/ios/Resources/Info.plist` from `VERSION` and
+`COMPATIBILITY_VERSION`. Generated files should not be edited by hand.
 
-Increment `VERSION` for every client release or physical-device test build. The
-render script derives an ordered `CFBundleVersion`, so it does not need a second
-manual edit. Theos package revisions such as `-2` identify a rebuilt artifact,
-but Surf's updater compares the app version from `VERSION`. Build the backend
-with that exact `.deb`: the build records and verifies its app version,
-compatibility generation, size, and SHA-256 hash before embedding it.
+Every release or hardware test build gets a new `VERSION`. The build derives
+`CFBundleVersion`. A Debian suffix such as `-2` marks another package build
+but does not change Surf's app version.
 
-Only increment `COMPATIBILITY_VERSION` when a client/backend wire change makes
-the previous generation impossible or unsafe to support. Patch releases within
-one compatibility generation connect normally. An older-generation client is
-offered the backend's matching embedded package; a newer-generation client asks
-for a backend update and is never automatically downgraded.
+`COMPATIBILITY_VERSION` changes only when old clients and backends cannot
+interoperate safely. A backend must embed the exact package built for its
+version and compatibility generation.
 
-## Compatibility
+## Package targets
 
-The package contains universal `armv7` and `arm64` binaries:
+| Slice | Hardware | Minimum iOS | Supported range |
+| --- | --- | ---: | --- |
+| `armv7` | 32 bit iPhone, iPod touch, and iPad | 6.0 | iOS 6 and later where hardware permits |
+| `arm64` | 64 bit iPhone, iPod touch, and iPad | 7.0 | iOS 7 through iOS 14 |
 
-| Slice   | Intended devices                    | Minimum iOS | Supported range                            |
-| ------- | ----------------------------------- | ----------- | ------------------------------------------ |
-| `armv7` | 32-bit iPhone, iPod touch, and iPad | 6.0         | iOS 6 onward, as permitted by the hardware |
-| `arm64` | 64-bit iPhone, iPod touch, and iPad | 7.0         | iOS 7 through iOS 14                       |
+The Debian architecture is `iphoneos-arm`. It is a rootful package containing
+both slices. The app declares iPhone, iPod, and iPad support.
 
-The Debian package architecture remains `iphoneos-arm`, the standard identifier
-for a rootful jailbreak package containing both slices. It is not a rootless
-`iphoneos-arm64` package. The bundle declares device families 1 and 2, so the
-same package installs on iPhone/iPod and iPad. Classic phone launch images opt
-into native 3.5-, 4-, 4.7-, and 5.5-inch viewports; the client sends the
-resulting live viewport and every rotation to the backend.
-There is no per-model resolution table in the client or backend: device bounds,
-chrome, orientation, and fullscreen determine the live even-sized surface.
-Named sizes in tests are regression examples only. The explicit Dark Mode uses
-Surf's own semantic palette on iOS 6–14 and applies Chromium's dark color-scheme
-and automatic darkening overrides to existing and newly attached tabs.
+Device bounds, browser controls, orientation, and fullscreen determine the
+stream size. There is no model resolution table. Phone and tablet layouts are
+selected with `UI_USER_INTERFACE_IDIOM()`.
 
-The runtime layout is selected with `UI_USER_INTERFACE_IDIOM()`. Phone builds
-use a five-action bottom toolbar and a full-screen Tabs controller; tablet
-builds use one responsive desktop-style rail, switchable between the top and
-bottom edge, containing navigation, a compact hostname that expands into the
-full editable URL, horizontally
-scrolling persistent tabs, and browser actions. Width affects spacing and tab
-scrolling only, so an iPhone-compatibility installation on an iPad exercises
-the real phone path. iOS 6–14 share Surf's Oceanic Precision palette,
-typography, and professionally sourced Lucide interface glyphs.
+Phone tab previews come from the last decoded frame. They are captured when the
+Tabs view opens or the active tab changes, kept in a 12 entry cache, and removed
+on memory warnings.
 
-Phone tab previews are snapshots of the last decoded frame. They are captured
-only when Tabs opens or the active phone tab is left, retained in a 12-entry
-LRU cache, and purged on memory warnings. This keeps preview work off the normal
-60 FPS presentation path.
-
-Packages from version 0.6.0 onward install the small root-owned
-`/usr/libexec/surf-update-v2` helper. When a release backend reports an incompatible
-older client, the app can download the backend's embedded matching `.deb`,
-verify its size and SHA-256, validate its package identity, and install it.
-Devices running a package older than 0.6.0 need one final manual installation
-to bootstrap that helper.
+Packages from 0.6.0 onward install `/usr/libexec/surf-update-v2`. It verifies
+and installs a compatible package offered by the backend. Older packages need
+one manual update before this path is available.
 
 The package is written to:
 
@@ -146,7 +110,7 @@ The package is written to:
 client/ios/packages/
 ```
 
-Theos records the exact package produced by the latest build in:
+The latest package path is recorded in:
 
 ```text
 client/ios/.theos/last_package
@@ -154,11 +118,9 @@ client/ios/.theos/last_package
 
 ## Verify
 
-The verifier extracts that exact `.deb` and checks the package identifier,
-`iphoneos-arm` metadata, both architectures and minimum iOS versions in the app
-and updater, both device families, every registered icon size, RGBA legacy
-plane-break icons, opaque iOS 7+ icons, the registered Lucide font, bundled
-third-party notices, and the updater's root/setuid mode:
+The verifier checks package metadata, both architectures, minimum OS versions,
+device families, icons, the Lucide font, third party notices, and the ownership
+and mode of the update helper.
 
 ```sh
 docker run --rm -v "$PWD:/src" surf-buildenv bash /src/client/ios/verify-package.sh
@@ -166,39 +128,23 @@ docker run --rm -v "$PWD:/src" surf-buildenv bash -c \
   'dpkg-deb -c /src/client/ios/packages/*.deb'
 ```
 
-For device acceptance, verify both idioms rather than resizing one layout:
+Hardware acceptance covers:
 
-- On iPad, test both browser-rail positions, compact and expanded address
-  states, horizontal tab scrolling, active-tab reveal, correctly directed
-  Share, Library, and custom More popovers, rotation, Surf fullscreen, page-requested
-  fullscreen, video, audio, and input. Fullscreen should expose only Exit.
-- On iOS 6, confirm the original paper plane escapes the pre-rendered blue tile.
-  On iOS 7 and later, confirm SpringBoard selects the opaque native-size icon
-  without a black perimeter or an inset second tile.
-- On an iPhone/iPod or phone-only compatibility package, test the five-action
-  bottom toolbar, Tabs previews and cache behavior, full-screen Library, Share,
-  the custom More drawer, portrait/landscape transitions, and Settings discovery.
-- Confirm More never exposes AirDrop or another share target; only Share should
-  invoke `UIActivityViewController` and system destinations.
-- Watch the native diagnostics/log during every chrome transition. The
-  reported viewport must equal the remaining even-sized stream surface, and
-  rotation/fullscreen changes must produce one settled encoder generation,
-  retain the WebSocket, and recover automatically without Retry Video.
-- Expand and collapse the performance inspector while watching viewport logs;
-  the panel must overlay the stream without producing a viewport update or a
-  new encoder generation.
-- Exercise rapid portrait/landscape changes as well as entering and leaving a
-  player such as YouTube. Returning from page fullscreen must restore the
-  device-specific chrome at the correct viewport without black borders.
-- In both Desktop and Mobile Websites modes, verify a normal tap, a long page
-  fling, TikTok-style vertical swipe navigation, multi-touch pinch zoom, the
-  Speedometer 3.1 **Start Test** button, and text/password keyboard focus inside
-  an open shadow root (Reddit login is a representative live check).
-- Cover representative compact phone/iPod, modern phone, iPad, and iPad Pro
-  surfaces. Every requested even size must remain exact rather than being
-  coerced to the dimensions of another device family.
+1. Both top and bottom iPad browser bars
+2. Phone browser controls and tab previews
+3. Rotation and both Surf and page fullscreen
+4. Video, audio, keyboard, touch, pinch, fling, and text composition
+5. Share, Library, Reader, Find, Media, Settings, and dialogs
+6. Light and dark appearance
+7. Compact phones, modern phones, iPads, and iPad Pro sizes
+8. Diagnostics without changes to the stream viewport
+9. Recovery from a forced IDR and foreground changes
+10. Correct icons on iOS 6 and iOS 7 or later
 
-To build the unified release binary with a matching client package embedded:
+Viewport logs must match the even sized page surface. Rotation and fullscreen
+must settle on one encoder generation without reconnecting.
+
+Build a release backend with the recorded package.
 
 ```sh
 client_deb="$(cat client/ios/.theos/last_package)"

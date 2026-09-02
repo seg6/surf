@@ -1,16 +1,10 @@
 # Backend
 
-Surf runs Chromium on a Windows, macOS, or Linux host and exposes one encrypted
-remote-browser port. The desktop build supervises the backend and provides
-local Settings, pairing, device revocation, logs, clipboard delivery, and
-updates. `surf serve` is the equivalent foreground process for a service
-manager. Add `--pair` to open one pairing invitation at startup.
+Surf runs Chromium on a Windows, macOS, or Linux host. The desktop app manages
+the backend. `surf serve` runs the same backend in the foreground for a service
+manager.
 
 ## Start and pair
-
-Desktop users open **Paired Devices** and choose **Pair device**.
-Headless users start one persistent server and connect to it from another
-terminal:
 
 ```sh
 ./surf serve
@@ -19,87 +13,84 @@ terminal:
 ./surf quit
 ```
 
-Pairing is closed by default. The desktop button or `surf pair` creates one
-single-use invitation with a six-digit manual code and a QR code. The QR is
-self-contained: it carries the reachable address, expected server identity,
-and a random 128-bit one-time token. A manual client enters the address and
-six-digit code separately.
+Add `--pair` to `surf serve` to create an invitation at startup.
 
-The invitation has no timer; it remains open until used, cancelled, the server
-restarts, or five incorrect manual codes close it. Only one matching client key
-can consume it. QR pairing already pins the identity carried by the code.
-Manual pairing compares a six-word value independently derived from the TLS
-certificate and client key; the six-digit code authorizes the request but does
-not by itself authenticate a self-signed endpoint against an active relay.
+Pairing is otherwise closed. **Pair device** or `surf pair` creates one
+invitation with a QR code and a six digit manual code. It remains open until one
+device uses it, it is cancelled, the server restarts, or five wrong manual codes
+are entered.
 
-Manage paired clients without restarting the browser:
+The QR code contains the address, expected server identity, and a random 128 bit
+token. Manual pairing uses the address and numeric code, then compares six words
+on the host and client. The words must match.
+
+Paired devices can be listed or revoked without restarting Chromium.
 
 ```sh
 ./surf devices list
 ./surf devices revoke DEVICE_ID
 ```
 
-Revocation closes that device's active WebSockets immediately and invalidates
-its sessions, challenges, and tickets.
+Revocation closes the device connections and invalidates its sessions,
+challenges, and tickets.
 
-## Direct TLS
+## Network and TLS
 
-Surf creates a persistent RSA-2048/SHA-256 certificate on first launch and
-serves TLS 1.2+ directly. Clients pin the SHA-256 leaf fingerprint, so a public
-CA, domain, reverse proxy, and installed iOS certificate are not required.
-TLS resumption is disabled; every new transport presents the pinned identity.
-The full trust model and first-pairing MITM boundary are documented in
-[Security](security.md).
+First launch creates an RSA 2048 certificate in `SURF_HOME`. Clients save its
+SHA 256 fingerprint during pairing. Surf serves TLS 1.2 and later directly and
+has no plaintext mode. A public certificate, domain, or reverse proxy is not
+required.
 
-For a VPS, expose the configured Surf TCP port and tell pairing codes which
-reachable address to use:
+A VPS needs an exposed Surf port and a public address in pairing codes.
 
 ```sh
 SURF_PUBLIC_ADDRESS=surf.example.net:18080 ./surf serve
 ```
 
-This does not provide NAT traversal. LAN firewalls and VPS security groups must
-allow the selected port. Protect `SURF_HOME`: copying it copies the server
-identity and paired-device registry.
+This setting does not provide NAT traversal. The selected port must be allowed
+through the host firewall or VPS security group.
 
-Cloudflare Tunnel can provide NAT traversal without changing Surf's trust
-anchor. Route a hostname to the Surf HTTPS listener, set that hostname in
-`SURF_TUNNEL_HOST`, and use it as `SURF_PUBLIC_ADDRESS`. The public WebSocket is
-only an opaque carrier; the client establishes a second, certificate-pinned
-Surf TLS connection through it.
+For Cloudflare Tunnel, route a hostname to the Surf HTTPS listener and set both
+address variables.
+
+```sh
+SURF_PUBLIC_ADDRESS=surf.example.net:443 \
+SURF_TUNNEL_HOST=surf.example.net \
+./surf serve
+```
+
+The public WebSocket carries a separate pinned Surf TLS connection. See
+[Security](security.md).
 
 ## Configuration
 
-Surf reads configuration from environment variables:
-
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `SURF_HOME` | `~/.surf` | Identity, devices, browser profile, downloads, logs |
-| `SURF_SERVER_NAME` | `Surf` | Friendly name shown while pairing and in Bonjour |
-| `SURF_PUBLIC_ADDRESS` | empty | Reachable host/IP and optional port for pairing QR codes |
-| `SURF_TUNNEL_HOST` | empty | Exact public hostname that enables the opaque WebSocket roaming transport |
-| `SURF_ADVERTISE_IP` | auto | Explicit LAN address for Bonjour; useful in containers and PRoot |
+| `SURF_HOME` | `~/.surf` | Identity, devices, browser profile, downloads, and logs |
+| `SURF_SERVER_NAME` | `Surf` | Name shown during pairing and in Bonjour |
+| `SURF_PUBLIC_ADDRESS` | empty | Address placed in pairing codes |
+| `SURF_TUNNEL_HOST` | empty | Hostname for Cloudflare WebSocket transport |
+| `SURF_ADVERTISE_IP` | automatic | LAN address advertised by Bonjour |
 | `BIND_ADDR` | `0.0.0.0` | Listener address |
-| `PORT` | `18080` | TLS/API port |
-| `CHROME` | auto | Chromium or Edge executable |
+| `PORT` | `18080` | TLS and API port |
+| `CHROME` | automatic | Chrome, Chromium, or Edge executable |
 | `PROFILE` | `$SURF_HOME/profile` | Chromium profile |
 | `START_URL` | Google | Initial page |
-| `DOWNLOADS` | `$SURF_HOME/downloads` | Browser downloads |
-| `UPLOADS` | `$SURF_HOME/uploads` | Temporary client uploads |
-| `VW`, `VH` | `768`, `934` | Initial viewport before the client reports its exact size |
-| `STREAM_BITRATE` | `16000` | H.264 variable-rate target in kbit/s |
-| `STREAM_QUANTIZER` | `12` | Fallback H.264 constant-quality QP (0–51; lower is sharper) |
+| `DOWNLOADS` | `$SURF_HOME/downloads` | Downloads |
+| `UPLOADS` | `$SURF_HOME/uploads` | Temporary uploads |
+| `VW`, `VH` | `768`, `934` | Initial viewport before the client reports its size |
+| `STREAM_BITRATE` | `16000` | H.264 variable rate target in kbit/s |
+| `STREAM_QUANTIZER` | `12` | H.264 constant quality fallback from 0 to 51 |
 | `STREAM_SCALE` | empty | Optional maximum stream size |
 | `SURF_CONTENT_BLOCKER` | `1` | Manage uBlock Origin Lite |
-| `SURF_ADAPTIVE_VIDEO` | `0` | Experimental adaptive cadence governor; set `1` to enable |
-| `CHROME_NO_SANDBOX` | automatic for root | Disable Chromium sandbox where required |
+| `SURF_ADAPTIVE_VIDEO` | `0` | Enable adaptive video with `1` |
+| `CHROME_NO_SANDBOX` | automatic for root | Disable the Chromium sandbox when required |
 
-There is no password variable and no plaintext mode.
+There is no password variable.
 
-## Persistent files
+## Files
 
-The security-sensitive files are permission-restricted and replaced
-atomically:
+These files contain the server identity and runtime state.
 
 ```text
 $SURF_HOME/identity/server.crt
@@ -110,35 +101,34 @@ $SURF_HOME/daemon.json
 $SURF_HOME/browser-session.json
 ```
 
-`daemon.json` is a permission-restricted, per-run server control descriptor.
-CLI commands use it to find and authenticate the server's loopback TLS control
-listener; they never start a second browser or create a server identity.
+`daemon.json` tells local CLI commands how to reach the running server and
+contains its control token. CLI commands do not start another backend.
 
-Desktop Surf owns its managed server through a private parent pipe. Normal
-Quit performs a graceful shutdown; if the tray is force-closed, the pipe closes
-and the server exits with its Chromium process tree. `desktop.lock` and
-`server.lock` are kernel-owned locks: their empty files may remain on disk, but
-the locks themselves are released when their owner exits.
+The desktop app uses a parent pipe to supervise the server. Closing the app
+closes the backend and Chromium tree. `desktop.lock` and `server.lock` use
+kernel locks. Empty lock files may remain after exit.
 
-The browser profile, downloads, uploads, managed browser, updates, and desktop
-configuration also live below `SURF_HOME`. Back up the entire directory if you
-want to preserve the server identity and existing pairings.
+The rest of `SURF_HOME` contains the browser profile, downloads, uploads,
+managed browser, updates, logs, and desktop settings. Backing up the whole
+directory preserves the server identity and pairings.
 
-The Surf server and its Chromium process tree form one runtime generation.
-Chromium starts with the server and remains resident until that server stops;
-video capture, encoding, audio, and transport still stop independently as soon
-as the last native client disconnects. If Chromium or its DevTools connection
-dies, the server generation exits so the desktop tray or an external service
-manager can restart the complete contained process tree. Tabs, the active tab,
-mobile-site mode, dark appearance, cookies, and site storage are restored after
-the restart. Surf writes its small tab/session snapshot atomically shortly after
-tabs, URLs, the active tab, website mode, or appearance changes, then performs a
-final synchronous flush during graceful shutdown. A sudden process loss therefore
-does not normally resurrect an older browsing session.
+Chromium starts and stops with the backend. Capture and transport stop when the
+last client disconnects. If Chromium or its DevTools connection exits, the
+backend exits so its supervisor can restart both.
 
-## Logs and clipboard
+Tabs, the active tab, website mode, appearance, cookies, and site storage are
+restored after restart. Tab state is written after changes and once more during
+a clean shutdown.
 
-Surf keeps bounded, rotating host logs under `SURF_HOME`:
+Malformed replaceable state is moved beside the original with an
+`.invalid-<timestamp>` suffix. After two Chromium startup failures within ten
+minutes, Surf preserves the old profile as
+`profile.startup-failed-<timestamp>` and starts a clean profile with Surf
+bookmarks and history. TLS identity files are never replaced by this recovery.
+
+## Logs
+
+Host logs rotate under `SURF_HOME`.
 
 ```text
 $SURF_HOME/logs/server.log
@@ -146,10 +136,8 @@ $SURF_HOME/logs/desktop.log
 $SURF_HOME/logs/devices/<device-id>.ndjson
 ```
 
-The native client sends each structured record over its authenticated session
-as soon as it is written. It also uploads bounded snapshots at connection and
-background boundaries so reconnects can repair any missed interval. Desktop
-Settings follows one selected source live; terminal access is available with:
+Clients send structured records during their authenticated sessions and upload
+bounded snapshots after connection and background changes.
 
 ```sh
 surf logs
@@ -157,7 +145,7 @@ surf logs --follow
 surf logs --source device --device DEVICE_ID
 ```
 
-Clipboard synchronization is controlled by the host owner:
+## Clipboard
 
 ```sh
 surf clipboard status
@@ -168,32 +156,22 @@ surf clipboard set --device DEVICE_ID
 surf clipboard sync off
 ```
 
-With two-way sync on, copying text on the host or any connected iOS client
-updates the others. Surf uses the native Windows clipboard API, `pbcopy` and
-`pbpaste` on macOS, and `wl-clipboard`, `xclip`, or `xsel` on Linux. A headless
-host without one of those providers can still synchronize connected Surf
-clients and expose the current memory-only value through `surf clipboard get`.
+With sync enabled, copied text moves between the host and connected iOS clients.
+Windows uses its native clipboard API. macOS uses `pbcopy` and `pbpaste`.
+Linux uses `wl-clipboard`, `xclip`, or `xsel`.
 
-With sync off, desktop Settings presents a **Send once** text box. The
-equivalent `surf clipboard set` terminal prompt hides input; redirected
-standard input is preserved byte-for-byte, including whitespace and newlines.
-Surf never accepts clipboard text as a command-line argument. Only the enabled
-preference is stored under `SURF_HOME`; clipboard text is not persisted or
-included in logs. One-off device values expire after two minutes if unchanged.
+A headless host without a system clipboard can still sync connected Surf
+clients and expose the in memory value through `surf clipboard get`.
 
-Replaceable state recovers conservatively. Invalid desktop settings, device
-registries, and runtime descriptors are moved beside the original with an
-`.invalid-<timestamp>` suffix. After two browser startup failures within ten
-minutes, Surf preserves the Chromium profile as
-`profile.startup-failed-<timestamp>`, restores Surf bookmarks and history into
-a clean profile, and retries. This recovery never replaces the pinned
-`identity/server.crt` or `identity/server.key`; an invalid server identity stays
-failed closed and requires an explicit owner decision.
+With sync disabled, desktop Settings has a **Send once** field. The terminal
+prompt for `surf clipboard set` hides typed input and preserves redirected
+input exactly. Clipboard text is not accepted as a command argument, stored on
+disk, or written to logs. A one time device value expires after two minutes if
+unchanged.
 
-## Versioned API
+## API
 
-Surf 0.10 intentionally has no old-route aliases. Network interfaces live
-under one root:
+Network routes use the `/api/v1` prefix.
 
 ```text
 /api/v1/health
@@ -210,132 +188,79 @@ under one root:
 /api/v1/admin/*
 ```
 
-`/api/v1/admin/*` is loopback-only and requires the per-run control token.
-Other protected routes require a signed, short-lived device session;
-WebSockets use a fresh device-bound one-time ticket. The signed challenge is
-bound to API v1, the server ID, device ID, challenge ID, and nonce.
+Administration routes accept only loopback requests with the current control
+token. Other protected routes require a device session. WebSockets use a new
+single use ticket bound to the device.
 
-The unauthenticated health endpoint is useful for basic reachability:
+The health route is public and only reports reachability.
 
 ```sh
 curl -k https://127.0.0.1:18080/api/v1/health
 ```
 
-Detailed runtime statistics are available to the local desktop and paired
-clients. They include capture, video/audio subscribers, frame/drop counters,
-and Widevine capability state.
+Paired clients and local Settings can read detailed capture, media, frame, drop,
+and Widevine statistics.
 
 ## Browser and media
 
-Surf prefers a compatible installed Google Chrome, Microsoft Edge, or Chromium,
-otherwise it uses its verified managed Chromium build. Capture and
-content-blocking extensions are loaded through CDP so branded browsers do not
-depend on the ignored `--load-extension` switch. Active-tab `tabCapture`
-supplies both video and audio; no FFmpeg, PulseAudio, desktop capture, or
-virtual audio device is required.
+Surf uses a compatible installed Chrome, Edge, or Chromium. If none is found,
+it uses a verified managed Chromium build. Extensions are loaded through the
+DevTools protocol. Chromium tab capture supplies video and audio.
 
-Surf strictly selects Chromium's software AVC encoder on every host. This does
-not disable GPU rendering or compositing inside Chromium; it only keeps the
-transmitted H.264 stream independent of platform encoders whose reference-frame
-and buffering choices may exceed older clients' real-time decode budget. Surf
-first requests bounded variable-rate encoding with `STREAM_BITRATE`, then uses
-constant-quality `STREAM_QUANTIZER` encoding when the software encoder does not
-support variable-rate mode.
+The stream uses Chromium's software AVC encoder. GPU page rendering remains
+enabled. Surf requests variable rate encoding with `STREAM_BITRATE` and falls
+back to constant quality using `STREAM_QUANTIZER`.
 
-Surf holds the native-size stream at 60 FPS by default. Every two seconds, each native
-client identifies its active renderer and reports the matching throughput,
-queue depth, frame age, drops, pressure/recovery signals, errors, and memory
-pressure for diagnostics. iOS 8+ reports frames accepted by its compressed
-system display queue instead of inventing decoder callback timing that the API
-does not expose. The
-experimental adaptive governor can be enabled with `SURF_ADAPTIVE_VIDEO=1`.
-It smooths that feedback and chooses the worst recent client in a shared session. It can move
-through crisp (60 FPS), motion (50 FPS), balanced (40 FPS), and recovery
-(30 FPS), always at the native stream size. Cadence and H.264 level change in
-one encoder generation. Startup and reconfiguration windows are excluded from
-control decisions; emergency faults then downshift immediately, moderate
-pressure requires consecutive current samples, healthy recovery is deliberately
-slow, and an idle static page returns to crisp without being classified as a
-low-FPS failure. Cadence fallback remains opt-in while its recovery behavior is
-being validated against the native 60 FPS target.
+The default stream is the native client size at 60 FPS. Clients report renderer
+health, throughput, queue depth, frame age, drops, and memory pressure every two
+seconds.
 
-The native client reports the exact even-sized stream surface left by its
-current chrome; the backend does not choose from hard-coded device profiles.
-The 64-1600 dimension bounds are resource guards and cover the supported
-iOS 6-14 catalog, whose largest logical screen dimension is 1366 points.
-Rapid intermediate sizes are coalesced before Chromium and WebCodecs are
-reconfigured, so rotation, Surf fullscreen, and page Fullscreen API transitions
-retain the authenticated socket and media subscription. Page fullscreen state
-is synchronized to native fullscreen in both directions.
+`SURF_ADAPTIVE_VIDEO=1` enables four frame rate profiles at the same render
+size.
 
-### Physical input and website mode
+| Profile | Frame rate |
+| --- | ---: |
+| Crisp | 60 FPS |
+| Motion | 50 FPS |
+| Balanced | 40 FPS |
+| Recovery | 30 FPS |
 
-Desktop clients negotiate `pointer-input` and send surface-generation-scoped,
-normalized mouse and wheel samples. Pointer moves and adjacent wheel samples
-coalesce in a bounded lane under overload, while button edges, keyboard input,
-paste, and IME composition remain ordered. This guarantees that typing cannot
-overtake the click which focused an element. Disconnect, navigation, tab
-switch, viewport changes, and website-mode changes cancel held buttons. Clients
-connected to an older compatible backend use the established one-contact touch
-fallback and omit additive key modifiers.
+The client reports the even sized page surface left by its controls. Width and
+height must be between 64 and 1600. Rotation and fullscreen changes are
+coalesced before Chromium and the encoder are resized.
 
-The iOS `UIEvent` stream is the touch source of truth in both website modes.
-Each physical contact gets one stable client ID for its lifetime. Start/end/
-cancel edges are reliable ordered messages; move messages contain the complete
-active-contact snapshot and may replace an older queued move. Coordinates and
-contact radii are normalized against the exact encoder generation currently
-presented on the device.
+Surf does not include Widevine. A selected host browser may provide it.
 
-The backend owns the corresponding Chromium touch state on one serialized
-worker. It rejects stale generations, clients, contact IDs, and sequence
-numbers, and sends `touchCancel` across navigation, tab, viewport, website-mode,
-and disconnect boundaries. Before dispatch it maps normalized surface points
-through `Page.getLayoutMetrics().cssVisualViewport`, then sends real
-`Input.dispatchTouchEvent` events. This distinction matters on mobile pages
-whose CSS viewport is wider than the streamed surface. Client contact IDs are
-remapped to dense Chromium-local IDs `0` through `4` for the active gesture;
-this preserves stable multi-touch identity without allowing lifetime IDs to
-degrade Chromium's velocity tracking after extended use.
+## Input
 
-Touch dispatch is ordered but nonblocking, so an expensive website event
-handler cannot stall later move or release delivery. Chromium events are
-timestamped when the backend dispatches them while the client clock validates
-input ordering. On lift, the backend briefly separates the last real UIKit
-move from the empty all-contact release; it does not invent another motion
-sample from `touchesEnded`. Chromium can therefore commit the gesture's final
-velocity and continue compositor-driven fling after the finger leaves the
-screen.
+Desktop clients use normalized pointer and wheel input when the server
+advertises `pointer-input`. Moves and wheel samples may coalesce. Button
+changes, keyboard input, paste, and IME composition remain ordered. Older
+servers receive touch input.
 
-**Mobile Websites** changes Chromium's mobile metrics and browser identity; it
-does not change an iPad into a mouse. Physical input remains touch in both
-modes, so Chromium owns tap activation, compositor scrolling and fling,
-multi-touch pinch zoom, Pointer Events, and Touch Events. A page may still
-restrict zoom through its own viewport policy, as it can in an ordinary touch
-browser.
+The iOS client sends complete active touch snapshots with stable contact IDs.
+The backend rejects stale generations and sequence numbers, maps coordinates
+through the current Chromium viewport, and dispatches Chromium touch events.
+Navigation, tab changes, viewport changes, website mode changes, and disconnects
+cancel active input.
 
-Editable focus is event-driven. A runtime binding listens to `focusin` and
-`focusout`, follows the active element through open shadow roots, and tells the
-client when to show its native keyboard. Plain insertions use Chromium text
-insertion; marked iOS text uses IME composition update/commit/cancel messages.
-Client/backend compatibility is an ordered generation in
-`COMPATIBILITY_VERSION`. Releases in the same generation connect normally even
-when their Surf versions differ. If the iPad is older, the backend offers its
-verified embedded client package. If the iPad is newer, Surf asks for a backend
-update instead of downgrading the device. Increment the generation only for a
-wire change that cannot safely interoperate with the preceding generation.
+**Mobile Websites** changes Chromium metrics and browser identity. It does not
+change touch input into mouse input.
 
-Surf does not distribute Widevine. A working CDM supplied by the selected host
-browser may be used, subject to each service's DRM and output-protection rules.
+Focus events from Chromium control the native keyboard. Plain text uses
+Chromium insertion. Marked text uses IME composition events.
+
+Client and backend compatibility uses `COMPATIBILITY_VERSION`. Matching
+generations connect. An older client can receive the embedded matching package.
+A newer client requires a backend update.
 
 ## Updates
 
-Desktop releases use the signed release manifest and SHA-256-verified assets.
-On Windows, the installer closes the installed Surf process tree before
-replacing the executable and starts the new version after a silent update.
-The native `.deb` update travels over its already authenticated, pinned Surf
-connection and is verified again before the privileged installer applies it.
-Both are in-place updates: uninstalling Surf or deleting `SURF_HOME` is neither
-required nor recommended, because doing so discards browser state or pairing
-identity without improving compatibility.
-See [Security](security.md#updates) for what that protects and which host trust
-boundary remains.
+Desktop releases use a signed manifest and SHA 256 checked assets. The Windows
+installer stops Surf before replacing it and starts the new version afterward.
+
+The iOS package travels over the authenticated Surf connection. Its size, hash,
+package identity, version, and architecture are checked before installation.
+
+Updates replace programs in place. They do not require deleting `SURF_HOME` or
+pairing again. See [Security](security.md#updates).

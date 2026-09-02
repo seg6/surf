@@ -2,161 +2,155 @@
 
 ## The client cannot find the server
 
-- Confirm Surf is running and the computer firewall allows TCP port `18080`.
-- Test locally with `curl -k https://127.0.0.1:18080/api/v1/health`.
-- Bonjour is only discovery. Enter the LAN hostname or IP manually if it is
-  filtered by the network.
-- Use the computer's address, not the iOS device's address.
+1. Confirm that Surf is running.
+2. Allow TCP port `18080` through the host firewall.
+3. Test the local endpoint.
 
-## Pairing is not started
+```sh
+curl -k https://127.0.0.1:18080/api/v1/health
+```
 
-Open **Paired Devices**, choose **Pair device**, then scan that QR code or
-enter its six-digit code. For a headless server, run `surf pair`. Pairing is
-closed before this step, even when Bonjour or manual address entry finds the
-server.
+Bonjour only discovers hosts. Enter the host name or LAN address when multicast
+discovery is unavailable. The address must belong to the computer running Surf,
+not the iOS device.
 
-The invitation does not expire on a timer. It closes when one client uses it,
-the owner cancels it, the server restarts, or five incorrect codes are entered.
-A client that has not presented the invitation credential has no access to
-browser data or media.
+## Pairing is closed
 
-Manual pairing must show the same six words on both endpoints. If the phrases
-differ, cancel: something is presenting a different server identity.
+Open **Paired Devices** and choose **Pair device**, or run `surf pair`. An
+invitation closes after use, cancellation, server restart, or five wrong
+manual codes.
 
-If a CLI command says the server is not running, start `surf serve` under your
-service manager and run the command with the same `SURF_HOME`. `surf status`
-shows the server and control connection selected by the CLI.
+Manual pairing must show the same six words on both ends. Different words mean
+that another server identity was presented, so the attempt must be cancelled.
+
+CLI commands must use the same `SURF_HOME` as the running backend. `surf
+status` shows the selected server and control connection.
 
 ## Pairing shows an SSL error
 
-The self-signed Surf certificate is expected; the client validates its exact
-fingerprint instead of a public CA. Confirm the computer and iOS device clocks
-are reasonably correct, then retry with the computer's LAN address rather than
-`127.0.0.1`. If the endpoint belongs to a saved server, do not bypass a changed
-identity warning—verify the host or explicitly forget and pair it again.
+Surf uses a self signed certificate and pins its fingerprint. Public CA
+validation is not involved.
+
+Check both system clocks and use the host LAN address instead of `127.0.0.1`.
+Never bypass a changed identity warning for a saved server.
 
 ## Server Identity Changed
 
-Surf refuses an endpoint whose certificate differs from the saved pin. This
-can mean the address now reaches another server, `SURF_HOME` was replaced, or a
-connection is being intercepted. Verify the host first. To accept a genuinely
-reinstalled server, explicitly **Forget Server** and pair again.
+The certificate no longer matches the saved fingerprint. The address may point
+to another server, `SURF_HOME` may have been replaced, or the connection may
+be intercepted.
+
+Confirm the host. A reinstalled server must be forgotten and paired again.
 
 ## A paired device is rejected
 
-Check `surf devices list`. A revoked device must pair again. If the client lost
-its device-only Keychain key, use **Pair Again**; copying app preferences does
-not copy the private key.
+Run `surf devices list`. A revoked device must pair again. Loss of the private
+Keychain key also requires **Pair Again**. App preferences do not contain that
+key.
 
-## QR scanning on iOS 6
+## QR scanning fails on iOS 6
 
-Surf includes a software QR decoder for camera-equipped iOS 6 devices. If the
-device has no usable camera, enter the address and six-digit code instead.
-Manual pairing also uses the six-word identity comparison.
+Surf includes a software QR decoder. Devices without a working camera can use
+the address, six digit code, and six word comparison.
 
-## Video, audio, or input trouble
+## Video, audio, or input fails
 
-- Open **More > Surf Settings > Performance Overlay** for decoder, latency,
-  network, and audio health.
-- Rotation and fullscreen reconfiguration should recover automatically. Use
-  **Retry Video** only if that recovery ultimately reports video unavailable.
-- Check the desktop logs for Chromium capture or WebCodecs errors.
-- Compare the client and backend compatibility values in Settings and
-  `surf status`. Surf release versions may differ when compatibility matches.
+Open **More > Surf Settings > Performance Overlay** and check the host logs for
+capture or WebCodecs errors.
 
-Surf's active-tab capture handles audio and video directly. Installing FFmpeg,
-PulseAudio, or a virtual audio device will not help this path.
+Rotation and fullscreen should recover without manual action. **Retry Video**
+is for a recovery that ended with video unavailable.
+
+The compatibility values in Settings and `surf status` must match. Surf app
+versions may differ.
+
+FFmpeg, PulseAudio, and virtual audio devices are not part of the Chromium tab
+capture path.
 
 ## Rotation or fullscreen has the wrong size
 
-Surf fullscreen and the remote page Fullscreen API are synchronized. A page
-player such as YouTube can enter native fullscreen, and the native Exit control
-leaves both states; Back and Forward are intentionally hidden in fullscreen.
+Surf fullscreen and page fullscreen are synchronized. The native Exit control
+leaves both.
 
-After rotation or a fullscreen change, the backend log should report the exact
-even-sized client surface and one settled tab-encoder resize. Intermediate
-orientation sizes are coalesced and must not close the WebSocket or require
-**Retry Video**. If the client reconnects, confirm the client and backend report
-the same compatibility generation, then collect both logs around the transition.
+After a size change, the backend log should show the client surface and one
+settled encoder resize. The WebSocket should remain open. If the client
+reconnects, confirm matching compatibility generations and collect both logs
+around the transition.
 
-## Widevine or streaming-site sign-in
+## Widevine or site sign in fails
 
-Check Surf's authenticated runtime statistics for the live Widevine EME probe.
-`chrome://components` only lists browser-managed components; a host-supplied
-CDM used by Chromium can work without appearing there. Surf does not ship a
-CDM. A site may still reject sign-in or playback because of its account,
-datacenter-IP, DRM, output-protection, or browser-policy requirements.
+Check the authenticated runtime statistics for the Widevine EME probe. Surf
+does not ship a CDM. A browser supplied CDM can work without appearing in
+`chrome://components`.
 
-For desktop pages, Surf changes only the classic `HeadlessChrome/` product
-token to `Chrome/`. Browser brands, full versions, platform details, and
-`Sec-CH-UA-*` values are read from the selected Chrome/Chromium build and
-returned unchanged. **Mobile Websites** is the deliberate exception: it
-requests an Android/mobile device identity while retaining the browser's
-native brand and version list. Keep that option off when testing a service's
-desktop Linux support.
+Sites may still reject playback or sign in because of account, IP, DRM, output
+protection, or browser policy.
 
-## Native package will not install
+Desktop mode changes the `HeadlessChrome/` product token to `Chrome/`.
+**Mobile Websites** requests a mobile identity. Disable it when checking a
+site's desktop support.
 
-Run the package verifier from the repository root:
+## The iOS package will not install
+
+Run the package verifier from the repository root.
 
 ```sh
 docker run --rm -v "$PWD:/src" surf-buildenv \
   bash /src/client/ios/verify-package.sh
 ```
 
-The package must contain armv7 and arm64 slices, declare device families 1 and
-2, and retain the privileged updater's root ownership/setuid mode. After a
-manual install, run `uicache` and respring if the icon does not appear.
-On older systems, use `su mobile -c uicache`; running it as `root` may fail to
-open SpringBoard's cache.
+The package must contain armv7 and arm64 builds, both device families, and the
+update helper with root ownership and its setuid mode.
 
-## The desktop opens but the backend does not start
+After manual installation, run `uicache` and respring if the icon is missing.
+Older systems may require:
 
-Check **Settings > Logs** before removing state. Surf retries transient server
-failures with bounded backoff and records the actual startup error in
-`$SURF_HOME/logs/desktop.log`.
+```sh
+su mobile -c uicache
+```
 
-A force-closed tray should not leave a server, Chromium tree, listener, or
-backend lock behind. Empty `.lock` files are normal and do not hold a lock by
-themselves. Dead runtime descriptors and malformed replaceable state are backed
-up and repaired automatically. Repeated Chromium startup failures preserve the
-old profile under `SURF_HOME` and retry with clean browser state while retaining
-the server identity and pairings.
+## The desktop opens but the backend does not
 
-Do not delete all of `SURF_HOME` as a first repair step: that also destroys the
-pinned server identity and forces every client to pair again. If the log reports
-an invalid TLS identity, preserve the directory and repair or deliberately
-replace only `identity/`; clients will correctly reject a replacement identity
-until explicitly forgotten and paired again.
+Read **Settings > Logs** or
+`$SURF_HOME/logs/desktop.log` before changing state.
+
+A forced desktop exit should not leave the backend, Chromium, listener, or a
+live lock. Empty `.lock` files do not hold locks. Surf repairs replaceable
+state and can move a failed Chromium profile aside while keeping the server
+identity and pairings.
+
+Deleting all of `SURF_HOME` also deletes the server identity and forces every
+client to pair again. An invalid TLS identity should be repaired or replaced
+under `identity/` only after its old contents have been preserved.
 
 ## A Windows update does not reopen Surf
 
-Install Surf 0.10.3 or later. Those installers force-close the installed Surf
-process tree before replacing it and launch the new version after a silent
-update. `SURF_HOME` is not removed, so the server identity, pairings, and
-browser profile remain in place.
+Install Surf 0.10.3 or later. Those installers stop the existing process before
+replacement and start the new version afterward. `SURF_HOME` remains in place.
 
 ## Clipboard sync has no host integration
 
-Run `surf clipboard status`. Windows and macOS use their built-in clipboard
-facilities. On Linux, a graphical session needs `wl-copy` and `wl-paste`
-(`wl-clipboard`) under Wayland, or `xclip`/`xsel` under X11, with the matching
-display environment available to the Surf process. A headless service can
-still synchronize text between connected Surf clients and use
-`surf clipboard get`/`set`; it simply cannot read or write a desktop system
-clipboard that does not exist.
+Run `surf clipboard status`.
+
+Windows and macOS use their system clipboard APIs. Wayland needs `wl-copy`
+and `wl-paste`. X11 needs `xclip` or `xsel`. The display environment must
+be available to the Surf process.
+
+A headless service can still sync text between Surf clients and use
+`surf clipboard get` and `surf clipboard set`.
 
 ## Collect logs
 
-The Surf tray Settings page follows the selected server, desktop, or paired
-device source live. Each iOS structured record is sent to the host as it is
-written, while bounded snapshots repair reconnect gaps. `surf logs` prints the
-same host copies without first copying anything off the device; use
-`surf logs --follow` while reproducing a problem. The host copies are bounded
-under `$SURF_HOME/logs/`.
+Desktop Settings can follow server, desktop, or client logs. The terminal
+equivalent is:
 
-On iOS, **Settings > Diagnostics > Logs** still provides color-coded structured
-events, expandable typed fields, live updates, copy, and clear controls. Its
-bounded NDJSON store is `/var/mobile/Library/Surf/surf.log`. Surf excludes
-credentials, clipboard contents, tickets, query strings, and full URLs, but
-review exported logs before publishing them.
+```sh
+surf logs --follow
+```
+
+Host copies are bounded under `$SURF_HOME/logs/`.
+
+On iOS, logs are under **Settings > Diagnostics > Logs** and at
+`/var/mobile/Library/Surf/surf.log`. Surf omits credentials, clipboard text,
+tickets, query strings, and full URLs. Exported logs still need review before
+publication.

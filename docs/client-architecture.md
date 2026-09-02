@@ -1,95 +1,65 @@
-# Client Architecture
+# Client architecture
 
-Surf consists of a computer-side Go backend and one or more remote browser
-clients. The native iOS application lives under `client/ios`. This document
-records the portable-client boundary established by the rework.
+Surf has a Go backend and native clients. Shared client behavior lives in the
+C99 library under `client/core`. Platform code handles operating system APIs
+and presentation.
 
-## Platform hosts
-
-The current client has several strong platform components:
-
-- `RBSecureHTTPClient`, `RBSocket`, and `RBTunnelPipe` implement old-iOS HTTP,
-  pinned TLS, WebSocket, and tunneled transport behavior.
-- `RBDeviceIdentity` uses Security/Keychain for a per-server RSA identity.
-- `RBVideoDecoder`, `RBSampleBufferRenderer`, and `RBStreamView` implement the
-  old-iOS video decode and stable presentation paths.
-- `RBAudioPlayer` owns AudioQueue output.
-- UIKit controllers implement phone/tablet chrome, pairing, settings, library,
-  dialogs, selects, sharing, and platform lifecycle.
-
-Portable responsibilities now enter those components through explicit core
-APIs:
-
-| Former platform owner | Portable owner now |
-| --- | --- |
-| `RBProtocol` | `client/core` validates the 84-byte `RBR1` envelope |
-| `rb_h264` | `client/core` owns Annex-B/configuration helpers |
-| `RBInteractionTracker` | `client/core` owns causal IDs, timestamps, and input sequencing |
-| `RBSession` | `client/core` owns connection epochs and reconnect policy |
-| `RBRootViewController` | `client/core` owns tabs, navigation, loading, title, security, and editable state |
-| UIKit modal/list lifecycle | `client/core` owns semantic presence, completion, and stale-state cleanup |
-| `RBMediaPipeline` | `client/core` owns generation/gap/recovery admission policy |
-| `RBDiagnostics` | `client/core` owns rolling metrics and health classification |
-
-`RBRootViewController` still coordinates UIKit presentation, as intended. It
-renders copied semantic snapshots and executes platform effects; original wire
-bytes are strictly decoded and reduced in C before UIKit receives a valid
-control event. Rich collection contents and modal widgets remain host-owned
-typed adapters, while the core owns their presence, identity, counts, control
-values, completion, and connection/page cleanup.
-
-## Repository layout
+## Layout
 
 ```text
 client/
-  core/       portable C99 behavior and protocol
-  desktop/    Rust/ImGui desktop host, initially certified on Linux
-  ios/        Objective-C/UIKit old-iOS host
+  core/       C99 behavior and protocol
+  desktop/    Rust and Dear ImGui host
+  ios/        Objective C and UIKit host
 ```
 
-The UIKit host was moved from `native/client` to `client/ios` only after the
-core build boundary stabilized. The history-preserving move updated Theos,
-buildenv, packaging, documentation, and CI paths together; toolchain support
-continues to live under `native/buildenv`.
+The iOS toolchain remains under `native/buildenv`.
 
-## Runtime boundaries
+## Responsibilities
+
+| Area | C99 core | Platform host |
+| --- | --- | --- |
+| Control protocol | Decode events and encode commands | Transport bytes |
+| Browser state | Reduce events into snapshots and effects | Draw snapshots and perform effects |
+| Reconnect | Choose timing and state transitions | Run timers and network operations |
+| TLS and identity | Model results | Use platform TLS and key storage |
+| Media | Validate frames and choose admission or recovery | Decode and present video, play audio |
+| Input | Order and normalize samples | Read platform events |
+| UI and services | Request work through effects | Layout, clipboard, files, dialogs, and notifications |
+| Diagnostics | Calculate rolling health | Display and export results |
+
+On iOS, `RBSecureHTTPClient`, `RBSocket`, and `RBTunnelPipe` handle
+transport. `RBDeviceIdentity` uses Security and Keychain.
+`RBVideoDecoder`, `RBSampleBufferRenderer`, and `RBStreamView` handle
+video. `RBAudioPlayer` handles AudioQueue output. UIKit handles the interface
+and lifecycle.
+
+The desktop host provides the same platform services with Rust, FFmpeg, OpenGL,
+CPAL, winit, and Dear ImGui.
+
+## Runtime
 
 ```text
-                         semantic actions
-  UIKit or ImGui --------------------------------->  control core
-       ^                                                   |
-       |                 immutable snapshot                |
-       +---------------------------------------------------+
-                                                           |
-                                                  effects to execute
-                                                           |
-       +---------------------------------------------------+
-       v                                                   v
- platform adapters <------------------------------- operation results
+platform action -> control core -> snapshot and effects -> platform adapters
 
- WebSocket binary -> frame parser/media policy -> platform decoder -> renderer
+WebSocket bytes -> frame parser -> media policy -> decoder -> renderer
 ```
 
-### Control core
+The control core has one owner. It accepts typed events, updates state, and
+queues effects. Platform operations run after dispatch and return their results
+as later events.
 
-The control core is single-owner and low-frequency. It receives typed events
-for user intent, control messages, transport results, timers, lifecycle, and
-platform-operation results. It updates deterministic state and queues effects.
-It never calls a platform callback while dispatching.
+Media does not pass through the UI reducer. The media path tracks connection
+and encoder generations, sequences, gaps, frame age, and recovery. Decoders use
+the original payload buffer. Small metrics are sent to the control path at
+intervals.
 
-### Media lane
+Separating these paths prevents UI work from blocking stream ingress and
+decode.
 
-The media lane is separate from UI state. It validates frame headers and
-tracks generations, sequences, gaps, frame age, and recovery decisions on the
-socket/decoder path. Platform decoders and renderers consume the original
-payload buffer. Only periodic small metrics enter the control/UI lane.
+## API
 
-This separation is required to keep opening an omnibox, changing keyboard
-state, resizing chrome, or presenting a sheet from stalling a 60 FPS stream.
-
-## Core API shape
-
-The exact ABI will evolve behind tests, but it follows these rules:
+The ABI follows this shape:
 
 ```c
 typedef struct surf_core surf_core_t;
@@ -106,47 +76,19 @@ surf_core_result_t surf_core_snapshot(const surf_core_t *core,
                                       surf_snapshot_t *out_snapshot);
 ```
 
-- Public structs begin with a size/version field where ABI extension requires
-  it.
-- Wire strings are pointer/length views and never implicitly null-terminated.
-- Collections have configured upper bounds.
-- Snapshot/effect lifetime is explicit.
-- Large media buffers remain owned by their platform host.
-- Core allocation can be injected for failure and constrained-device tests.
+Public structures carry a size or version where later extension needs one.
+Strings use pointer and length views. Collections have configured limits.
+Snapshot and effect lifetimes are explicit. Media buffers remain with the host.
+Tests can replace the allocator.
 
-## Platform ownership
+## Migration record
 
-| Responsibility | Core | iOS host | Desktop host |
-| --- | --- | --- | --- |
-| Protocol schema and validation | Yes | Adapter only | Adapter only |
-| Browser/session state policy | Yes | Snapshot consumer | Snapshot consumer |
-| Reconnect decision and delay | Yes | Timer/network effect | Tokio timer/network effect |
-| HTTP/WebSocket implementation | No | Existing native code | Rust async transport |
-| TLS fingerprint policy result | Modeled | Security/CFNetwork | rustls verifier |
-| Device-key operations | Requested | Keychain/SecKey | Rust identity store |
-| H.264 frame admission | Yes | Calls core media API | Calls core media API |
-| H.264 decode | No | VideoToolbox | FFmpeg initially |
-| Video presentation | No | sample-buffer/OpenGL | direct OpenGL surface |
-| Audio output | No | AudioQueue | desktop audio adapter |
-| UI layout and theme | No | UIKit | Dear ImGui |
-| Clipboard/files/dialog widgets | Requested | UIKit services | desktop services |
+The portable core now handles framing, H.264 helpers, protocol codecs, browser
+state, connection epochs, input sequencing, rich state cleanup, media policy,
+and diagnostics. Both the UIKit and Linux clients use it.
 
-## Completed initial migration
+The UIKit source moved from `native/client` to `client/ios` after the core
+boundary was established. Build and packaging paths moved with it.
 
-1. Build/test guardrails and ownership documentation.
-2. Binary framing and pure-C H.264 helpers.
-3. Complete two-way Go/C typed protocol contracts.
-4. Browser reducer, effects, immutable snapshots, and connection epochs.
-5. iOS shadow comparison followed by navigation/editable-state cutover.
-6. Raw plus safe Rust bindings and direct YUV OpenGL presentation.
-7. Genuine Linux pairing, pinned transport, bounded media, and browser UI.
-8. Atomic history-preserving UIKit relocation to `client/ios`.
-9. Shared rich semantic lifecycle and actual-presented-frame generation scope.
-
-No step requires a trace file or simulated connection for normal use. Trace
-capture may support deterministic tests, but the desktop milestone is a real
-Surf client paired to an ordinary backend.
-
-See [Porting Surf Clients](porting-clients.md) for the host-adapter contract and
-platform bring-up gates, and [Versioning and Compatibility](versioning.md) for
-the independent release, wire, capability, and ABI dimensions.
+See [Porting Surf Clients](porting-clients.md) for the host contract and
+[Versioning](versioning.md) for network and ABI versions.

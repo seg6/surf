@@ -1,18 +1,14 @@
-# Surf Client Core
+# Surf client core
 
-`surf_client_core` is Surf's platform-neutral C99 client library. It is built
-without UIKit, Foundation, Qt, Rust, networking, TLS, decoder, renderer, or
-audio dependencies.
+`surf_client_core` is the C99 library shared by Surf clients. It has no UI,
+network, TLS, decoder, renderer, audio, filesystem, thread, or Rust dependency.
 
-The core owns the binary media envelope, H.264 Annex-B helpers, the complete
-typed control-event decoder and command encoder, deterministic browser state,
-immutable navigation and rich-semantic snapshots, modal completion, platform
-effects, reconnect/media/input policy, NTP-style clock synchronization, and
-rolling pipeline diagnostics. The JSON decoder is strict and allocation-free
-after a host supplies one reusable workspace; decoded strings and collections
-remain valid until that workspace is reused.
+The core handles control events and commands, browser state, connection state,
+input ordering, media admission, clock synchronization, and pipeline metrics.
+Its JSON decoder uses a workspace supplied by the host. Decoded strings and
+collections remain valid until that workspace is reused.
 
-Build and test it directly:
+Build and test the library with:
 
 ```sh
 cmake -S client/core -B .local/build/client-core \
@@ -21,14 +17,15 @@ cmake --build .local/build/client-core
 ctest --test-dir .local/build/client-core --output-on-failure
 ```
 
-Or run:
+The root make targets run the same tests and the sanitizer build.
 
 ```sh
 make client-core-test
 make client-core-sanitize
 ```
 
-Public interfaces live under `include/surf`. Large media payloads remain owned
-by the platform host; parsers return borrowed views and never copy access units.
-See [Porting Surf Clients](../../docs/porting-clients.md) for the complete
-adapter and threading contract.
+Public headers live under `include/surf`. Media parsers return borrowed views,
+so the host retains ownership of the source buffer.
+
+See [Porting Surf Clients](../../docs/porting-clients.md) for the adapter and
+threading contract.
