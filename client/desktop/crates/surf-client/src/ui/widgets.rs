@@ -2,6 +2,19 @@
 //! remain owned by ImGui, never by a parallel invisible-button interaction system.
 use imgui::{StyleColor, StyleVar, Ui};
 
+/// Public Dear ImGui placement API, missing a standalone wrapper in imgui-rs.
+pub fn place_next(position: [f32; 2], size: [f32; 2]) {
+    // SAFETY: called on the UI thread between NewFrame and Render.
+    unsafe {
+        imgui::sys::igSetNextWindowPos(
+            position.into(),
+            imgui::Condition::Always as i32,
+            [0.0, 0.0].into(),
+        );
+        imgui::sys::igSetNextWindowSize(size.into(), imgui::Condition::Always as i32);
+    }
+}
+
 pub fn icon_button(ui: &Ui, id: &str, glyph: &str, help: &str) -> bool {
     let _id = ui.push_id(id);
     let _align = ui.push_style_var(StyleVar::ButtonTextAlign([0.5, 0.5]));

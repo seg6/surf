@@ -60,6 +60,23 @@ impl PageInput {
         self.composition_active = false;
     }
 
+    pub fn dragging(&self) -> bool {
+        self.buttons != 0
+    }
+
+    pub fn release_buttons(&mut self, rect: PageRect, generation: u32) -> Vec<Command> {
+        let (x, y) = self.pointer.unwrap_or((rect.x, rect.y));
+        let mut commands = Vec::new();
+        for button in 1..=5 {
+            if let Ok(Some(command)) =
+                self.button(false, button, x, y, rect, generation, Modifiers::default())
+            {
+                commands.push(command);
+            }
+        }
+        commands
+    }
+
     pub fn motion(
         &mut self,
         x: f64,

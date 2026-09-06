@@ -19,6 +19,8 @@ pub struct VideoSurface {
     last_presentation_ns: u64,
     surface_generation: u32,
     error: Option<String>,
+    submitted: Option<(PresentedFrame, u64)>,
+    drawn_viewport: [i32; 4],
 }
 
 impl VideoSurface {
@@ -33,6 +35,8 @@ impl VideoSurface {
             last_presentation_ns: 0,
             surface_generation: 0,
             error: None,
+            submitted: None,
+            drawn_viewport: [0; 4],
         })
     }
 
@@ -44,6 +48,7 @@ impl VideoSurface {
     }
 
     pub fn clear(&mut self) {
+        self.submitted = None;
         self.pending = None;
         self.visible = false;
         self.last_presentation_ns = 0;
@@ -54,9 +59,12 @@ impl VideoSurface {
 
     pub fn render(&mut self, gl: &glow::Context, viewport: [i32; 4]) -> Option<PresentedFrame> {
         let viewport = self
-            .resources
-            .dimensions
+            .pending
+            .as_ref()
+            .map(|frame| (frame.width, frame.height))
+            .or(self.resources.dimensions)
             .map_or(viewport, |source| aspect_fit_viewport(viewport, source));
+        self.drawn_viewport = viewport;
         // SAFETY: the event loop owns the current framebuffer and these
         // resources belong to the same glutin context.
         unsafe {
@@ -82,28 +90,41 @@ impl VideoSurface {
             }
             self.diagnostics.latest_upload_us =
                 u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
-            let now = monotonic_ns();
-            if self.last_presentation_ns != 0 {
-                self.diagnostics.latest_presentation_gap_us = self
-                    .diagnostics
-                    .latest_presentation_gap_us
-                    .max(now.saturating_sub(self.last_presentation_ns) / 1_000);
-            }
-            self.last_presentation_ns = now;
             let origin = frame.source_client_ns.unwrap_or(frame.ingress_receive_ns);
-            self.diagnostics.latest_frame_age_us = now.saturating_sub(origin) / 1_000;
             self.surface_generation = frame.generation;
             presented = Some(PresentedFrame {
                 generation: frame.generation,
                 source_sequence: frame.source_sequence,
             });
+            self.submitted = presented.map(|frame| (frame, origin));
         }
         // SAFETY: resources belong to the current host GL context.
         unsafe { self.resources.draw(gl) };
-        if presented.is_some() {
-            self.diagnostics.presented = self.diagnostics.presented.saturating_add(1);
-        }
         presented
+    }
+
+    pub fn drawn_viewport(&self) -> [i32; 4] {
+        self.drawn_viewport
+    }
+
+    /// A successful swap is evidence of presentation submission, not physical scanout.
+    /// Redrawing an unchanged texture must not acknowledge or count the frame again.
+    pub fn after_swap(&mut self, success: bool) -> Option<PresentedFrame> {
+        let (frame, origin) = self.submitted.take()?;
+        if !success {
+            return None;
+        }
+        let now = monotonic_ns();
+        if self.last_presentation_ns != 0 {
+            self.diagnostics.latest_presentation_gap_us = self
+                .diagnostics
+                .latest_presentation_gap_us
+                .max(now.saturating_sub(self.last_presentation_ns) / 1000);
+        }
+        self.last_presentation_ns = now;
+        self.diagnostics.latest_frame_age_us = now.saturating_sub(origin) / 1000;
+        self.diagnostics.presented = self.diagnostics.presented.saturating_add(1);
+        Some(frame)
     }
 
     pub fn surface_generation(&self) -> u32 {

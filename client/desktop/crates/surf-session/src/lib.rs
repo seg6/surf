@@ -215,6 +215,7 @@ impl FrameSink for LatestFrameSink {
 }
 
 pub struct SessionClient {
+    cancel: Arc<tokio::sync::Notify>,
     actions: ActionSender<SessionAction>,
     events: Receiver<SessionEvent>,
     latest_frame: Arc<LatestFrameSink>,
@@ -241,6 +242,8 @@ impl SessionClient {
         let (actions, action_rx) = channel(256);
         let (event_tx, events) = mpsc::sync_channel(256);
         let discovery_events = event_tx.clone();
+        let cancel = Arc::new(tokio::sync::Notify::new());
+        let worker_cancel = cancel.clone();
         let thread = thread::Builder::new()
             .name("surf-session".to_owned())
             .spawn(move || {
@@ -250,9 +253,13 @@ impl SessionClient {
                     .thread_name("surf-net")
                     .build();
                 match runtime {
-                    Ok(runtime) => {
-                        runtime.block_on(driver(storage, action_rx, event_tx.clone(), frame_sink))
-                    }
+                    Ok(runtime) => runtime.block_on(async {
+                        tokio::select! {
+                            _=worker_cancel.notified()=>{},
+                            _=driver(storage,action_rx,event_tx.clone(),frame_sink.clone())=>{},
+                        }
+                        frame_sink.clear();
+                    }),
                     Err(error) => {
                         let _ = event_tx.try_send(SessionEvent::Failure(SessionFailure {
                             kind: FailureKind::Internal,
@@ -264,6 +271,7 @@ impl SessionClient {
             })?;
         let discovery = Some(discovery::DiscoveryWorker::spawn(discovery_events));
         Ok(Self {
+            cancel,
             actions,
             events,
             latest_frame,
@@ -294,6 +302,7 @@ impl SessionClient {
 
 impl Drop for SessionClient {
     fn drop(&mut self) {
+        self.cancel.notify_one();
         self.discovery.take();
         let _ = self.actions.try_send(SessionAction::Shutdown);
         if let Some(thread) = self.thread.take()

@@ -2,249 +2,257 @@ use super::*;
 
 impl DesktopApp {
     pub(super) fn draw_panel(&mut self, ui: &Ui) {
+        if self.panel != self.previous_panel {
+            if self.panel == Some(Panel::More) {
+                ui.open_popup("##tools-popup");
+            }
+            self.previous_panel = self.panel;
+        }
         match self.panel {
             Some(Panel::Tabs) => self.draw_tabs(ui),
             Some(Panel::More) => self.draw_more(ui),
             Some(Panel::Library) => self.draw_library(ui),
-            Some(Panel::Find) => self.draw_find(ui),
+            Some(Panel::Find) => {
+                self.find_open = true;
+                self.panel = None;
+            }
+            Some(Panel::Performance) => {
+                self.performance_open = true;
+                self.panel = None;
+            }
             Some(Panel::Reader) => self.draw_reader(ui),
             Some(Panel::Media) => self.draw_media(ui),
             Some(Panel::Settings) => self.draw_settings(ui),
-            Some(Panel::Performance) => self.draw_performance(ui),
             Some(Panel::Files) => self.draw_files(ui),
             None => {}
         }
     }
 
     pub(super) fn draw_more(&mut self, ui: &Ui) {
-        let display = ui.io().display_size;
-        let flags = overlay_flags() | WindowFlags::ALWAYS_AUTO_RESIZE | WindowFlags::NO_TITLE_BAR;
-        let mut next = self.panel;
-        ui.window("Tools##panel")
-            .position([display[0], PANEL_TOP], Condition::Always)
-            .position_pivot([1.0, 0.0])
-            .size_constraints([220.0, 0.0], [220.0, display[1] - PANEL_TOP - 8.0])
-            .flags(flags)
-            .build(|| {
-                if full_button(ui, "Library", 206.0) {
-                    self.controller.command(Command::Library {
-                        causal: Causal::default(),
-                    });
-                    self.controller.command(Command::Downloads {
-                        causal: Causal::default(),
-                    });
-                    next = Some(Panel::Library);
-                }
-                if full_button(ui, "Find on page", 206.0) {
-                    next = Some(Panel::Find);
-                }
-                if full_button(ui, "Reader", 206.0) {
-                    self.controller.command(Command::Reader {
-                        causal: Causal::default(),
-                    });
-                    next = None;
-                }
-                if full_button(ui, "Media", 206.0) {
-                    self.controller.command(Command::MediaQuery {
-                        causal: Causal::default(),
-                    });
-                    next = Some(Panel::Media);
-                }
-                ui.separator();
-                if full_button(ui, "Performance", 206.0) {
-                    next = Some(Panel::Performance);
-                }
-                if full_button(ui, "Settings", 206.0) {
-                    next = Some(Panel::Settings);
-                }
-                if full_button(ui, "Fullscreen", 206.0) {
-                    let on = !self.fullscreen;
-                    self.set_fullscreen_command(on);
-                    next = None;
-                }
-                ui.separator();
-                if full_button(ui, "Disconnect", 206.0) {
-                    self.controller.disconnect();
-                    next = None;
-                }
+        let (position, size) = crate::layout::anchored(
+            ui.io().display_size,
+            [
+                ui.io().display_size[0] - 300.0,
+                self.layout.rail[1],
+                30.0,
+                42.0,
+            ],
+            [292.0, 444.0],
+        );
+        widgets::place_next(position, size);
+        let Some(_popup) = ui.begin_popup("##tools-popup") else {
+            self.panel = None;
+            return;
+        };
+        let mut next = None;
+        if widgets::menu_row(ui, "new", icon::PLUS, "New tab", "Ctrl+T", false) {
+            self.new_tab();
+        }
+        if widgets::menu_row(
+            ui,
+            "bookmark",
+            icon::STAR,
+            "Bookmark this page",
+            "Ctrl+D",
+            self.controller.snapshot.starred,
+        ) {
+            self.controller.command(Command::Bookmark {
+                causal: Causal::default(),
             });
-        self.panel = next;
-    }
-
-    pub(super) fn draw_library(&mut self, ui: &Ui) {
-        let display = ui.io().display_size;
-        let available_width = (display[0] - 16.0).max(280.0);
-        let available_height = (display[1] - 16.0).max(220.0);
-        let width = (display[0] * 0.72).clamp(280.0, 820.0).min(available_width);
-        let height = (display[1] * 0.72)
-            .clamp(220.0, 620.0)
-            .min(available_height);
-        let mut open = true;
-        let mut actions = Vec::new();
-        ui.window("Library")
-            .position([display[0] * 0.5, display[1] * 0.5], Condition::Appearing)
-            .position_pivot([0.5, 0.5])
-            .size([width, height], Condition::Appearing)
-            .size_constraints([280.0, 220.0], [available_width, available_height])
-            .opened(&mut open)
-            .flags(overlay_flags())
-            .build(|| {
-                for (section, label) in [
-                    (LibrarySection::History, "History"),
-                    (LibrarySection::Bookmarks, "Bookmarks"),
-                    (LibrarySection::Downloads, "Downloads"),
-                ] {
-                    if section != LibrarySection::History {
-                        ui.same_line();
-                    }
-                    let selected = self.library_section == section;
-                    if ui.selectable_config(label).selected(selected).build() {
-                        self.library_section = section;
-                    }
-                }
-                ui.separator();
-                ui.child_window("##library-list")
-                    .size([0.0, 0.0])
-                    .build(|| match self.library_section {
-                        LibrarySection::History => {
-                            let items = self.controller.browser.history.clone();
-                            if items.is_empty() {
-                                ui.text_disabled("No browsing history yet.");
-                            }
-                            for (index, item) in items.into_iter().enumerate() {
-                                let label = row_label(&item.title, &item.url, index);
-                                let row_width = (ui.content_region_avail()[0] - 30.0).max(120.0);
-                                if ui.selectable_config(label).size([row_width, 24.0]).build() {
-                                    actions.push(Action::Navigate(item.url.clone()));
-                                }
-                                ui.same_line();
-                                if compact_button(
-                                    ui,
-                                    &format!("{}##hist-{index}", icon::CLOSE),
-                                    "Remove",
-                                    [25.0, 22.0],
-                                ) {
-                                    actions.push(Action::Command(Command::HistoryDelete {
-                                        url: item.url,
-                                        ts: item.ts,
-                                        causal: Causal::default(),
-                                    }));
-                                    actions.push(Action::Command(Command::Library {
-                                        causal: Causal::default(),
-                                    }));
-                                }
-                            }
-                        }
-                        LibrarySection::Bookmarks => {
-                            let items = self.controller.browser.bookmarks.clone();
-                            if items.is_empty() {
-                                ui.text_disabled("Bookmarks appear here.");
-                            }
-                            for (index, item) in items.into_iter().enumerate() {
-                                let label = row_label(&item.title, &item.url, index);
-                                let row_width = (ui.content_region_avail()[0] - 30.0).max(120.0);
-                                if ui.selectable_config(label).size([row_width, 24.0]).build() {
-                                    actions.push(Action::Navigate(item.url.clone()));
-                                }
-                                ui.same_line();
-                                if compact_button(
-                                    ui,
-                                    &format!("{}##bookmark-{index}", icon::CLOSE),
-                                    "Remove",
-                                    [25.0, 22.0],
-                                ) {
-                                    actions.push(Action::Command(Command::BookmarkDelete {
-                                        url: item.url,
-                                        causal: Causal::default(),
-                                    }));
-                                    actions.push(Action::Command(Command::Library {
-                                        causal: Causal::default(),
-                                    }));
-                                }
-                            }
-                        }
-                        LibrarySection::Downloads => {
-                            let items = self.controller.browser.downloads.clone();
-                            if items.is_empty() {
-                                ui.text_disabled("Downloads from this server appear here.");
-                            }
-                            for (index, item) in items.into_iter().enumerate() {
-                                ui.text(truncate(&item.name, 58));
-                                ui.same_line();
-                                let progress = self
-                                    .controller
-                                    .browser
-                                    .download_progress
-                                    .get(&item.name)
-                                    .map(|value| format!("{value}%"))
-                                    .unwrap_or_else(|| format_bytes(item.size));
-                                ui.text_disabled(progress);
-                                ui.same_line();
-                                if ui.small_button(format!("Save##download-{index}")) {
-                                    actions.push(Action::Download(item.name.clone()));
-                                }
-                                ui.same_line();
-                                if ui.small_button(format!("Remove##download-remove-{index}")) {
-                                    actions.push(Action::Command(Command::DownloadDelete {
-                                        name: item.name,
-                                        causal: Causal::default(),
-                                    }));
-                                    actions.push(Action::Command(Command::Downloads {
-                                        causal: Causal::default(),
-                                    }));
-                                }
-                            }
-                        }
-                    });
-            });
-        if !open {
+        }
+        if widgets::menu_row(ui, "share", icon::SHARE, "Copy page link", "", false) {
+            match arboard::Clipboard::new()
+                .and_then(|mut c| c.set_text(self.controller.snapshot.current_url.clone()))
+            {
+                Ok(()) => self.controller.browser.toast("Link copied"),
+                Err(e) => self
+                    .controller
+                    .browser
+                    .toast(format!("Could not copy link: {e}")),
+            }
+        }
+        ui.separator();
+        if widgets::menu_row(ui, "library", icon::BOOK, "Library", "", false) {
+            self.open_library();
+            next = Some(Panel::Library);
+        }
+        if widgets::menu_row(
+            ui,
+            "find",
+            icon::SEARCH,
+            "Find on page",
+            "Ctrl+F",
+            self.find_open,
+        ) {
+            self.find_open = !self.find_open;
+            ui.close_current_popup();
             self.panel = None;
         }
-        self.apply_actions(actions);
+        if widgets::menu_row(ui, "reader", icon::READER, "Reader", "", false) {
+            self.controller.command(Command::Reader {
+                causal: Causal::default(),
+            });
+            self.panel = None;
+        }
+        if widgets::menu_row(ui, "media", icon::MEDIA, "Page media", "", false) {
+            self.controller.command(Command::MediaQuery {
+                causal: Causal::default(),
+            });
+            next = Some(Panel::Media);
+        }
+        ui.separator();
+        if widgets::menu_row(
+            ui,
+            "performance",
+            icon::GAUGE,
+            "Performance",
+            "",
+            self.performance_open,
+        ) {
+            self.performance_open = !self.performance_open;
+            self.panel = None;
+        }
+        if widgets::menu_row(ui, "settings", icon::GEAR, "Settings", "", false) {
+            next = Some(Panel::Settings);
+        }
+        if widgets::menu_row(
+            ui,
+            "fullscreen",
+            icon::EXPAND,
+            "Fullscreen",
+            "F11",
+            self.fullscreen,
+        ) {
+            self.set_fullscreen_command(!self.fullscreen);
+            self.panel = None;
+        }
+        ui.separator();
+        if widgets::menu_row(ui, "disconnect", icon::SERVER, "Disconnect", "", false) {
+            self.controller.disconnect();
+            self.panel = None;
+        }
+        if let Some(next) = next {
+            self.panel = Some(next);
+        }
+        if self.panel != Some(Panel::More) {
+            ui.close_current_popup();
+        }
+    }
+
+    pub(super) fn draw_library(&mut self,ui:&Ui) {
+        let display=ui.io().display_size;
+        let size=[(display[0]-16.0).min(680.0),(display[1]-16.0).min(610.0)];
+        let mut open=true;let mut actions=Vec::new();
+        ui.window("Library###library").position([display[0]*0.5,display[1]*0.5],Condition::Always)
+            .position_pivot([0.5,0.5]).size(size,Condition::Always).opened(&mut open)
+            .flags(overlay_flags()|WindowFlags::NO_RESIZE).build(||{
+                let segment_width=(ui.content_region_avail()[0]-8.0)/3.0;
+                for (section,label) in [(LibrarySection::History,"History"),(LibrarySection::Bookmarks,"Bookmarks"),
+                    (LibrarySection::Downloads,"Downloads")] {
+                    if section!=LibrarySection::History {ui.same_line();}
+                    let p=Palette::new(self.controller.dark_mode);
+                    let _bg=ui.push_style_color(imgui::StyleColor::Button,
+                        if self.library_section==section {p.hover}else{p.rail});
+                    if ui.button_with_size(label,[segment_width,30.0]){self.library_section=section;}
+                }
+                ui.set_next_item_width(-1.0);
+                ui.input_text("##library-filter",&mut self.library_filter).hint("Filter library").build();
+                let filter=self.library_filter.to_lowercase();
+                ui.child_window("##library-list").size([0.0,0.0]).build(||{
+                    if self.library_section==LibrarySection::Downloads {
+                        let items=self.controller.browser.downloads.clone();
+                        if items.is_empty(){ui.text_disabled("No downloads yet.");}
+                        for item in items.iter().filter(|i|i.name.to_lowercase().contains(&filter)) {
+                            let _id=ui.push_id(&item.name);
+                            let progress=self.controller.browser.download_progress.get(&item.name)
+                                .map(|p|format!("{p}%")).unwrap_or_else(||format_bytes(item.size));
+                            row(ui,"file",&item.name,&progress,false,ui.content_region_avail()[0]);
+                            if ui.button("Save to Downloads"){actions.push(Action::Download(item.name.clone()));}
+                            ui.same_line();
+                            if ui.button("Remove"){
+                                actions.push(Action::Command(Command::DownloadDelete{name:item.name.clone(),causal:Causal::default()}));
+                                actions.push(Action::Command(Command::Downloads{causal:Causal::default()}));
+                            }
+                            ui.separator();
+                        }
+                    } else {
+                        let history=self.library_section==LibrarySection::History;
+                        let items=if history {self.controller.browser.history.clone()}else{self.controller.browser.bookmarks.clone()};
+                        if items.is_empty(){ui.text_disabled(if history {"No browsing history yet."}else{"Bookmark a page to find it here."});}
+                        let mut matches=0;
+                        for item in items.iter().filter(|i|format!("{} {}",i.title,i.url).to_lowercase().contains(&filter)) {
+                            matches+=1;
+                            let _id=ui.push_id(format!("{}-{}",item.url,item.ts));
+                            let width=ui.content_region_avail()[0]-34.0;
+                            if row(ui,"open",&item.title,&compact_address(&item.url),false,width){
+                                actions.push(Action::Navigate(item.url.clone()));
+                            }
+                            ui.same_line();
+                            if icon_button(ui,"remove",icon::CLOSE,"Remove"){
+                                actions.push(Action::Command(if history {
+                                    Command::HistoryDelete{url:item.url.clone(),ts:item.ts,causal:Causal::default()}
+                                }else{Command::BookmarkDelete{url:item.url.clone(),causal:Causal::default()}}));
+                                actions.push(Action::Command(Command::Library{causal:Causal::default()}));
+                            }
+                        }
+                        if matches==0 && !items.is_empty(){ui.text_disabled("No matching pages.");}
+                        if history && !items.is_empty() && ui.button("Load older history"){
+                            actions.push(Action::Command(Command::History{q:String::new(),offset:items.len() as i32,causal:Causal::default()}));
+                        }
+                    }
+                });
+            });
+        if !open{self.panel=None;}self.apply_actions(actions);
     }
 
     pub(super) fn draw_find(&mut self, ui: &Ui) {
-        let display = ui.io().display_size;
-        let width = (display[0] - 8.0).clamp(280.0, 330.0);
-        let mut open = true;
-        let mut command = None;
-        ui.window("Find##panel")
-            .position([display[0], PANEL_TOP], Condition::Always)
-            .position_pivot([1.0, 0.0])
-            .size([width, 0.0], Condition::Always)
-            .opened(&mut open)
-            .flags(overlay_flags() | WindowFlags::ALWAYS_AUTO_RESIZE)
+        let [x, y, width, height] = self.layout.find;
+        let mut direction = None;
+        let _padding = ui.push_style_var(imgui::StyleVar::WindowPadding([6.0, 6.0]));
+        ui.window("##find-rail")
+            .position([x, y], Condition::Always)
+            .size([width, height], Condition::Always)
+            .flags(
+                WindowFlags::NO_DECORATION | WindowFlags::NO_MOVE | WindowFlags::NO_SAVED_SETTINGS,
+            )
             .build(|| {
-                ui.set_next_item_width((ui.content_region_avail()[0] - 70.0).max(100.0));
-                let previous = self.controller.browser.find_query.clone();
-                let changed = ui
+                let old = self.controller.browser.find_query.clone();
+                ui.set_next_item_width((width - 114.0).max(80.0));
+                if ui
                     .input_text("##find", &mut self.controller.browser.find_query)
                     .hint("Find on page")
-                    .build();
-                if changed || previous != self.controller.browser.find_query {
-                    command = Some(1);
+                    .enter_returns_true(true)
+                    .build()
+                {
+                    direction = Some(1);
+                }
+                if old != self.controller.browser.find_query {
+                    direction = Some(0);
                 }
                 ui.same_line();
-                if ui.small_button("Up") {
-                    command = Some(-1);
+                if icon_button(ui, "previous", icon::BACK, "Previous match") {
+                    direction = Some(-1);
                 }
                 ui.same_line();
-                if ui.small_button("Down") {
-                    command = Some(1);
+                if icon_button(ui, "next", icon::FORWARD, "Next match") {
+                    direction = Some(1);
                 }
-                if let Some(found) = self.controller.browser.find_found {
-                    ui.text_disabled(if found { "Match" } else { "No match" });
+                ui.same_line();
+                if icon_button(ui, "close-find", icon::CLOSE, "Close find") {
+                    self.find_open = false;
+                    self.controller.command(Command::Find {
+                        q: String::new(),
+                        dir: 0,
+                        causal: Causal::default(),
+                    });
                 }
             });
-        if let Some(dir) = command {
+        if let Some(dir) = direction {
             self.controller.command(Command::Find {
                 q: self.controller.browser.find_query.clone(),
                 dir,
                 causal: Causal::default(),
             });
-        }
-        if !open {
-            self.panel = None;
         }
     }
 
@@ -261,17 +269,14 @@ impl DesktopApp {
             .min((display[1] - 16.0).max(220.0));
         let mut open = true;
         let mut navigate = false;
-        ui.window(if reader.title.is_empty() {
-            "Reader"
-        } else {
-            &reader.title
-        })
+        ui.window("Reader###reader")
         .position([display[0] * 0.5, display[1] * 0.5], Condition::Appearing)
         .position_pivot([0.5, 0.5])
         .size([width, height], Condition::Appearing)
         .opened(&mut open)
         .flags(overlay_flags())
         .build(|| {
+            ui.text_wrapped(&reader.title);
             ui.text_disabled(compact_address(&reader.url));
             ui.same_line();
             if ui.small_button("Open page") {
@@ -347,22 +352,38 @@ impl DesktopApp {
 
     pub(super) fn draw_settings(&mut self, ui: &Ui) {
         let display = ui.io().display_size;
-        let width = (display[0] - 16.0).clamp(280.0, 470.0);
-        let max_height = (display[1] - 16.0).max(220.0);
+        let size = [
+            (display[0] - 16.0).min(440.0),
+            (display[1] - 16.0).min(610.0),
+        ];
         let mut open = true;
         let mut actions = Vec::new();
-        ui.window("Settings")
-            .position([display[0] * 0.5, display[1] * 0.5], Condition::Appearing)
-            .position_pivot([0.5, 0.5])
-            .size([width, 0.0], Condition::Appearing)
-            .size_constraints([width, 0.0], [width, max_height])
-            .opened(&mut open)
-            .flags(overlay_flags() | WindowFlags::ALWAYS_AUTO_RESIZE)
-            .build(|| {
-                ui.text_disabled("LINUX DEVICE WINDOW");
-                ui.text_wrapped(
-                    "Match an iPhone or iPad layout using UIKit points. Retina scale does not change the layout size.",
-                );
+        ui.window("Settings###settings").position([display[0]*0.5,display[1]*0.5],Condition::Always)
+            .position_pivot([0.5,0.5]).size(size,Condition::Always).opened(&mut open)
+            .flags(overlay_flags()|WindowFlags::NO_RESIZE).build(||{
+                ui.child_window("##settings-body").size([0.0,0.0]).build(||{
+                    section(ui,"Appearance");
+                    let mut dark=self.controller.dark_mode;
+                    if ui.checkbox("Dark interface and websites",&mut dark){actions.push(Action::Dark(dark));}
+                    ui.checkbox("Browser controls at the bottom",&mut self.preferences.bottom);
+                    ui.checkbox("Reduce motion",&mut self.preferences.reduce_motion);
+                    section(ui,"Browsing");
+                    let mut mobile=self.controller.mobile_mode;
+                    if ui.checkbox("Request mobile websites",&mut mobile){actions.push(Action::Mobile(mobile));}
+                    if ui.button("Clear browsing history"){
+                        actions.push(Action::Command(Command::Clear{what:"history".into(),causal:Causal::default()}));
+                    }
+                    section(ui,"Computers");
+                    let servers=self.controller.saved_servers.clone();
+                    if servers.is_empty(){ui.text_disabled("No saved computers");}
+                    for server in servers {
+                        ui.text_wrapped(&server.name);ui.text_disabled(&server.endpoint);
+                        let _id=ui.push_id(&server.server_id);
+                        if ui.button("Forget"){actions.push(Action::Forget(server.server_id.clone()));}
+                    }
+                    if self.controller.connected && ui.button("Disconnect"){actions.push(Action::Disconnect);}
+                    section(ui,"Device testing");
+                    ui.text_wrapped("Resize the client to an iPhone or iPad layout. This changes the browser viewport, not the UI scale.");
                 let preset = DEVICE_PRESETS[self.device_preset.min(DEVICE_PRESETS.len() - 1)];
                 let size = preset.size(self.device_landscape);
                 let preview = format!("{} — {} x {} pt", preset.label, size[0], size[1]);
@@ -414,50 +435,14 @@ impl DesktopApp {
                 } else if let Some((width, height)) = self.controller.video_dimensions {
                     ui.text_disabled(format!("Browser video: {width} x {height} px"));
                 }
-                ui.separator();
-                ui.text_disabled("APPEARANCE");
-                let mut dark = self.controller.dark_mode;
-                if ui.checkbox("Dark interface and websites", &mut dark) {
-                    actions.push(Action::Dark(dark));
-                }
-                let mut mobile = self.controller.mobile_mode;
-                if ui.checkbox("Request mobile websites", &mut mobile) {
-                    actions.push(Action::Mobile(mobile));
-                }
-                ui.separator();
-                ui.text_disabled("BROWSING DATA");
-                if ui.button("Clear history") {
-                    actions.push(Action::Command(Command::Clear {
-                        what: "history".to_owned(),
-                        causal: Causal::default(),
-                    }));
-                }
-                ui.separator();
-                ui.text_disabled("SERVERS");
-                let servers = self.controller.saved_servers.clone();
-                for (index, server) in servers.into_iter().enumerate() {
-                    ui.text(&server.name);
-                    ui.same_line();
-                    ui.text_disabled(server.endpoint.trim_start_matches("https://"));
-                    ui.same_line();
-                    if ui.small_button(format!("Forget##server-forget-{index}")) {
-                        actions.push(Action::Forget(server.server_id));
-                    }
-                }
-                ui.separator();
-                ui.text_wrapped(&self.controller.status);
-                if self.controller.connected && ui.button("Disconnect") {
-                    actions.push(Action::Disconnect);
-                }
-                let server_version = self
-                    .controller
-                    .inspected
-                    .as_ref()
-                    .map_or("—", |info| info.version.as_str());
-                ui.text_disabled(format!(
-                    "Surf client {}  |  server {server_version}  |  core C99",
-                    SURF_VERSION.trim()
-                ));
+
+                    section(ui,"About");
+                    let server=self.controller.inspected.as_ref().map_or("—",|s|s.version.as_str());
+                    ui.text(format!("Surf client {}",SURF_VERSION.trim()));
+                    ui.text_disabled(format!("Server {server}"));
+                    ui.text_wrapped("Inter · Lucide · Dear ImGui");
+                    ui.text_wrapped("Device sizes use logical points. Window scaling follows your desktop display.");
+                });
             });
         if !open {
             self.panel = None;
@@ -466,41 +451,55 @@ impl DesktopApp {
     }
 
     pub(super) fn draw_performance(&mut self, ui: &Ui) {
-        let display = ui.io().display_size;
-        let width = (display[0] - 8.0).clamp(280.0, 360.0);
         let report = self.controller.latest_diagnostics.unwrap_or_default();
-        let media = self.controller.media_diagnostics();
+        let width = (ui.io().display_size[0] - 16.0).min(300.0);
+        let p = self.layout.page;
+        let position = [p.width as f32 - width - 8.0, p.y as f32 + 8.0];
         let mut open = true;
-        ui.window("Performance")
-            .position([display[0], PANEL_TOP], Condition::Always)
-            .position_pivot([1.0, 0.0])
+        ui.window("Performance###performance")
+            .position(position, Condition::Always)
             .size([width, 0.0], Condition::Always)
             .opened(&mut open)
-            .flags(overlay_flags() | WindowFlags::ALWAYS_AUTO_RESIZE)
+            .flags(
+                overlay_flags()
+                    | WindowFlags::ALWAYS_AUTO_RESIZE
+                    | WindowFlags::NO_RESIZE
+                    | WindowFlags::NO_SCROLLBAR,
+            )
+            .bg_alpha(0.90)
             .build(|| {
-                metric(ui, "PRESENT", format!("{:.1} fps", report.presentation_fps));
+                metric(ui, "FPS", format!("{:.1}", report.presentation_fps));
                 ui.same_line();
-                metric(ui, "DECODE", format!("{:.1} fps", report.decode_fps));
+                metric(
+                    ui,
+                    "Decode",
+                    format!("{:.1} ms", report.decode_us as f64 / 1000.0),
+                );
                 ui.same_line();
-                metric(ui, "DROP", format!("{:.1}%", report.drop_percent));
+                metric(
+                    ui,
+                    "Upload",
+                    format!("{:.1} ms", report.upload_us as f64 / 1000.0),
+                );
                 ui.separator();
-                ui.text(format!("decode       {:>7} us", report.decode_us));
-                ui.text(format!("GPU upload   {:>7} us", report.upload_us));
-                ui.text(format!("frame age    {:>7} us", report.frame_age_us));
-                ui.text(format!("network      {:>7} us", report.network_us));
-                ui.text(format!("round trip   {:>7} us", report.rtt_us));
                 ui.text(format!(
-                    "queues       {} / {} / {}",
-                    report.encoded_video_depth, report.decoded_video_depth, report.audio_depth
+                    "Frame age  {:.1} ms",
+                    report.frame_age_us as f64 / 1000.0
                 ));
-                ui.separator();
-                ui.text_disabled(format!(
-                    "{:?}  |  {} gaps  |  {} decode errors  |  {} received",
-                    report.health, report.sequence_gaps, report.decode_errors, media.ingress_frames
+                ui.text(format!(
+                    "Dropped  {:.1}%   ·   Queue  {}/{}",
+                    report.drop_percent, report.encoded_video_depth, report.decoded_video_depth
                 ));
+                if let Some((w, h)) = self.controller.video_dimensions {
+                    ui.text_disabled(format!("{w} × {h}"));
+                }
+                let server = self
+                    .controller
+                    .inspected
+                    .as_ref()
+                    .map_or("—", |s| s.version.as_str());
+                ui.text_disabled(format!("Client {} · Server {server}", SURF_VERSION.trim()));
             });
-        if !open {
-            self.panel = None;
-        }
+        self.performance_open = open;
     }
 }

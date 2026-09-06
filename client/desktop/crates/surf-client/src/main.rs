@@ -1,3 +1,4 @@
+mod assets;
 mod layout;
 mod page_input;
 mod preferences;
@@ -107,11 +108,13 @@ fn run() -> Result<(), Box<dyn Error>> {
     let shared_gl = renderer.gl_context().clone();
     let mut app = DesktopApp::new(&shared_gl)?;
     let mut last_frame = Instant::now();
+    let mut font_scale = hidpi_factor;
 
     #[allow(deprecated)]
     event_loop.run(move |event, target| {
         target.set_control_flow(ControlFlow::Poll);
         platform.handle_event(imgui.io_mut(), &window, &event);
+        app.handle_local_ime(imgui.io_mut(), &event);
         match event {
             Event::NewEvents(_) => {
                 let now = Instant::now();
@@ -140,6 +143,32 @@ fn run() -> Result<(), Box<dyn Error>> {
                         surface_size = actual_size;
                     }
                     sync_imgui_display_size(imgui.io_mut(), surface_size, window.scale_factor());
+                    let scale = window.scale_factor() as f32;
+                    if (scale - font_scale).abs() > 0.001 {
+                        install_fonts(&mut imgui, scale);
+                        let atlas = imgui.fonts().build_rgba32_texture();
+                        // SAFETY: re-upload the renderer's public atlas texture between
+                        // frames. The GL context is current; no draw data references this atlas.
+                        unsafe {
+                            shared_gl.bind_texture(
+                                glow::TEXTURE_2D,
+                                renderer.renderer().font_atlas_texture,
+                            );
+                            shared_gl.tex_image_2d(
+                                glow::TEXTURE_2D,
+                                0,
+                                glow::RGBA as i32,
+                                atlas.width as i32,
+                                atlas.height as i32,
+                                0,
+                                glow::RGBA,
+                                glow::UNSIGNED_BYTE,
+                                Some(atlas.data),
+                            );
+                            shared_gl.bind_texture(glow::TEXTURE_2D, None);
+                        }
+                        font_scale = scale;
+                    }
                     if let Err(error) = platform.prepare_frame(imgui.io_mut(), &window) {
                         app.report_host_error(format!("window input: {error}"));
                     }
@@ -203,8 +232,12 @@ fn run() -> Result<(), Box<dyn Error>> {
                     {
                         app.report_host_error(format!("ImGui renderer: {error}"));
                     }
-                    if let Err(error) = surface.swap_buffers(&gl_context) {
-                        app.report_host_error(format!("swap buffers: {error}"));
+                    match surface.swap_buffers(&gl_context) {
+                        Ok(()) => app.after_swap(true),
+                        Err(error) => {
+                            app.after_swap(false);
+                            app.report_host_error(format!("swap buffers: {error}"));
+                        }
                     }
                     if app.after_present(&window) {
                         target.exit();

@@ -225,10 +225,12 @@ impl SmokeState {
 }
 
 pub struct DesktopApp {
+    assets: crate::assets::Assets,
     controller: ClientController,
     video: VideoSurface,
     page_input: PageInput,
     page_rect: PageRect,
+    input_rect: PageRect,
     cursor: Option<(f64, f64)>,
     modifiers: Modifiers,
     page_focused: bool,
@@ -239,6 +241,7 @@ pub struct DesktopApp {
     endpoint: String,
     pairing_code: String,
     panel: Option<Panel>,
+    previous_panel: Option<Panel>,
     library_section: LibrarySection,
     dialog_input: String,
     dialog_signature: String,
@@ -255,6 +258,8 @@ pub struct DesktopApp {
     pending_window_size: Option<PendingWindowSize>,
     ui_wants_pointer: bool,
     ui_wants_keyboard: bool,
+    remote_keys: std::collections::HashMap<PhysicalKey, (String, String, i32)>,
+    local_preedit: String,
     observed_url: String,
     observed_tab: Option<i64>,
     focus_new_tab: bool,
@@ -273,9 +278,10 @@ pub struct DesktopApp {
 }
 
 impl DesktopApp {
-    pub fn new(gl: &glow::Context) -> Result<Self, String> {
+    pub fn new(gl: &std::rc::Rc<glow::Context>) -> Result<Self, String> {
         let preferences = Preferences::load();
         Ok(Self {
+            assets: crate::assets::Assets::new(gl)?,
             controller: ClientController::new_with_options(surf_client_app::ClientOptions {
                 dark_mode: preferences.dark,
                 mobile_mode: preferences.mobile,
@@ -283,6 +289,7 @@ impl DesktopApp {
             video: VideoSurface::new(gl)?,
             page_input: PageInput::new(),
             page_rect: PageRect::default(),
+            input_rect: PageRect::default(),
             cursor: None,
             modifiers: Modifiers::default(),
             page_focused: false,
@@ -293,6 +300,7 @@ impl DesktopApp {
             endpoint: String::new(),
             pairing_code: String::new(),
             panel: None,
+            previous_panel: None,
             library_section: LibrarySection::History,
             dialog_input: String::new(),
             dialog_signature: String::new(),
@@ -309,6 +317,8 @@ impl DesktopApp {
             pending_window_size: None,
             ui_wants_pointer: false,
             ui_wants_keyboard: false,
+            remote_keys: std::collections::HashMap::new(),
+            local_preedit: String::new(),
             observed_url: String::new(),
             observed_tab: None,
             focus_new_tab: false,
@@ -329,6 +339,61 @@ impl DesktopApp {
 
     pub fn report_host_error(&mut self, error: String) {
         self.controller.report_renderer_error(error);
+    }
+
+    fn release_page_input(&mut self) {
+        for (_, (key, code, key_code)) in std::mem::take(&mut self.remote_keys) {
+            if let Ok(command) = self.page_input.key(
+                false,
+                key,
+                code,
+                key_code,
+                String::new(),
+                Modifiers::default(),
+            ) {
+                self.controller.command(command);
+            }
+        }
+        for command in self
+            .page_input
+            .release_buttons(self.page_rect, self.video.surface_generation())
+        {
+            self.controller.command(command);
+        }
+        if self.page_input.composition_active()
+            && let Ok(command) = self.page_input.compose("cancel", String::new(), 0, 0)
+        {
+            self.controller.command(command);
+        }
+        self.page_focused = false;
+        self.local_preedit.clear();
+    }
+
+    // WinitPlatform currently does not forward IME events. This narrow host adapter
+    // commits local text once; preedit is presentation-only, never an InputText draft.
+    pub fn handle_local_ime(&mut self, io: &mut imgui::Io, event: &winit::event::Event<()>) {
+        if self.page_accepts_keyboard() {
+            return;
+        }
+        if let winit::event::Event::WindowEvent {
+            event: WindowEvent::Ime(ime),
+            ..
+        } = event
+        {
+            match ime {
+                Ime::Preedit(text, _) => self.local_preedit.clone_from(text),
+                Ime::Commit(text) => {
+                    self.local_preedit.clear();
+                    if io.want_text_input {
+                        for c in text.chars() {
+                            io.add_input_character(c);
+                        }
+                    }
+                }
+                Ime::Disabled => self.local_preedit.clear(),
+                Ime::Enabled => {}
+            }
+        }
     }
 
     pub fn tick(&mut self) {
@@ -392,7 +457,7 @@ impl DesktopApp {
             }
             if tab_changed {
                 self.address_editing = false;
-                self.controller.browser.suggestions.clear();
+                self.controller.clear_suggestions();
                 self.suggestion_index = None;
             }
         }
@@ -403,6 +468,9 @@ impl DesktopApp {
         self.layout = BrowserLayout::new(display, self.preferences.bottom, self.find_open);
         self.page_rect = self.layout.page;
         if connected {
+            if current_url.starts_with("about:blank") {
+                self.draw_new_tab(ui);
+            }
             self.draw_chrome(ui);
             if self.pending_window_size.is_none() {
                 self.update_viewport(window.scale_factor());
@@ -425,6 +493,16 @@ impl DesktopApp {
         self.draw_page_select(ui);
         self.draw_page_error(ui);
         self.draw_toast(ui);
+        if !self.local_preedit.is_empty() {
+            small_overlay(
+                ui,
+                [
+                    self.omnibox_rect[0] + 80.0,
+                    (self.omnibox_rect[1] - 34.0).max(8.0),
+                ],
+                &self.local_preedit,
+            );
+        }
 
         let title = self.controller.snapshot.active_title.trim();
         let window_title = if title.is_empty() {
@@ -479,16 +557,27 @@ impl DesktopApp {
             .unwrap_or(i32::MAX)
             .saturating_sub(top)
             .saturating_sub(height);
-        if let Some(frame) = self.video.render(gl, [x, y, width, height]) {
+        self.video.render(gl, [x, y, width, height]);
+        let [x, y, w, h] = self.video.drawn_viewport();
+        self.input_rect = PageRect {
+            x: f64::from(x) / scale,
+            y: (f64::from(framebuffer_height) - f64::from(y + h)) / scale,
+            width: f64::from(w) / scale,
+            height: f64::from(h) / scale,
+        };
+        if let Some(error) = self.video.take_error() {
+            self.controller.report_renderer_error(error);
+        }
+    }
+
+    pub fn after_swap(&mut self, success: bool) {
+        if let Some(frame) = self.video.after_swap(success) {
             self.controller
                 .report_presented_frame(frame.generation, frame.source_sequence);
         }
         let diagnostics = self.video.diagnostics();
         self.render_diagnostics = diagnostics;
         self.controller.set_render_diagnostics(diagnostics);
-        if let Some(error) = self.video.take_error() {
-            self.controller.report_renderer_error(error);
-        }
     }
 
     pub fn after_present(&mut self, window: &Window) -> bool {
@@ -579,11 +668,11 @@ impl DesktopApp {
             WindowEvent::CursorMoved { position, .. } => {
                 let position: LogicalPosition<f64> = position.to_logical(window.scale_factor());
                 self.cursor = Some((position.x, position.y));
-                if self.page_accepts_pointer(position.x, position.y) {
+                if self.page_accepts_pointer(position.x, position.y) || self.page_input.dragging() {
                     match self.page_input.motion(
                         position.x,
                         position.y,
-                        self.page_rect,
+                        self.input_rect,
                         self.video.surface_generation(),
                         self.modifiers,
                     ) {
@@ -599,11 +688,16 @@ impl DesktopApp {
                 };
                 let pressed = *state == ElementState::Pressed;
                 if pressed {
+                    // Dismissal is a local click, not an accidental click through to a page.
+                    if self.panel.is_some() && !self.ui_wants_pointer {
+                        self.panel = None;
+                        self.page_focused = false;
+                        return;
+                    }
                     let page_hit = self.page_accepts_pointer(x, y);
                     self.page_focused = page_hit;
                     if page_hit {
-                        self.address_editing = false;
-                        self.focus_address = false;
+                        self.finish_address_edit();
                     }
                 }
                 if (self.page_accepts_pointer(x, y) || !pressed)
@@ -614,7 +708,7 @@ impl DesktopApp {
                         number,
                         x,
                         y,
-                        self.page_rect,
+                        self.input_rect,
                         self.video.surface_generation(),
                         self.modifiers,
                     ) {
@@ -642,7 +736,7 @@ impl DesktopApp {
                     match self.page_input.wheel(
                         dx,
                         -dy,
-                        self.page_rect,
+                        self.input_rect,
                         self.video.surface_generation(),
                         self.modifiers,
                     ) {
@@ -686,14 +780,29 @@ impl DesktopApp {
                     }
                 }
             }
-            WindowEvent::Focused(false) => self.page_focused = false,
+            WindowEvent::Focused(false) => self.release_page_input(),
             _ => {}
         }
     }
 
     fn handle_key(&mut self, event: &KeyEvent) {
         let pressed = event.state == ElementState::Pressed;
-        if self.handle_shortcut(event, pressed) {
+        if !pressed
+            && let Some((key, code, key_code)) = self.remote_keys.remove(&event.physical_key)
+        {
+            if let Ok(command) =
+                self.page_input
+                    .key(false, key, code, key_code, String::new(), self.modifiers)
+            {
+                self.controller.command(command);
+            }
+            return;
+        }
+        if self.controller.browser.dialog.is_none()
+            && self.controller.browser.select.is_none()
+            && self.panel != Some(Panel::Files)
+            && self.handle_shortcut(event, pressed)
+        {
             return;
         }
         if !self.page_accepts_keyboard() {
@@ -729,6 +838,10 @@ impl DesktopApp {
             return;
         }
         let (key, code, key_code, _) = dom_key(event);
+        if pressed {
+            self.remote_keys
+                .insert(event.physical_key, (key.clone(), code.clone(), key_code));
+        }
         let textual_key = logical_character(&event.logical_key).is_some()
             || matches!(event.logical_key, Key::Named(NamedKey::Space));
         if !pressed && textual_key && !self.modifiers.control && !self.modifiers.alt {
@@ -782,7 +895,7 @@ impl DesktopApp {
                 }
                 Some(ref value) if value == "f" => {
                     if pressed {
-                        self.panel = Some(Panel::Find);
+                        self.find_open = true;
                         self.page_focused = false;
                     }
                     return true;
@@ -835,8 +948,7 @@ impl DesktopApp {
                 true
             }
             Key::Named(NamedKey::Escape) if pressed && self.address_editing => {
-                self.address_editing = false;
-                self.page_focused = true;
+                self.finish_address_edit();
                 true
             }
             _ => false,
@@ -849,7 +961,7 @@ impl DesktopApp {
             && self.controller.browser.dialog.is_none()
             && self.controller.browser.select.is_none()
             && self.controller.browser.page_error.is_none()
-            && self.page_rect.contains(x, y)
+            && self.input_rect.contains(x, y)
     }
 
     fn page_accepts_keyboard(&self) -> bool {
@@ -877,7 +989,7 @@ impl DesktopApp {
             .clone_from(&self.controller.snapshot.current_url);
         // Do not flash a result set left over from the previous edit session. A fresh
         // response will repopulate this after the user changes the query.
-        self.controller.browser.suggestions.clear();
+        self.controller.clear_suggestions();
         self.address_editing = true;
         self.focus_address = true;
         self.page_focused = false;
@@ -885,8 +997,8 @@ impl DesktopApp {
 
     fn update_viewport(&mut self, scale: f64) {
         let candidate = (
-            (self.page_rect.width * scale).round().max(64.0) as i32,
-            (self.page_rect.height * scale).round().max(64.0) as i32,
+            ((self.page_rect.width * scale).round().max(64.0) as i32) & !1,
+            ((self.page_rect.height * scale).round().max(64.0) as i32) & !1,
         );
         if self.viewport_candidate != Some(candidate) {
             self.viewport_candidate = Some(candidate);

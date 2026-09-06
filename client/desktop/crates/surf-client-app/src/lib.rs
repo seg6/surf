@@ -1,4 +1,5 @@
 mod browser;
+mod suggestions;
 
 use std::path::{Path, PathBuf};
 
@@ -39,6 +40,7 @@ pub struct Tick {
 }
 
 pub struct ClientController {
+    pub connection_phase: ConnectionPhase,
     core: Core,
     storage: Storage,
     pub snapshot: Snapshot,
@@ -72,6 +74,19 @@ pub struct ClientController {
     pipeline_diagnostics: PipelineDiagnostics,
     render_diagnostics: RenderDiagnostics,
     requested_viewport: Option<(i32, i32)>,
+    suggestions: suggestions::Suggestions,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConnectionPhase {
+    Choose,
+    Inspecting,
+    Code,
+    Pairing,
+    Words,
+    Connecting,
+    Connected,
+    Failed(surf_session::SessionFailure),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -125,6 +140,7 @@ impl ClientController {
             .skip(1)
             .find(|argument| !argument.starts_with('-'));
         let mut controller = Self {
+            connection_phase: ConnectionPhase::Choose,
             core,
             storage,
             snapshot,
@@ -162,6 +178,7 @@ impl ClientController {
             pipeline_diagnostics: PipelineDiagnostics::new(),
             render_diagnostics: RenderDiagnostics::default(),
             requested_viewport: None,
+            suggestions: suggestions::Suggestions::default(),
         };
         if let Some(endpoint) = startup_endpoint {
             controller.inspect(endpoint, true);
@@ -170,6 +187,7 @@ impl ClientController {
     }
 
     pub fn inspect(&mut self, endpoint: impl Into<String>, connect_when_paired: bool) {
+        self.connection_phase = ConnectionPhase::Inspecting;
         self.endpoint = endpoint.into();
         self.inspected = None;
         self.pairing = None;
@@ -179,14 +197,17 @@ impl ClientController {
     }
 
     pub fn pair(&mut self, code: String, device_name: String) {
+        self.connection_phase = ConnectionPhase::Pairing;
         self.send(SessionAction::Pair { code, device_name });
     }
 
     pub fn confirm_pairing(&mut self) {
+        self.connection_phase = ConnectionPhase::Connecting;
         self.send(SessionAction::ConfirmPairing);
     }
 
     pub fn connect(&mut self) {
+        self.connection_phase = ConnectionPhase::Connecting;
         self.send(SessionAction::Connect);
     }
 
@@ -194,11 +215,47 @@ impl ClientController {
         self.send(SessionAction::Disconnect);
     }
 
+    /// End the attempt and replace its event channel. Dropping SessionClient
+    /// cancels pending HTTP/WebSocket work; its late events cannot reach this host.
+    pub fn cancel_connection(&mut self) {
+        self.session.take();
+        self.connected = false;
+        self.pairing = None;
+        self.inspected = None;
+        self.paired = false;
+        self.connection_phase = ConnectionPhase::Choose;
+        self.status = "Choose a computer".into();
+        self.connect_after_inspect = false;
+        if let Some(media) = &self.media {
+            match SessionClient::spawn_with_frame_sink(self.storage.clone(), media.frame_sink()) {
+                Ok(session) => self.session = Some(session),
+                Err(error) => self.status = error.to_string(),
+            }
+        }
+    }
+
     pub fn command(&mut self, command: Command) {
         if self.connected {
             self.send(SessionAction::Send(command));
         } else {
             self.status = "Connect to a Surf server first".to_owned();
+        }
+    }
+
+    pub fn clear_suggestions(&mut self) {
+        self.browser.suggestions.clear();
+        self.suggestions.clear();
+    }
+
+    pub fn suggest(&mut self, query: String) {
+        if self.connected
+            && let Some(q) = self.suggestions.query(query)
+        {
+            self.command(Command::Suggest {
+                q,
+                offset: 0,
+                causal: Causal::default(),
+            });
         }
     }
 
@@ -399,6 +456,7 @@ impl ClientController {
     }
 
     fn reset_transport(&mut self, effects: &mut Vec<HostEffect>) {
+        self.suggestions = suggestions::Suggestions::default();
         self.connected = false;
         self.clock_available = false;
         self.media_stats_available = false;
@@ -447,6 +505,11 @@ impl ClientController {
                 // record; otherwise clicking the server can detour through an
                 // avoidable 401 before revealing the code field.
                 let can_connect = saved_pairing && !info.pairing;
+                self.connection_phase = if can_connect {
+                    ConnectionPhase::Connecting
+                } else {
+                    ConnectionPhase::Code
+                };
                 self.status = if info.pairing {
                     format!("Enter the six-digit code shown by {}", info.name)
                 } else if can_connect {
@@ -464,6 +527,7 @@ impl ClientController {
                 }
             }
             SessionEvent::PairingPhrase(pairing) => {
+                self.connection_phase = ConnectionPhase::Words;
                 self.status = "Compare these six words, then confirm".to_owned();
                 self.pairing = Some(pairing);
             }
@@ -477,6 +541,7 @@ impl ClientController {
                     .sort_by(|left, right| left.name.cmp(&right.name));
             }
             SessionEvent::Connected { info, config } => {
+                self.connection_phase = ConnectionPhase::Connected;
                 if let Err(error) = self.core.begin_connection() {
                     self.status = error.to_string();
                     return;
@@ -555,14 +620,17 @@ impl ClientController {
                 self.browser.toast(self.status.clone());
             }
             SessionEvent::Disconnected(message) => {
+                self.connection_phase = ConnectionPhase::Choose;
                 self.reset_transport(effects);
                 self.status = message;
                 let _ = self.core.dispatch(&CoreEvent::Loading(false));
                 self.refresh();
             }
             SessionEvent::Failure(failure) => {
+                self.connection_phase = ConnectionPhase::Failed(failure.clone());
                 self.reset_transport(effects);
                 if failure.kind == FailureKind::Authentication {
+                    self.connection_phase = ConnectionPhase::Code;
                     // A saved key only proves that this client paired at some
                     // point. A 401/403 is the server's authoritative answer:
                     // it no longer accepts that key, so expose pairing again
@@ -702,14 +770,35 @@ impl ClientController {
             WireEvent::DownloadProgress { name, pct } => {
                 self.browser.download_progress.insert(name, pct);
             }
-            WireEvent::Suggest { items } => self.browser.suggestions = items,
+            WireEvent::Suggest { items } => {
+                let (accept, next) = self.suggestions.reply();
+                if accept {
+                    self.browser.suggestions = items;
+                }
+                if let Some(q) = next {
+                    self.command(Command::Suggest {
+                        q,
+                        offset: 0,
+                        causal: Causal::default(),
+                    });
+                }
+            }
             WireEvent::Library {
                 hist, bookmarks, ..
             } => {
                 self.browser.history = hist;
                 self.browser.bookmarks = bookmarks;
             }
-            WireEvent::History { items, .. } => self.browser.history = items,
+            WireEvent::History { items, offset, .. } => {
+                if offset==0 {self.browser.history=items;}
+                else {
+                    for item in items {
+                        if !self.browser.history.iter().any(|old|old.url==item.url && old.ts==item.ts) {
+                            self.browser.history.push(item);
+                        }
+                    }
+                }
+            }
             WireEvent::Downloads { items } => self.browser.downloads = items,
             WireEvent::Dialog {
                 kind,
