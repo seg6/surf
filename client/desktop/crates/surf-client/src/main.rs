@@ -1,4 +1,7 @@
+mod layout;
 mod page_input;
+mod preferences;
+mod theme;
 mod ui;
 mod video_surface;
 
@@ -11,11 +14,12 @@ use glutin::context::{ContextApi, ContextAttributesBuilder, NotCurrentGlContext 
 use glutin::display::{GetGlDisplay as _, GlDisplay as _};
 use glutin::prelude::GlSurface as _;
 use glutin::surface::{Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface};
-use imgui::{ConfigFlags, Context, FontConfig, FontSource};
+use imgui::{ConfigFlags, Context};
 use imgui_glow_renderer::glow::HasContext as _;
 use imgui_glow_renderer::{AutoRenderer, glow};
 use imgui_winit_support::{HiDpiMode, WinitPlatform, winit};
 use raw_window_handle::HasWindowHandle as _;
+use theme::{apply_palette, install_fonts, install_style};
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -94,7 +98,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         imgui.set_clipboard_backend(clipboard);
     }
     let mut platform = WinitPlatform::new(&mut imgui);
-    platform.attach_window(imgui.io_mut(), &window, HiDpiMode::Rounded);
+    platform.attach_window(imgui.io_mut(), &window, HiDpiMode::Default);
     let hidpi_factor = platform.hidpi_factor() as f32;
     install_fonts(&mut imgui, hidpi_factor);
     imgui.io_mut().font_global_scale = 1.0 / hidpi_factor;
@@ -240,82 +244,6 @@ fn load_window_icon() -> Option<Icon> {
     let image = image::load_from_memory(APP_ICON).ok()?.into_rgba8();
     let (width, height) = image.dimensions();
     Icon::from_rgba(image.into_raw(), width, height).ok()
-}
-
-fn install_fonts(imgui: &mut Context, hidpi_factor: f32) {
-    let size = 13.0 * hidpi_factor;
-    imgui.fonts().add_font(&[FontSource::DefaultFontData {
-        config: Some(FontConfig {
-            size_pixels: size,
-            pixel_snap_h: true,
-            ..FontConfig::default()
-        }),
-    }]);
-}
-
-fn install_style(imgui: &mut Context) {
-    let style = imgui.style_mut();
-    style.window_padding = [7.0, 6.0];
-    style.frame_padding = [5.0, 3.0];
-    style.item_spacing = [4.0, 3.0];
-    style.item_inner_spacing = [4.0, 3.0];
-    style.scrollbar_size = 9.0;
-    style.grab_min_size = 8.0;
-    style.window_rounding = 4.0;
-    style.child_rounding = 3.0;
-    style.frame_rounding = 3.0;
-    style.popup_rounding = 4.0;
-    style.scrollbar_rounding = 4.0;
-    style.tab_rounding = 3.0;
-    style.window_border_size = 1.0;
-    style.child_border_size = 0.0;
-    style.frame_border_size = 1.0;
-    apply_palette(style, true);
-}
-
-fn apply_palette(style: &mut imgui::Style, dark: bool) {
-    use imgui::StyleColor;
-    if !dark {
-        style.colors[StyleColor::Text as usize] = [0.08, 0.09, 0.10, 1.0];
-        style.colors[StyleColor::TextDisabled as usize] = [0.42, 0.45, 0.48, 1.0];
-        style.colors[StyleColor::WindowBg as usize] = [0.94, 0.95, 0.96, 0.98];
-        style.colors[StyleColor::ChildBg as usize] = [0.94, 0.95, 0.96, 0.0];
-        style.colors[StyleColor::PopupBg as usize] = [0.98, 0.98, 0.99, 0.99];
-        style.colors[StyleColor::Border as usize] = [0.66, 0.68, 0.70, 1.0];
-        style.colors[StyleColor::FrameBg as usize] = [0.86, 0.87, 0.88, 1.0];
-        style.colors[StyleColor::FrameBgHovered as usize] = [0.80, 0.82, 0.84, 1.0];
-        style.colors[StyleColor::FrameBgActive as usize] = [0.75, 0.78, 0.80, 1.0];
-        style.colors[StyleColor::Button as usize] = [0.94, 0.95, 0.96, 0.0];
-        style.colors[StyleColor::ButtonHovered as usize] = [0.82, 0.84, 0.86, 1.0];
-        style.colors[StyleColor::ButtonActive as usize] = [0.75, 0.78, 0.80, 1.0];
-        style.colors[StyleColor::Header as usize] = [0.86, 0.87, 0.88, 1.0];
-        style.colors[StyleColor::HeaderHovered as usize] = [0.80, 0.82, 0.84, 1.0];
-        style.colors[StyleColor::HeaderActive as usize] = [0.75, 0.78, 0.80, 1.0];
-        style.colors[StyleColor::CheckMark as usize] = [0.04, 0.52, 0.68, 1.0];
-        style.colors[StyleColor::SliderGrab as usize] = [0.04, 0.52, 0.68, 1.0];
-        style.colors[StyleColor::Separator as usize] = [0.66, 0.68, 0.70, 1.0];
-        style.colors[StyleColor::NavHighlight as usize] = [0.04, 0.52, 0.68, 1.0];
-        return;
-    }
-    style.colors[StyleColor::Text as usize] = [0.91, 0.92, 0.94, 1.0];
-    style.colors[StyleColor::TextDisabled as usize] = [0.49, 0.53, 0.57, 1.0];
-    style.colors[StyleColor::WindowBg as usize] = [0.098, 0.11, 0.125, 0.98];
-    style.colors[StyleColor::ChildBg as usize] = [0.098, 0.11, 0.125, 0.0];
-    style.colors[StyleColor::PopupBg as usize] = [0.137, 0.153, 0.173, 0.99];
-    style.colors[StyleColor::Border as usize] = [0.204, 0.227, 0.251, 1.0];
-    style.colors[StyleColor::FrameBg as usize] = [0.137, 0.153, 0.173, 1.0];
-    style.colors[StyleColor::FrameBgHovered as usize] = [0.18, 0.20, 0.22, 1.0];
-    style.colors[StyleColor::FrameBgActive as usize] = [0.20, 0.23, 0.25, 1.0];
-    style.colors[StyleColor::Button as usize] = [0.098, 0.11, 0.125, 0.0];
-    style.colors[StyleColor::ButtonHovered as usize] = [0.16, 0.18, 0.20, 1.0];
-    style.colors[StyleColor::ButtonActive as usize] = [0.20, 0.23, 0.25, 1.0];
-    style.colors[StyleColor::Header as usize] = [0.137, 0.153, 0.173, 1.0];
-    style.colors[StyleColor::HeaderHovered as usize] = [0.18, 0.20, 0.22, 1.0];
-    style.colors[StyleColor::HeaderActive as usize] = [0.20, 0.23, 0.25, 1.0];
-    style.colors[StyleColor::CheckMark as usize] = [0.325, 0.718, 0.824, 1.0];
-    style.colors[StyleColor::SliderGrab as usize] = [0.325, 0.718, 0.824, 1.0];
-    style.colors[StyleColor::Separator as usize] = [0.204, 0.227, 0.251, 1.0];
-    style.colors[StyleColor::NavHighlight as usize] = [0.325, 0.718, 0.824, 1.0];
 }
 
 struct Clipboard(arboard::Clipboard);

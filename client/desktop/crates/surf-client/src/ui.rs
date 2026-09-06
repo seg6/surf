@@ -1,3 +1,13 @@
+mod browser;
+mod connection;
+mod prompts;
+mod tools;
+mod widgets;
+use crate::layout::{BrowserLayout, CONTROL, Density};
+use crate::preferences::Preferences;
+use crate::theme::Palette;
+use widgets::{icon_button, row, section};
+
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -19,7 +29,7 @@ use winit::window::{Fullscreen, Window};
 use crate::page_input::{Modifiers, PageInput, PageRect};
 use crate::video_surface::VideoSurface;
 
-const BAR_HEIGHT: f32 = 32.0;
+const BAR_HEIGHT: f32 = crate::layout::RAIL_HEIGHT;
 const PANEL_TOP: f32 = BAR_HEIGHT + 4.0;
 const PANEL_WIDTH: f32 = 330.0;
 const VIEWPORT_SETTLE: Duration = Duration::from_millis(120);
@@ -82,14 +92,24 @@ const DEVICE_PRESETS: &[DevicePreset] = &[
 ];
 
 mod icon {
-    pub const BACK: &str = "<";
-    pub const FORWARD: &str = ">";
-    pub const RELOAD: &str = "R";
-    pub const STOP: &str = "X";
-    pub const CLOSE: &str = "x";
-    pub const PLUS: &str = "+";
-    pub const MORE: &str = "...";
-    pub const STAR: &str = "*";
+    pub const BACK: &str = "\u{e06e}";
+    pub const FORWARD: &str = "\u{e06f}";
+    pub const RELOAD: &str = "\u{e145}";
+    pub const STOP: &str = "\u{e167}";
+    pub const CLOSE: &str = "\u{e1b2}";
+    pub const PLUS: &str = "\u{e13d}";
+    pub const MORE: &str = "\u{e0b6}";
+    pub const STAR: &str = "\u{e176}";
+    pub const BOOK: &str = "\u{e05f}";
+    pub const TABS: &str = "\u{e12c}";
+    pub const SEARCH: &str = "\u{e151}";
+    pub const GEAR: &str = "\u{e154}";
+    pub const GAUGE: &str = "\u{e1bf}";
+    pub const SHARE: &str = "\u{e155}";
+    pub const EXPAND: &str = "\u{e112}";
+    pub const READER: &str = "\u{e348}";
+    pub const MEDIA: &str = "\u{e080}";
+    pub const SERVER: &str = "\u{e11d}";
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -236,6 +256,15 @@ pub struct DesktopApp {
     ui_wants_pointer: bool,
     ui_wants_keyboard: bool,
     observed_url: String,
+    observed_tab: Option<i64>,
+    focus_new_tab: bool,
+    suggestion_index: Option<usize>,
+    preferences: Preferences,
+    saved_preferences: Preferences,
+    layout: BrowserLayout,
+    find_open: bool,
+    performance_open: bool,
+    library_filter: String,
     viewport_candidate: Option<(i32, i32)>,
     viewport_candidate_since: Instant,
     viewport_committed: Option<(i32, i32)>,
@@ -245,8 +274,12 @@ pub struct DesktopApp {
 
 impl DesktopApp {
     pub fn new(gl: &glow::Context) -> Result<Self, String> {
+        let preferences = Preferences::load();
         Ok(Self {
-            controller: ClientController::new()?,
+            controller: ClientController::new_with_options(surf_client_app::ClientOptions {
+                dark_mode: preferences.dark,
+                mobile_mode: preferences.mobile,
+            })?,
             video: VideoSurface::new(gl)?,
             page_input: PageInput::new(),
             page_rect: PageRect::default(),
@@ -269,14 +302,23 @@ impl DesktopApp {
             fullscreen: false,
             fullscreen_request: None,
             fullscreen_pending: None,
-            theme_request: None,
-            device_preset: 5,
-            device_landscape: false,
+            theme_request: Some(preferences.dark),
+            device_preset: preferences.device_preset.min(DEVICE_PRESETS.len() - 1),
+            device_landscape: preferences.landscape,
             window_size_request: None,
             pending_window_size: None,
             ui_wants_pointer: false,
             ui_wants_keyboard: false,
             observed_url: String::new(),
+            observed_tab: None,
+            focus_new_tab: false,
+            suggestion_index: None,
+            saved_preferences: preferences.clone(),
+            preferences,
+            layout: BrowserLayout::new([1180.0, 760.0], true, false),
+            find_open: false,
+            performance_open: false,
+            library_filter: String::new(),
             viewport_candidate: None,
             viewport_candidate_since: Instant::now(),
             viewport_committed: None,
@@ -334,22 +376,32 @@ impl DesktopApp {
         let display = ui.io().display_size;
         let connected = self.controller.connected;
         let current_url = self.controller.snapshot.current_url.clone();
-        if current_url != self.observed_url {
+        let current_tab = self
+            .controller
+            .snapshot
+            .tabs
+            .iter()
+            .find(|tab| tab.active)
+            .map(|tab| tab.id);
+        let tab_changed = current_tab != self.observed_tab;
+        self.observed_tab = current_tab;
+        if current_url != self.observed_url || tab_changed {
             self.observed_url.clone_from(&current_url);
-            self.address.clone_from(&current_url);
-            self.address_editing = false;
-            self.focus_address = false;
+            if !self.address_editing || tab_changed {
+                self.address.clone_from(&current_url);
+            }
+            if tab_changed {
+                self.address_editing = false;
+                self.controller.browser.suggestions.clear();
+                self.suggestion_index = None;
+            }
         }
-        self.page_rect = PageRect {
-            x: 0.0,
-            y: if connected {
-                f64::from(BAR_HEIGHT)
-            } else {
-                0.0
-            },
-            width: f64::from(display[0].max(1.0)),
-            height: f64::from((display[1] - if connected { BAR_HEIGHT } else { 0.0 }).max(1.0)),
-        };
+        if self.focus_new_tab && tab_changed && current_url.starts_with("about:blank") {
+            self.focus_new_tab = false;
+            self.edit_address();
+        }
+        self.layout = BrowserLayout::new(display, self.preferences.bottom, self.find_open);
+        self.page_rect = self.layout.page;
         if connected {
             self.draw_chrome(ui);
             if self.pending_window_size.is_none() {
@@ -362,6 +414,12 @@ impl DesktopApp {
             self.draw_start(ui);
         }
         self.draw_panel(ui);
+        if self.find_open {
+            self.draw_find(ui);
+        }
+        if self.performance_open {
+            self.draw_performance(ui);
+        }
         self.draw_suggestions(ui);
         self.draw_page_dialog(ui);
         self.draw_page_select(ui);
@@ -392,1109 +450,17 @@ impl DesktopApp {
         }
         self.update_window_size(window);
         self.ui_wants_pointer = ui.io().want_capture_mouse;
-        self.ui_wants_keyboard = ui.io().want_text_input;
-    }
-
-    fn draw_chrome(&mut self, ui: &Ui) {
-        let display = ui.io().display_size;
-        let narrow = display[0] < 520.0;
-        let flags = WindowFlags::NO_DECORATION
-            | WindowFlags::NO_MOVE
-            | WindowFlags::NO_SAVED_SETTINGS
-            | WindowFlags::NO_BRING_TO_FRONT_ON_FOCUS;
-        ui.window("##surf-chrome")
-            .position([0.0, 0.0], Condition::Always)
-            .size([display[0], BAR_HEIGHT], Condition::Always)
-            .bg_alpha(0.96)
-            .flags(flags)
-            .build(|| {
-                if compact_button(ui, icon::BACK, "Back", [24.0, 20.0]) {
-                    self.controller.command(Command::Back {
-                        causal: Causal::default(),
-                    });
-                }
-                if !narrow {
-                    ui.same_line();
-                    if compact_button(ui, icon::FORWARD, "Forward", [24.0, 20.0]) {
-                        self.controller.command(Command::Forward {
-                            causal: Causal::default(),
-                        });
-                    }
-                }
-                ui.same_line();
-                let reload = if self.controller.snapshot.loading {
-                    icon::STOP
-                } else {
-                    icon::RELOAD
-                };
-                if compact_button(ui, reload, "Reload / stop", [24.0, 20.0]) {
-                    self.reload_or_stop();
-                }
-                ui.same_line();
-
-                let tabs = &self.controller.snapshot.tabs;
-                let active_title = tabs
-                    .iter()
-                    .find(|tab| tab.active)
-                    .map(|tab| {
-                        if tab.title.trim().is_empty() {
-                            compact_address(&tab.url)
-                        } else {
-                            tab.title.clone()
-                        }
-                    })
-                    .unwrap_or_else(|| "No tab".to_owned());
-                let tab_width = if narrow {
-                    (display[0] * 0.18).clamp(54.0, 76.0)
-                } else {
-                    (display[0] * 0.17).clamp(112.0, 180.0)
-                };
-                let tab_label = if narrow {
-                    format!("[{}]##tabs", tabs.len())
-                } else {
-                    format!("{}  [{}]##tabs", truncate(&active_title, 22), tabs.len())
-                };
-                if ui.button_with_size(tab_label, [tab_width, 20.0]) {
-                    self.panel = toggle(self.panel, Panel::Tabs);
-                    self.page_focused = false;
-                }
-                if ui.is_item_hovered() {
-                    ui.tooltip_text("Tabs");
-                }
-                ui.same_line();
-                if compact_button(ui, icon::PLUS, "New tab", [24.0, 20.0]) {
-                    self.new_tab();
-                }
-                ui.same_line();
-
-                let utility_width = if narrow { 28.0 } else { 58.0 };
-                let address_width = (ui.content_region_avail()[0] - utility_width).max(if narrow {
-                    60.0
-                } else {
-                    120.0
-                });
-                ui.set_next_item_width(address_width);
-                if self.address_editing {
-                    if self.focus_address {
-                        ui.set_keyboard_focus_here();
-                        self.focus_address = false;
-                    }
-                    let previous = self.address.clone();
-                    let submitted = ui
-                        .input_text("##omnibox", &mut self.address)
-                        .auto_select_all(true)
-                        .enter_returns_true(true)
-                        .build();
-                    self.omnibox_rect = item_rect(ui);
-                    if previous != self.address {
-                        self.controller.command(Command::Suggest {
-                            q: self.address.clone(),
-                            offset: 0,
-                            causal: Causal::default(),
-                        });
-                    }
-                    if submitted {
-                        let address = self.address.clone();
-                        self.controller.navigate(&address);
-                        self.address_editing = false;
-                        self.page_focused = true;
-                    } else if ui.is_key_pressed(ImKey::Escape) {
-                        self.address_editing = false;
-                        self.page_focused = true;
-                    }
-                } else {
-                    let compact = compact_address(&self.controller.snapshot.current_url);
-                    if ui.button_with_size(
-                        format!("{compact}##omnibox-display"),
-                        [address_width, 20.0],
-                    ) {
-                        self.edit_address();
-                    }
-                    self.omnibox_rect = item_rect(ui);
-                    if ui.is_item_hovered() {
-                        ui.tooltip_text(&self.controller.snapshot.current_url);
-                    }
-                }
-                if !narrow {
-                    ui.same_line();
-                    let star = if self.controller.snapshot.starred {
-                        "[*]".to_owned()
-                    } else {
-                        icon::STAR.to_string()
-                    };
-                    if compact_button(ui, &star, "Bookmark", [24.0, 20.0]) {
-                        self.controller.command(Command::Bookmark {
-                            causal: Causal::default(),
-                        });
-                    }
-                }
-                ui.same_line();
-                if compact_button(ui, icon::MORE, "Browser tools", [24.0, 20.0]) {
-                    self.panel = toggle(self.panel, Panel::More);
-                    self.page_focused = false;
-                }
-
-                if self.controller.snapshot.loading {
-                    let draw = ui.get_window_draw_list();
-                    let t = (ui.time() as f32 * 0.7).fract();
-                    let width = display[0] * 0.28;
-                    let start = (display[0] + width) * t - width;
-                    draw.add_line(
-                        [start, BAR_HEIGHT - 1.0],
-                        [(start + width).min(display[0]), BAR_HEIGHT - 1.0],
-                        [0.325, 0.718, 0.824, 1.0],
-                    )
-                    .thickness(1.0)
-                    .build();
-                }
-            });
-        if self.controller.frames_received == 0 {
-            small_overlay(
-                ui,
-                [display[0] * 0.5, PANEL_TOP + 8.0],
-                "Waiting for video…",
-            );
-        }
-    }
-
-    fn draw_start(&mut self, ui: &Ui) {
-        let display = ui.io().display_size;
-        let width = (display[0] - 16.0).clamp(280.0, 450.0);
-        let flags = WindowFlags::NO_COLLAPSE
-            | WindowFlags::NO_RESIZE
-            | WindowFlags::NO_SAVED_SETTINGS
-            | WindowFlags::ALWAYS_AUTO_RESIZE;
-        let mut actions = Vec::new();
-        ui.window("Connect to Surf")
-            .position([display[0] * 0.5, display[1] * 0.5], Condition::Always)
-            .position_pivot([0.5, 0.5])
-            .size_constraints([width, 0.0], [width, (display[1] - 16.0).max(220.0)])
-            .flags(flags)
-            .build(|| {
-                ui.text("AVAILABLE COMPUTERS");
-                ui.separator();
-                let mut servers: Vec<(String, String)> = self
-                    .controller
-                    .saved_servers
-                    .iter()
-                    .map(|server| (server.name.clone(), server.endpoint.clone()))
-                    .collect();
-                for server in &self.controller.discovered_servers {
-                    if !servers
-                        .iter()
-                        .any(|(_, endpoint)| endpoint == &server.endpoint)
-                    {
-                        servers.push((server.name.clone(), server.endpoint.clone()));
-                    }
-                }
-                if servers.is_empty() {
-                    ui.text_disabled("Searching the LAN…");
-                }
-                for (name, endpoint) in servers {
-                    let label = format!(
-                        "{}  {}##server-{endpoint}",
-                        truncate(&name, 28),
-                        endpoint.trim_start_matches("https://")
-                    );
-                    if ui.selectable_config(label).size([0.0, 26.0]).build() {
-                        actions.push(Action::Inspect(endpoint, true));
-                    }
-                }
-                ui.spacing();
-                ui.set_next_item_width(ui.content_region_avail()[0] - 82.0);
-                ui.input_text("##server-address", &mut self.endpoint)
-                    .hint("Address or host name")
-                    .build();
-                ui.same_line();
-                if ui.button_with_size("Add", [76.0, 0.0]) && !self.endpoint.trim().is_empty() {
-                    actions.push(Action::Inspect(self.endpoint.trim().to_owned(), false));
-                }
-
-                if let Some(info) = &self.controller.inspected {
-                    ui.separator();
-                    ui.text(&info.name);
-                    ui.same_line();
-                    ui.text_disabled(self.controller.endpoint.trim_start_matches("https://"));
-                    if let Some(pairing) = &self.controller.pairing {
-                        ui.spacing();
-                        ui.text("Compare these words with the server:");
-                        ui.text_wrapped(&pairing.phrase);
-                        if ui.button("Words match") {
-                            actions.push(Action::ConfirmPairing);
-                        }
-                    } else if !self.controller.paired {
-                        ui.set_next_item_width(180.0);
-                        ui.input_text("##pair-code", &mut self.pairing_code)
-                            .hint("Six-digit code")
-                            .chars_decimal(true)
-                            .build();
-                        ui.same_line();
-                        if ui.button("Pair") {
-                            actions.push(Action::Pair(self.pairing_code.clone()));
-                        }
-                    } else if ui.button("Connect") {
-                        actions.push(Action::Connect);
-                    }
-                }
-                ui.separator();
-                ui.text_wrapped(&self.controller.status);
-                if let Some(note) = &self.controller.discovery_note {
-                    ui.text_disabled(note);
-                }
-            });
-        self.apply_actions(actions);
-    }
-
-    fn draw_panel(&mut self, ui: &Ui) {
-        match self.panel {
-            Some(Panel::Tabs) => self.draw_tabs(ui),
-            Some(Panel::More) => self.draw_more(ui),
-            Some(Panel::Library) => self.draw_library(ui),
-            Some(Panel::Find) => self.draw_find(ui),
-            Some(Panel::Reader) => self.draw_reader(ui),
-            Some(Panel::Media) => self.draw_media(ui),
-            Some(Panel::Settings) => self.draw_settings(ui),
-            Some(Panel::Performance) => self.draw_performance(ui),
-            Some(Panel::Files) => self.draw_files(ui),
-            None => {}
-        }
-    }
-
-    fn draw_tabs(&mut self, ui: &Ui) {
-        let display = ui.io().display_size;
-        let panel_width = (display[0] - 8.0).clamp(280.0, 340.0);
-        let panel_x = if display[0] < 520.0 { 4.0 } else { 82.0 };
-        let tabs = self.controller.snapshot.tabs.clone();
-        let mut action = None;
-        ui.window("Tabs##panel")
-            .position([panel_x, PANEL_TOP], Condition::Always)
-            .size_constraints(
-                [panel_width, 0.0],
-                [panel_width, (display[1] * 0.7).max(160.0)],
-            )
-            .flags(overlay_flags() | WindowFlags::ALWAYS_AUTO_RESIZE | WindowFlags::NO_TITLE_BAR)
-            .build(|| {
-                for (index, tab) in tabs.iter().enumerate() {
-                    let title = if tab.title.trim().is_empty() {
-                        compact_address(&tab.url)
-                    } else {
-                        tab.title.clone()
-                    };
-                    let selected = tab.active;
-                    let row_width = (ui.content_region_avail()[0] - 30.0).max(80.0);
-                    if ui
-                        .selectable_config(format!("{}##tab-{index}", truncate(&title, 42)))
-                        .selected(selected)
-                        .size([row_width, 18.0])
-                        .build()
-                    {
-                        action = Some(("select", tab.id));
-                    }
-                    if ui.is_item_hovered() {
-                        ui.tooltip_text(&tab.url);
-                    }
-                    ui.same_line();
-                    if ui.small_button(format!("{}##tab-close-{index}", icon::CLOSE)) {
-                        action = Some(("close", tab.id));
-                    }
-                }
-            });
-        if let Some((action, id)) = action {
-            let id = i32::try_from(id).unwrap_or_default();
-            if action == "close" {
-                self.close_tab(id);
-            } else {
-                self.controller.command(Command::Tab {
-                    action: action.to_owned(),
-                    id,
-                    causal: Causal::default(),
-                });
+        self.ui_wants_keyboard = ui.io().want_capture_keyboard;
+        self.preferences.dark = self.controller.dark_mode;
+        self.preferences.mobile = self.controller.mobile_mode;
+        self.preferences.device_preset = self.device_preset;
+        self.preferences.landscape = self.device_landscape;
+        if self.preferences != self.saved_preferences {
+            match self.preferences.save() {
+                Ok(()) => self.saved_preferences = self.preferences.clone(),
+                Err(error) => self.report_host_error(format!("Could not save settings: {error}")),
             }
-            self.panel = None;
-            self.page_focused = true;
         }
-    }
-
-    fn draw_more(&mut self, ui: &Ui) {
-        let display = ui.io().display_size;
-        let flags = overlay_flags() | WindowFlags::ALWAYS_AUTO_RESIZE | WindowFlags::NO_TITLE_BAR;
-        let mut next = self.panel;
-        ui.window("Tools##panel")
-            .position([display[0], PANEL_TOP], Condition::Always)
-            .position_pivot([1.0, 0.0])
-            .size_constraints([220.0, 0.0], [220.0, display[1] - PANEL_TOP - 8.0])
-            .flags(flags)
-            .build(|| {
-                if full_button(ui, "Library", 206.0) {
-                    self.controller.command(Command::Library {
-                        causal: Causal::default(),
-                    });
-                    self.controller.command(Command::Downloads {
-                        causal: Causal::default(),
-                    });
-                    next = Some(Panel::Library);
-                }
-                if full_button(ui, "Find on page", 206.0) {
-                    next = Some(Panel::Find);
-                }
-                if full_button(ui, "Reader", 206.0) {
-                    self.controller.command(Command::Reader {
-                        causal: Causal::default(),
-                    });
-                    next = None;
-                }
-                if full_button(ui, "Media", 206.0) {
-                    self.controller.command(Command::MediaQuery {
-                        causal: Causal::default(),
-                    });
-                    next = Some(Panel::Media);
-                }
-                ui.separator();
-                if full_button(ui, "Performance", 206.0) {
-                    next = Some(Panel::Performance);
-                }
-                if full_button(ui, "Settings", 206.0) {
-                    next = Some(Panel::Settings);
-                }
-                if full_button(ui, "Fullscreen", 206.0) {
-                    let on = !self.fullscreen;
-                    self.set_fullscreen_command(on);
-                    next = None;
-                }
-                ui.separator();
-                if full_button(ui, "Disconnect", 206.0) {
-                    self.controller.disconnect();
-                    next = None;
-                }
-            });
-        self.panel = next;
-    }
-
-    fn draw_library(&mut self, ui: &Ui) {
-        let display = ui.io().display_size;
-        let available_width = (display[0] - 16.0).max(280.0);
-        let available_height = (display[1] - 16.0).max(220.0);
-        let width = (display[0] * 0.72).clamp(280.0, 820.0).min(available_width);
-        let height = (display[1] * 0.72)
-            .clamp(220.0, 620.0)
-            .min(available_height);
-        let mut open = true;
-        let mut actions = Vec::new();
-        ui.window("Library")
-            .position([display[0] * 0.5, display[1] * 0.5], Condition::Appearing)
-            .position_pivot([0.5, 0.5])
-            .size([width, height], Condition::Appearing)
-            .size_constraints([280.0, 220.0], [available_width, available_height])
-            .opened(&mut open)
-            .flags(overlay_flags())
-            .build(|| {
-                for (section, label) in [
-                    (LibrarySection::History, "History"),
-                    (LibrarySection::Bookmarks, "Bookmarks"),
-                    (LibrarySection::Downloads, "Downloads"),
-                ] {
-                    if section != LibrarySection::History {
-                        ui.same_line();
-                    }
-                    let selected = self.library_section == section;
-                    if ui.selectable_config(label).selected(selected).build() {
-                        self.library_section = section;
-                    }
-                }
-                ui.separator();
-                ui.child_window("##library-list")
-                    .size([0.0, 0.0])
-                    .build(|| match self.library_section {
-                        LibrarySection::History => {
-                            let items = self.controller.browser.history.clone();
-                            if items.is_empty() {
-                                ui.text_disabled("No browsing history yet.");
-                            }
-                            for (index, item) in items.into_iter().enumerate() {
-                                let label = row_label(&item.title, &item.url, index);
-                                let row_width = (ui.content_region_avail()[0] - 30.0).max(120.0);
-                                if ui.selectable_config(label).size([row_width, 24.0]).build() {
-                                    actions.push(Action::Navigate(item.url.clone()));
-                                }
-                                ui.same_line();
-                                if compact_button(
-                                    ui,
-                                    &format!("{}##hist-{index}", icon::CLOSE),
-                                    "Remove",
-                                    [25.0, 22.0],
-                                ) {
-                                    actions.push(Action::Command(Command::HistoryDelete {
-                                        url: item.url,
-                                        ts: item.ts,
-                                        causal: Causal::default(),
-                                    }));
-                                    actions.push(Action::Command(Command::Library {
-                                        causal: Causal::default(),
-                                    }));
-                                }
-                            }
-                        }
-                        LibrarySection::Bookmarks => {
-                            let items = self.controller.browser.bookmarks.clone();
-                            if items.is_empty() {
-                                ui.text_disabled("Bookmarks appear here.");
-                            }
-                            for (index, item) in items.into_iter().enumerate() {
-                                let label = row_label(&item.title, &item.url, index);
-                                let row_width = (ui.content_region_avail()[0] - 30.0).max(120.0);
-                                if ui.selectable_config(label).size([row_width, 24.0]).build() {
-                                    actions.push(Action::Navigate(item.url.clone()));
-                                }
-                                ui.same_line();
-                                if compact_button(
-                                    ui,
-                                    &format!("{}##bookmark-{index}", icon::CLOSE),
-                                    "Remove",
-                                    [25.0, 22.0],
-                                ) {
-                                    actions.push(Action::Command(Command::BookmarkDelete {
-                                        url: item.url,
-                                        causal: Causal::default(),
-                                    }));
-                                    actions.push(Action::Command(Command::Library {
-                                        causal: Causal::default(),
-                                    }));
-                                }
-                            }
-                        }
-                        LibrarySection::Downloads => {
-                            let items = self.controller.browser.downloads.clone();
-                            if items.is_empty() {
-                                ui.text_disabled("Downloads from this server appear here.");
-                            }
-                            for (index, item) in items.into_iter().enumerate() {
-                                ui.text(truncate(&item.name, 58));
-                                ui.same_line();
-                                let progress = self
-                                    .controller
-                                    .browser
-                                    .download_progress
-                                    .get(&item.name)
-                                    .map(|value| format!("{value}%"))
-                                    .unwrap_or_else(|| format_bytes(item.size));
-                                ui.text_disabled(progress);
-                                ui.same_line();
-                                if ui.small_button(format!("Save##download-{index}")) {
-                                    actions.push(Action::Download(item.name.clone()));
-                                }
-                                ui.same_line();
-                                if ui.small_button(format!("Remove##download-remove-{index}")) {
-                                    actions.push(Action::Command(Command::DownloadDelete {
-                                        name: item.name,
-                                        causal: Causal::default(),
-                                    }));
-                                    actions.push(Action::Command(Command::Downloads {
-                                        causal: Causal::default(),
-                                    }));
-                                }
-                            }
-                        }
-                    });
-            });
-        if !open {
-            self.panel = None;
-        }
-        self.apply_actions(actions);
-    }
-
-    fn draw_find(&mut self, ui: &Ui) {
-        let display = ui.io().display_size;
-        let width = (display[0] - 8.0).clamp(280.0, 330.0);
-        let mut open = true;
-        let mut command = None;
-        ui.window("Find##panel")
-            .position([display[0], PANEL_TOP], Condition::Always)
-            .position_pivot([1.0, 0.0])
-            .size([width, 0.0], Condition::Always)
-            .opened(&mut open)
-            .flags(overlay_flags() | WindowFlags::ALWAYS_AUTO_RESIZE)
-            .build(|| {
-                ui.set_next_item_width((ui.content_region_avail()[0] - 70.0).max(100.0));
-                let previous = self.controller.browser.find_query.clone();
-                let changed = ui
-                    .input_text("##find", &mut self.controller.browser.find_query)
-                    .hint("Find on page")
-                    .build();
-                if changed || previous != self.controller.browser.find_query {
-                    command = Some(1);
-                }
-                ui.same_line();
-                if ui.small_button("Up") {
-                    command = Some(-1);
-                }
-                ui.same_line();
-                if ui.small_button("Down") {
-                    command = Some(1);
-                }
-                if let Some(found) = self.controller.browser.find_found {
-                    ui.text_disabled(if found { "Match" } else { "No match" });
-                }
-            });
-        if let Some(dir) = command {
-            self.controller.command(Command::Find {
-                q: self.controller.browser.find_query.clone(),
-                dir,
-                causal: Causal::default(),
-            });
-        }
-        if !open {
-            self.panel = None;
-        }
-    }
-
-    fn draw_reader(&mut self, ui: &Ui) {
-        let Some(reader) = self.controller.browser.reader.clone() else {
-            return;
-        };
-        let display = ui.io().display_size;
-        let width = (display[0] * 0.72)
-            .clamp(280.0, 900.0)
-            .min((display[0] - 16.0).max(280.0));
-        let height = (display[1] * 0.78)
-            .clamp(220.0, 720.0)
-            .min((display[1] - 16.0).max(220.0));
-        let mut open = true;
-        let mut navigate = false;
-        ui.window(if reader.title.is_empty() {
-            "Reader"
-        } else {
-            &reader.title
-        })
-        .position([display[0] * 0.5, display[1] * 0.5], Condition::Appearing)
-        .position_pivot([0.5, 0.5])
-        .size([width, height], Condition::Appearing)
-        .opened(&mut open)
-        .flags(overlay_flags())
-        .build(|| {
-            ui.text_disabled(compact_address(&reader.url));
-            ui.same_line();
-            if ui.small_button("Open page") {
-                navigate = true;
-            }
-            ui.separator();
-            ui.child_window("##reader-text").size([0.0, 0.0]).build(|| {
-                ui.text_wrapped(&reader.text);
-            });
-        });
-        if navigate {
-            self.controller.navigate(&reader.url);
-            open = false;
-        }
-        if !open {
-            self.controller.browser.reader = None;
-            self.panel = None;
-        }
-    }
-
-    fn draw_media(&mut self, ui: &Ui) {
-        let display = ui.io().display_size;
-        let width = (display[0] - 8.0).clamp(280.0, PANEL_WIDTH);
-        let media = self.controller.browser.media.clone();
-        let mut open = true;
-        let mut actions = Vec::new();
-        ui.window("Media")
-            .position([display[0], PANEL_TOP], Condition::Always)
-            .position_pivot([1.0, 0.0])
-            .size_constraints([width, 0.0], [width, 260.0])
-            .opened(&mut open)
-            .flags(overlay_flags() | WindowFlags::ALWAYS_AUTO_RESIZE)
-            .build(|| {
-                if !media.available {
-                    ui.text_disabled("No controllable media on this page.");
-                    return;
-                }
-                ui.text(if media.title.is_empty() {
-                    "Page media"
-                } else {
-                    &media.title
-                });
-                ui.text_disabled(format!(
-                    "{} / {}",
-                    format_time(media.current_time),
-                    format_time(media.duration)
-                ));
-                if ui.button(if media.paused { "Play" } else { "Pause" }) {
-                    actions.push(Action::Command(Command::MediaPlayPause {
-                        causal: Causal::default(),
-                    }));
-                }
-                ui.same_line();
-                if ui.button(if media.muted { "Unmute" } else { "Mute" }) {
-                    actions.push(Action::Command(Command::MediaMute {
-                        causal: Causal::default(),
-                    }));
-                }
-                let mut volume = media.volume.clamp(0.0, 1.0) as f32;
-                ui.set_next_item_width(-1.0);
-                if ui.slider("Volume", 0.0, 1.0, &mut volume) {
-                    actions.push(Action::Command(Command::MediaVolume {
-                        value: f64::from(volume),
-                        causal: Causal::default(),
-                    }));
-                }
-            });
-        if !open {
-            self.panel = None;
-        }
-        self.apply_actions(actions);
-    }
-
-    fn draw_settings(&mut self, ui: &Ui) {
-        let display = ui.io().display_size;
-        let width = (display[0] - 16.0).clamp(280.0, 470.0);
-        let max_height = (display[1] - 16.0).max(220.0);
-        let mut open = true;
-        let mut actions = Vec::new();
-        ui.window("Settings")
-            .position([display[0] * 0.5, display[1] * 0.5], Condition::Appearing)
-            .position_pivot([0.5, 0.5])
-            .size([width, 0.0], Condition::Appearing)
-            .size_constraints([width, 0.0], [width, max_height])
-            .opened(&mut open)
-            .flags(overlay_flags() | WindowFlags::ALWAYS_AUTO_RESIZE)
-            .build(|| {
-                ui.text_disabled("LINUX DEVICE WINDOW");
-                ui.text_wrapped(
-                    "Match an iPhone or iPad layout using UIKit points. Retina scale does not change the layout size.",
-                );
-                let preset = DEVICE_PRESETS[self.device_preset.min(DEVICE_PRESETS.len() - 1)];
-                let size = preset.size(self.device_landscape);
-                let preview = format!("{} — {} x {} pt", preset.label, size[0], size[1]);
-                ui.set_next_item_width(-1.0);
-                if let Some(_combo) = ui.begin_combo("##device-preset", preview) {
-                    for (index, candidate) in DEVICE_PRESETS.iter().enumerate() {
-                        let candidate_size = candidate.size(self.device_landscape);
-                        let selected = index == self.device_preset;
-                        if ui
-                            .selectable_config(format!(
-                                "{} — {} x {} pt",
-                                candidate.label, candidate_size[0], candidate_size[1]
-                            ))
-                            .selected(selected)
-                            .build()
-                        {
-                            self.device_preset = index;
-                        }
-                        if selected {
-                            ui.set_item_default_focus();
-                        }
-                    }
-                }
-                if ui.radio_button_bool("Portrait", !self.device_landscape) {
-                    self.device_landscape = false;
-                }
-                ui.same_line();
-                if ui.radio_button_bool("Landscape", self.device_landscape) {
-                    self.device_landscape = true;
-                }
-                let preset = DEVICE_PRESETS[self.device_preset.min(DEVICE_PRESETS.len() - 1)];
-                let size = preset.size(self.device_landscape);
-                if ui.button_with_size("Apply exact client size", [ui.content_region_avail()[0], 0.0]) {
-                    self.window_size_request = Some(WindowSizeRequest {
-                        label: preset.label,
-                        size,
-                    });
-                }
-                ui.text_disabled(format!(
-                    "Current client area: {:.0} x {:.0} pt",
-                    display[0], display[1]
-                ));
-                if let Some(pending) = &self.pending_window_size {
-                    if let Some((width, height)) = pending.viewport {
-                        ui.text_disabled(format!("Applying browser: {width} x {height} px…"));
-                    } else {
-                        ui.text_disabled("Applying window size…");
-                    }
-                } else if let Some((width, height)) = self.controller.video_dimensions {
-                    ui.text_disabled(format!("Browser video: {width} x {height} px"));
-                }
-                ui.separator();
-                ui.text_disabled("APPEARANCE");
-                let mut dark = self.controller.dark_mode;
-                if ui.checkbox("Dark interface and websites", &mut dark) {
-                    actions.push(Action::Dark(dark));
-                }
-                let mut mobile = self.controller.mobile_mode;
-                if ui.checkbox("Request mobile websites", &mut mobile) {
-                    actions.push(Action::Mobile(mobile));
-                }
-                ui.separator();
-                ui.text_disabled("BROWSING DATA");
-                if ui.button("Clear history") {
-                    actions.push(Action::Command(Command::Clear {
-                        what: "history".to_owned(),
-                        causal: Causal::default(),
-                    }));
-                }
-                ui.separator();
-                ui.text_disabled("SERVERS");
-                let servers = self.controller.saved_servers.clone();
-                for (index, server) in servers.into_iter().enumerate() {
-                    ui.text(&server.name);
-                    ui.same_line();
-                    ui.text_disabled(server.endpoint.trim_start_matches("https://"));
-                    ui.same_line();
-                    if ui.small_button(format!("Forget##server-forget-{index}")) {
-                        actions.push(Action::Forget(server.server_id));
-                    }
-                }
-                ui.separator();
-                ui.text_wrapped(&self.controller.status);
-                if self.controller.connected && ui.button("Disconnect") {
-                    actions.push(Action::Disconnect);
-                }
-                let server_version = self
-                    .controller
-                    .inspected
-                    .as_ref()
-                    .map_or("—", |info| info.version.as_str());
-                ui.text_disabled(format!(
-                    "Surf client {}  |  server {server_version}  |  core C99",
-                    SURF_VERSION.trim()
-                ));
-            });
-        if !open {
-            self.panel = None;
-        }
-        self.apply_actions(actions);
-    }
-
-    fn draw_performance(&mut self, ui: &Ui) {
-        let display = ui.io().display_size;
-        let width = (display[0] - 8.0).clamp(280.0, 360.0);
-        let report = self.controller.latest_diagnostics.unwrap_or_default();
-        let media = self.controller.media_diagnostics();
-        let mut open = true;
-        ui.window("Performance")
-            .position([display[0], PANEL_TOP], Condition::Always)
-            .position_pivot([1.0, 0.0])
-            .size([width, 0.0], Condition::Always)
-            .opened(&mut open)
-            .flags(overlay_flags() | WindowFlags::ALWAYS_AUTO_RESIZE)
-            .build(|| {
-                metric(ui, "PRESENT", format!("{:.1} fps", report.presentation_fps));
-                ui.same_line();
-                metric(ui, "DECODE", format!("{:.1} fps", report.decode_fps));
-                ui.same_line();
-                metric(ui, "DROP", format!("{:.1}%", report.drop_percent));
-                ui.separator();
-                ui.text(format!("decode       {:>7} us", report.decode_us));
-                ui.text(format!("GPU upload   {:>7} us", report.upload_us));
-                ui.text(format!("frame age    {:>7} us", report.frame_age_us));
-                ui.text(format!("network      {:>7} us", report.network_us));
-                ui.text(format!("round trip   {:>7} us", report.rtt_us));
-                ui.text(format!(
-                    "queues       {} / {} / {}",
-                    report.encoded_video_depth, report.decoded_video_depth, report.audio_depth
-                ));
-                ui.separator();
-                ui.text_disabled(format!(
-                    "{:?}  |  {} gaps  |  {} decode errors  |  {} received",
-                    report.health, report.sequence_gaps, report.decode_errors, media.ingress_frames
-                ));
-            });
-        if !open {
-            self.panel = None;
-        }
-    }
-
-    fn draw_files(&mut self, ui: &Ui) {
-        let Some(picker) = &mut self.file_picker else {
-            self.panel = None;
-            return;
-        };
-        let display = ui.io().display_size;
-        let width = (display[0] * 0.72)
-            .clamp(280.0, 800.0)
-            .min((display[0] - 16.0).max(280.0));
-        let height = (display[1] * 0.72)
-            .clamp(220.0, 600.0)
-            .min((display[1] - 16.0).max(220.0));
-        let mut open = true;
-        let mut complete: Option<Vec<PathBuf>> = None;
-        ui.window("Choose file")
-            .position([display[0] * 0.5, display[1] * 0.5], Condition::Appearing)
-            .position_pivot([0.5, 0.5])
-            .size([width, height], Condition::Appearing)
-            .opened(&mut open)
-            .flags(overlay_flags())
-            .build(|| {
-                if ui.small_button("Up")
-                    && let Some(parent) = picker.directory.parent()
-                {
-                    picker.directory = parent.to_owned();
-                    picker.selected.clear();
-                }
-                ui.same_line();
-                ui.text_disabled(picker.directory.display().to_string());
-                ui.separator();
-                ui.child_window("##files").size([0.0, -31.0]).build(|| {
-                    let mut entries = match fs::read_dir(&picker.directory) {
-                        Ok(entries) => entries.flatten().collect::<Vec<_>>(),
-                        Err(error) => {
-                            picker.error = Some(error.to_string());
-                            Vec::new()
-                        }
-                    };
-                    entries.sort_by_key(|entry| {
-                        let is_file = entry.file_type().map_or(true, |kind| kind.is_file());
-                        (is_file, entry.file_name().to_string_lossy().to_lowercase())
-                    });
-                    for entry in entries {
-                        let path = entry.path();
-                        let is_dir = entry.file_type().is_ok_and(|kind| kind.is_dir());
-                        let selected = picker.selected.contains(&path);
-                        let prefix = if is_dir { "[dir] " } else { "" };
-                        let clicked = ui
-                            .selectable_config(format!(
-                                "{prefix}{}##{}",
-                                entry.file_name().to_string_lossy(),
-                                path.display()
-                            ))
-                            .selected(selected)
-                            .allow_double_click(true)
-                            .build();
-                        if !clicked {
-                            continue;
-                        }
-                        if is_dir && ui.is_mouse_double_clicked(ImMouseButton::Left) {
-                            picker.directory = path;
-                            picker.selected.clear();
-                            break;
-                        }
-                        if !is_dir {
-                            if !picker.multiple {
-                                picker.selected.clear();
-                            }
-                            if !picker.selected.insert(path.clone()) {
-                                picker.selected.remove(&path);
-                            }
-                        }
-                    }
-                    if let Some(error) = &picker.error {
-                        ui.text_disabled(error);
-                    }
-                });
-                let choose_label = if picker.multiple {
-                    "Upload selected"
-                } else {
-                    "Upload"
-                };
-                if ui.button(choose_label) && !picker.selected.is_empty() {
-                    complete = Some(picker.selected.iter().cloned().collect());
-                }
-                ui.same_line();
-                if ui.button("Cancel") {
-                    complete = Some(Vec::new());
-                }
-            });
-        if !open && complete.is_none() {
-            complete = Some(Vec::new());
-        }
-        if let Some(paths) = complete {
-            self.file_picker = None;
-            self.panel = None;
-            self.controller.choose_files(paths);
-        }
-    }
-
-    fn draw_suggestions(&mut self, ui: &Ui) {
-        if !self.address_editing || self.controller.browser.suggestions.is_empty() {
-            return;
-        }
-        let display = ui.io().display_size;
-        let width = (self.omnibox_rect[2] - self.omnibox_rect[0])
-            .max(80.0)
-            .min((display[0] - 8.0).max(80.0));
-        let suggestions = self.controller.browser.suggestions.clone();
-        let mut selected = None;
-        ui.window("##suggestions")
-            .position(
-                [self.omnibox_rect[0], self.omnibox_rect[3] + 2.0],
-                Condition::Always,
-            )
-            .size([width, 0.0], Condition::Always)
-            .size_constraints([width, 0.0], [width, 260.0])
-            // Suggestions are a visual/click target owned by the omnibox. They must not
-            // become the active keyboard window when the first result arrives.
-            .flags(
-                overlay_flags()
-                    | WindowFlags::ALWAYS_AUTO_RESIZE
-                    | WindowFlags::NO_FOCUS_ON_APPEARING
-                    | WindowFlags::NO_BRING_TO_FRONT_ON_FOCUS,
-            )
-            .build(|| {
-                for (index, item) in suggestions.into_iter().take(8).enumerate() {
-                    let title = if item.title.trim().is_empty() {
-                        compact_address(&item.url)
-                    } else {
-                        item.title.clone()
-                    };
-                    if ui.selectable(format!(
-                        "{}  {}##suggestion-{index}",
-                        truncate(&title, 34),
-                        compact_address(&item.url)
-                    )) {
-                        selected = Some(item.url);
-                    }
-                }
-            });
-        if let Some(url) = selected {
-            self.controller.navigate(&url);
-            self.address_editing = false;
-            self.page_focused = true;
-        }
-    }
-
-    fn draw_page_dialog(&mut self, ui: &Ui) {
-        let Some(prompt) = self.controller.browser.dialog.clone() else {
-            self.dialog_signature.clear();
-            return;
-        };
-        let signature = format!("{}|{}|{}", prompt.kind, prompt.text, prompt.input);
-        if self.dialog_signature != signature {
-            self.dialog_signature = signature;
-            self.dialog_input.clone_from(&prompt.input);
-        }
-        let display = ui.io().display_size;
-        let width = (display[0] - 32.0).clamp(260.0, 520.0);
-        let mut action = None;
-        ui.window("This page says")
-            .position([display[0] * 0.5, display[1] * 0.5], Condition::Always)
-            .position_pivot([0.5, 0.5])
-            .size_constraints(
-                [width.min(360.0), 0.0],
-                [width, (display[1] - 32.0).max(180.0)],
-            )
-            .flags(overlay_flags() | WindowFlags::ALWAYS_AUTO_RESIZE)
-            .build(|| {
-                ui.text_wrapped(&prompt.text);
-                if prompt.kind == "prompt" {
-                    ui.set_next_item_width(-1.0);
-                    ui.input_text("##dialog-input", &mut self.dialog_input)
-                        .enter_returns_true(true)
-                        .build();
-                }
-                if prompt.kind != "alert" && ui.button("Cancel") {
-                    action = Some(false);
-                }
-                if prompt.kind != "alert" {
-                    ui.same_line();
-                }
-                if ui.button("OK") {
-                    action = Some(true);
-                }
-            });
-        if let Some(accept) = action {
-            self.controller
-                .reply_dialog(accept, self.dialog_input.clone());
-        }
-    }
-
-    fn draw_page_select(&mut self, ui: &Ui) {
-        let Some(prompt) = self.controller.browser.select.clone() else {
-            self.select_signature.clear();
-            self.select_values.clear();
-            return;
-        };
-        if self.select_signature != prompt.id {
-            self.select_signature.clone_from(&prompt.id);
-            self.select_values.clone_from(&prompt.selected);
-        }
-        let display = ui.io().display_size;
-        let position = prompt
-            .rect
-            .map_or([display[0] * 0.5, display[1] * 0.5], |rect| {
-                [
-                    (self.page_rect.x + rect[0] * self.page_rect.width) as f32,
-                    (self.page_rect.y + (rect[1] + rect[3]) * self.page_rect.height) as f32,
-                ]
-            });
-        let mut reply = None;
-        ui.window("Choose##page-select")
-            .position(position, Condition::Always)
-            .position_pivot(if prompt.rect.is_some() {
-                [0.0, 0.0]
-            } else {
-                [0.5, 0.5]
-            })
-            .size_constraints([220.0, 0.0], [420.0, display[1] * 0.6])
-            .flags(overlay_flags() | WindowFlags::ALWAYS_AUTO_RESIZE)
-            .build(|| {
-                if !prompt.title.is_empty() {
-                    ui.text_wrapped(&prompt.title);
-                    ui.separator();
-                }
-                for (index, option) in prompt.options.iter().enumerate() {
-                    let selected = self.select_values.get(index).copied().unwrap_or(false);
-                    if ui
-                        .selectable_config(format!("{}##select-{index}", option.label))
-                        .selected(selected)
-                        .disabled(option.disabled)
-                        .build()
-                    {
-                        if prompt.multiple {
-                            if let Some(value) = self.select_values.get_mut(index) {
-                                *value = !*value;
-                            }
-                        } else {
-                            reply = Some(vec![i32::try_from(index).unwrap_or(i32::MAX)]);
-                        }
-                    }
-                }
-                if prompt.multiple && ui.button("Choose") {
-                    reply = Some(
-                        self.select_values
-                            .iter()
-                            .enumerate()
-                            .filter_map(|(index, selected)| {
-                                selected.then_some(i32::try_from(index).unwrap_or(i32::MAX))
-                            })
-                            .collect(),
-                    );
-                }
-                ui.same_line();
-                if ui.button("Cancel") {
-                    self.controller.reply_select(true, Vec::new());
-                }
-            });
-        if let Some(indices) = reply {
-            self.controller.reply_select(false, indices);
-        }
-    }
-
-    fn draw_page_error(&mut self, ui: &Ui) {
-        let Some(url) = self.controller.browser.page_error.clone() else {
-            return;
-        };
-        let display = ui.io().display_size;
-        let mut close = false;
-        ui.window("Page unavailable")
-            .position([display[0] * 0.5, display[1] * 0.5], Condition::Always)
-            .position_pivot([0.5, 0.5])
-            .flags(overlay_flags() | WindowFlags::ALWAYS_AUTO_RESIZE)
-            .build(|| {
-                ui.text_disabled(compact_address(&url));
-                if ui.button("Close") {
-                    close = true;
-                }
-            });
-        if close {
-            self.controller.browser.page_error = None;
-        }
-    }
-
-    fn draw_toast(&self, ui: &Ui) {
-        let Some(toast) = &self.controller.browser.toast else {
-            return;
-        };
-        let display = ui.io().display_size;
-        small_overlay(ui, [display[0] * 0.5, display[1] - 34.0], &toast.text);
     }
 
     pub fn take_theme_request(&mut self) -> Option<bool> {
@@ -1897,7 +863,16 @@ impl DesktopApp {
     }
 
     fn edit_address(&mut self) {
-        self.address = self.controller.snapshot.current_url.clone();
+        self.address = if self
+            .controller
+            .snapshot
+            .current_url
+            .starts_with("about:blank")
+        {
+            String::new()
+        } else {
+            self.controller.snapshot.current_url.clone()
+        };
         self.observed_url
             .clone_from(&self.controller.snapshot.current_url);
         // Do not flash a result set left over from the previous edit session. A fresh
@@ -1944,6 +919,7 @@ impl DesktopApp {
     }
 
     fn new_tab(&mut self) {
+        self.focus_new_tab = true;
         self.controller.command(Command::Tab {
             action: "new".to_owned(),
             id: 0,
@@ -2416,7 +1392,7 @@ mod tests {
 
     #[test]
     fn preset_window_maps_to_the_page_below_chrome() {
-        assert_eq!(viewport_for_window([768, 1024], 1.0), (768, 992));
-        assert_eq!(viewport_for_window([375, 667], 2.0), (750, 1270));
+        assert_eq!(viewport_for_window([768, 1024], 1.0), (768, 982));
+        assert_eq!(viewport_for_window([375, 667], 2.0), (750, 1250));
     }
 }

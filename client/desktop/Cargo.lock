@@ -3075,6 +3075,7 @@ dependencies = [
  "imgui-glow-renderer",
  "imgui-winit-support",
  "raw-window-handle",
+ "serde",
  "serde_json",
  "surf-client-app",
  "surf-core",

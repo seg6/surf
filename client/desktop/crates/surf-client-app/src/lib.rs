@@ -74,8 +74,27 @@ pub struct ClientController {
     requested_viewport: Option<(i32, i32)>,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct ClientOptions {
+    pub dark_mode: bool,
+    pub mobile_mode: bool,
+}
+
+impl Default for ClientOptions {
+    fn default() -> Self {
+        Self {
+            dark_mode: true,
+            mobile_mode: false,
+        }
+    }
+}
+
 impl ClientController {
     pub fn new() -> Result<Self, String> {
+        Self::new_with_options(ClientOptions::default())
+    }
+
+    pub fn new_with_options(options: ClientOptions) -> Result<Self, String> {
         let mut core = Core::new().map_err(|error| error.to_string())?;
         core.dispatch(&CoreEvent::Tabs(vec![Tab {
             id: 1,
@@ -128,8 +147,8 @@ impl ClientController {
             last_frame_dimensions: None,
             remote_viewport: None,
             video_dimensions: None,
-            dark_mode: true,
-            mobile_mode: false,
+            dark_mode: options.dark_mode,
+            mobile_mode: options.mobile_mode,
             browser: BrowserState::default(),
             latest_diagnostics: None,
             native_pointer: false,

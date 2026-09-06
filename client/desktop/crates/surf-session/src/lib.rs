@@ -683,7 +683,7 @@ fn emit(events: &SyncSender<SessionEvent>, event: SessionEvent) -> Result<()> {
     })
 }
 
-fn atomic_write_private(path: &Path, data: &[u8]) -> Result<()> {
+pub fn atomic_write_private(path: &Path, data: &[u8]) -> Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| SessionError::Storage("private file has no parent".to_owned()))?;

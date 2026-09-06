@@ -22,6 +22,7 @@ surf-media.workspace = true
 surf-protocol.workspace = true
 surf-session.workspace = true
 serde_json.workspace = true
+serde.workspace = true
 
 [[bin]]
 name = "surf-client"
