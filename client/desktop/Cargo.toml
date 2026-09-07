@@ -1,0 +1,53 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/surf-client",
+    "crates/surf-client-app",
+    "crates/surf-core",
+    "crates/surf-core-sys",
+    "crates/surf-media",
+    "crates/surf-protocol",
+    "crates/surf-session",
+]
+
+[workspace.package]
+version = "0.16.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+repository = "https://github.com/seg6/surf"
+
+[workspace.dependencies]
+arboard = "3.6.1"
+base64 = "0.22.1"
+bytes = "1.11.1"
+cpal = "0.18.2"
+directories = "6.0.0"
+ffmpeg-the-third = { version = "6.0.0", default-features = false, features = ["format"] }
+futures-util = "0.3.31"
+glutin = "0.32.3"
+glutin-winit = "0.5.0"
+hex = "0.4.3"
+image = { version = "0.25.9", default-features = false, features = ["png", "ico", "jpeg"] }
+imgui = { version = "0.12.0", features = ["tables-api"] }
+imgui-glow-renderer = "0.13.0"
+imgui-winit-support = "0.13.0"
+mdns-sd = { version = "0.21.1", default-features = false }
+rand = "0.8.5"
+raw-window-handle = "0.6.2"
+reqwest = { version = "0.13.4", default-features = false, features = ["cookies", "json", "multipart", "rustls", "stream"] }
+rsa = { version = "0.9.8", features = ["sha2"] }
+rustls = { version = "0.23.40", default-features = true }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.145"
+sha2 = { version = "0.10.9", features = ["oid"] }
+surf-core = { path = "crates/surf-core" }
+surf-core-sys = { path = "crates/surf-core-sys" }
+surf-media = { path = "crates/surf-media" }
+surf-protocol = { path = "crates/surf-protocol" }
+surf-session = { path = "crates/surf-session" }
+surf-client-app = { path = "crates/surf-client-app" }
+thiserror = "2.0.17"
+tokio = { version = "1.48.0", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-native-roots"] }
+url = { version = "2.5.7", features = ["serde"] }

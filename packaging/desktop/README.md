@@ -1,25 +1,19 @@
 # Desktop package
 
-The desktop Surf executable owns one supervised backend process and a
-loopback-only Settings page. The page shows stream health and logs, changes the
-server name/public address/port, creates single-use pairing codes and QR
-invitations, shows the active verification phrase, lists paired devices, and
-revokes devices immediately.
+The desktop app supervises one Surf backend and opens a local Settings page.
+Settings covers stream health, logs, host configuration, pairing, device
+management, clipboard sync, and updates.
 
-The six-word phrase shown for manual pairing is the active-MITM check, not an
-extra password. QR pairing carries the expected identity out of band and does
-not require the comparison.
+Manual pairing shows the same six word phrase on the host and device. Matching
+phrases confirm the server identity. QR pairing carries that identity in the
+code.
 
-The backend listener itself is pinned TLS. The local Settings page proxies only
-loopback admin operations through the server's permission-restricted per-run
-control descriptor, so device management is neither exposed nor authorized on
-the LAN.
+The backend serves pinned TLS on the network. Local administration uses a
+private control token on the loopback interface.
 
-Platform packages preserve `SURF_HOME` across updates. That directory contains
-the long-lived server identity and pairing registry; deleting it intentionally
-creates a new server identity which existing clients will reject until they
-forget and pair again.
+Updates preserve `SURF_HOME`. That directory contains the server identity,
+paired devices, browser profile, and other state. Replacing it makes saved
+clients reject the host until they forget it and pair again.
 
-Use `surf quit` when a command-line shutdown is preferable to the tray's
-**Quit Surf** action. It closes the desktop manager, backend, and managed
-Chromium process tree as one graceful operation.
+The **Quit Surf** action closes the desktop app, backend, and managed Chromium
+processes. `surf quit` performs the same shutdown from a terminal.

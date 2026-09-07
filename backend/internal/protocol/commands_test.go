@@ -46,6 +46,8 @@ func TestDecodeEveryNativeCommand(t *testing.T) {
 		`{"t":"touch","phase":"move","seq":2,"surface":1,"ts":2,"points":[{"id":1,"x":0.1,"y":0.3}]}`,
 		`{"t":"touch","phase":"end","seq":3,"surface":1,"ts":3,"points":[{"id":1,"x":0.1,"y":0.3}]}`,
 		`{"t":"touch","phase":"cancel","seq":4,"surface":1,"ts":4,"points":[]}`,
+		`{"t":"pointer","phase":"move","seq":5,"surface":1,"ts":5,"x":0.1,"y":0.2,"button":"none","buttons":0,"mods":0,"clicks":0}`,
+		`{"t":"wheel","seq":6,"surface":1,"ts":6,"x":0.1,"y":0.2,"dx":0,"dy":0.1,"buttons":0,"mods":0}`,
 		`{"t":"compose","phase":"update","text":"kan","start":3,"end":3}`,
 		`{"t":"video-retry"}`, `{"t":"stop"}`, `{"t":"dialogreply","accept":true,"text":""}`,
 		`{"t":"selectreply","id":"request","indices":[2]}`,

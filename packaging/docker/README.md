@@ -1,7 +1,7 @@
 # Docker deployment
 
-Persist `/data` as `SURF_HOME` so the TLS identity, paired devices, Chromium
-profile, and downloads survive container replacement:
+Mount `/data` as `SURF_HOME` so the server identity, paired devices, browser
+profile, and downloads survive container replacement.
 
 ```env
 SURF_HOME=/data
@@ -10,14 +10,18 @@ SURF_PUBLIC_ADDRESS=192.168.1.50:18080
 PORT=18080
 ```
 
-Publish the same TCP port; the container runs `surf serve` in the foreground.
-Review a client request with `docker compose exec surf surf pair`, and inspect
-the running instance with `docker compose exec surf surf status`. Surf
-terminates TLS itself; there is no password or required reverse proxy.
+Publish the same TCP port. The container runs `surf serve` in the foreground.
 
-Basic health is `https://HOST:18080/api/v1/health`. Clients authenticate with
-paired device keys before configuration, media, files, or diagnostics are
-available.
+```sh
+docker compose exec surf surf pair
+docker compose exec surf surf status
+```
 
-For the pairing and host-compromise trust boundaries, see
-[`docs/security.md`](../../docs/security.md).
+Surf terminates TLS itself. It has no plaintext mode and does not require a
+reverse proxy.
+
+The unauthenticated health endpoint is
+`https://HOST:18080/api/v1/health`. Configuration, media, files, and
+diagnostics require a paired device.
+
+See [Security](../../docs/security.md) for the pairing and host trust model.

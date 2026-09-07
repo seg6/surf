@@ -3,18 +3,35 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="color-scheme" content="dark">
+  <meta name="color-scheme" content="light dark">
   <title>Surf</title>
   <link rel="icon" type="image/png" sizes="1024x1024" href="/icon.png">
   <link rel="apple-touch-icon" href="/icon.png">
   <style>
     :root {
-      --ink: #e7e9ed; --muted: #9ba1ab; --quiet: #737a85;
-      --bg: #17191d; --panel: #22252a;
-      --field: #181a1e; --line: #373b42; --line-strong: #4b5059;
-      --blue: #3978d6; --blue-bright: #74a7ee; --green: #55b97a; --red: #dd6b74;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color-scheme: light;
+      --ink: #111; --muted: #4b535b; --quiet: #565e66;
+      --bg: #c7ced5; --panel: #fff; --field: #f5f6f7;
+      --line: #c8c8c8; --line-strong: #9da4aa;
+      --blue: #1765a5; --blue-bright: #1765a5; --green: #267343; --red: #b22c3a;
+      --button: #f5f7f9; --button-end: #e1e6eb; --hover: #d9e7f4;
+      --nav: linear-gradient(#7895b1 0%, #4c7093 50%, #345a7e 51%, #2f5273 100%);
+      --nav-line: #1e3f5c; --bevel: rgba(255,255,255,.65);
+      --pairing: #edf4fa; --log-warn: #885209; --log-component: #276b72;
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-size: 14px; line-height: 1.35;
       color: var(--ink); background: var(--bg); font-synthesis: none;
+    }
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --ink: #f0f0f0; --muted: #b2b7bc; --quiet: #a0a6ac;
+      --bg: #16181b; --panel: #25282c; --field: #1d2024;
+      --line: #41464c; --line-strong: #555c63;
+      --blue: #316c9e; --blue-bright: #91bfe6; --green: #7bc591; --red: #f08f99;
+      --button: #393e44; --button-end: #2c3035; --hover: #3a4856;
+      --nav: linear-gradient(#43494f 0%, #30363c 50%, #292e33 51%, #22272c 100%);
+      --nav-line: #101215; --bevel: rgba(255,255,255,.07);
+      --pairing: #253442; --log-warn: #e5bd7c; --log-component: #91ccd1;
     }
     * { box-sizing: border-box; }
     html, body { min-height: 100%; margin: 0; }
@@ -25,22 +42,27 @@
     .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--quiet); }
     .dot.online { background: var(--green); }
     main { min-width: 0; max-width: 960px; margin: 0 auto; padding: 28px 24px 48px; }
-    .page-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
-    .page-brand { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; }
-    .page-brand img { width: 32px; height: 32px; object-fit: contain; }
+    .page-head { background: var(--nav); border-bottom: 1px solid var(--nav-line); color: #fff;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.25), 0 1px 3px rgba(0,0,0,.25); }
+    .nav-inner { max-width: 960px; margin: auto; padding: 8px 24px; min-height: 48px;
+      display: flex; justify-content: center; align-items: center; }
+    .page-head h1 { font-size: 18px; font-weight: bold; text-shadow: 0 -1px 0 rgba(0,0,0,.55); }
+    .page-footer { display: flex; justify-content: flex-end; padding-top: 18px; }
+    .appearance { display: flex; align-items: center; gap: 8px; color: var(--muted); font-weight: normal; }
+    .appearance select { font-size: 12px; padding-top: 5px; padding-bottom: 5px; }
     .eyebrow { display: none; }
     h1 { font-size: 16px; line-height: 1.2; margin: 0; font-weight: 600; }
     h2 { font-size: 14px; margin: 0; font-weight: 600; }
     .lede { display: none; }
-    .panel, .metric { border: 1px solid var(--line); background: var(--panel); }
-    .panel { border-radius: 8px; padding: 18px; }
+    .panel, .metric { border: 1px solid var(--line-strong); background: var(--panel); }
+    .panel { border-radius: 10px; padding: 18px; box-shadow: 0 1px 0 var(--bevel); min-width: 0; }
     .hero {
       display: flex; justify-content: space-between; align-items: center;
       gap: 18px; min-height: 0; padding: 18px;
     }
     .hero-actions { display: flex; align-items: center; gap: 8px; }
     .engine { display: flex; align-items: center; gap: 13px; min-width: 0; }
-    .engine-icon { width: 42px; height: 42px; }
+    .engine-icon { width: 57px; height: 57px; flex-shrink: 0; }
     .engine-icon img { display: block; width: 100%; height: 100%; object-fit: contain; }
     .status-line { display: flex; align-items: center; gap: 7px; margin-bottom: 3px; color: var(--green); font-size: 12px; }
     .status-line.offline { color: var(--red); }
@@ -48,24 +70,26 @@
     .endpoint { color: var(--muted); font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; margin-top: 4px; overflow-wrap: anywhere; }
     .button {
       border: 1px solid var(--line-strong); border-radius: 6px; padding: 7px 12px;
-      font-weight: 500; cursor: pointer; background: #30343a;
+      font-weight: 600; cursor: pointer; background: linear-gradient(var(--button), var(--button-end));
+      box-shadow: inset 0 1px 0 var(--bevel);
       display: inline-flex; align-items: center; justify-content: center; gap: 6px;
       text-decoration: none;
     }
-    .button:hover { background: #393e45; }
-    .primary { background: var(--blue); border-color: #528bdc; color: #fff; }
-    .primary:hover { background: #4483df; }
-    .secondary { background: #30343a; }
-    .danger { color: #ff9da5; }
+    .button:hover { background: var(--hover); }
+    .button:focus-visible, summary:focus-visible, select:focus-visible { outline: 2px solid var(--blue-bright); outline-offset: 3px; }
+    .button:disabled { opacity: .55; cursor: default; }
+    .primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+    .primary:hover { background: var(--blue); filter: brightness(1.12); }
+    .danger { color: var(--red); }
     .small { padding: 6px 9px; font-size: 12px; }
-    .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 12px 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 16px 0; border: 1px solid var(--line-strong); border-radius: 10px; overflow: hidden; box-shadow: 0 1px 0 var(--bevel); }
     .metric { border: 0; border-right: 1px solid var(--line); padding: 14px 16px; }
     .metric:last-child { border-right: 0; }
     .metric-label { color: var(--muted); font-size: 11px; }
     .metric-value { font-size: 20px; font-weight: 600; margin-top: 5px; }
     .metric-unit { color: var(--quiet); font-size: 11px; margin-left: 3px; }
-    .grid { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 12px; }
-    .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin-bottom: 14px; }
+    .grid { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 16px; }
+    .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: -18px -18px 14px; padding: 13px 18px; border-bottom: 1px solid var(--line); }
     .panel-actions { display: flex; align-items: center; gap: 8px; }
     .panel-copy { color: var(--muted); font-size: 12px; margin: 4px 0 0; line-height: 1.4; }
     .credential { display: grid; gap: 6px; margin-top: 12px; }
@@ -74,7 +98,7 @@
     .copy-value {
       flex: 1; min-width: 0; padding: 8px 10px; border-radius: 5px;
       border: 1px solid var(--line); background: var(--field);
-      color: #cdd1d7; font: 12px ui-monospace, SFMono-Regular, Consolas, monospace;
+      color: var(--ink); font: 12px ui-monospace, SFMono-Regular, Consolas, monospace;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .health-list { display: grid; gap: 11px; }
@@ -87,6 +111,8 @@
       border: 1px solid var(--line-strong); border-radius: 6px; outline: 0; padding: 9px 10px;
     }
     input:focus, textarea:focus { border-color: var(--blue-bright); box-shadow: 0 0 0 1px var(--blue-bright); }
+    input::placeholder, textarea::placeholder { color: var(--quiet); opacity: 1; }
+    input[type="checkbox"] { accent-color: var(--blue); }
     textarea { min-height: 84px; resize: vertical; line-height: 1.45; }
     select {
       color: var(--ink); background-color: var(--field); border: 1px solid var(--line-strong);
@@ -120,7 +146,7 @@
       content: ""; position: absolute; width: 14px; height: 14px; top: 2px; left: 2px;
       border-radius: 50%; background: var(--muted); transition: transform 120ms ease, background 120ms ease;
     }
-    .toggle-row input:checked + .switch-track { background: var(--blue); border-color: #528bdc; }
+    .toggle-row input:checked + .switch-track { background: var(--blue); border-color: var(--blue); }
     .toggle-row input:checked + .switch-track::after { transform: translateX(14px); background: #fff; }
     .toggle-row input:focus-visible + .switch-track { box-shadow: 0 0 0 2px var(--blue-bright); }
     .toggle-row input:disabled + .switch-track { opacity: .55; cursor: wait; }
@@ -153,7 +179,7 @@
       color: var(--ink); font: 600 12px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
       margin-top: 6px; overflow-wrap: anywhere;
     }
-    .pairing-state { display: none; border: 1px solid var(--blue); border-radius: 8px; padding: 14px; margin-bottom: 16px; background: #1c2635; }
+    .pairing-state { display: none; border: 1px solid var(--blue); border-radius: 8px; padding: 14px; margin-bottom: 16px; background: var(--pairing); }
     .pairing-state.show { display: block; }
     .pairing-state-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
     .pairing-title { font-size: 13px; font-weight: 600; }
@@ -162,8 +188,8 @@
     .pairing-note { color: var(--muted); font-size: 11px; line-height: 1.45; margin: 9px 0 0; }
     .pairing-qr {
       display: none; width: 280px; height: 280px; max-width: 100%; margin: 12px auto 0;
-      padding: 8px; background: #b9bec5; border-radius: 6px;
-      filter: brightness(.72) contrast(1.22); image-rendering: pixelated;
+      padding: 8px; background: #fff; border-radius: 6px;
+      image-rendering: pixelated;
     }
     .pairing-qr.show { display: block; }
     #add-device, #close-pairing { white-space: nowrap; }
@@ -193,28 +219,28 @@
     #log-output {
       margin: 0; width: 100%; min-width: 0; max-width: 100%; height: clamp(320px, 52vh, 560px); overflow: auto;
       border: 1px solid var(--line); border-radius: 6px; padding: 12px;
-      background: #111316; color: #bdc2ca; font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
-      white-space: pre; overflow-wrap: normal; word-break: normal; scrollbar-color: var(--line-strong) #111316;
+      background: var(--field); color: var(--ink); font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+      white-space: pre; overflow-wrap: normal; word-break: normal; scrollbar-color: var(--line-strong) var(--field);
     }
     .log-line {
       display: grid; grid-template-columns: 31ch 6ch 18ch max-content max-content; column-gap: 1ch;
       width: max-content; min-width: 100%; padding: 0 3px; margin: 0 -3px; border-radius: 2px;
       font-variant-numeric: tabular-nums; font-variant-ligatures: none;
     }
-    .log-line:hover { background: rgba(255,255,255,.035); }
-    .log-time { color: #707782; }
+    .log-line:hover { background: var(--hover); }
+    .log-time { color: var(--quiet); }
     .log-level { font-weight: 700; }
-    .log-level-info { color: #76a9ed; }
-    .log-level-warn { color: #e5ad62; }
-    .log-level-error, .log-level-fatal { color: #ee7b84; }
-    .log-level-debug, .log-level-trace { color: #8b929c; }
-    .log-component { color: #77bec4; }
-    .log-message { color: #d5d8dd; }
-    .log-fields { color: #8f97a2; }
+    .log-level-info { color: var(--blue-bright); }
+    .log-level-warn { color: var(--log-warn); }
+    .log-level-error, .log-level-fatal { color: var(--red); }
+    .log-level-debug, .log-level-trace { color: var(--quiet); }
+    .log-component { color: var(--log-component); }
+    .log-message { color: var(--ink); }
+    .log-fields { color: var(--muted); }
     .toast {
       position: fixed; right: 24px; bottom: 24px; z-index: 20;
       border: 1px solid var(--line-strong); border-radius: 6px; padding: 9px 12px;
-      background: #30343a;
+      background: var(--panel);
       color: var(--ink); font-size: 13px; opacity: 0; transform: translateY(8px); pointer-events: none;
       transition: 120ms ease;
     }
@@ -222,10 +248,14 @@
 
     @media (max-width: 900px) {
       .metrics { grid-template-columns: repeat(2, 1fr); }
+      .metric:nth-child(2) { border-right: 0; }
+      .metric:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
       .grid { grid-template-columns: 1fr; }
     }
     @media (max-width: 620px) {
       main { padding: 18px 14px 36px; }
+      .nav-inner { padding: 8px 14px; }
+      .hero-actions { flex-wrap: wrap; }
       .hero { align-items: flex-start; flex-direction: column; }
       .metrics { grid-template-columns: 1fr 1fr; }
       .form-grid { grid-template-columns: 1fr; }
@@ -244,14 +274,31 @@
     }
     @media (prefers-reduced-motion: reduce) { .live-state.live .dot { animation: none; } }
   </style>
+  <script>
+    // Apply before first paint. This changes only the dashboard, never websites
+    // streamed to clients. Storage can be unavailable in private browser modes.
+    const appearanceQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    let appearancePreference = 'system';
+    try {
+      const saved = localStorage.getItem('surf-dashboard-appearance');
+      if (['system', 'light', 'dark'].includes(saved)) appearancePreference = saved;
+    } catch {}
+    function applyDashboardAppearance() {
+      document.documentElement.dataset.theme = appearancePreference === 'system'
+        ? (appearanceQuery.matches ? 'dark' : 'light') : appearancePreference;
+    }
+    applyDashboardAppearance();
+    appearanceQuery.addEventListener('change', applyDashboardAppearance);
+  </script>
 </head>
 <body>
   <div class="shell">
+    <header class="page-head">
+      <div class="nav-inner">
+        <h1>Surf Backend</h1>
+      </div>
+    </header>
     <main>
-      <header class="page-head">
-        <div class="page-brand"><img src="/icon.png" alt="">Surf</div>
-        <h1>Backend</h1>
-      </header>
 
       <div class="panel hero">
           <div class="engine">
@@ -298,7 +345,6 @@
           <div class="panel-head">
             <div><h2>Paired devices</h2><p class="panel-copy">Add or revoke clients.</p></div>
             <div class="panel-actions">
-              <a class="button secondary" href="https://seg6.space/surf/" target="_blank" rel="noopener">Get iOS app</a>
               <button class="button primary" id="add-device" type="button" aria-controls="pairing-state" aria-expanded="false">Pair device</button>
             </div>
           </div>
@@ -380,12 +426,25 @@
           <pre id="log-output">Open Logs to start the live stream.</pre>
         </div>
       </details>
+      <footer class="page-footer">
+        <label class="appearance">Appearance
+          <select id="appearance" aria-label="Dashboard appearance">
+            <option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option>
+          </select>
+        </label>
+      </footer>
     </main>
   </div>
   <div class="toast" id="toast"></div>
 
   <script>
     const $ = id => document.getElementById(id);
+    $('appearance').value = appearancePreference;
+    $('appearance').addEventListener('change', event => {
+      appearancePreference = event.target.value;
+      try { localStorage.setItem('surf-dashboard-appearance', appearancePreference); } catch {}
+      applyDashboardAppearance();
+    });
     let config = null, previousAU = null, previousAt = null, toastTimer = null, pairingAddress = '', pairingCode = '', pairingOpen = false;
 
     function toast(message) {

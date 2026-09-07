@@ -29,8 +29,8 @@ concurrency:
 jobs:
   release:
     name: Release build ${{ inputs.tag || github.ref_name }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -142,7 +142,7 @@ jobs:
           echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
 
       - name: Restore Go cross-build cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ${{ env.GOCACHE }}
@@ -199,15 +199,15 @@ jobs:
           version="$(tr -d '[:space:]' < VERSION)"
           compatibility_version="$(tr -d '[:space:]' < COMPATIBILITY_VERSION)"
           VERSION="$version" COMPATIBILITY_VERSION="$compatibility_version" \
-            native/client/render-versioned-files.sh
+            client/ios/render-versioned-files.sh
           git diff --exit-code -- \
-            native/client/control native/client/Resources/Info.plist
+            client/ios/control client/ios/Resources/Info.plist
 
           make native-sdk
           make native-package
 
           mkdir -p dist/native
-          mapfile -t client_debs < <(find native/client/packages \
+          mapfile -t client_debs < <(find client/ios/packages \
             -name "space.seg6.surf_${version}-*_iphoneos-arm.deb" -type f -print)
           test "${#client_debs[@]}" -eq 1 || {
             echo "expected exactly one native client package" >&2
@@ -215,6 +215,46 @@ jobs:
           }
           test -s "${client_debs[0]}"
           install -m 0644 "${client_debs[0]}" dist/native/
+
+      - name: Prepare Linux client dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev libavcodec-dev libavformat-dev libavutil-dev \
+            libgl1-mesa-dev libxkbcommon-x11-0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: "1.95.0"
+          components: clippy, rustfmt
+
+      - name: Cache Rust release dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: client/desktop -> ../../.local/build/desktop-release
+          shared-key: desktop-release-ubuntu24.04
+          cache-on-failure: true
+          cache-bin: false
+
+      # Warm release-mode dependencies on verified main commits as well as
+      # building the archive on tags. Every run still compiles/verifies source.
+      - name: Build and verify Linux client preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(rustc --version | awk '{print $2}')" = "1.95.0"
+
+          archive="$(client/desktop/package-linux.sh)"
+          version="$(tr -d '[:space:]' < VERSION)"
+          test "$archive" = "$GITHUB_WORKSPACE/dist/surf-desktop-${version}-linux-amd64.tar.gz"
+          test -s "$archive"
+          contents="$RUNNER_TEMP/surf-desktop-preview.contents"
+          tar -tzf "$archive" > "$contents"
+          grep -q '/bin/surf-client$' "$contents"
 
       - name: Prepare Go toolchain
         shell: bash
@@ -346,9 +386,9 @@ jobs:
           client_deb="$(find dist/native -name '*.deb' -type f -print -quit)"
 
           VERSION="$version" COMPATIBILITY_VERSION="$compatibility_version" \
-            native/client/render-versioned-files.sh
+            client/ios/render-versioned-files.sh
           git diff --exit-code -- \
-            native/client/control native/client/Resources/Info.plist
+            client/ios/control client/ios/Resources/Info.plist
 
           (
             cd backend
@@ -369,9 +409,9 @@ jobs:
             END { if (!found) exit 1 }
           ' CHANGELOG.md > release-notes.md
           test -s release-notes.md
-          printf '\nNative iOS and unified Linux, Windows, and macOS packages are attached. Launch `surf` for the desktop app or run `surf serve` under a service manager for a headless backend.\n' >> release-notes.md
+          printf '\nNative iOS and unified Linux, Windows, and macOS backend packages are attached. The separate Linux client preview exercises the portable client core and remains experimental. Launch `surf` for the normal desktop backend or run `surf serve` under a service manager.\n' >> release-notes.md
 
-          sha256sum dist/native/*.deb update.json
+          sha256sum dist/native/*.deb dist/surf-desktop-*-linux-amd64.tar.gz update.json
 
       - name: Publish verified release
         if: env.CACHE_ONLY != 'true'
@@ -398,6 +438,7 @@ jobs:
             CHANGELOG.md
             update.json
             "dist/native/$native_asset"
+            "dist/surf-desktop-${version}-linux-amd64.tar.gz"
             "dist/packages/surf-${version}-linux-amd64.tar.gz"
             "dist/packages/surf-${version}-linux-amd64.AppImage"
             "dist/packages/surf-${version}-linux-arm64.tar.gz"
@@ -410,6 +451,7 @@ jobs:
             CHANGELOG.md
             update.json
             "$native_asset"
+            "surf-desktop-${version}-linux-amd64.tar.gz"
             "surf-${version}-linux-amd64.tar.gz"
             "surf-${version}-linux-amd64.AppImage"
             "surf-${version}-linux-arm64.tar.gz"
@@ -418,7 +460,7 @@ jobs:
             "surf-${version}-darwin-amd64.tar.gz"
             "surf-${version}-darwin-arm64.tar.gz"
           )
-          test "${#assets[@]}" -eq 10
+          test "${#assets[@]}" -eq 11
           test "${#expected_names[@]}" -eq "${#assets[@]}"
           gh release upload "$RELEASE_TAG" --clobber "${assets[@]}"
 

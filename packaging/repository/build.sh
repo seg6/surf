@@ -85,7 +85,7 @@ if find "$output_dir" -mindepth 1 -print -quit | grep -q .; then
 fi
 mkdir -p "$output_dir/debs"
 install -m 0644 "$client_deb" "$output_dir/debs/$client_name"
-install -m 0644 "$script_dir/../../native/client/Resources/icon-144.png" \
+install -m 0644 "$script_dir/../../client/ios/Resources/icon-144.png" \
   "$output_dir/CydiaIcon.png"
 : > "$output_dir/.nojekyll"
 

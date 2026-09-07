@@ -1,0 +1,34 @@
+[package]
+name = "surf-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
+arboard.workspace = true
+directories.workspace = true
+glutin.workspace = true
+glutin-winit.workspace = true
+image.workspace = true
+imgui.workspace = true
+imgui-glow-renderer.workspace = true
+imgui-winit-support.workspace = true
+raw-window-handle.workspace = true
+resvg = { version = "0.46.0", default-features = false }
+surf-client-app.workspace = true
+surf-core.workspace = true
+surf-media.workspace = true
+surf-protocol.workspace = true
+surf-session.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+
+[[bin]]
+name = "surf-client"
+path = "src/main.rs"
+
+[dev-dependencies]
+x11rb = { version = "0.13.2", features = ["xtest"] }

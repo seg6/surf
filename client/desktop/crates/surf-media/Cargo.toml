@@ -1,0 +1,16 @@
+[package]
+name = "surf-media"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+bytes.workspace = true
+cpal.workspace = true
+ffmpeg-the-third.workspace = true
+surf-core.workspace = true
+surf-protocol.workspace = true
+surf-session.workspace = true
+thiserror.workspace = true

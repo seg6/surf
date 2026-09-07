@@ -1,6 +1,11 @@
 package browser
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+
+	"surf-backend/internal/protocol"
+)
 
 func TestHistoryTitlePatchesMatchingURL(t *testing.T) {
 	s := NewStore(t.TempDir())
@@ -18,5 +23,17 @@ func TestHistoryTitlePatchesMatchingURL(t *testing.T) {
 	}
 	if recent[1].URL != "https://example.com/one" || recent[1].Title != "One" {
 		t.Fatalf("oldest = %+v, want one/One", recent[1])
+	}
+}
+
+func TestEmptySuggestionsEncodeAsArray(t *testing.T) {
+	store := NewStore(t.TempDir())
+	items := store.Suggest("nothing matches this")
+	encoded, err := json.Marshal(protocol.SuggestEvent{Type: "suggest", Items: items})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(encoded) != `{"t":"suggest","items":[]}` {
+		t.Fatalf("empty suggestions = %s, want an empty JSON array", encoded)
 	}
 }

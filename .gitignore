@@ -2,6 +2,10 @@ native/client/.theos/
 native/client/packages/
 native/client/control
 native/client/Resources/Info.plist
+client/ios/.theos/
+client/ios/packages/
+client/ios/control
+client/ios/Resources/Info.plist
 native/buildenv/sdk/
 /backend/surf-backend
 /backend/surf-backend.exe
@@ -13,3 +17,4 @@ native/buildenv/sdk/
 /dist/
 .env
 .local/
+client/desktop/target/

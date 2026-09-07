@@ -1,4 +1,4 @@
-.PHONY: test surf-binary surf-dist surf-release-dist native-sdk native-package
+.PHONY: test client-core-build client-core-test client-core-sanitize desktop-build desktop-test desktop-run desktop-package surf-binary surf-dist surf-release-dist native-sdk native-package
 
 VERSION := $(shell tr -d '[:space:]' < VERSION)
 COMPATIBILITY_VERSION := $(shell tr -d '[:space:]' < COMPATIBILITY_VERSION)
@@ -6,10 +6,12 @@ SURF_GOOS ?= $(shell go env GOOS)
 SURF_GOARCH ?= $(shell go env GOARCH)
 # Local rebuilds retain client updating whenever a package for the exact Surf
 # version exists. Release builds may still select an explicit verified package.
-CLIENT_DEB ?= $(shell ls -1t native/client/packages/space.seg6.surf_$(VERSION)-*_iphoneos-arm.deb 2>/dev/null | sed -n '1p')
+CLIENT_DEB ?= $(shell ls -1t client/ios/packages/space.seg6.surf_$(VERSION)-*_iphoneos-arm.deb 2>/dev/null | sed -n '1p')
 MAKENSIS ?= makensis
 SURF_DIST := surf-$(VERSION)-$(SURF_GOOS)-$(SURF_GOARCH)
 SURF_CGO_ENV := CGO_ENABLED=0
+CLIENT_CORE_BUILD_DIR ?= .local/build/client-core
+CLIENT_CORE_SANITIZE_DIR ?= .local/build/client-core-sanitize
 ifeq ($(SURF_GOOS),windows)
 SURF_EXE := surf.exe
 SURF_ARCHIVE := $(SURF_DIST).zip
@@ -18,8 +20,39 @@ SURF_EXE := surf
 SURF_ARCHIVE := $(SURF_DIST).tar.gz
 endif
 
-test:
+test: client-core-test
 	cd backend && go test ./...
+	$(MAKE) desktop-test
+
+client-core-build:
+	cmake -S client/core -B "$(CLIENT_CORE_BUILD_DIR)" \
+		-DCMAKE_BUILD_TYPE=Debug -DSURF_CORE_WARNINGS_AS_ERRORS=ON
+	cmake --build "$(CLIENT_CORE_BUILD_DIR)"
+
+client-core-test: client-core-build
+	ctest --test-dir "$(CLIENT_CORE_BUILD_DIR)" --output-on-failure
+
+client-core-sanitize:
+	cmake -S client/core -B "$(CLIENT_CORE_SANITIZE_DIR)" \
+		-DCMAKE_BUILD_TYPE=Debug -DSURF_CORE_WARNINGS_AS_ERRORS=ON \
+		-DSURF_CORE_SANITIZE=ON
+	cmake --build "$(CLIENT_CORE_SANITIZE_DIR)"
+	ctest --test-dir "$(CLIENT_CORE_SANITIZE_DIR)" --output-on-failure
+
+desktop-build:
+	CARGO_TARGET_DIR="$(CURDIR)/.local/build/desktop" \
+		cargo build --manifest-path client/desktop/Cargo.toml --workspace
+
+desktop-test:
+	CARGO_TARGET_DIR="$(CURDIR)/.local/build/desktop" \
+		cargo test --manifest-path client/desktop/Cargo.toml --workspace
+
+desktop-run:
+	CARGO_TARGET_DIR="$(CURDIR)/.local/build/desktop" \
+		cargo run --manifest-path client/desktop/Cargo.toml -p surf-client
+
+desktop-package:
+	client/desktop/package-linux.sh
 
 # Surf's tray implementation binds native desktop APIs without cgo, so every
 # supported target cross-compiles from the same Go toolchain.
@@ -97,4 +130,4 @@ native-sdk:
 
 native-package: native-sdk
 	docker run --rm --network host -v "$(CURDIR):/src" surf-buildenv bash -c \
-		'make -C /src/native/client clean package DEBUG=0 && bash /src/native/client/verify-package.sh'
+		'make -C /src/client/ios clean package DEBUG=0 && bash /src/client/ios/verify-package.sh'

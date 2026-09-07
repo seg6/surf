@@ -3,8 +3,8 @@ set -euo pipefail
 
 icon_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_dir="$(cd "$icon_dir/../../.." && pwd)"
-source_icon="$repo_dir/native/client/Artwork/deta-surf-icon.png"
-source_plane="$repo_dir/native/client/Artwork/deta-surf-plane.png"
+source_icon="$repo_dir/client/ios/Artwork/deta-surf-icon.png"
+source_plane="$repo_dir/client/ios/Artwork/deta-surf-plane.png"
 
 if ! command -v magick >/dev/null 2>&1; then
   echo "ImageMagick 7 is required (missing magick)" >&2

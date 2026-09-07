@@ -1,131 +1,110 @@
 # Surf
 
-Surf brings the modern web to legacy iPhones, iPod touches, and iPads.
+Surf brings the modern web to older iPhones, iPod touches, and iPads.
 
-The iOS app is a native, touch-first remote browser. A computer running Surf
-hosts Chromium, renders the page, and streams video and audio to the device;
-the client sends navigation, keyboard, and touch input back. Modern TLS,
-JavaScript, media, and optional Widevine support therefore come from the host
-browser instead of the device's obsolete WebKit.
+Websites run in Chromium on a Windows, macOS, or Linux computer and stream to
+your device. You browse through a native iOS app with touch, keyboard input,
+video, and audio, without being limited by the device's outdated web engine.
 
-Surf is built around the device rather than a generic remote-desktop surface:
-it has native tabs, an omnibox, bookmarks, history, downloads, uploads, sharing,
-fullscreen media, and phone- and tablet-specific layouts inspired by classic
-Safari.
-
-## Project status
-
-Surf is experimental. The primary tested client is an original iPad mini on
-iOS 6.1.3. The release package is built for many more devices, but those
-model/OS combinations should be considered build-supported until they have
-been tested on hardware. Current iPad-mini acceptance covers pairing, saved
-servers, touch and keyboard input, video and audio, rotation, and synchronized
-page/native fullscreen; the phone layout is also exercised there through a
-disposable compatibility-mode package.
+The iOS app has native tabs, an address bar, bookmarks, history, downloads,
+uploads, sharing, fullscreen media, and separate phone and tablet layouts.
 
 ## Compatibility
 
-One universal, rootful `iphoneos-arm` package contains both client
-architectures and declares the iPhone/iPod and iPad device families:
+The rootful `iphoneos-arm` package contains both client architectures.
 
-| Client slice | Minimum OS | Hardware |
+| Slice | Minimum OS | Hardware |
 | --- | --- | --- |
-| `armv7` | iOS 6.0 | 32-bit iPhone, iPod touch, and iPad models |
-| `arm64` | iOS 7.0 | 64-bit A7 and newer devices through the iOS 14 generation |
+| `armv7` | iOS 6.0 | 32 bit iPhone, iPod touch, and iPad models |
+| `arm64` | iOS 7.0 | A7 and newer devices through iOS 14 |
 
-The current compatibility target ends at iOS/iPadOS 14.8.1 and requires a
-rootful jailbreak. A compatible jailbreak may not exist for every model and OS
-combination in that range. iOS 15+, rootless packages, armv6 devices, iOS 5,
-and the original iPad are not currently supported.
+The current target ends at iOS and iPadOS 14.8.1. A rootful jailbreak is
+required. iOS 15 and later, rootless packages, armv6 devices, iOS 5, and the
+original iPad are unsupported.
 
-For the best experience, use an A5 device or newer; A7 and newer devices are
-preferred. The 256 MB iPhone 3GS and iPod touch 4 are package-compatible but
-experimental.
+A5 or newer hardware is recommended. The 256 MB iPhone 3GS and iPod touch 4
+can install the package but remain experimental.
+
+The main hardware test device is an original iPad mini running iOS 6.1.3.
+Pairing, saved servers, touch and keyboard input, video, audio, rotation, and
+fullscreen are tested there. Build support for other devices does not yet
+mean each device and OS combination has been tested on hardware.
 
 <details>
 <summary>Device and OS details</summary>
 
-### 32-bit devices
+### 32 bit devices
 
-| Models | Surf-compatible OS range | Status |
+| Models | Surf compatible OS range | Status |
 | --- | --- | --- |
-| iPhone 3GS | 6.0–6.1.6 | Experimental |
-| iPhone 4 | 6.0–7.1.2 | Legacy candidate |
-| iPhone 4s | 6.0–9.3.6 | Legacy candidate |
-| iPhone 5 | 6.0–10.3.4 | Good candidate |
-| iPhone 5c | 7.0–10.3.3 | Good candidate |
-| iPod touch 4 | 6.0–6.1.6 | Experimental |
-| iPod touch 5 | 6.0–9.3.5 | Legacy candidate |
-| iPad 2 and iPad 3 | 6.0–9.3.5; 9.3.6 on cellular models | Legacy candidates |
-| iPad 4 | 6.0–10.3.3; 10.3.4 on cellular models | Good candidate |
-| iPad mini 1 | 6.0–9.3.5; 9.3.6 on cellular models | Verified on iOS 6.1.3 |
+| iPhone 3GS | 6.0 to 6.1.6 | Experimental |
+| iPhone 4 | 6.0 to 7.1.2 | Legacy candidate |
+| iPhone 4s | 6.0 to 9.3.6 | Legacy candidate |
+| iPhone 5 | 6.0 to 10.3.4 | Good candidate |
+| iPhone 5c | 7.0 to 10.3.3 | Good candidate |
+| iPod touch 4 | 6.0 to 6.1.6 | Experimental |
+| iPod touch 5 | 6.0 to 9.3.5 | Legacy candidate |
+| iPad 2 and iPad 3 | 6.0 to 9.3.5, or 9.3.6 on cellular models | Legacy candidates |
+| iPad 4 | 6.0 to 10.3.3, or 10.3.4 on cellular models | Good candidate |
+| iPad mini 1 | 6.0 to 9.3.5, or 9.3.6 on cellular models | Verified on iOS 6.1.3 |
 
-### 64-bit devices
+### 64 bit devices
 
-| Models | Surf-compatible OS range |
+| Models | Surf compatible OS range |
 | --- | --- |
-| iPhone 5s | 7.0–12.5.7 |
-| iPhone 6 and 6 Plus | 8.0–12.5.7 |
-| iPad Air 1 and iPad mini 2 | 7.0–12.5.7 |
-| iPad mini 3 | 8.0–12.5.7 |
-| iPod touch 6 | 8.4–12.5.7 |
-| iPhone 6s through iPhone 12, including SE 1 and SE 2 | Device launch OS–14.8.1 |
-| iPad Air 2–4, iPad mini 4–5, and iPad 5–8 | Device launch OS–14.8.1 |
-| iPad Pro models released through 2020 | Device launch OS–14.8.1 |
-| iPod touch 7 | 12.3–14.8.1 |
+| iPhone 5s | 7.0 to 12.5.7 |
+| iPhone 6 and 6 Plus | 8.0 to 12.5.7 |
+| iPad Air 1 and iPad mini 2 | 7.0 to 12.5.7 |
+| iPad mini 3 | 8.0 to 12.5.7 |
+| iPod touch 6 | 8.4 to 12.5.7 |
+| iPhone 6s through iPhone 12, including SE 1 and SE 2 | Launch OS to 14.8.1 |
+| iPad Air 2 through 4, iPad mini 4 and 5, and iPad 5 through 8 | Launch OS to 14.8.1 |
+| iPad Pro models released through 2020 | Launch OS to 14.8.1 |
+| iPod touch 7 | 12.3 to 14.8.1 |
 
 </details>
 
-The computer running Surf must be 64-bit. Surf supports:
-
-- 64-bit Windows PCs
-- Macs running macOS 12 or newer
-- 64-bit Linux PCs and ARM computers
-
-Thirty-two-bit computers and operating systems are not supported. An older PC
-can still work if its processor is 64-bit and you install a lightweight 64-bit
-Linux system on it.
+The host computer must run a 64 bit version of Windows, macOS 12 or later, or
+Linux. Both x86_64 and ARM Linux hosts are supported.
 
 ## Quick start
 
-### 1. Start Surf on the computer
+### Start the host
 
-Download the package for your computer from the
+Download a host package from the
 [latest release](https://github.com/seg6/surf/releases/latest).
 
-The desktop build provides a Settings window for the server name, port, paired
-devices, detected LAN address, live logs, clipboard sync, and updates. For a
-terminal or server installation:
+The desktop app includes settings, pairing, device management, logs, clipboard
+sync, and updates. A terminal or server installation runs in the foreground.
 
 ```sh
 ./surf serve
 ```
 
-The server stays in the foreground so systemd, Docker, or another service
-manager can supervise it. In another terminal, `surf status`, `surf pair`, and
-`surf devices ...` connect to that one running server. Surf listens on port
-`18080` by default. Windows archives contain `surf.exe`.
+Useful commands from another terminal are:
 
-Run `surf quit` to close either the desktop tray and its managed browser or a
-headless backend gracefully.
+```sh
+surf status
+surf pair
+surf devices list
+surf quit
+```
 
-Install updates in place. Do not remove Surf, delete `SURF_HOME`, or pair again:
-desktop profiles and device keys survive normal updates, and the backend can
-deliver a required compatible iPad package over the existing pinned connection.
+Surf listens on port `18080` by default. Windows archives contain `surf.exe`.
 
-### 2. Install the iOS client
+Updates install over the existing copy. `SURF_HOME` contains the server
+identity, paired devices, and browser profile, so it should remain in place.
 
-Open the [Surf package repository](https://seg6.space/surf/) on the jailbroken
-device and add it to Cydia or Sileo. The landing page works in iOS 6 Safari,
-offers the current `.deb` directly, and always points both package managers at:
+### Install the iOS app
+
+Add the [Surf package repository](https://seg6.space/surf/) to Cydia or Sileo
+on the jailbroken device.
 
 ```text
 https://seg6.space/surf/
 ```
 
-Install `Surf` from the package manager. As a manual alternative, download
-`space.seg6.surf_<version>_iphoneos-arm.deb` from that page and open it with
-Filza or iFile, or copy it over SSH:
+The same page also offers the current `.deb`. A manual SSH installation uses:
 
 ```sh
 scp space.seg6.surf_*.deb root@DEVICE_IP:/tmp/surf.deb
@@ -133,40 +112,29 @@ ssh root@DEVICE_IP 'dpkg -i /tmp/surf.deb'
 ssh root@DEVICE_IP 'su mobile -c uicache || uicache || true'
 ```
 
-On older jailbreaks, running `uicache` as `root` can report an incorrect-user
-error. Run it as `mobile` as shown above, then respring if the icon still does
-not appear.
+Older jailbreaks may reject `uicache` when it runs as `root`. Run it as
+`mobile`, then respring if the icon is still missing.
 
-### 3. Pair and connect
+### Pair
 
-On the computer, open **Paired Devices** and choose **Pair device**, or run
-`surf pair` beside a headless server. Surf creates one single-use invitation.
+Open **Paired Devices** on the host and choose **Pair device**. A headless host
+uses `surf pair`. Each invitation accepts one device.
 
-On any camera-equipped supported device, scan the QR code. It contains the
-address, pinned identity, and one-time secret. Devices without a camera can
-enter the address and six-digit code instead:
+Camera equipped devices can scan the QR code. Manual pairing uses the host
+address and six digit code, then compares the same six words on both ends.
 
 ```text
 192.168.1.50:18080
 ```
 
-Use the computer's address, not the address of the iOS device. If the backend
-is unreachable, allow inbound TCP port `18080` through the host firewall.
+Use the host address and allow inbound TCP port `18080` through its firewall.
+The words confirm the server identity. Cancel pairing if they differ.
 
-QR pairing pins the server identity from the code and completes directly.
-Manual pairing also asks you to compare six words; the short numeric code
-authorizes the attempt, while the words verify that the self-signed server was
-not replaced or relayed. Pairing is closed unless the server owner creates an
-invitation. It accepts exactly one client and is cancelled after five incorrect
-manual codes.
+Surf handles TLS directly. A LAN or VPS setup needs one reachable Surf port.
+Set `SURF_PUBLIC_ADDRESS=host:port` when the address in pairing codes must
+differ from the listener address.
 
-Surf serves pinned TLS itself. A direct LAN or VPS setup needs one reachable
-Surf port, not Caddy, Cloudflare, a public certificate, or a certificate
-installed on the iOS device. Set `SURF_PUBLIC_ADDRESS=host:port` when a
-headless VPS should include its public endpoint in pairing codes.
-
-For roaming behind Cloudflare Tunnel, route a public hostname to Surf's HTTPS
-listener and set both variables:
+Cloudflare Tunnel can carry the pinned Surf connection for remote access.
 
 ```sh
 SURF_PUBLIC_ADDRESS=surf-roam.example.net:443 \
@@ -174,91 +142,82 @@ SURF_TUNNEL_HOST=surf-roam.example.net \
 ./surf serve
 ```
 
-The client opens a Cloudflare WebSocket and carries Surf's original pinned TLS
-session inside it. Cloudflare provides reachability but cannot decrypt the
-browser stream. Keep a direct LAN endpoint saved for the lowest local latency.
+The inner Surf connection remains encrypted between the device and host.
+Cloudflare can see connection metadata and encrypted traffic volume. A direct
+LAN endpoint gives lower local latency.
 
-After pairing, every saved server is identified by its exact certificate pin
-and a per-server device key in the iOS Keychain. See the concise
-[security model](docs/security.md) for the pairing, MITM, revocation, and
-update-package trust boundaries.
+See [Security](docs/security.md) for the trust model.
 
-## Browser and DRM support
+## Browser support
 
-Surf prefers a compatible installed Google Chrome, Microsoft Edge, or Chromium
-and otherwise manages a verified ungoogled-chromium build in its private data
-directory. Surf loads its capture and content-blocking extensions through the
-browser's DevTools extension API, including in branded Chrome and Edge builds
-that ignore the legacy command-line extension switch. Video and audio come
-from Chromium's tab-capture APIs; no FFmpeg, PulseAudio, virtual audio device,
-or desktop capture is required.
+Surf uses an installed Google Chrome, Microsoft Edge, or Chromium when one is
+compatible. Otherwise it installs a verified ungoogled Chromium build in
+`SURF_HOME`. Capture and content blocking extensions are loaded through the
+DevTools extension API.
 
-The stream follows the exact even-sized surface left by native chrome; it is
-not selected from a fixed phone/iPad resolution list. Rotation and Surf
-fullscreen settle into one capture reconfiguration. A page entering or
-leaving the Fullscreen API, including YouTube's player, keeps native fullscreen
-synchronized without reconnecting the browser session.
+Video and audio come from Chromium tab capture. FFmpeg, PulseAudio, virtual
+audio devices, and desktop capture are not required on the host.
 
-An optional adaptive governor can keep demanding motion smooth on legacy
-devices. When enabled, native decode and presentation health selects one
-coordinated capture profile, while Chromium still lays the page out at the
-device's full logical viewport. Static pages automatically return to 60 FPS,
-and every profile preserves full-quality native-size rendering so text and
-images remain sharp.
+The stream matches the page area left by the native controls. Rotation, Surf
+fullscreen, and page fullscreen update that area without reconnecting the
+browser session.
 
-Surf does not distribute Widevine. If the selected host browser supplies a
-working Widevine CDM, protected sites can use it, subject to that site's
-license and output-protection rules.
+The optional adaptive video mode changes frame rate when an old device falls
+behind. It does not reduce the page viewport or render size.
 
-## Build from source
+Surf does not include Widevine. Protected sites can use a working Widevine CDM
+provided by the selected host browser, subject to the site's own rules.
 
-Build the backend and the current host's desktop package:
+## Build
+
+Build the backend and a package for the current host.
 
 ```sh
 make surf-binary
 make surf-dist
 ```
 
-Surf's desktop tray is cgo-free. A Linux x86-64 host can cross-build every
-supported desktop archive from one Go toolchain; the release target also uses
-`appimagetool` for the Linux AppImage and `makensis` from NSIS for the Windows
-installer. Put `makensis` on `PATH` and pass the AppImage tool explicitly:
+The release target builds the desktop archives. Linux AppImage builds need
+`appimagetool`, and Windows installer builds need `makensis` from NSIS.
 
 ```sh
 APPIMAGETOOL=/path/to/appimagetool make surf-release-dist \
   CLIENT_DEB=path/to/space.seg6.surf_VERSION_iphoneos-arm.deb
 ```
 
-The macOS archives contain Intel or Apple Silicon `Surf.app` bundles and do not
-require Xcode, an Apple SDK, code signing, or a macOS build host.
+macOS archives contain Intel or Apple Silicon `Surf.app` bundles. Their build
+does not require Xcode, an Apple SDK, signing, or a macOS host.
 
-Building the universal iOS package uses a reproducible Linux/WSL2/Docker
-environment. See [Native Build](docs/native-build.md) for the SDK and packaging
-steps.
+The universal iOS package uses a pinned Linux, WSL2, or Docker environment.
+See [Native Build](docs/native-build.md).
+
+Run the normal test suite with `make test`. Backend download tests include a
+real Chromium round trip using a temporary profile and local HTTP fixtures.
+They discover an installed Chrome/Chromium automatically; `SURF_TEST_BROWSER`
+can select another executable. Without Chromium these tests explicitly skip
+locally and fail in CI. No separate download-test command or CI step is needed.
 
 ## Documentation
 
-- [Backend configuration and deployment](docs/backend.md)
-- [Native client build](docs/native-build.md)
-- [Security model](docs/security.md)
+- [Backend](docs/backend.md)
+- [Client architecture](docs/client-architecture.md)
+- [Linux client and development tools](client/desktop/README.md)
+- [Porting clients](docs/porting-clients.md)
+- [Protocol](docs/protocol.md)
+- [Versioning](docs/versioning.md)
+- [Native build](docs/native-build.md)
+- [Security](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Changelog](CHANGELOG.md)
 
-## Support Surf
+## Support
 
-If Surf has made an old device useful again and you'd like to buy me a coffee,
-you can do that on Ko-fi.
-
-<a href="https://ko-fi.com/seg6_">
-  <img src="https://storage.ko-fi.com/cdn/kofi5.png?v=3" alt="Buy me a coffee on Ko-fi" height="36">
-</a>
+Donations are accepted on [Ko-fi](https://ko-fi.com/seg6_).
 
 ## AI disclosure
 
 Surf is an AI-assisted project. Its direction, device testing, deployment
-decisions, and release judgment are human-directed. Treat it like any other
-experimental systems project: review the code, test your setup, protect the
-server's `SURF_HOME`, and revoke devices you no longer use.
+decisions, and release judgment are human-directed.
 
 ## License
 

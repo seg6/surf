@@ -1,0 +1,219 @@
+name: Continuous Integration
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  client-core:
+    name: Client core (${{ matrix.compiler }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: GCC
+            cc: gcc
+            sanitize: "OFF"
+          - compiler: Clang sanitizers
+            cc: clang
+            sanitize: "ON"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Configure portable C99 core
+        env:
+          CC: ${{ matrix.cc }}
+        run: |
+          cmake -S client/core -B .local/build/client-core \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DSURF_CORE_WARNINGS_AS_ERRORS=ON \
+            -DSURF_CORE_SANITIZE=${{ matrix.sanitize }}
+
+      - name: Build portable core
+        run: cmake --build .local/build/client-core
+
+      - name: Test portable core
+        run: ctest --test-dir .local/build/client-core --output-on-failure
+
+      - name: Verify tracked files stayed clean
+        run: git diff --exit-code
+
+  desktop-client:
+    name: Rust desktop client
+    # FFmpeg/ALSA ABI is part of the Rust cache identity.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: "1.95.0"
+          components: clippy, rustfmt
+
+      - name: Set up Go for secure-session integration
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Install desktop media and headless OpenGL dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev libavcodec-dev libavformat-dev libavutil-dev \
+            libgl1-mesa-dev libgl1-mesa-dri libxkbcommon-x11-0 \
+            libasound2-plugins pulseaudio pulseaudio-utils ripgrep xauth xvfb
+
+      - name: Cache Rust debug dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: client/desktop
+          shared-key: desktop-debug-ubuntu24.04
+          cache-on-failure: true
+          # Leave rustup/cargo installed for the second cache's post-job save.
+          cache-bin: false
+
+      - name: Check formatting
+        run: cargo fmt --manifest-path client/desktop/Cargo.toml --all -- --check
+
+      - name: Lint desktop workspace
+        run: cargo clippy --manifest-path client/desktop/Cargo.toml --workspace --all-targets -- -D warnings
+
+      - name: Test desktop workspace
+        run: cargo test --manifest-path client/desktop/Cargo.toml --workspace
+
+      - name: Test real desktop UI input
+        run: bash client/desktop/test-ui-input.sh
+
+      - name: Check browser runtime for secure-session integration
+        run: google-chrome-stable --version || google-chrome --version
+
+      - name: Test real secure desktop session
+        env:
+          ALSA_CONFIG_PATH: ${{ github.workspace }}/client/desktop/tests/alsa-headless.conf
+          PULSE_SINK: surf_test
+        run: |
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=surf_test rate=48000 channels=2
+          client/desktop/test-secure-session.sh
+
+      - name: Cache Rust release dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: client/desktop -> ../../.local/build/desktop-release
+          shared-key: desktop-release-ubuntu24.04
+          cache-on-failure: true
+          cache-bin: false
+
+      - name: Build Linux desktop preview package
+        run: |
+          archive="$(client/desktop/package-linux.sh)"
+          test -f "$archive"
+          contents="$(mktemp)"
+          tar -tzf "$archive" > "$contents"
+          grep -q '/bin/surf-client$' "$contents"
+
+      - name: Verify tracked files stayed clean
+        run: git diff --exit-code
+
+  backend-test:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Test all backend packages
+        working-directory: backend
+        run: go test ./...
+
+      - name: Verify the test tree stayed clean
+        run: git diff --exit-code
+
+  backend-cross-build:
+    name: Backend ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Cross-build backend
+        run: make surf-binary SURF_GOOS=${{ matrix.goos }} SURF_GOARCH=${{ matrix.goarch }} CLIENT_DEB=
+
+  native-package:
+    name: iOS 6/7 universal package
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Cache verified iOS SDK
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: native/buildenv/sdk
+          key: native-sdk-${{ hashFiles('native/buildenv/fetch-sdk.sh') }}
+
+      - name: Fetch and verify iOS SDK
+        run: make native-sdk
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Build pinned Theos environment
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: native/buildenv
+          load: true
+          tags: surf-buildenv:latest
+          cache-from: type=gha,scope=native-buildenv
+          cache-to: type=gha,scope=native-buildenv,mode=max
+
+      - name: Build and verify package
+        run: make native-package
+
+      - name: Verify tracked files stayed clean
+        run: git diff --exit-code
