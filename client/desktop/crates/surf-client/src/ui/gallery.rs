@@ -6,10 +6,11 @@ impl DesktopApp {
         let Ok(scene) = std::env::var("SURF_UI_GALLERY") else {
             return;
         };
-        if std::env::var("SURF_UI_THEME").is_ok_and(|s| s == "light") {
-            self.preferences.dark = false;
-            self.controller.dark_mode = false;
-            self.theme_request = Some(false);
+        if let Ok(theme) = std::env::var("SURF_UI_THEME") {
+            let dark = theme != "light";
+            self.preferences.dark = dark;
+            self.controller.dark_mode = dark;
+            self.theme_request = Some(dark);
         }
         if std::env::var("SURF_UI_CHROME").is_ok_and(|s| s == "top") {
             self.preferences.bottom = false;

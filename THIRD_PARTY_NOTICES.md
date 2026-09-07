@@ -47,7 +47,7 @@ Surf does not vendor or statically link an FFmpeg build.
 
 The desktop audio host uses CPAL 0.18.2, copyright the RustAudio contributors,
 under the Apache License 2.0.
-# Inter
+## Inter
 
 The desktop client bundles Inter 4.1 Regular, Medium and SemiBold, by Rasmus
 Andersson and contributors. Source: https://github.com/rsms/inter/releases/tag/v4.1.

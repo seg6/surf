@@ -84,6 +84,7 @@ pub fn row(ui: &Ui, id: &str, title: &str, subtitle: &str, selected: bool, width
         title,
     );
     if !subtitle.is_empty() {
+        let _font = ui.push_font(ui.fonts().fonts()[2]);
         let subtitle = ellipsize(ui, subtitle, width - 16.0);
         ui.get_window_draw_list().add_text(
             [p[0] + 8.0, p[1] + 24.0],

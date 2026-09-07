@@ -161,28 +161,17 @@ impl DesktopApp {
                     ui.child_window("##inline-tabs")
                         .size([tab_width, 30.0])
                         .scroll_bar(false)
-                        .flags(WindowFlags::HORIZONTAL_SCROLLBAR)
+                        .flags(WindowFlags::HORIZONTAL_SCROLLBAR | WindowFlags::NO_SCROLLBAR)
                         .build(|| {
+                            let _font = ui.push_font(ui.fonts().fonts()[1]);
                             let tabs = self.controller.snapshot.tabs.clone();
                             for (i, tab) in tabs.iter().enumerate() {
                                 if i > 0 {
                                     ui.same_line();
                                 }
                                 let _id = ui.push_id(format!("tab-{}", tab.id));
-                                let _bg = ui.push_style_color(
-                                    StyleColor::Button,
-                                    if tab.active {
-                                        palette.surface
-                                    } else {
-                                        palette.rail
-                                    },
-                                );
-                                let _border =
-                                    ui.push_style_var(StyleVar::FrameBorderSize(if tab.active {
-                                        1.0
-                                    } else {
-                                        0.0
-                                    }));
+                                let _bg = ui.push_style_color(StyleColor::Button, [0.0; 4]);
+                                let _border = ui.push_style_var(StyleVar::FrameBorderSize(0.0));
                                 let title = if tab.title.trim().is_empty() {
                                     compact_address(&tab.url)
                                 } else {
@@ -191,6 +180,19 @@ impl DesktopApp {
                                 let item_width = (tab_width / tabs.len().max(1) as f32)
                                     .clamp(142.0, 190.0)
                                     - 30.0;
+                                if tab.active {
+                                    let start = ui.cursor_screen_pos();
+                                    let end = [start[0] + item_width + 30.0, start[1] + 30.0];
+                                    ui.get_window_draw_list()
+                                        .add_rect(start, end, palette.surface)
+                                        .filled(true)
+                                        .rounding(6.0)
+                                        .build();
+                                    ui.get_window_draw_list()
+                                        .add_rect(start, end, palette.border)
+                                        .rounding(6.0)
+                                        .build();
+                                }
                                 let texture = self.assets.icon(&tab.icon);
                                 let inset = if texture.is_some() { 28.0 } else { 8.0 };
                                 let label =

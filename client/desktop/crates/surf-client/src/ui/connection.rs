@@ -161,6 +161,9 @@ impl DesktopApp {
 
     pub(super) fn draw_new_tab(&mut self, ui: &Ui) {
         let p = self.layout.page;
+        let visible_bookmarks = if p.height < 350.0 { 1 } else { 2 };
+        let card_height = if visible_bookmarks == 1 { 220.0 } else { 268.0 };
+        let _border = ui.push_style_var(imgui::StyleVar::WindowBorderSize(0.0));
         ui.get_background_draw_list()
             .add_rect(
                 [p.x as f32, p.y as f32],
@@ -181,7 +184,7 @@ impl DesktopApp {
         ui.window("##new-tab")
             .position(position, Condition::Always)
             .position_pivot([0.5, 0.5])
-            .size([width, 240.0], Condition::Always)
+            .size([width, card_height], Condition::Always)
             .flags(
                 WindowFlags::NO_DECORATION
                     | WindowFlags::NO_MOVE
@@ -201,7 +204,7 @@ impl DesktopApp {
                 }
                 ui.text_disabled("Ctrl+L to start typing");
                 let bookmarks = self.controller.browser.bookmarks.clone();
-                for item in bookmarks.iter().take(2) {
+                for item in bookmarks.iter().take(visible_bookmarks) {
                     if row(
                         ui,
                         &item.url,

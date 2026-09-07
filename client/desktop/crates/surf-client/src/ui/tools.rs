@@ -561,7 +561,7 @@ impl DesktopApp {
                 }
                 ui.text_disabled(format!(
                     "Current client area: {:.0} x {:.0} pt",
-                    display[0], display[1]
+                    ui.io().display_size[0], ui.io().display_size[1]
                 ));
                 if let Some(pending) = &self.pending_window_size {
                     if let Some((width, height)) = pending.viewport {
