@@ -1,24 +1,13 @@
 # Surf
 
-Surf brings current websites to old iPhones, iPod touches, and iPads.
+Surf brings the modern web to older iPhones, iPod touches, and iPads.
 
-Chromium runs on a Windows, macOS, or Linux computer. The native iOS app shows
-the video and audio stream and sends navigation, keyboard, and touch input back
-to Chromium. Website TLS, JavaScript, media, and optional Widevine support come
-from the host browser instead of the old WebKit on the device.
+Websites run in Chromium on a Windows, macOS, or Linux computer and stream to
+your device. You browse through a native iOS app with touch, keyboard input,
+video, and audio, without being limited by the device's outdated web engine.
 
 The iOS app has native tabs, an address bar, bookmarks, history, downloads,
 uploads, sharing, fullscreen media, and separate phone and tablet layouts.
-
-## Status
-
-Surf is experimental. The main hardware test target is an original iPad mini
-running iOS 6.1.3. Pairing, saved servers, touch and keyboard input, video,
-audio, rotation, and fullscreen are tested there. Other package targets remain
-build supported until tested on their hardware.
-
-The Linux desktop client uses the same C99 behavior core. Its current test
-target is X11 on x86_64. It is a development client, not part of the iOS release.
 
 ## Compatibility
 
@@ -35,6 +24,11 @@ original iPad are unsupported.
 
 A5 or newer hardware is recommended. The 256 MB iPhone 3GS and iPod touch 4
 can install the package but remain experimental.
+
+The main hardware test device is an original iPad mini running iOS 6.1.3.
+Pairing, saved servers, touch and keyboard input, video, audio, rotation, and
+fullscreen are tested there. Build support for other devices does not yet
+mean each device and OS combination has been tested on hardware.
 
 <details>
 <summary>Device and OS details</summary>
@@ -207,6 +201,7 @@ locally and fail in CI. No separate download-test command or CI step is needed.
 
 - [Backend](docs/backend.md)
 - [Client architecture](docs/client-architecture.md)
+- [Linux client and development tools](client/desktop/README.md)
 - [Porting clients](docs/porting-clients.md)
 - [Protocol](docs/protocol.md)
 - [Versioning](docs/versioning.md)
