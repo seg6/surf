@@ -69,6 +69,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 MediaEvent::DecoderError(message) => eprintln!("decoder: {message}"),
                 MediaEvent::AudioReady { .. } => audio_ready = true,
                 MediaEvent::AudioUnavailable(message) | MediaEvent::AudioError(message) => {
+                    if expect_audio {
+                        return Err(
+                            format!("audio probe requires working playback: {message}").into()
+                        );
+                    }
                     eprintln!("audio: {message}");
                 }
             }

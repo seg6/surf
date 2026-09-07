@@ -53,6 +53,12 @@ the build succeeds. The integration tests also need these tools:
 sudo apt-get install ripgrep xauth xvfb libgl1-mesa-dri
 ```
 
+The secure-session test requires working audio output. CI installs PulseAudio
+and `libasound2-plugins`, creates a clocked null sink, and uses
+`tests/alsa-headless.conf` to exercise real ALSA playback without a sound card.
+Normal local runs use your existing audio device. An unavailable audio output
+fails the audio probe immediately instead of timing out.
+
 Run the tests and client with:
 
 ```sh

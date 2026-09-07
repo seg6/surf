@@ -76,7 +76,7 @@ jobs:
           sudo apt-get install -y \
             libasound2-dev libavcodec-dev libavformat-dev libavutil-dev \
             libgl1-mesa-dev libgl1-mesa-dri libxkbcommon-x11-0 \
-            ripgrep xauth xvfb
+            libasound2-plugins pulseaudio pulseaudio-utils ripgrep xauth xvfb
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -99,7 +99,13 @@ jobs:
         run: google-chrome-stable --version || google-chrome --version
 
       - name: Test real secure desktop session
-        run: client/desktop/test-secure-session.sh
+        env:
+          ALSA_CONFIG_PATH: ${{ github.workspace }}/client/desktop/tests/alsa-headless.conf
+          PULSE_SINK: surf_test
+        run: |
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=surf_test rate=48000 channels=2
+          client/desktop/test-secure-session.sh
 
       - name: Build Linux desktop preview package
         run: |
