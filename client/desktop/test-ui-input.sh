@@ -69,5 +69,39 @@ expect '"panel":"None"'
 drive click 120 646
 drive type "clicked"
 expect '"draft":"clicked","editing":true'
-printf 'Surf real X11 input: focus, spaces, page input, popup Escape, resize and tab close passed.\n'
+
+# Exercise the redesigned task views through the same real event path.
+restart_scene() {
+    kill "$client_pid"
+    wait "$client_pid" 2>/dev/null || true
+    env SURF_UI_SIZE=1024x768 SURF_UI_GALLERY="$1" "$SURF_UI_TEST_BIN/surf-client" > "$SURF_UI_TEST_ROOT/client.log" 2>&1 &
+    client_pid=$!
+    for _ in $(seq 1 100); do
+        if rg -q SURF_UI_STATE "$SURF_UI_TEST_ROOT/client.log"; then break; fi
+        sleep .1
+    done
+    sleep .2
+}
+restart_scene new-tab
+drive click 400 227
+drive type "two word search"
+expect '"new_tab_query":"two word search"'
+drive key Return
+expect '"new_tab_query":""'
+rg -q 'SURF_UI_COMMAND Navigate.*two' "$SURF_UI_TEST_ROOT/client.log"
+drive key ctrl+l
+drive type "address again"
+expect '"draft":"address again","editing":true'
+
+restart_scene settings
+drive click 245 235
+expect '"settings_category":"Browsing"'
+drive click 245 302
+expect '"settings_category":"Testing"'
+drive resize 375 667
+expect '"viewport":\[375.0,625.0\]'
+expect '"settings_category":"Testing"'
+drive key Escape
+expect '"panel":"None"'
+printf 'Surf real X11 input: focus, spaces, page input, popup Escape, resize, tab close, new-tab search and settings categories passed.\n'
 X11

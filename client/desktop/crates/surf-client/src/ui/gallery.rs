@@ -15,6 +15,18 @@ impl DesktopApp {
         if std::env::var("SURF_UI_CHROME").is_ok_and(|s| s == "top") {
             self.preferences.bottom = false;
         }
+        if scene == "start-populated" {
+            self.controller
+                .discovered_servers
+                .push(surf_session::DiscoveredServer {
+                    name: "Office computer".into(),
+                    endpoint: "192.168.1.20:18080".into(),
+                    server_id: "gallery".into(),
+                    protocol: "https".into(),
+                    compatibility_version: "1".into(),
+                });
+            return;
+        }
         if scene == "start" {
             return;
         }
@@ -50,15 +62,25 @@ impl DesktopApp {
             surf_protocol::LibraryEntry {
                 title: "Surf — your browser, anywhere".into(),
                 url: "https://github.com/seg6/surf".into(),
-                ts: 1,
+                ts: chrono::Local::now().timestamp() - 3600,
             },
             surf_protocol::LibraryEntry {
                 title: "Writing about systems".into(),
                 url: "https://seg6.space".into(),
-                ts: 2,
+                ts: chrono::Local::now().timestamp() - 86400,
             },
         ];
         self.controller.browser.history = self.controller.browser.bookmarks.clone();
+        if scene == "library-long" {
+            for index in 0..30 {
+                self.controller.browser.history.push(surf_protocol::LibraryEntry {
+                    title: format!("A longer page title about browser architecture and the systems that make it work · {index}"),
+                    url: format!("https://example.com/articles/{index}"),
+                    ts: chrono::Local::now().timestamp() - index * 86400,
+                });
+            }
+        }
+        self.endpoint = "Office computer".into();
         match scene.as_str() {
             "code"=>{
                 self.controller.connected=false;
@@ -98,10 +120,21 @@ impl DesktopApp {
                 self.file_picker=Some(picker);self.panel=Some(Panel::Files);
             }
             "settings" => self.panel = Some(Panel::Settings),
+            "settings-testing" => { self.panel = Some(Panel::Settings); self.settings_category = SettingsCategory::Testing; },
+            "settings-browsing" => { self.panel = Some(Panel::Settings); self.settings_category = SettingsCategory::Browsing; },
+            "settings-about" => { self.panel = Some(Panel::Settings); self.settings_category = SettingsCategory::About; },
+            "library-empty" => { self.controller.browser.history.clear(); self.panel = Some(Panel::Library); },
+            "library-long" => self.panel = Some(Panel::Library),
+            "downloads" => { self.library_section = LibrarySection::Downloads; self.panel = Some(Panel::Library);
+                self.controller.browser.downloads = vec![surf_protocol::DownloadItem { name: "Surf architecture.pdf".into(), size: 2_540_000, ts: 0 }];
+            },
             "library" => self.panel = Some(Panel::Library),
             "tools" => self.panel = Some(Panel::More),
             "tabs" => self.panel = Some(Panel::Tabs),
-            "performance" => self.performance_open = true,
+            "performance" => { self.performance_open = true; self.controller.latest_diagnostics = Some(surf_core::DiagnosticsReport {
+                presentation_fps: 59.9, decode_us: 7600, upload_us: 1100, frame_age_us: 17500,
+                encoded_video_depth: 1, ..Default::default()
+            }); },
             "find" => self.find_open = true,
             "new-tab" => self.controller.snapshot.current_url = "about:blank#surf-new".into(),
             "address" => {

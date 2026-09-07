@@ -24,22 +24,47 @@ impl DesktopApp {
         );
         let mut complete = None;
         ui.modal_popup_config("Choose files###file-picker")
-            .flags(WindowFlags::NO_RESIZE | WindowFlags::NO_MOVE)
+            .flags(WindowFlags::NO_RESIZE | WindowFlags::NO_MOVE | WindowFlags::NO_TITLE_BAR)
             .build(|| {
                 self.hit_regions.push(window_rect(ui));
+                let mut open = true;
+                widgets::sheet_header(ui, &self.assets.ui_icons, "Choose files", &mut open);
+                if !open {
+                    complete = Some(Vec::new());
+                }
+                ui.dummy([0.0, 6.0]);
+                if let Some(dirs) = directories::UserDirs::new() {
+                    if ui.button("Home") {
+                        picker.directory = dirs.home_dir().to_owned();
+                        picker.selected.clear();
+                    }
+                    if let Some(downloads) = dirs.download_dir() {
+                        ui.same_line();
+                        if ui.button("Downloads") {
+                            picker.directory = downloads.to_owned();
+                            picker.selected.clear();
+                        }
+                    }
+                }
+                ui.same_line();
                 if ui.button("Up")
                     && let Some(parent) = picker.directory.parent()
                 {
                     picker.directory = parent.to_owned();
                     picker.selected.clear();
                 }
-                ui.same_line();
-                ui.text(widgets::ellipsize(
+                ui.dummy([0.0, 4.0]);
+                ui.text_disabled(widgets::ellipsize(
                     ui,
                     &picker.directory.display().to_string(),
                     ui.content_region_avail()[0],
                 ));
-                ui.child_window("##files").size([0.0, -42.0]).build(|| {
+                if ui.is_item_hovered() {
+                    ui.tooltip_text(picker.directory.display().to_string());
+                }
+                ui.dummy([0.0, 6.0]);
+                let list_height = (ui.content_region_avail()[1] - 68.0).max(40.0);
+                widgets::inset(ui, "##files", list_height, || {
                     for entry in picker.entries.clone() {
                         let selected = picker.selected.contains(&entry.path);
                         if row(
@@ -67,14 +92,20 @@ impl DesktopApp {
                         ui.text_wrapped(error);
                     }
                 });
+                ui.dummy([0.0, 4.0]);
+                ui.text_disabled(format!("{} selected", picker.selected.len()));
                 {
                     let _disabled = ui.begin_disabled(picker.selected.is_empty());
-                    if ui.button("Upload selected") {
+                    if widgets::primary_button(
+                        ui,
+                        "Upload selected",
+                        (ui.content_region_avail()[0] - 84.0).max(100.0),
+                    ) {
                         complete = Some(picker.selected.iter().cloned().collect());
                     }
                 }
                 ui.same_line();
-                if ui.button("Cancel") || ui.is_key_pressed(ImKey::Escape) {
+                if ui.button_with_size("Cancel", [80.0, 32.0]) || ui.is_key_pressed(ImKey::Escape) {
                     complete = Some(Vec::new());
                 }
                 if complete.is_some() {

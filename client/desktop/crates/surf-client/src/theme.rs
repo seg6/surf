@@ -90,6 +90,7 @@ pub fn apply_palette(s: &mut imgui::Style, dark: bool) {
         (HeaderHovered, p.hover),
         (HeaderActive, p.border),
         (CheckMark, p.accent),
+        (PlotHistogram, p.accent),
         (SliderGrab, p.accent),
         (SliderGrabActive, p.accent),
         (Separator, p.border),

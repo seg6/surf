@@ -2,12 +2,15 @@ mod browser;
 mod connection;
 mod gallery;
 mod input;
+mod library;
 mod prompts;
+mod settings;
 mod tools;
 mod widgets;
 use crate::layout::{BrowserLayout, Density};
 use crate::preferences::Preferences;
 use crate::theme::Palette;
+use settings::SettingsCategory;
 use widgets::{icon_button, row, section};
 
 use std::collections::BTreeSet;
@@ -32,8 +35,6 @@ use crate::page_input::{Modifiers, PageInput, PageRect};
 use crate::video_surface::VideoSurface;
 
 const BAR_HEIGHT: f32 = crate::layout::RAIL_HEIGHT;
-const PANEL_TOP: f32 = BAR_HEIGHT + 4.0;
-const PANEL_WIDTH: f32 = 330.0;
 const VIEWPORT_SETTLE: Duration = Duration::from_millis(120);
 const WINDOW_RESIZE_TIMEOUT: Duration = Duration::from_secs(4);
 const SURF_VERSION: &str = include_str!("../../../../../VERSION");
@@ -197,6 +198,7 @@ pub struct DesktopApp {
     modifiers: Modifiers,
     page_focused: bool,
     address: String,
+    new_tab_query: String,
     address_editing: bool,
     focus_address: bool,
     address_expansion: f32,
@@ -208,6 +210,7 @@ pub struct DesktopApp {
     panel_started: Instant,
     more_height: f32,
     library_section: LibrarySection,
+    settings_category: SettingsCategory,
     dialog_input: String,
     dialog_signature: String,
     select_signature: String,
@@ -266,6 +269,7 @@ impl DesktopApp {
             modifiers: Modifiers::default(),
             page_focused: false,
             address: String::new(),
+            new_tab_query: String::new(),
             address_editing: false,
             focus_address: false,
             address_expansion: 0.0,
@@ -277,6 +281,7 @@ impl DesktopApp {
             panel_started: Instant::now(),
             more_height: 440.0,
             library_section: LibrarySection::History,
+            settings_category: SettingsCategory::Appearance,
             dialog_input: String::new(),
             dialog_signature: String::new(),
             select_signature: String::new(),
@@ -388,6 +393,9 @@ impl DesktopApp {
             .find(|tab| tab.active)
             .map(|tab| tab.id);
         let tab_changed = current_tab != self.observed_tab;
+        if tab_changed {
+            self.new_tab_query.clear();
+        }
         self.observed_tab = current_tab;
         if current_url != self.observed_url || tab_changed {
             self.observed_url.clone_from(&current_url);
@@ -474,6 +482,7 @@ impl DesktopApp {
             && std::env::var_os("SURF_UI_TRACE").is_some()
         {
             let trace=serde_json::json!({"draft":self.address,"editing":self.address_editing,
+                "new_tab_query":self.new_tab_query,"settings_category":format!("{:?}",self.settings_category),
                 "page_focused":self.page_focused,"keyboard_capture":self.ui_wants_keyboard,
                 "panel":format!("{:?}",self.panel),"viewport":[self.page_rect.width,self.page_rect.height]}).to_string();
             if trace != self.last_trace {
@@ -932,13 +941,6 @@ fn small_overlay(ui: &Ui, position: [f32; 2], text: &str) {
         .position_pivot([0.5, 0.0])
         .flags(overlay_flags() | WindowFlags::ALWAYS_AUTO_RESIZE | WindowFlags::NO_INPUTS)
         .build(|| ui.text(text));
-}
-
-fn metric(ui: &Ui, label: &str, value: String) {
-    ui.group(|| {
-        ui.text_disabled(label);
-        ui.text(value);
-    });
 }
 
 #[cfg(test)]
