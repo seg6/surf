@@ -214,10 +214,10 @@ locally and fail in CI. No separate download-test command or CI step is needed.
 
 Donations are accepted on [Ko-fi](https://ko-fi.com/seg6_).
 
-## Development disclosure
+## AI disclosure
 
-AI tools are used during development. Project direction, hardware testing,
-deployment, and releases are handled by the maintainers.
+Surf is an AI-assisted project. Its direction, device testing, deployment
+decisions, and release judgment are human-directed.
 
 ## License
 
