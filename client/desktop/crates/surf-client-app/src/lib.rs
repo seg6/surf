@@ -827,11 +827,16 @@ impl ClientController {
             WireEvent::Found { on } => self.browser.find_found = Some(on),
             WireEvent::Toast { text } => self.browser.toast(text),
             WireEvent::Download { name } => {
+                self.browser.download_progress.remove(&name);
                 let destination = default_download_path(&name);
                 self.request_download(name, destination);
             }
             WireEvent::DownloadProgress { name, pct } => {
-                self.browser.download_progress.insert(name, pct);
+                if pct >= 100 {
+                    self.browser.download_progress.remove(&name);
+                } else {
+                    self.browser.download_progress.insert(name, pct);
+                }
             }
             WireEvent::Suggest { items } => {
                 let (accept, next) = self.suggestions.reply();

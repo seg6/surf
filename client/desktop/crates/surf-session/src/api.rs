@@ -322,48 +322,62 @@ pub(crate) async fn download_file(
     name: &str,
     destination: &Path,
 ) -> Result<()> {
-    let safe_name = Path::new(name)
-        .file_name()
-        .filter(|value| *value == name)
-        .ok_or_else(|| SessionError::Protocol("invalid download name".to_owned()))?;
-    let mut url = join(&verified.endpoint, "/api/v1/downloads/")?;
-    url.path_segments_mut()
-        .map_err(|()| SessionError::Endpoint("download endpoint has no path".to_owned()))?
-        .push(&safe_name.to_string_lossy());
+    let url = download_url(&verified.endpoint, name)?;
     let response = verified
         .client
         .get(url)
         .timeout(Duration::from_secs(120))
         .send()
         .await?;
+    save_download_response(response, destination).await
+}
+
+fn download_url(endpoint: &Url, name: &str) -> Result<Url> {
+    if name.starts_with('.') || name.contains(['\\', ':', '\0']) {
+        return Err(SessionError::Protocol("invalid download name".to_owned()));
+    }
+    let safe_name = Path::new(name)
+        .file_name()
+        .filter(|value| *value == name)
+        .ok_or_else(|| SessionError::Protocol("invalid download name".to_owned()))?;
+    let mut url = join(endpoint, "/api/v1/downloads/")?;
+    url.path_segments_mut()
+        .map_err(|()| SessionError::Endpoint("download endpoint has no path".to_owned()))?
+        .pop_if_empty()
+        .push(&safe_name.to_string_lossy());
+    Ok(url)
+}
+
+async fn save_download_response(response: reqwest::Response, destination: &Path) -> Result<()> {
     let status = response.status();
-    if !status.is_success() {
+    if status != StatusCode::OK {
         return Err(status_error(response, status).await);
     }
     let parent = destination
         .parent()
         .ok_or_else(|| SessionError::Storage("download destination has no parent".to_owned()))?;
     tokio::fs::create_dir_all(parent).await?;
-    let temporary = destination.with_extension("surf-part");
-    let result = async {
-        let mut file = tokio::fs::File::create(&temporary).await?;
+    // Unique temporary files prevent simultaneous report.pdf/report.txt saves
+    // from sharing a path. The guard also cleans up on errors or task cancellation.
+    let temporary = tempfile::NamedTempFile::new_in(parent)?;
+    async {
+        let mut file = tokio::fs::File::from_std(temporary.reopen()?);
         let mut stream = response.bytes_stream();
         while let Some(chunk) = stream.next().await {
             file.write_all(&chunk?).await?;
         }
         file.flush().await?;
+        file.sync_all().await?;
         drop(file);
-        if destination.exists() {
-            tokio::fs::remove_file(destination).await?;
-        }
-        tokio::fs::rename(&temporary, destination).await?;
+        temporary.persist_noclobber(destination).map_err(|error| {
+            SessionError::Storage(format!(
+                "could not save download without overwriting an existing file: {}",
+                error.error
+            ))
+        })?;
         Ok(())
     }
-    .await;
-    if result.is_err() {
-        let _ = tokio::fs::remove_file(&temporary).await;
-    }
-    result
+    .await
 }
 
 fn client(config: Arc<rustls::ClientConfig>) -> Result<Client> {
@@ -520,6 +534,114 @@ mod tests {
     use super::{
         app_version, compatibility_version, normalize_endpoint, wire_compatibility_version,
     };
+
+    #[test]
+    fn download_urls_are_single_escaped_path_segments() {
+        let endpoint = url::Url::parse("https://localhost:18080/").unwrap();
+        let url = super::download_url(&endpoint, "test book #1%.epub").unwrap();
+        assert_eq!(
+            url.as_str(),
+            "https://localhost:18080/api/v1/downloads/test%20book%20%231%25.epub"
+        );
+        for name in ["", ".", "../file", ".private", "/file", "a/b", "a\\b"] {
+            assert!(super::download_url(&endpoint, name).is_err(), "{name}");
+        }
+    }
+
+    async fn fixture_response(raw: &'static str) -> reqwest::Response {
+        use std::io::{Read as _, Write as _};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let worker = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 4096];
+            let _ = stream.read(&mut request).unwrap();
+            stream.write_all(raw.as_bytes()).unwrap();
+        });
+        let response = reqwest::get(format!("http://{address}/file"))
+            .await
+            .unwrap();
+        worker.join().unwrap();
+        response
+    }
+
+    #[tokio::test]
+    async fn downloads_preserve_existing_files_and_clean_up_failed_transfers() {
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("book.txt");
+        std::fs::write(&destination, "original").unwrap();
+        let response = fixture_response(
+            "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nnew",
+        )
+        .await;
+        assert!(
+            super::save_download_response(response, &destination)
+                .await
+                .is_err()
+        );
+        assert_eq!(std::fs::read_to_string(&destination).unwrap(), "original");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+        let missing = dir.path().join("missing.txt");
+        let response = fixture_response(
+            "HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\nshort",
+        )
+        .await;
+        assert!(
+            super::save_download_response(response, &missing)
+                .await
+                .is_err()
+        );
+        assert!(!missing.exists());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn downloads_accept_empty_files_and_reject_http_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("empty.txt");
+        let response =
+            fixture_response("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await;
+        super::save_download_response(response, &destination)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::metadata(&destination).unwrap().len(), 0);
+        let failed = dir.path().join("error.txt");
+        let response = fixture_response(
+            "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        )
+        .await;
+        assert!(
+            super::save_download_response(response, &failed)
+                .await
+                .is_err()
+        );
+        assert!(!failed.exists());
+    }
+
+    #[tokio::test]
+    async fn concurrent_downloads_with_the_same_stem_do_not_share_temporary_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("book.txt");
+        let second = dir.path().join("book.pdf");
+        let a = fixture_response(
+            "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\none",
+        )
+        .await;
+        let b = fixture_response(
+            "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\ntwo",
+        )
+        .await;
+        let (a, b) = tokio::join!(
+            super::save_download_response(a, &first),
+            super::save_download_response(b, &second)
+        );
+        a.unwrap();
+        b.unwrap();
+        assert_eq!(std::fs::read_to_string(first).unwrap(), "one");
+        assert_eq!(std::fs::read_to_string(second).unwrap(), "two");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
 
     #[test]
     fn endpoint_normalization_matches_native_client() {

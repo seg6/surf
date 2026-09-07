@@ -270,7 +270,18 @@ static UITextField *RBLibrarySearchTextField(UIView *view) {
     NSArray *source = nil;
     switch ([self tab]) {
         case RBLibraryTabBookmarks: source = self.bookmarkItems; break;
-        case RBLibraryTabDownloads: source = self.downloadItems; break;
+        case RBLibraryTabDownloads: {
+            NSMutableArray *downloads = [NSMutableArray arrayWithArray:self.downloadItems];
+            for (NSString *name in [[self.dlProgress allKeys] sortedArrayUsingSelector:@selector(compare:)]) {
+                BOOL listed = NO;
+                for (NSDictionary *item in self.downloadItems) {
+                    if ([[item objectForKey:@"name"] isEqualToString:name]) { listed = YES; break; }
+                }
+                if (!listed) [downloads insertObject:@{@"name":name, @"pending":@YES} atIndex:0];
+            }
+            source = downloads;
+            break;
+        }
         default: return self.history;
     }
     NSString *needle = [self.query lowercaseString];
@@ -356,7 +367,7 @@ static NSString *RBLibFormatDate(long long timestamp) {
         NSNumber *pct = [self.dlProgress objectForKey:name];
         cell.textLabel.text = name;
         cell.detailTextLabel.text = pct
-            ? [NSString stringWithFormat:@"downloading… %@%%", pct]
+            ? ([pct integerValue] < 0 ? @"Downloading…" : [NSString stringWithFormat:@"Downloading… %@%%", pct])
             : [NSString stringWithFormat:@"%@  ·  %@",
                RBLibFormatSize([[entry objectForKey:@"size"] longLongValue]),
                RBLibFormatDate([[entry objectForKey:@"ts"] longLongValue])];
@@ -380,6 +391,7 @@ static NSString *RBLibFormatDate(long long timestamp) {
     }
     NSDictionary *entry = [rows objectAtIndex:(NSUInteger)indexPath.row];
     if ([self tab] == RBLibraryTabDownloads) {
+        if ([[entry objectForKey:@"pending"] boolValue]) return;
         NSString *name = [entry objectForKey:@"name"];
         if ([name length] && self.onOpenDownload) self.onOpenDownload(name);
         return;
@@ -389,6 +401,8 @@ static NSString *RBLibFormatDate(long long timestamp) {
 }
 
 - (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath {
+    NSArray *rows = [self currentRows];
+    if (indexPath.row < (NSInteger)[rows count] && [[[rows objectAtIndex:(NSUInteger)indexPath.row] objectForKey:@"pending"] boolValue]) return NO;
     if ([self tab] == RBLibraryTabHistory && [self historyHasMore] &&
         indexPath.row == (NSInteger)[[self currentRows] count]) return NO;
     return YES;

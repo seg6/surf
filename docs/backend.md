@@ -126,6 +126,24 @@ minutes, Surf preserves the old profile as
 `profile.startup-failed-<timestamp>` and starts a clean profile with Surf
 bookmarks and history. TLS identity files are never replaced by this recovery.
 
+## Downloads
+
+Chromium writes unfinished downloads into a private session directory under
+`DOWNLOADS/.incomplete/`. When a download finishes, Surf publishes it into
+`DOWNLOADS` without overwriting an existing file. Concurrent downloads with
+the same filename receive different names. Only completed, non-hidden regular
+files appear in Library or can be fetched through the downloads API.
+
+Setup and filesystem failures are reported instead of announcing success.
+Files left behind by a crash or failed publication remain in `.incomplete`
+for manual recovery; Surf does not automatically resume them. A completed file
+kept there after a publication error is named with Chromium's download ID;
+the server log identifies its path.
+
+The file endpoint supports authenticated GET, HEAD, byte ranges and ETags.
+Desktop saves use unique temporary files and never overwrite local copies.
+The iOS client uses bounded ranges and a unique local directory for each copy.
+
 ## Logs
 
 Host logs rotate under `SURF_HOME`.

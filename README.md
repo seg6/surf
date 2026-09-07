@@ -197,6 +197,12 @@ does not require Xcode, an Apple SDK, signing, or a macOS host.
 The universal iOS package uses a pinned Linux, WSL2, or Docker environment.
 See [Native Build](docs/native-build.md).
 
+Run the normal test suite with `make test`. Backend download tests include a
+real Chromium round trip using a temporary profile and local HTTP fixtures.
+They discover an installed Chrome/Chromium automatically; `SURF_TEST_BROWSER`
+can select another executable. Without Chromium these tests explicitly skip
+locally and fail in CI. No separate download-test command or CI step is needed.
+
 ## Documentation
 
 - [Backend](docs/backend.md)

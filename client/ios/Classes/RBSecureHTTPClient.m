@@ -320,7 +320,7 @@ static NSString *RBTrimHeaderValue(NSString *value) {
     }
 }
 
-- (NSData *)readResponse:(SSLContextRef)context URL:(NSURL *)url response:(NSHTTPURLResponse **)response error:(NSError **)error {
+- (NSData *)readResponse:(SSLContextRef)context URL:(NSURL *)url headOnly:(BOOL)headOnly response:(NSHTTPURLResponse **)response error:(NSError **)error {
     NSMutableData *headerData = [NSMutableData data];
     unsigned char byte = 0;
     while ([headerData length] < 65536) {
@@ -368,6 +368,7 @@ static NSString *RBTrimHeaderValue(NSString *value) {
         }
     }
 
+    if (headOnly || statusCode == 204 || statusCode == 304) return [NSData data];
     NSMutableData *body = [NSMutableData data];
     NSString *transfer = [[lowerHeaders objectForKey:@"transfer-encoding"] lowercaseString];
     if ([transfer length] && [transfer rangeOfString:@"chunked"].location != NSNotFound) {
@@ -435,9 +436,17 @@ static NSString *RBTrimHeaderValue(NSString *value) {
     }
     if (![self handshake:context error:error]) { CFRelease(context); close(fd); return nil; }
 
-    NSString *path = [url path];
-    if (![path length]) path = @"/";
-    if ([[url query] length]) path = [path stringByAppendingFormat:@"?%@", [url query]];
+    // NSURL.path is decoded: writing it into an HTTP request corrupts spaces,
+    // percent signs and other escaped filename characters. Preserve the
+    // escaped origin-form target, excluding the fragment.
+    NSString *absolute = [[url absoluteURL] absoluteString];
+    NSRange schemeEnd = [absolute rangeOfString:@"://"];
+    NSString *afterScheme = [absolute substringFromIndex:schemeEnd.location + schemeEnd.length];
+    NSRange targetStart = [afterScheme rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"/?#"]];
+    NSString *path = targetStart.location == NSNotFound ? @"/" : [afterScheme substringFromIndex:targetStart.location];
+    NSRange fragment = [path rangeOfString:@"#"];
+    if (fragment.location != NSNotFound) path = [path substringToIndex:fragment.location];
+    if (![path hasPrefix:@"/"]) path = [@"/" stringByAppendingString:path];
     NSString *hostHeader = [url host];
     if ([hostHeader rangeOfString:@":"].location != NSNotFound) hostHeader = [NSString stringWithFormat:@"[%@]", hostHeader];
     if ([url port] && port != 443) hostHeader = [hostHeader stringByAppendingFormat:@":%ld", (long)port];
@@ -461,11 +470,80 @@ static NSString *RBTrimHeaderValue(NSString *value) {
     BOOL wrote = RBTLSWriteAll(context, [headData bytes], [headData length]) &&
                  (![body length] || RBTLSWriteAll(context, [body bytes], [body length]));
     if (!wrote) { if (error) *error = RBTLSError(8, @"Could not send the secure request"); CFRelease(context); close(fd); return nil; }
-    NSData *result = [self readResponse:context URL:url response:response error:error];
+    NSData *result = [self readResponse:context URL:url headOnly:[method isEqualToString:@"HEAD"] response:response error:error];
     SSLClose(context);
     CFRelease(context);
     close(fd);
     return result;
+}
+
+// Fetch in bounded ranges instead of retaining an entire book/video in RAM on
+// old iPads. This uses the same pinned TLS/auth path (including tunnel support).
+// The caller supplies a unique local path; never overwrite a user's saved copy.
+- (BOOL)downloadRequest:(NSURLRequest *)request toPath:(NSString *)path error:(NSError **)error {
+    int output = open([path fileSystemRepresentation], O_WRONLY | O_CREAT | O_EXCL, 0600);
+    if (output < 0) {
+        if (error) *error = [NSError errorWithDomain:NSPOSIXErrorDomain code:errno userInfo:nil];
+        return NO;
+    }
+    BOOL success = NO;
+    @try {
+        NSMutableURLRequest *head = [request mutableCopy];
+        [head setHTTPMethod:@"HEAD"];
+        NSHTTPURLResponse *metadata = nil;
+        if (![self sendRequest:head response:&metadata error:error] || [metadata statusCode] != 200 || [metadata expectedContentLength] < 0) {
+            if (error && !*error) *error = RBTLSError(9, @"Could not read download information");
+            return NO;
+        }
+        long long total = [metadata expectedContentLength];
+        NSString *etag = nil;
+        for (NSString *key in [metadata allHeaderFields]) {
+            if ([key caseInsensitiveCompare:@"ETag"] == NSOrderedSame) etag = [[metadata allHeaderFields] objectForKey:key];
+        }
+        for (long long offset = 0; offset < total;) {
+            @autoreleasepool {
+                long long end = offset + MIN(1024LL * 1024, total - offset) - 1;
+                NSMutableURLRequest *part = [request mutableCopy];
+                [part setHTTPMethod:@"GET"];
+                [part setValue:[NSString stringWithFormat:@"bytes=%lld-%lld", offset, end] forHTTPHeaderField:@"Range"];
+                if ([etag length]) [part setValue:etag forHTTPHeaderField:@"If-Match"];
+                NSHTTPURLResponse *response = nil;
+                NSData *data = [self sendRequest:part response:&response error:error];
+                NSString *contentRange = nil;
+                for (NSString *key in [response allHeaderFields]) {
+                    if ([key caseInsensitiveCompare:@"Content-Range"] == NSOrderedSame) contentRange = [[response allHeaderFields] objectForKey:key];
+                }
+                NSString *expected = [NSString stringWithFormat:@"bytes %lld-%lld/%lld", offset, end, total];
+                if (!data || [response statusCode] != 206 || ![contentRange isEqualToString:expected] ||
+                    [data length] != (NSUInteger)(end - offset + 1)) {
+                    if (error && !*error) *error = RBTLSError(9, @"Download changed or was interrupted; please try again");
+                    return NO;
+                }
+                const unsigned char *bytes = [data bytes];
+                NSUInteger remaining = [data length];
+                while (remaining) {
+                    ssize_t written = write(output, bytes, remaining);
+                    if (written < 0 && errno == EINTR) continue;
+                    if (written <= 0) {
+                        if (error) *error = [NSError errorWithDomain:NSPOSIXErrorDomain code:errno userInfo:nil];
+                        return NO;
+                    }
+                    bytes += written;
+                    remaining -= (NSUInteger)written;
+                }
+                offset = end + 1;
+            }
+        }
+        if (fsync(output) != 0) {
+            if (error) *error = [NSError errorWithDomain:NSPOSIXErrorDomain code:errno userInfo:nil];
+            return NO;
+        }
+        success = YES;
+        return YES;
+    } @finally {
+        close(output);
+        if (!success) unlink([path fileSystemRepresentation]);
+    }
 }
 
 @end

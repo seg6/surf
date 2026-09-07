@@ -41,6 +41,8 @@
 
 #include <math.h>
 #include <stdlib.h>
+#include <errno.h>
+#include <string.h>
 
 
 static const CGFloat kRBTopBarHeight = 50.0;
@@ -1350,6 +1352,7 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
     } else if ([t isEqualToString:@"found"]) {
         [self.findBar setFound:[[message objectForKey:@"on"] boolValue]];
     } else if ([t isEqualToString:@"download"]) {
+        [self.libraryController updateDownloadProgress:[message objectForKey:@"name"] pct:100];
         [self showToast:[NSString stringWithFormat:@"Downloaded %@", [message objectForKey:@"name"] ?: @""]];
     } else if ([t isEqualToString:@"downloads"]) {
         [self.libraryController setDownloads:[message objectForKey:@"items"]];
@@ -1436,7 +1439,7 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
         if (self.libraryController) {
             // Progress belongs in the Library rows, not toast spam.
             [self.libraryController updateDownloadProgress:name pct:pct];
-        } else {
+        } else if (pct < 100) {
             [self showToast:(pct >= 0 ? [NSString stringWithFormat:@"%@ — %d%%", name, pct]
                                       : [NSString stringWithFormat:@"%@…", name])];
         }
@@ -2333,36 +2336,38 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
 // scratch space that can vanish under memory pressure), then offer the
 // system "Open in…" menu — the loop iOS 6 Safari never closed.
 - (void)openDownloadNamed:(NSString *)name {
-    if (![name length]) return;
-    NSString *escaped = [name stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+    if (![name length] || ![[name lastPathComponent] isEqualToString:name] || [name hasPrefix:@"."] ||
+        [name rangeOfString:@"\\"].location != NSNotFound) return;
+    NSString *escaped = CFBridgingRelease(CFURLCreateStringByAddingPercentEscapes(
+        NULL, (__bridge CFStringRef)name, NULL, CFSTR(":/?#[]@!$&'()*+,;=%"), kCFStringEncodingUTF8));
     NSURL *url = [NSURL URLWithString:[@"/api/v1/downloads/" stringByAppendingString:escaped] relativeToURL:self.session.baseURL];
     if (!url) return;
     [self showToast:[NSString stringWithFormat:@"Fetching %@…", name]];
     RBLogEvent(@"download", @"info", @{@"host": [url host] ?: @"", @"name": name ?: @""}, @"Download started");
     NSURLRequest *request = [NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:120.0];
+    NSDictionary *server = [self.currentServer copy];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        RBSecureHTTPClient *client = [RBSecureHTTPClient clientForServer:self.currentServer];
-        NSHTTPURLResponse *response = nil; NSError *error = nil;
-        NSData *data = [client sendRequest:request response:&response error:&error];
-        dispatch_async(dispatch_get_main_queue(), ^{
-        NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]] ? [(NSHTTPURLResponse *)response statusCode] : 0;
-        RBLogEvent(@"download", (error || status >= 400) ? @"error" : @"info",
-                   @{@"status": @(status), @"bytes": @([data length]),
-                     @"error": [error localizedDescription] ?: @""}, @"Download request completed");
-        if (error || status >= 400 || ![data length]) {
-            [self showToast:@"Download failed"];
-            return;
-        }
-        NSString *dir = [RBLogDirectory stringByAppendingPathComponent:@"Downloads"];
-        NSError *dirError = nil;
-        if (![[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:&dirError]) {
-            RBLogEvent(@"download", @"error", @{@"operation": @"create_directory",
-                       @"error": [dirError localizedDescription] ?: @""}, @"Download directory creation failed");
+        RBSecureHTTPClient *client = [RBSecureHTTPClient clientForServer:server];
+        NSError *error = nil;
+        NSString *root = [RBLogDirectory stringByAppendingPathComponent:@"Downloads"];
+        NSString *dir = nil;
+        if ([[NSFileManager defaultManager] createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:&error]) {
+            char *candidate = strdup([[root stringByAppendingPathComponent:@"download-XXXXXX"] fileSystemRepresentation]);
+            if (candidate && mkdtemp(candidate)) {
+                dir = [[NSFileManager defaultManager] stringWithFileSystemRepresentation:candidate length:strlen(candidate)];
+            } else {
+                error = [NSError errorWithDomain:NSPOSIXErrorDomain code:candidate ? errno : ENOMEM userInfo:nil];
+            }
+            free(candidate);
         }
         NSString *path = [dir stringByAppendingPathComponent:name];
-        if (![data writeToFile:path atomically:YES]) {
-            RBLogEvent(@"download", @"error", @{@"operation": @"write_file", @"name": [path lastPathComponent] ?: @""}, @"Downloaded file could not be saved");
-            [self showToast:@"Could not save file"];
+        BOOL saved = dir && [client downloadRequest:request toPath:path error:&error];
+        if (!saved && dir) [[NSFileManager defaultManager] removeItemAtPath:dir error:NULL];
+        RBLogEvent(@"download", saved ? @"info" : @"error",
+                   @{@"name": name, @"error": [error localizedDescription] ?: @""}, @"Download transfer finished");
+        dispatch_async(dispatch_get_main_queue(), ^{
+        if (!saved) {
+            [self showToast:[error localizedDescription] ?: @"Download failed"];
             return;
         }
         self.docController = [UIDocumentInteractionController interactionControllerWithURL:[NSURL fileURLWithPath:path]];

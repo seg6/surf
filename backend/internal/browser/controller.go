@@ -82,8 +82,7 @@ type Controller struct {
 	icons        map[string]*favicon // origin -> icon, guarded by b.mu
 	iconFetching map[string]bool     // guarded by b.mu
 
-	dlMu    sync.Mutex
-	dlNames map[string]string // download guid -> final filename
+	downloads *downloadStore
 
 	video       *media.VideoPipeline
 	audio       *media.AudioPipeline
@@ -159,7 +158,6 @@ type Controller struct {
 	chooserSession string
 	chooserNode    int64
 	selectRequest  selectRequest
-	dlLastPush     map[string]time.Time // download guid -> last dlprogress
 }
 
 type controllerCommand struct {
@@ -196,9 +194,7 @@ func New(cfg *config.Config, hub *transport.Hub) (*Controller, error) {
 		store:          NewStore(cfg.Profile),
 		icons:          map[string]*favicon{},
 		iconFetching:   map[string]bool{},
-		dlNames:        map[string]string{},
 		dialogSessions: map[string]bool{},
-		dlLastPush:     map[string]time.Time{},
 		video:          media.NewVideoPipeline(videoCfg),
 		audio:          media.NewAudioPipeline(audioCfg),
 		capture:        capture,
@@ -300,6 +296,9 @@ func (b *Controller) Start() (err error) {
 		b.userAgentMetadata = metadata
 		log.Printf("browser identity: preserving native client hints")
 	}
+	if err := b.setupDownloads(); err != nil {
+		return fmt.Errorf("set up downloads: %w", err)
+	}
 	client.OnEvent(func(event cdp.Event) {
 		select {
 		case b.events <- event:
@@ -318,7 +317,6 @@ func (b *Controller) Start() (err error) {
 	if err != nil {
 		return err
 	}
-	b.setupDownloads()
 	log.Printf("browser ready, view %dx%d (headless-new, source=tabCapture/WebCodecs, profile %s)",
 		b.viewW, b.viewH, b.cfg.Profile)
 	started = true
@@ -609,9 +607,9 @@ func (b *Controller) onEvent(ev cdp.Event) {
 			go b.refreshTabTitle(t)
 		}
 		go b.probeWidevine(ev.SessionID)
-	case "Controller.downloadWillBegin":
+	case "Browser.downloadWillBegin":
 		b.onDownloadBegin(ev)
-	case "Controller.downloadProgress":
+	case "Browser.downloadProgress":
 		b.onDownloadProgress(ev)
 	case "Page.javascriptDialogOpening":
 		b.onJavascriptDialog(ev)

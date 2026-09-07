@@ -251,6 +251,26 @@ impl DesktopApp {
     fn draw_download_rows(&mut self, ui: &Ui, filter: &str, actions: &mut Vec<Action>) {
         let items = self.controller.browser.downloads.clone();
         let mut matches = 0;
+        for (name, pct) in &self.controller.browser.download_progress {
+            if !name.to_lowercase().contains(filter) {
+                continue;
+            }
+            matches += 1;
+            let detail = if *pct < 0 {
+                "Downloading on your Surf computer…".to_owned()
+            } else {
+                format!("Downloading on your Surf computer · {pct}%")
+            };
+            let _disabled = ui.begin_disabled(true);
+            row(
+                ui,
+                "file",
+                name,
+                &detail,
+                false,
+                ui.content_region_avail()[0],
+            );
+        }
         for item in items
             .iter()
             .filter(|i| i.name.to_lowercase().contains(filter))
@@ -265,7 +285,13 @@ impl DesktopApp {
                 .copied();
             let detail = progress.map_or_else(
                 || format!("{}  ·  On your computer", format_bytes(item.size)),
-                |p| format!("Saving local copy · {p}%"),
+                |p| {
+                    if p < 0 {
+                        "Downloading…".to_owned()
+                    } else {
+                        format!("Downloading · {p}%")
+                    }
+                },
             );
             let start = ui.cursor_pos();
             let width = ui.content_region_avail()[0];

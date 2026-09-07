@@ -2,7 +2,6 @@ package browser
 
 import (
 	"net/http"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -30,13 +29,5 @@ func (b *Controller) RegisterRoutes(server *web.Server) {
 		_, _ = w.Write(icon.data)
 	})
 	server.Gated(web.APIRoot+"/uploads", b.handleUpload)
-	server.Gated(web.APIRoot+"/downloads/", func(w http.ResponseWriter, r *http.Request) {
-		name := filepath.Base(strings.TrimPrefix(r.URL.Path, web.APIRoot+"/downloads/"))
-		if name == "." || name == "/" || strings.HasPrefix(name, ".") {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Disposition", "inline; filename=\""+name+"\"")
-		http.ServeFile(w, r, filepath.Join(b.cfg.DownloadsDir, name))
-	})
+	server.Gated(web.APIRoot+"/downloads/", b.handleDownload)
 }

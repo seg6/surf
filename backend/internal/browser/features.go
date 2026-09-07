@@ -8,13 +8,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
-	"surf-backend/internal/cdp"
 	"surf-backend/internal/protocol"
 	"surf-backend/internal/transport"
 	"surf-backend/internal/web"
@@ -159,106 +155,6 @@ func fetchIcon(href string) *favicon {
 	return &favicon{data: data, ctype: ct, hash: hex.EncodeToString(sum[:4])}
 }
 
-// ---- downloads ----------------------------------------------------------
-
-var unsafeName = regexp.MustCompile(`[^a-zA-Z0-9._ ()\-]`)
-
-func (b *Controller) setupDownloads() {
-	_ = os.MkdirAll(b.cfg.DownloadsDir, 0o755)
-	_, _ = b.cdp.Call("", "Controller.setDownloadBehavior", map[string]any{
-		"behavior": "allowAndName", "downloadPath": b.cfg.DownloadsDir, "eventsEnabled": true,
-	})
-}
-
-func (b *Controller) onDownloadBegin(ev cdp.Event) {
-	var p struct {
-		GUID              string `json:"guid"`
-		SuggestedFilename string `json:"suggestedFilename"`
-	}
-	if json.Unmarshal(ev.Params, &p) != nil || p.GUID == "" {
-		return
-	}
-	name := unsafeName.ReplaceAllString(filepath.Base(p.SuggestedFilename), "_")
-	if name == "" || name == "." {
-		name = "download"
-	}
-	b.dlMu.Lock()
-	// Dedupe against files already on disk.
-	final := name
-	for i := 1; ; i++ {
-		if _, err := os.Stat(filepath.Join(b.cfg.DownloadsDir, final)); os.IsNotExist(err) {
-			break
-		}
-		ext := filepath.Ext(name)
-		final = fmt.Sprintf("%s-%d%s", strings.TrimSuffix(name, ext), i, ext)
-	}
-	b.dlNames[p.GUID] = final
-	b.dlMu.Unlock()
-	b.broadcast(protocol.TextEvent{Type: "toast", Text: "downloading " + final})
-}
-
-func (b *Controller) onDownloadProgress(ev cdp.Event) {
-	var p struct {
-		GUID          string  `json:"guid"`
-		State         string  `json:"state"`
-		ReceivedBytes float64 `json:"receivedBytes"`
-		TotalBytes    float64 `json:"totalBytes"`
-	}
-	if json.Unmarshal(ev.Params, &p) != nil || p.GUID == "" {
-		return
-	}
-	if p.State != "completed" && p.State != "canceled" {
-		// In-flight: push a throttled dlprogress so the client can show a bar.
-		b.verbMu.Lock()
-		last := b.dlLastPush[p.GUID]
-		push := time.Since(last) > 500*time.Millisecond
-		if push {
-			b.dlLastPush[p.GUID] = time.Now()
-		}
-		b.verbMu.Unlock()
-		if push {
-			b.dlMu.Lock()
-			name := b.dlNames[p.GUID]
-			b.dlMu.Unlock()
-			pct := -1
-			if p.TotalBytes > 0 {
-				pct = int(p.ReceivedBytes / p.TotalBytes * 100)
-			}
-			b.broadcast(protocol.DownloadProgressEvent{Type: "dlprogress", Name: name, Pct: pct})
-		}
-		return
-	}
-	b.verbMu.Lock()
-	delete(b.dlLastPush, p.GUID)
-	b.verbMu.Unlock()
-	b.dlMu.Lock()
-	name := b.dlNames[p.GUID]
-	delete(b.dlNames, p.GUID)
-	b.dlMu.Unlock()
-	if p.State == "canceled" || name == "" {
-		return
-	}
-	_ = os.Rename(filepath.Join(b.cfg.DownloadsDir, p.GUID), filepath.Join(b.cfg.DownloadsDir, name))
-	b.broadcast(protocol.NameEvent{Type: "download", Name: name})
-}
-
-func (b *Controller) downloadList() []protocol.DownloadItem {
-	entries, _ := os.ReadDir(b.cfg.DownloadsDir)
-	items := []protocol.DownloadItem{}
-	for _, e := range entries {
-		info, err := e.Info()
-		if err != nil || e.IsDir() {
-			continue
-		}
-		items = append(items, protocol.DownloadItem{
-			Name: e.Name(), Size: info.Size(), TS: info.ModTime().Unix(),
-		})
-	}
-	return items
-}
-
-// ---- feature messages ------------------------------------------------------
-
 // handleFeatureMessage handles message types beyond the M1 set.
 func (b *Controller) handleFeatureMessage(c *transport.Client, t *Tab, session string, command protocol.Command) {
 	kind := command.Kind()
@@ -288,11 +184,8 @@ func (b *Controller) handleFeatureMessage(c *transport.Client, t *Tab, session s
 		if kind != "dldel" {
 			return
 		}
-		// Delete a completed download from the server (Library UI). Name is
-		// path-sanitized the same way the /downloads/ route is.
-		name := filepath.Base(m.Name)
-		if name != "." && name != "/" && !strings.HasPrefix(name, ".") {
-			_ = os.Remove(filepath.Join(b.cfg.DownloadsDir, name))
+		if err := b.downloads.remove(m.Name); err != nil {
+			b.downloadError("Could not delete download", err)
 		}
 		b.send(c, protocol.DownloadsEvent{Type: "downloads", Items: b.downloadList()})
 	case *protocol.HistoryDeleteCommand:
