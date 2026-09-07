@@ -25,7 +25,9 @@ L.L.C. Their names and trademarks are not used to imply sponsorship.
 
 ## Lucide icons
 
-Browser interface glyphs use the Lucide icon font from `lucide-static` 1.34.0.
+The iOS browser interface uses the Lucide icon font from `lucide-static` 1.34.0.
+The desktop interface bundles original SVG icons from the same version in
+`client/desktop/assets/icons`, rasterized at the display scale with resvg.
 The package was retrieved from
 <https://registry.npmjs.org/lucide-static/-/lucide-static-1.34.0.tgz>.
 The downloaded package archive has SHA-256

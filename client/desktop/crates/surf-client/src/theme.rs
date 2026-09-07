@@ -130,31 +130,19 @@ pub fn install_fonts(context: &mut Context, scale: f32) {
         (semibold.as_slice(), 18.0),
         (semibold.as_slice(), 24.0),
     ] {
-        fonts.add_font(&[
-            FontSource::TtfData {
-                data,
-                size_pixels: size * scale,
-                config: Some(FontConfig {
-                    oversample_h: 2,
-                    oversample_v: 2,
-                    glyph_ranges: FontGlyphRanges::from_slice(&[
-                        0x20, 0x24f, 0x370, 0x52f, 0x2000, 0x206f, 0x20a0, 0x214f, 0x2190, 0x27ff,
-                        0xfffd, 0xfffd, 0,
-                    ]),
-                    ..FontConfig::default()
-                }),
-            },
-            FontSource::TtfData {
-                data: include_bytes!("../../../../ios/Resources/Lucide.ttf"),
-                size_pixels: 16.0 * scale,
-                config: Some(FontConfig {
-                    glyph_ranges: FontGlyphRanges::from_slice(&[0xe000, 0xeaff, 0]),
-                    glyph_min_advance_x: 16.0 * scale,
-                    glyph_max_advance_x: 16.0 * scale,
-                    ..FontConfig::default()
-                }),
-            },
-        ]);
+        fonts.add_font(&[FontSource::TtfData {
+            data,
+            size_pixels: size * scale,
+            config: Some(FontConfig {
+                oversample_h: 2,
+                oversample_v: 2,
+                glyph_ranges: FontGlyphRanges::from_slice(&[
+                    0x20, 0x24f, 0x370, 0x52f, 0x2000, 0x206f, 0x20a0, 0x214f, 0x2190, 0x27ff,
+                    0xfffd, 0xfffd, 0,
+                ]),
+                ..FontConfig::default()
+            }),
+        }]);
     }
     context.io_mut().font_global_scale = 1.0 / scale;
 }

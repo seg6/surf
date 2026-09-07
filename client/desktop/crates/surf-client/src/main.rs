@@ -1,4 +1,5 @@
 mod assets;
+mod icons;
 mod layout;
 mod page_input;
 mod preferences;

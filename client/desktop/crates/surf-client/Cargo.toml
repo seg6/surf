@@ -16,6 +16,7 @@ imgui.workspace = true
 imgui-glow-renderer.workspace = true
 imgui-winit-support.workspace = true
 raw-window-handle.workspace = true
+resvg = { version = "0.46.0", default-features = false }
 surf-client-app.workspace = true
 surf-core.workspace = true
 surf-media.workspace = true

@@ -39,7 +39,13 @@ impl DesktopApp {
                 self.hit_regions.push(window_rect(ui));
                 {
                     let _disabled = ui.begin_disabled(!self.controller.snapshot.can_go_back);
-                    if icon_button(ui, "back", icon::BACK, "Back · Alt+Left") {
+                    if icon_button(
+                        ui,
+                        &self.assets.ui_icons,
+                        "back",
+                        icon::BACK,
+                        "Back · Alt+Left",
+                    ) {
                         self.controller.command(Command::Back {
                             causal: Causal::default(),
                         });
@@ -48,7 +54,13 @@ impl DesktopApp {
                 if density != Density::Minimal {
                     ui.same_line();
                     let _disabled = ui.begin_disabled(!self.controller.snapshot.can_go_forward);
-                    if icon_button(ui, "forward", icon::FORWARD, "Forward · Alt+Right") {
+                    if icon_button(
+                        ui,
+                        &self.assets.ui_icons,
+                        "forward",
+                        icon::FORWARD,
+                        "Forward · Alt+Right",
+                    ) {
                         self.controller.command(Command::Forward {
                             causal: Causal::default(),
                         });
@@ -151,7 +163,13 @@ impl DesktopApp {
                     } else {
                         icon::RELOAD
                     };
-                    if icon_button(ui, "reload-stop", glyph, "Reload / stop · Ctrl+R") {
+                    if icon_button(
+                        ui,
+                        &self.assets.ui_icons,
+                        "reload-stop",
+                        glyph,
+                        "Reload / stop · Ctrl+R",
+                    ) {
                         self.reload_or_stop();
                     }
                 });
@@ -224,7 +242,13 @@ impl DesktopApp {
                                     ui.tooltip_text(&title);
                                 }
                                 ui.same_line_with_spacing(0.0, 0.0);
-                                if icon_button(ui, "close", icon::CLOSE, "Close tab") {
+                                if icon_button(
+                                    ui,
+                                    &self.assets.ui_icons,
+                                    "close",
+                                    icon::CLOSE,
+                                    "Close tab",
+                                ) {
                                     self.close_tab(i32::try_from(tab.id).unwrap_or_default());
                                 }
                             }
@@ -233,6 +257,7 @@ impl DesktopApp {
                     ui.same_line();
                     if icon_button(
                         ui,
+                        &self.assets.ui_icons,
                         "tabs",
                         icon::TABS,
                         &format!("Tabs · {} open", self.controller.snapshot.tabs.len()),
@@ -247,18 +272,30 @@ impl DesktopApp {
                     } else {
                         ui.same_line();
                     }
-                    if icon_button(ui, "new-tab", icon::PLUS, "New tab · Ctrl+T") {
+                    if icon_button(
+                        ui,
+                        &self.assets.ui_icons,
+                        "new-tab",
+                        icon::PLUS,
+                        "New tab · Ctrl+T",
+                    ) {
                         self.new_tab();
                     }
                 }
                 if show_tabs {
                     ui.same_line();
-                    if icon_button(ui, "library", icon::BOOK, "Library") {
+                    if icon_button(ui, &self.assets.ui_icons, "library", icon::BOOK, "Library") {
                         self.open_library();
                     }
                 }
                 ui.set_cursor_pos([width - 36.0, 6.0]);
-                if icon_button(ui, "more", icon::MORE, "Browser tools") {
+                if icon_button(
+                    ui,
+                    &self.assets.ui_icons,
+                    "more",
+                    icon::MORE,
+                    "Browser tools",
+                ) {
                     self.panel = toggle(self.panel, Panel::More);
                     self.page_focused = false;
                 }
@@ -360,7 +397,8 @@ impl DesktopApp {
                             self.panel = None;
                         }
                         ui.same_line();
-                        if icon_button(ui, "close", icon::CLOSE, "Close tab") {
+                        if icon_button(ui, &self.assets.ui_icons, "close", icon::CLOSE, "Close tab")
+                        {
                             self.close_tab(i32::try_from(tab.id).unwrap_or_default());
                         }
                     }

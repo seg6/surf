@@ -43,6 +43,7 @@ install -m 0644 "$repository_root/THIRD_PARTY_NOTICES.md" "$stage/THIRD_PARTY_NO
 mkdir -p "$stage/licenses"
 install -m 0644 "$repository_root/client/desktop/assets/fonts/LICENSE.txt" "$stage/licenses/Inter-OFL.txt"
 install -m 0644 "$repository_root/client/ios/Artwork/LUCIDE-LICENSE.txt" "$stage/licenses/Lucide.txt"
+install -m 0644 "$repository_root/client/desktop/assets/icons/RESVG-LICENSE-MIT.txt" "$stage/licenses/resvg-MIT.txt"
 install -m 0644 "$repository_root/client/ios/Artwork/DETA-SURF-LICENSE.txt" "$stage/licenses/Deta-Surf.txt"
 install -m 0644 "$repository_root/client/desktop/README.md" "$stage/README.md"
 install -m 0644 "$repository_root/backend/cmd/surf/surf-icon.png" \

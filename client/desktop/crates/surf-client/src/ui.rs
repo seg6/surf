@@ -93,26 +93,7 @@ const DEVICE_PRESETS: &[DevicePreset] = &[
     },
 ];
 
-mod icon {
-    pub const BACK: &str = "\u{e06e}";
-    pub const FORWARD: &str = "\u{e06f}";
-    pub const RELOAD: &str = "\u{e145}";
-    pub const STOP: &str = "\u{e167}";
-    pub const CLOSE: &str = "\u{e1b2}";
-    pub const PLUS: &str = "\u{e13d}";
-    pub const MORE: &str = "\u{e0b6}";
-    pub const STAR: &str = "\u{e176}";
-    pub const BOOK: &str = "\u{e05f}";
-    pub const TABS: &str = "\u{e12c}";
-    pub const SEARCH: &str = "\u{e151}";
-    pub const GEAR: &str = "\u{e154}";
-    pub const GAUGE: &str = "\u{e1bf}";
-    pub const SHARE: &str = "\u{e155}";
-    pub const EXPAND: &str = "\u{e112}";
-    pub const READER: &str = "\u{e348}";
-    pub const MEDIA: &str = "\u{e080}";
-    pub const SERVER: &str = "\u{e11d}";
-}
+use crate::icons as icon;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Panel {
@@ -392,6 +373,9 @@ impl DesktopApp {
     }
 
     pub fn draw(&mut self, ui: &Ui, window: &Window) {
+        self.assets
+            .ui_icons
+            .prepare(ui.io().display_framebuffer_scale[0]);
         self.hit_regions.clear();
         let display = ui.io().display_size;
         let connected = self.controller.connected;

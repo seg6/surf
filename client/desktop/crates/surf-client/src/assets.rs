@@ -6,6 +6,7 @@ type PendingIcon = (
     std::sync::mpsc::Receiver<(String, Option<image::RgbaImage>)>,
 );
 pub struct Assets {
+    pub ui_icons: crate::icons::IconAtlas,
     gl: Rc<glow::Context>,
     mark: glow::Texture,
     icons: std::collections::BTreeMap<String, glow::Texture>,
@@ -48,6 +49,7 @@ impl Assets {
             texture
         };
         Ok(Self {
+            ui_icons: crate::icons::IconAtlas::new(gl)?,
             gl: gl.clone(),
             mark,
             icons: std::collections::BTreeMap::new(),

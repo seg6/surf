@@ -57,11 +57,20 @@ impl DesktopApp {
             self.more_height = ui.window_size()[1];
         }
         let mut next = None;
-        if widgets::menu_row(ui, "new", icon::PLUS, "New tab", "Ctrl+T", false) {
+        if widgets::menu_row(
+            ui,
+            &self.assets.ui_icons,
+            "new",
+            icon::PLUS,
+            "New tab",
+            "Ctrl+T",
+            false,
+        ) {
             self.new_tab();
         }
         if widgets::menu_row(
             ui,
+            &self.assets.ui_icons,
             "bookmark",
             icon::STAR,
             "Bookmark this page",
@@ -72,7 +81,15 @@ impl DesktopApp {
                 causal: Causal::default(),
             });
         }
-        if widgets::menu_row(ui, "share", icon::SHARE, "Copy page link", "", false) {
+        if widgets::menu_row(
+            ui,
+            &self.assets.ui_icons,
+            "share",
+            icon::SHARE,
+            "Copy page link",
+            "",
+            false,
+        ) {
             match arboard::Clipboard::new()
                 .and_then(|mut c| c.set_text(self.controller.snapshot.current_url.clone()))
             {
@@ -84,12 +101,21 @@ impl DesktopApp {
             }
         }
         ui.separator();
-        if widgets::menu_row(ui, "library", icon::BOOK, "Library", "", false) {
+        if widgets::menu_row(
+            ui,
+            &self.assets.ui_icons,
+            "library",
+            icon::BOOK,
+            "Library",
+            "",
+            false,
+        ) {
             self.open_library();
             next = Some(Panel::Library);
         }
         if widgets::menu_row(
             ui,
+            &self.assets.ui_icons,
             "find",
             icon::SEARCH,
             "Find on page",
@@ -101,13 +127,29 @@ impl DesktopApp {
             ui.close_current_popup();
             self.panel = None;
         }
-        if widgets::menu_row(ui, "reader", icon::READER, "Reader", "", false) {
+        if widgets::menu_row(
+            ui,
+            &self.assets.ui_icons,
+            "reader",
+            icon::READER,
+            "Reader",
+            "",
+            false,
+        ) {
             self.controller.command(Command::Reader {
                 causal: Causal::default(),
             });
             self.panel = None;
         }
-        if widgets::menu_row(ui, "media", icon::MEDIA, "Page media", "", false) {
+        if widgets::menu_row(
+            ui,
+            &self.assets.ui_icons,
+            "media",
+            icon::MEDIA,
+            "Page media",
+            "",
+            false,
+        ) {
             self.controller.command(Command::MediaQuery {
                 causal: Causal::default(),
             });
@@ -116,6 +158,7 @@ impl DesktopApp {
         ui.separator();
         if widgets::menu_row(
             ui,
+            &self.assets.ui_icons,
             "performance",
             icon::GAUGE,
             "Performance",
@@ -125,11 +168,20 @@ impl DesktopApp {
             self.performance_open = !self.performance_open;
             self.panel = None;
         }
-        if widgets::menu_row(ui, "settings", icon::GEAR, "Settings", "", false) {
+        if widgets::menu_row(
+            ui,
+            &self.assets.ui_icons,
+            "settings",
+            icon::GEAR,
+            "Settings",
+            "",
+            false,
+        ) {
             next = Some(Panel::Settings);
         }
         if widgets::menu_row(
             ui,
+            &self.assets.ui_icons,
             "fullscreen",
             icon::EXPAND,
             "Fullscreen",
@@ -140,7 +192,15 @@ impl DesktopApp {
             self.panel = None;
         }
         ui.separator();
-        if widgets::menu_row(ui, "disconnect", icon::SERVER, "Disconnect", "", false) {
+        if widgets::menu_row(
+            ui,
+            &self.assets.ui_icons,
+            "disconnect",
+            icon::SERVER,
+            "Disconnect",
+            "",
+            false,
+        ) {
             self.controller.disconnect();
             self.panel = None;
         }
@@ -183,7 +243,7 @@ impl DesktopApp {
             )
             .build(|| {
                 self.hit_regions.push(window_rect(ui));
-                widgets::sheet_header(ui, "Library", &mut open);
+                widgets::sheet_header(ui, &self.assets.ui_icons, "Library", &mut open);
                 let segment_width = (ui.content_region_avail()[0] - 8.0) / 3.0;
                 for (section, label) in [
                     (LibrarySection::History, "History"),
@@ -288,7 +348,13 @@ impl DesktopApp {
                                     actions.push(Action::Navigate(item.url.clone()));
                                 }
                                 ui.same_line();
-                                if icon_button(ui, "remove", icon::CLOSE, "Remove") {
+                                if icon_button(
+                                    ui,
+                                    &self.assets.ui_icons,
+                                    "remove",
+                                    icon::CLOSE,
+                                    "Remove",
+                                ) {
                                     actions.push(Action::Command(if history {
                                         Command::HistoryDelete {
                                             url: item.url.clone(),
@@ -355,15 +421,33 @@ impl DesktopApp {
                     direction = Some(0);
                 }
                 ui.same_line();
-                if icon_button(ui, "previous", icon::BACK, "Previous match") {
+                if icon_button(
+                    ui,
+                    &self.assets.ui_icons,
+                    "previous",
+                    icon::BACK,
+                    "Previous match",
+                ) {
                     direction = Some(-1);
                 }
                 ui.same_line();
-                if icon_button(ui, "next", icon::FORWARD, "Next match") {
+                if icon_button(
+                    ui,
+                    &self.assets.ui_icons,
+                    "next",
+                    icon::FORWARD,
+                    "Next match",
+                ) {
                     direction = Some(1);
                 }
                 ui.same_line();
-                if icon_button(ui, "close-find", icon::CLOSE, "Close find") {
+                if icon_button(
+                    ui,
+                    &self.assets.ui_icons,
+                    "close-find",
+                    icon::CLOSE,
+                    "Close find",
+                ) {
                     self.find_open = false;
                     self.controller.command(Command::Find {
                         q: String::new(),
@@ -401,7 +485,7 @@ impl DesktopApp {
             .flags(overlay_flags() | WindowFlags::NO_TITLE_BAR | WindowFlags::NO_MOVE)
             .build(|| {
                 self.hit_regions.push(window_rect(ui));
-                widgets::sheet_header(ui, "Reader", &mut open);
+                widgets::sheet_header(ui, &self.assets.ui_icons, "Reader", &mut open);
                 ui.text_wrapped(&reader.title);
                 ui.text_disabled(compact_address(&reader.url));
                 ui.same_line();
@@ -497,7 +581,7 @@ impl DesktopApp {
             .position_pivot([0.5,0.5]).size(size,Condition::Always)
             .flags(overlay_flags()|WindowFlags::NO_RESIZE | WindowFlags::NO_TITLE_BAR | WindowFlags::NO_MOVE).build(|| {
                 self.hit_regions.push(window_rect(ui));
-                widgets::sheet_header(ui,"Settings",&mut open);
+                widgets::sheet_header(ui, &self.assets.ui_icons,"Settings",&mut open);
                 ui.child_window("##settings-body").size([0.0,0.0]).build(||{
                     section(ui,"Appearance");
                     let mut dark=self.controller.dark_mode;
