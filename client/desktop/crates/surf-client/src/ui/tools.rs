@@ -231,32 +231,42 @@ impl DesktopApp {
             return;
         };
         let display = ui.io().display_size;
-        let width = (display[0] * 0.72)
-            .clamp(280.0, 900.0)
-            .min((display[0] - 16.0).max(280.0));
-        let height = (display[1] * 0.78)
-            .clamp(220.0, 720.0)
-            .min((display[1] - 16.0).max(220.0));
+        let page = self.layout.page;
+        let width = (display[0] - 16.0).min(720.0);
+        let height = (page.height as f32 - 16.0).min(620.0);
         let mut open = true;
         let mut navigate = false;
         ui.window("Reader###reader")
-            .position([display[0] * 0.5, display[1] * 0.5], Condition::Appearing)
+            .position(
+                [display[0] * 0.5, page.y as f32 + page.height as f32 * 0.5],
+                Condition::Always,
+            )
             .position_pivot([0.5, 0.5])
-            .size([width, height], Condition::Appearing)
-            .flags(overlay_flags() | WindowFlags::NO_TITLE_BAR | WindowFlags::NO_MOVE)
+            .size([width, height], Condition::Always)
+            .flags(
+                overlay_flags()
+                    | WindowFlags::NO_TITLE_BAR
+                    | WindowFlags::NO_MOVE
+                    | WindowFlags::NO_RESIZE,
+            )
             .build(|| {
                 self.hit_regions.push(window_rect(ui));
                 widgets::sheet_header(ui, &self.assets.ui_icons, "Reader", &mut open);
-                ui.text_wrapped(&reader.title);
-                ui.text_disabled(compact_address(&reader.url));
-                ui.same_line();
-                if ui.small_button("Open page") {
-                    navigate = true;
-                }
-                ui.separator();
-                ui.child_window("##reader-text").size([0.0, 0.0]).build(|| {
+                ui.dummy([0.0, 8.0]);
+                let body_height = (ui.content_region_avail()[1] - 44.0).max(40.0);
+                widgets::inset(ui, "##reader-text", body_height, || {
+                    {
+                        let _font = ui.push_font(ui.fonts().fonts()[4]);
+                        ui.text_wrapped(&reader.title);
+                    }
+                    widgets::description(ui, &compact_address(&reader.url));
+                    ui.dummy([0.0, 12.0]);
                     ui.text_wrapped(&reader.text);
                 });
+                ui.dummy([0.0, 4.0]);
+                if ui.button_with_size("Open original page", [0.0, 32.0]) {
+                    navigate = true;
+                }
             });
         if navigate {
             self.controller.navigate(&reader.url);

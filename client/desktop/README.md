@@ -28,6 +28,11 @@ switcher. Ctrl+L selects the address; Enter navigates, Escape restores the curre
 address. Ctrl+T opens a tab, Ctrl+W closes one, Ctrl+F opens Find, and F11 toggles
 fullscreen. Find and Performance can remain visible together.
 
+Settings separates Appearance, Browsing, Computers, Device testing, and About.
+Wide windows use category navigation; narrow windows use a category selector.
+History is grouped by local calendar date. Library row menus contain file/page
+actions and confirmed removal. New Tab includes a directly editable search field.
+
 Settings are saved beside the server identities in `desktop-preferences.json`.
 Dark appearance, bar position, reduced motion, mobile websites and the selected
 device preset survive restarts. A device preset only resizes the window when
@@ -79,6 +84,8 @@ The opt-in gallery uses production widgets and isolated fixture data, without a
 network worker. Scenes include `start`, `browser`, `new-tab`, `address`,
 `settings`, `library`, `tools`, `tabs`, `find`, `performance`, `code`, `words`,
 `reader`, `dialog`, `select`, `files`, `media`, and `error`.
+Additional stress fixtures are `start-populated`, `settings-testing`,
+`settings-browsing`, `settings-about`, `library-long`, `library-empty`, and `downloads`.
 
 ```sh
 SURF_UI_GALLERY=settings SURF_UI_SIZE=375x667 \

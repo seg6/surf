@@ -71,7 +71,14 @@ impl DesktopApp {
                     );
                     let _pad = ui.push_style_var(imgui::StyleVar::WindowPadding([8.0, 8.0]));
                     ui.child_window("##settings-nav")
-                        .size([144.0, -28.0])
+                        .size([
+                            144.0,
+                            if self.settings_category == SettingsCategory::Testing {
+                                -68.0
+                            } else {
+                                -28.0
+                            },
+                        ])
                         .flags(WindowFlags::ALWAYS_USE_WINDOW_PADDING)
                         .build(|| {
                             for (category, label) in SettingsCategory::ALL {
@@ -106,7 +113,14 @@ impl DesktopApp {
                     ui.dummy([0.0, 8.0]);
                 }
                 ui.child_window(format!("##settings-{}", self.settings_category.label()))
-                    .size([0.0, -28.0])
+                    .size([
+                        0.0,
+                        if self.settings_category == SettingsCategory::Testing {
+                            -68.0
+                        } else {
+                            -28.0
+                        },
+                    ])
                     .build(|| {
                         if wide {
                             let _font = ui.push_font(ui.fonts().fonts()[3]);
@@ -115,6 +129,20 @@ impl DesktopApp {
                         ui.dummy([0.0, 8.0]);
                         self.draw_settings_category(ui, &mut actions);
                     });
+                if self.settings_category == SettingsCategory::Testing {
+                    ui.dummy([0.0, 4.0]);
+                    let preset = DEVICE_PRESETS[self.device_preset.min(DEVICE_PRESETS.len() - 1)];
+                    if widgets::primary_button(
+                        ui,
+                        "Apply window size",
+                        ui.content_region_avail()[0],
+                    ) {
+                        self.window_size_request = Some(WindowSizeRequest {
+                            label: preset.label,
+                            size: preset.size(self.device_landscape),
+                        });
+                    }
+                }
                 ui.separator();
                 let _font = ui.push_font(ui.fonts().fonts()[2]);
                 ui.text_disabled(format!(
@@ -296,13 +324,6 @@ impl DesktopApp {
         );
         if let Some((w, h)) = self.controller.video_dimensions {
             widgets::key_value(ui, "Browser video", &format!("{w} × {h} px"));
-        }
-        ui.dummy([0.0, 12.0]);
-        if widgets::primary_button(ui, "Apply window size", ui.content_region_avail()[0]) {
-            self.window_size_request = Some(WindowSizeRequest {
-                label: preset.label,
-                size,
-            });
         }
         if self.pending_window_size.is_some() {
             widgets::description(ui, "Applying viewport…");

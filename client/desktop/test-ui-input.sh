@@ -101,6 +101,11 @@ expect '"settings_category":"Testing"'
 drive resize 375 667
 expect '"viewport":\[375.0,625.0\]'
 expect '"settings_category":"Testing"'
+drive resize 320 480
+expect '"viewport":\[320.0,438.0\]'
+# Apply stays reachable outside the scroll area even at the smallest preset.
+drive click 155 378
+expect '"viewport":\[768.0,982.0\]'
 drive key Escape
 expect '"panel":"None"'
 printf 'Surf real X11 input: focus, spaces, page input, popup Escape, resize, tab close, new-tab search and settings categories passed.\n'
