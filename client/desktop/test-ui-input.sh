@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+for tool in cargo rg xvfb-run xauth; do
+    command -v "$tool" >/dev/null 2>&1 || {
+        echo "Missing test dependency: $tool (see client/desktop/README.md)" >&2
+        exit 1
+    }
+done
 repository_root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$repository_root/client/desktop"
 cargo build --locked -p surf-client --example ui-input
@@ -15,10 +21,19 @@ export SURF_CLIENT_HOME="$SURF_UI_TEST_ROOT/client" SURF_UI_GALLERY=browser SURF
 "$SURF_UI_TEST_BIN/surf-client" > "$SURF_UI_TEST_ROOT/client.log" 2>&1 &
 client_pid=$!
 trap 'status=$?; if [[ $status != 0 ]]; then cat "$SURF_UI_TEST_ROOT/client.log"; fi; kill "$client_pid" 2>/dev/null || true' EXIT
-for _ in $(seq 1 100); do
-    if rg -q SURF_UI_STATE "$SURF_UI_TEST_ROOT/client.log"; then break; fi
-    sleep .1
-done
+wait_ready() {
+    for _ in $(seq 1 100); do
+        if ! kill -0 "$client_pid" 2>/dev/null; then
+            echo "Surf exited before its test window was ready; client log follows:" >&2
+            return 1
+        fi
+        if rg -q SURF_UI_STATE "$SURF_UI_TEST_ROOT/client.log"; then return; fi
+        sleep .1
+    done
+    echo "Timed out waiting for the Surf test window; client log follows:" >&2
+    return 1
+}
+wait_ready
 drive() { "$SURF_UI_TEST_BIN/examples/ui-input" "$@"; }
 expect() {
     for _ in $(seq 1 60); do
@@ -76,10 +91,7 @@ restart_scene() {
     wait "$client_pid" 2>/dev/null || true
     env SURF_UI_SIZE=1024x768 SURF_UI_GALLERY="$1" "$SURF_UI_TEST_BIN/surf-client" > "$SURF_UI_TEST_ROOT/client.log" 2>&1 &
     client_pid=$!
-    for _ in $(seq 1 100); do
-        if rg -q SURF_UI_STATE "$SURF_UI_TEST_ROOT/client.log"; then break; fi
-        sleep .1
-    done
+    wait_ready
     sleep .2
 }
 restart_scene new-tab

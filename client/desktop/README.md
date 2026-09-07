@@ -43,7 +43,14 @@ Apply is pressed. Display scaling follows the desktop's exact scale factor.
 Debian and Ubuntu hosts need these development packages.
 
 ```sh
-sudo apt-get install libasound2-dev libavcodec-dev libavformat-dev libavutil-dev libgl1-mesa-dev
+sudo apt-get install libasound2-dev libavcodec-dev libavformat-dev libavutil-dev libgl1-mesa-dev libxkbcommon-x11-0
+```
+
+The X11 client loads `libxkbcommon-x11` at runtime, so it is needed even when
+the build succeeds. The integration tests also need these tools:
+
+```sh
+sudo apt-get install ripgrep xauth xvfb libgl1-mesa-dri
 ```
 
 Run the tests and client with:
@@ -74,7 +81,7 @@ The secure session test pairs with a real backend, receives PCM, decodes live
 video, exercises input and resize, and checks recovery after a forced UI stall.
 
 The UI test uses Xvfb and XTest to send real keyboard and mouse events through
-Winit and ImGui. It needs Xvfb plus the Rust build dependencies, not an iPad.
+Winit and ImGui. It needs the dependencies above, not an iPad.
 Presentation diagnostics count a frame after successful buffer swap, not after
 upload or on every repaint; they do not claim to measure physical screen scanout.
 

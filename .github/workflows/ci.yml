@@ -73,7 +73,10 @@ jobs:
       - name: Install desktop media and headless OpenGL dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libavcodec-dev libavformat-dev libavutil-dev libgl1-mesa-dev libgl1-mesa-dri xauth xvfb
+          sudo apt-get install -y \
+            libasound2-dev libavcodec-dev libavformat-dev libavutil-dev \
+            libgl1-mesa-dev libgl1-mesa-dri libxkbcommon-x11-0 \
+            ripgrep xauth xvfb
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2

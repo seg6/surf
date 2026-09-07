@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+for tool in cargo go rg xvfb-run xauth timeout; do
+  command -v "$tool" >/dev/null 2>&1 || {
+    echo "Missing test dependency: $tool (see client/desktop/README.md)" >&2
+    exit 1
+  }
+done
+
 repository_root="$(cd "$(dirname "$0")/../.." && pwd)"
 test_root="$(mktemp -d)"
 backend_pid=""
