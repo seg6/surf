@@ -8,6 +8,15 @@ for tool in cargo go rg xvfb-run xauth timeout; do
   }
 done
 
+# Functional CI checks must also work on shared, software-rendered runners.
+# Opt into an FPS gate only on a machine with a controlled performance budget.
+minimum_fps="${SURF_TEST_MIN_FPS:-}"
+if [[ -n "$minimum_fps" ]] &&
+  ! awk -v fps="$minimum_fps" 'BEGIN { exit !(fps ~ /^[0-9]+([.][0-9]+)?$/ && fps > 0) }'; then
+  echo "SURF_TEST_MIN_FPS must be a positive number" >&2
+  exit 1
+fi
+
 repository_root="$(cd "$(dirname "$0")/../.." && pwd)"
 test_root="$(mktemp -d)"
 backend_pid=""
@@ -193,8 +202,9 @@ for step in resize-small edit-omnibox resize-large ui-stall; do
   fi
 done
 smoke_fps="$(sed -n 's/^SURF_SMOKE_RESULT .* fps=\([0-9.]*\) .*/\1/p' "$render_log")"
-if ! awk -v fps="$smoke_fps" 'BEGIN { exit !(fps >= 55.0) }'; then
-  echo "Surf sustained presentation rate was ${smoke_fps:-missing} FPS; expected at least 55" >&2
+if [[ -n "$minimum_fps" ]] &&
+  ! awk -v fps="$smoke_fps" -v minimum="$minimum_fps" 'BEGIN { exit !(fps >= minimum) }'; then
+  echo "Surf sustained presentation rate was ${smoke_fps:-missing} FPS; expected at least $minimum_fps" >&2
   sed -n '1,240p' "$render_log" >&2
   exit 1
 fi

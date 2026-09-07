@@ -59,6 +59,13 @@ and `libasound2-plugins`, creates a clocked null sink, and uses
 Normal local runs use your existing audio device. An unavailable audio output
 fails the audio probe immediately instead of timing out.
 
+The session test always requires 600 presented frames within 40 seconds, resize
+delivery, successful reconnect/input/audio, zero decode errors, bounded queues,
+and recovery after a deliberate UI stall. It reports FPS but does not impose a
+hardware benchmark on shared software-rendered CI runners. To also require
+at least 55 FPS on a controlled test machine, run
+`SURF_TEST_MIN_FPS=55 client/desktop/test-secure-session.sh`.
+
 Run the tests and client with:
 
 ```sh
