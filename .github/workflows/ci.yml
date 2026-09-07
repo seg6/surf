@@ -89,6 +89,9 @@ jobs:
       - name: Test desktop workspace
         run: cargo test --manifest-path client/desktop/Cargo.toml --workspace
 
+      - name: Test real desktop UI input
+        run: bash client/desktop/test-ui-input.sh
+
       - name: Check browser runtime for secure-session integration
         run: google-chrome-stable --version || google-chrome --version
 

@@ -70,6 +70,7 @@ pub struct BrowserState {
     pub download_progress: BTreeMap<String, i32>,
     pub suggestions: Vec<LibraryEntry>,
     pub dialog: Option<DialogPrompt>,
+    pub dialog_revision: u64,
     pub select: Option<SelectPrompt>,
     pub reader: Option<ReaderDocument>,
     pub upload_multiple: Option<bool>,

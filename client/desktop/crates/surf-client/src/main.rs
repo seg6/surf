@@ -41,7 +41,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let event_loop = EventLoop::new()?;
     let attributes = WindowAttributes::default()
         .with_title("Surf")
-        .with_inner_size(LogicalSize::new(1180.0, 760.0))
+        .with_inner_size(initial_window_size())
         .with_min_inner_size(LogicalSize::new(320.0, 320.0))
         .with_window_icon(load_window_icon());
     let (window, config) = glutin_winit::DisplayBuilder::new()
@@ -52,6 +52,7 @@ fn run() -> Result<(), Box<dyn Error>> {
                 .expect("glutin supplied no framebuffer configuration")
         })?;
     let window = window.ok_or("glutin did not create a window")?;
+    window.set_ime_allowed(true);
     let raw_window = window.window_handle()?.as_raw();
     let context_attributes = ContextAttributesBuilder::new().build(Some(raw_window));
     let fallback_attributes = ContextAttributesBuilder::new()
@@ -109,6 +110,9 @@ fn run() -> Result<(), Box<dyn Error>> {
     let mut app = DesktopApp::new(&shared_gl)?;
     let mut last_frame = Instant::now();
     let mut font_scale = hidpi_factor;
+    let mut capture_frames = 0u32;
+    let capture_path = std::env::var_os("SURF_UI_CAPTURE").map(std::path::PathBuf::from);
+    let capture_started = Instant::now();
 
     #[allow(deprecated)]
     event_loop.run(move |event, target| {
@@ -145,7 +149,9 @@ fn run() -> Result<(), Box<dyn Error>> {
                     sync_imgui_display_size(imgui.io_mut(), surface_size, window.scale_factor());
                     let scale = window.scale_factor() as f32;
                     if (scale - font_scale).abs() > 0.001 {
+                        let atlas_id = imgui.fonts().tex_id;
                         install_fonts(&mut imgui, scale);
+                        imgui.fonts().tex_id = atlas_id;
                         let atlas = imgui.fonts().build_rgba32_texture();
                         // SAFETY: re-upload the renderer's public atlas texture between
                         // frames. The GL context is current; no draw data references this atlas.
@@ -197,7 +203,8 @@ fn run() -> Result<(), Box<dyn Error>> {
                                 i32::try_from(surface_size.width).unwrap_or(i32::MAX),
                                 i32::try_from(surface_size.height).unwrap_or(i32::MAX),
                             );
-                            shared_gl.clear_color(0.063, 0.071, 0.078, 1.0);
+                            let [r, g, b, a] = app.canvas_color();
+                            shared_gl.clear_color(r, g, b, a);
                             shared_gl.clear(glow::COLOR_BUFFER_BIT);
                         }
                         if let Err(error) = surface.swap_buffers(&gl_context) {
@@ -215,7 +222,8 @@ fn run() -> Result<(), Box<dyn Error>> {
                             i32::try_from(window.inner_size().width).unwrap_or(i32::MAX),
                             i32::try_from(window.inner_size().height).unwrap_or(i32::MAX),
                         );
-                        shared_gl.clear_color(0.063, 0.071, 0.078, 1.0);
+                        let [r, g, b, a] = app.canvas_color();
+                        shared_gl.clear_color(r, g, b, a);
                         shared_gl.clear(glow::COLOR_BUFFER_BIT);
                     }
                     app.render_video(
@@ -231,6 +239,20 @@ fn run() -> Result<(), Box<dyn Error>> {
                         && let Err(error) = renderer.render(draw_data)
                     {
                         app.report_host_error(format!("ImGui renderer: {error}"));
+                    }
+                    capture_frames += 1;
+                    if let Some(path) = &capture_path
+                        && capture_frames >= 20
+                        && capture_started.elapsed() >= std::time::Duration::from_millis(400)
+                    {
+                        if let Err(error) = capture_frame(
+                            &shared_gl,
+                            window.inner_size(),
+                            std::path::Path::new(&path),
+                        ) {
+                            app.report_host_error(error);
+                        }
+                        target.exit();
                     }
                     match surface.swap_buffers(&gl_context) {
                         Ok(()) => app.after_swap(true),
@@ -250,6 +272,43 @@ fn run() -> Result<(), Box<dyn Error>> {
         }
     })?;
     Ok(())
+}
+
+fn initial_window_size() -> LogicalSize<f64> {
+    std::env::var("SURF_UI_SIZE")
+        .ok()
+        .and_then(|s| {
+            let (w, h) = s.split_once('x')?;
+            Some(LogicalSize::new(
+                w.parse::<f64>().ok()?.max(320.0),
+                h.parse::<f64>().ok()?.max(320.0),
+            ))
+        })
+        .unwrap_or(LogicalSize::new(1180.0, 760.0))
+}
+
+fn capture_frame(
+    gl: &glow::Context,
+    size: PhysicalSize<u32>,
+    path: &std::path::Path,
+) -> Result<(), String> {
+    let mut pixels = vec![0u8; size.width as usize * size.height as usize * 4];
+    // SAFETY: capture is opt-in, before swap, on the GL thread; storage fits RGBA.
+    unsafe {
+        gl.read_pixels(
+            0,
+            0,
+            size.width as i32,
+            size.height as i32,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            glow::PixelPackData::Slice(&mut pixels),
+        );
+    }
+    let mut image = image::RgbaImage::from_raw(size.width, size.height, pixels)
+        .ok_or("Invalid capture size")?;
+    image::imageops::flip_vertical_in_place(&mut image);
+    image.save(path).map_err(|e| e.to_string())
 }
 
 fn resize_surface(

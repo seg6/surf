@@ -1334,6 +1334,8 @@ dependencies = [
  "num-traits",
  "png",
  "tiff",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -3082,6 +3084,7 @@ dependencies = [
  "surf-media",
  "surf-protocol",
  "surf-session",
+ "x11rb",
 ]
 
 [[package]]

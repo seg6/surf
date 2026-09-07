@@ -3,23 +3,22 @@ use super::*;
 impl DesktopApp {
     pub(super) fn draw_panel(&mut self, ui: &Ui) {
         if self.panel != self.previous_panel {
+            self.panel_started = Instant::now();
             if self.panel == Some(Panel::More) {
                 ui.open_popup("##tools-popup");
             }
             self.previous_panel = self.panel;
         }
+        let alpha = if self.preferences.reduce_motion {
+            1.0
+        } else {
+            (self.panel_started.elapsed().as_secs_f32() / 0.10).min(1.0)
+        };
+        let _alpha = ui.push_style_var(imgui::StyleVar::Alpha(alpha));
         match self.panel {
             Some(Panel::Tabs) => self.draw_tabs(ui),
             Some(Panel::More) => self.draw_more(ui),
             Some(Panel::Library) => self.draw_library(ui),
-            Some(Panel::Find) => {
-                self.find_open = true;
-                self.panel = None;
-            }
-            Some(Panel::Performance) => {
-                self.performance_open = true;
-                self.panel = None;
-            }
             Some(Panel::Reader) => self.draw_reader(ui),
             Some(Panel::Media) => self.draw_media(ui),
             Some(Panel::Settings) => self.draw_settings(ui),
@@ -37,13 +36,26 @@ impl DesktopApp {
                 30.0,
                 42.0,
             ],
-            [292.0, 444.0],
+            [292.0, self.more_height],
         );
-        widgets::place_next(position, size);
+        widgets::place_next(position, [size[0], 0.0]);
+        // SAFETY: public ImGui sizing API on its owning thread. Long menus may
+        // scroll on unusually short windows, but short menus keep their natural height.
+        unsafe {
+            imgui::sys::igSetNextWindowSizeConstraints(
+                [size[0], 0.0].into(),
+                [size[0], ui.io().display_size[1] - 16.0].into(),
+                None,
+                std::ptr::null_mut(),
+            );
+        }
         let Some(_popup) = ui.begin_popup("##tools-popup") else {
             self.panel = None;
             return;
         };
+        if ui.window_size()[1] > 100.0 {
+            self.more_height = ui.window_size()[1];
+        }
         let mut next = None;
         if widgets::menu_row(ui, "new", icon::PLUS, "New tab", "Ctrl+T", false) {
             self.new_tab();
@@ -85,6 +97,7 @@ impl DesktopApp {
             self.find_open,
         ) {
             self.find_open = !self.find_open;
+            self.focus_find = self.find_open;
             ui.close_current_popup();
             self.panel = None;
         }
@@ -139,70 +152,177 @@ impl DesktopApp {
         }
     }
 
-    pub(super) fn draw_library(&mut self,ui:&Ui) {
-        let display=ui.io().display_size;
-        let size=[(display[0]-16.0).min(680.0),(display[1]-16.0).min(610.0)];
-        let mut open=true;let mut actions=Vec::new();
-        ui.window("Library###library").position([display[0]*0.5,display[1]*0.5],Condition::Always)
-            .position_pivot([0.5,0.5]).size(size,Condition::Always).opened(&mut open)
-            .flags(overlay_flags()|WindowFlags::NO_RESIZE).build(||{
-                let segment_width=(ui.content_region_avail()[0]-8.0)/3.0;
-                for (section,label) in [(LibrarySection::History,"History"),(LibrarySection::Bookmarks,"Bookmarks"),
-                    (LibrarySection::Downloads,"Downloads")] {
-                    if section!=LibrarySection::History {ui.same_line();}
-                    let p=Palette::new(self.controller.dark_mode);
-                    let _bg=ui.push_style_color(imgui::StyleColor::Button,
-                        if self.library_section==section {p.hover}else{p.rail});
-                    if ui.button_with_size(label,[segment_width,30.0]){self.library_section=section;}
+    pub(super) fn draw_library(&mut self, ui: &Ui) {
+        let mut display = ui.io().display_size;
+        let top = if self.controller.connected {
+            self.layout.page.y as f32
+        } else {
+            0.0
+        };
+        if self.controller.connected {
+            display[1] = self.layout.page.height as f32;
+        }
+        let size = [
+            (display[0] - 16.0).min(680.0),
+            (display[1] - 16.0).min(610.0),
+        ];
+        let mut open = true;
+        let mut actions = Vec::new();
+        ui.window("Library###library")
+            .position(
+                [display[0] * 0.5, top + display[1] * 0.5],
+                Condition::Always,
+            )
+            .position_pivot([0.5, 0.5])
+            .size(size, Condition::Always)
+            .flags(
+                overlay_flags()
+                    | WindowFlags::NO_RESIZE
+                    | WindowFlags::NO_TITLE_BAR
+                    | WindowFlags::NO_MOVE,
+            )
+            .build(|| {
+                self.hit_regions.push(window_rect(ui));
+                widgets::sheet_header(ui, "Library", &mut open);
+                let segment_width = (ui.content_region_avail()[0] - 8.0) / 3.0;
+                for (section, label) in [
+                    (LibrarySection::History, "History"),
+                    (LibrarySection::Bookmarks, "Bookmarks"),
+                    (LibrarySection::Downloads, "Downloads"),
+                ] {
+                    if section != LibrarySection::History {
+                        ui.same_line();
+                    }
+                    let p = Palette::new(self.controller.dark_mode);
+                    let _bg = ui.push_style_color(
+                        imgui::StyleColor::Button,
+                        if self.library_section == section {
+                            p.hover
+                        } else {
+                            p.rail
+                        },
+                    );
+                    if ui.button_with_size(label, [segment_width, 30.0]) {
+                        self.library_section = section;
+                    }
                 }
                 ui.set_next_item_width(-1.0);
-                ui.input_text("##library-filter",&mut self.library_filter).hint("Filter library").build();
-                let filter=self.library_filter.to_lowercase();
-                ui.child_window("##library-list").size([0.0,0.0]).build(||{
-                    if self.library_section==LibrarySection::Downloads {
-                        let items=self.controller.browser.downloads.clone();
-                        if items.is_empty(){ui.text_disabled("No downloads yet.");}
-                        for item in items.iter().filter(|i|i.name.to_lowercase().contains(&filter)) {
-                            let _id=ui.push_id(&item.name);
-                            let progress=self.controller.browser.download_progress.get(&item.name)
-                                .map(|p|format!("{p}%")).unwrap_or_else(||format_bytes(item.size));
-                            row(ui,"file",&item.name,&progress,false,ui.content_region_avail()[0]);
-                            if ui.button("Save to Downloads"){actions.push(Action::Download(item.name.clone()));}
-                            ui.same_line();
-                            if ui.button("Remove"){
-                                actions.push(Action::Command(Command::DownloadDelete{name:item.name.clone(),causal:Causal::default()}));
-                                actions.push(Action::Command(Command::Downloads{causal:Causal::default()}));
+                ui.input_text("##library-filter", &mut self.library_filter)
+                    .hint("Filter library")
+                    .build();
+                let filter = self.library_filter.to_lowercase();
+                ui.child_window("##library-list")
+                    .size([0.0, 0.0])
+                    .build(|| {
+                        if self.library_section == LibrarySection::Downloads {
+                            let items = self.controller.browser.downloads.clone();
+                            if items.is_empty() {
+                                ui.text_disabled("No downloads yet.");
                             }
-                            ui.separator();
-                        }
-                    } else {
-                        let history=self.library_section==LibrarySection::History;
-                        let items=if history {self.controller.browser.history.clone()}else{self.controller.browser.bookmarks.clone()};
-                        if items.is_empty(){ui.text_disabled(if history {"No browsing history yet."}else{"Bookmark a page to find it here."});}
-                        let mut matches=0;
-                        for item in items.iter().filter(|i|format!("{} {}",i.title,i.url).to_lowercase().contains(&filter)) {
-                            matches+=1;
-                            let _id=ui.push_id(format!("{}-{}",item.url,item.ts));
-                            let width=ui.content_region_avail()[0]-34.0;
-                            if row(ui,"open",&item.title,&compact_address(&item.url),false,width){
-                                actions.push(Action::Navigate(item.url.clone()));
+                            for item in items
+                                .iter()
+                                .filter(|i| i.name.to_lowercase().contains(&filter))
+                            {
+                                let _id = ui.push_id(&item.name);
+                                let progress = self
+                                    .controller
+                                    .browser
+                                    .download_progress
+                                    .get(&item.name)
+                                    .map(|p| format!("{p}%"))
+                                    .unwrap_or_else(|| format_bytes(item.size));
+                                row(
+                                    ui,
+                                    "file",
+                                    &item.name,
+                                    &progress,
+                                    false,
+                                    ui.content_region_avail()[0],
+                                );
+                                if ui.button("Save to Downloads") {
+                                    actions.push(Action::Download(item.name.clone()));
+                                }
+                                ui.same_line();
+                                if ui.button("Remove") {
+                                    actions.push(Action::Command(Command::DownloadDelete {
+                                        name: item.name.clone(),
+                                        causal: Causal::default(),
+                                    }));
+                                    actions.push(Action::Command(Command::Downloads {
+                                        causal: Causal::default(),
+                                    }));
+                                }
+                                ui.separator();
                             }
-                            ui.same_line();
-                            if icon_button(ui,"remove",icon::CLOSE,"Remove"){
-                                actions.push(Action::Command(if history {
-                                    Command::HistoryDelete{url:item.url.clone(),ts:item.ts,causal:Causal::default()}
-                                }else{Command::BookmarkDelete{url:item.url.clone(),causal:Causal::default()}}));
-                                actions.push(Action::Command(Command::Library{causal:Causal::default()}));
+                        } else {
+                            let history = self.library_section == LibrarySection::History;
+                            let items = if history {
+                                self.controller.browser.history.clone()
+                            } else {
+                                self.controller.browser.bookmarks.clone()
+                            };
+                            if items.is_empty() {
+                                ui.text_disabled(if history {
+                                    "No browsing history yet."
+                                } else {
+                                    "Bookmark a page to find it here."
+                                });
+                            }
+                            let mut matches = 0;
+                            for item in items.iter().filter(|i| {
+                                format!("{} {}", i.title, i.url)
+                                    .to_lowercase()
+                                    .contains(&filter)
+                            }) {
+                                matches += 1;
+                                let _id = ui.push_id(format!("{}-{}", item.url, item.ts));
+                                let width = ui.content_region_avail()[0] - 34.0;
+                                if row(
+                                    ui,
+                                    "open",
+                                    &item.title,
+                                    &compact_address(&item.url),
+                                    false,
+                                    width,
+                                ) {
+                                    actions.push(Action::Navigate(item.url.clone()));
+                                }
+                                ui.same_line();
+                                if icon_button(ui, "remove", icon::CLOSE, "Remove") {
+                                    actions.push(Action::Command(if history {
+                                        Command::HistoryDelete {
+                                            url: item.url.clone(),
+                                            ts: item.ts,
+                                            causal: Causal::default(),
+                                        }
+                                    } else {
+                                        Command::BookmarkDelete {
+                                            url: item.url.clone(),
+                                            causal: Causal::default(),
+                                        }
+                                    }));
+                                    actions.push(Action::Command(Command::Library {
+                                        causal: Causal::default(),
+                                    }));
+                                }
+                            }
+                            if matches == 0 && !items.is_empty() {
+                                ui.text_disabled("No matching pages.");
+                            }
+                            if history && !items.is_empty() && ui.button("Load older history") {
+                                actions.push(Action::Command(Command::History {
+                                    q: String::new(),
+                                    offset: items.len() as i32,
+                                    causal: Causal::default(),
+                                }));
                             }
                         }
-                        if matches==0 && !items.is_empty(){ui.text_disabled("No matching pages.");}
-                        if history && !items.is_empty() && ui.button("Load older history"){
-                            actions.push(Action::Command(Command::History{q:String::new(),offset:items.len() as i32,causal:Causal::default()}));
-                        }
-                    }
-                });
+                    });
             });
-        if !open{self.panel=None;}self.apply_actions(actions);
+        if !open {
+            self.panel = None;
+        }
+        self.apply_actions(actions);
     }
 
     pub(super) fn draw_find(&mut self, ui: &Ui) {
@@ -216,7 +336,12 @@ impl DesktopApp {
                 WindowFlags::NO_DECORATION | WindowFlags::NO_MOVE | WindowFlags::NO_SAVED_SETTINGS,
             )
             .build(|| {
+                self.hit_regions.push(window_rect(ui));
                 let old = self.controller.browser.find_query.clone();
+                if self.focus_find {
+                    ui.set_keyboard_focus_here();
+                    self.focus_find = false;
+                }
                 ui.set_next_item_width((width - 114.0).max(80.0));
                 if ui
                     .input_text("##find", &mut self.controller.browser.find_query)
@@ -270,23 +395,24 @@ impl DesktopApp {
         let mut open = true;
         let mut navigate = false;
         ui.window("Reader###reader")
-        .position([display[0] * 0.5, display[1] * 0.5], Condition::Appearing)
-        .position_pivot([0.5, 0.5])
-        .size([width, height], Condition::Appearing)
-        .opened(&mut open)
-        .flags(overlay_flags())
-        .build(|| {
-            ui.text_wrapped(&reader.title);
-            ui.text_disabled(compact_address(&reader.url));
-            ui.same_line();
-            if ui.small_button("Open page") {
-                navigate = true;
-            }
-            ui.separator();
-            ui.child_window("##reader-text").size([0.0, 0.0]).build(|| {
-                ui.text_wrapped(&reader.text);
+            .position([display[0] * 0.5, display[1] * 0.5], Condition::Appearing)
+            .position_pivot([0.5, 0.5])
+            .size([width, height], Condition::Appearing)
+            .flags(overlay_flags() | WindowFlags::NO_TITLE_BAR | WindowFlags::NO_MOVE)
+            .build(|| {
+                self.hit_regions.push(window_rect(ui));
+                widgets::sheet_header(ui, "Reader", &mut open);
+                ui.text_wrapped(&reader.title);
+                ui.text_disabled(compact_address(&reader.url));
+                ui.same_line();
+                if ui.small_button("Open page") {
+                    navigate = true;
+                }
+                ui.separator();
+                ui.child_window("##reader-text").size([0.0, 0.0]).build(|| {
+                    ui.text_wrapped(&reader.text);
+                });
             });
-        });
         if navigate {
             self.controller.navigate(&reader.url);
             open = false;
@@ -310,6 +436,7 @@ impl DesktopApp {
             .opened(&mut open)
             .flags(overlay_flags() | WindowFlags::ALWAYS_AUTO_RESIZE)
             .build(|| {
+                self.hit_regions.push(window_rect(ui));
                 if !media.available {
                     ui.text_disabled("No controllable media on this page.");
                     return;
@@ -351,16 +478,26 @@ impl DesktopApp {
     }
 
     pub(super) fn draw_settings(&mut self, ui: &Ui) {
-        let display = ui.io().display_size;
+        let mut display = ui.io().display_size;
+        let top = if self.controller.connected {
+            self.layout.page.y as f32
+        } else {
+            0.0
+        };
+        if self.controller.connected {
+            display[1] = self.layout.page.height as f32;
+        }
         let size = [
             (display[0] - 16.0).min(440.0),
             (display[1] - 16.0).min(610.0),
         ];
         let mut open = true;
         let mut actions = Vec::new();
-        ui.window("Settings###settings").position([display[0]*0.5,display[1]*0.5],Condition::Always)
-            .position_pivot([0.5,0.5]).size(size,Condition::Always).opened(&mut open)
-            .flags(overlay_flags()|WindowFlags::NO_RESIZE).build(||{
+        ui.window("Settings###settings").position([display[0]*0.5,top+display[1]*0.5],Condition::Always)
+            .position_pivot([0.5,0.5]).size(size,Condition::Always)
+            .flags(overlay_flags()|WindowFlags::NO_RESIZE | WindowFlags::NO_TITLE_BAR | WindowFlags::NO_MOVE).build(|| {
+                self.hit_regions.push(window_rect(ui));
+                widgets::sheet_header(ui,"Settings",&mut open);
                 ui.child_window("##settings-body").size([0.0,0.0]).build(||{
                     section(ui,"Appearance");
                     let mut dark=self.controller.dark_mode;
@@ -468,6 +605,7 @@ impl DesktopApp {
             )
             .bg_alpha(0.90)
             .build(|| {
+                self.hit_regions.push(window_rect(ui));
                 metric(ui, "FPS", format!("{:.1}", report.presentation_fps));
                 ui.same_line();
                 metric(

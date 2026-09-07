@@ -368,6 +368,7 @@ pub(crate) async fn download_file(
 
 fn client(config: Arc<rustls::ClientConfig>) -> Result<Client> {
     Ok(Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .tls_backend_preconfigured((*config).clone())
         .tls_info(true)
         .cookie_store(true)
@@ -375,6 +376,38 @@ fn client(config: Arc<rustls::ClientConfig>) -> Result<Client> {
         .timeout(REQUEST_TIMEOUT)
         .user_agent(format!("Surf Desktop/{}", app_version()))
         .build()?)
+}
+
+pub(crate) async fn fetch_icon(server: &VerifiedEndpoint, path: &str) -> Result<Vec<u8>> {
+    let parsed = server
+        .endpoint
+        .join(path)
+        .map_err(|e| SessionError::Protocol(e.to_string()))?;
+    if !path.starts_with("/api/v1/tab-icons/")
+        || parsed.origin() != server.endpoint.origin()
+        || parsed
+            .path()
+            .trim_start_matches("/api/v1/tab-icons/")
+            .parse::<u64>()
+            .is_err()
+    {
+        return Err(SessionError::Protocol("Invalid server icon path".into()));
+    }
+    let mut response = server
+        .client
+        .get(parsed)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await?
+        .error_for_status()?;
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if bytes.len() + chunk.len() > 256 * 1024 {
+            return Err(SessionError::Protocol("Icon is too large".into()));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
 }
 
 async fn request_json<B: Serialize + ?Sized, T: DeserializeOwned>(

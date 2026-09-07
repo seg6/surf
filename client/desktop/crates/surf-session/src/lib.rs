@@ -141,12 +141,17 @@ pub enum SessionAction {
     Upload(Vec<PathBuf>),
     CancelUpload,
     Download { name: String, destination: PathBuf },
+    FetchIcon(String),
     Disconnect,
     Shutdown,
 }
 
 #[derive(Clone, Debug)]
 pub enum SessionEvent {
+    Icon {
+        path: String,
+        bytes: Vec<u8>,
+    },
     Status {
         phase: &'static str,
         message: String,
@@ -404,6 +409,7 @@ async fn driver(
                 | SessionAction::Download { .. } => Err(SessionError::Protocol(
                     "browser command sent while disconnected".to_owned(),
                 )),
+                SessionAction::FetchIcon(_) => Ok(None),
                 SessionAction::Disconnect => {
                     frame_sink.clear();
                     emit(
@@ -574,6 +580,13 @@ async fn run_socket(
                 Some(SessionAction::Download { name, destination }) => {
                     spawn_download(server.clone(), name, destination, events.clone());
                 }
+                Some(SessionAction::FetchIcon(path)) => {
+                    let server=server.clone();let events=events.clone();
+                    tokio::spawn(async move {
+                        let bytes=api::fetch_icon(&server,&path).await.unwrap_or_default();
+                        let _=events.try_send(SessionEvent::Icon{path,bytes});
+                    });
+                }
                 Some(SessionAction::Disconnect) => {
                     writer.send(Message::Close(None)).await?;
                     frame_sink.clear();
@@ -725,6 +738,42 @@ pub fn atomic_write_private(path: &Path, data: &[u8]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn abandoning_an_attempt_cancels_pending_tls() {
+        use std::{
+            net::TcpListener,
+            sync::mpsc,
+            time::{Duration, Instant},
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (accepted, rx) = mpsc::sync_channel(1);
+        let listener_thread = std::thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            accepted.send(socket).unwrap();
+        });
+        let mut client = super::SessionClient::spawn(super::Storage::at(
+            std::env::temp_dir().join("surf-cancel-readonly-test"),
+        ))
+        .unwrap();
+        client
+            .send(super::SessionAction::Inspect(format!("https://{address}")))
+            .unwrap();
+        let socket = rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        let worker = client.thread.take().unwrap();
+        drop(client);
+        let start = Instant::now();
+        while !worker.is_finished() && start.elapsed() < Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            worker.is_finished(),
+            "cancel waited for the request timeout"
+        );
+        worker.join().unwrap();
+        drop(socket);
+        listener_thread.join().unwrap();
+    }
     use super::{FailureKind, SessionError};
 
     #[test]

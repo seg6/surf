@@ -1,9 +1,11 @@
 mod browser;
 mod connection;
+mod gallery;
+mod input;
 mod prompts;
 mod tools;
 mod widgets;
-use crate::layout::{BrowserLayout, CONTROL, Density};
+use crate::layout::{BrowserLayout, Density};
 use crate::preferences::Preferences;
 use crate::theme::Palette;
 use widgets::{icon_button, row, section};
@@ -13,7 +15,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use imgui::{Condition, Key as ImKey, MouseButton as ImMouseButton, Ui, WindowFlags};
+use imgui::{Condition, Key as ImKey, Ui, WindowFlags};
 use imgui_glow_renderer::glow;
 use imgui_winit_support::winit;
 use surf_client_app::{ClientController, HostEffect, RenderDiagnostics, compact_address};
@@ -117,11 +119,9 @@ enum Panel {
     Tabs,
     More,
     Library,
-    Find,
     Reader,
     Media,
     Settings,
-    Performance,
     Files,
 }
 
@@ -138,7 +138,6 @@ enum Action {
     Inspect(String, bool),
     Pair(String),
     ConfirmPairing,
-    Connect,
     Disconnect,
     Dark(bool),
     Mobile(bool),
@@ -146,27 +145,8 @@ enum Action {
     Download(String),
 }
 
-struct FilePicker {
-    directory: PathBuf,
-    selected: BTreeSet<PathBuf>,
-    multiple: bool,
-    error: Option<String>,
-}
-
-impl FilePicker {
-    fn new(multiple: bool) -> Self {
-        let directory = directories::UserDirs::new()
-            .map(|dirs| dirs.home_dir().to_owned())
-            .or_else(|| std::env::current_dir().ok())
-            .unwrap_or_else(|| PathBuf::from("."));
-        Self {
-            directory,
-            selected: BTreeSet::new(),
-            multiple,
-            error: None,
-        }
-    }
-}
+mod files;
+use files::FilePicker;
 
 struct SmokeState {
     target: Option<u64>,
@@ -231,17 +211,21 @@ pub struct DesktopApp {
     page_input: PageInput,
     page_rect: PageRect,
     input_rect: PageRect,
+    hit_regions: Vec<PageRect>,
     cursor: Option<(f64, f64)>,
     modifiers: Modifiers,
     page_focused: bool,
     address: String,
     address_editing: bool,
     focus_address: bool,
+    address_expansion: f32,
     omnibox_rect: [f32; 4],
     endpoint: String,
     pairing_code: String,
     panel: Option<Panel>,
     previous_panel: Option<Panel>,
+    panel_started: Instant,
+    more_height: f32,
     library_section: LibrarySection,
     dialog_input: String,
     dialog_signature: String,
@@ -256,18 +240,22 @@ pub struct DesktopApp {
     device_landscape: bool,
     window_size_request: Option<WindowSizeRequest>,
     pending_window_size: Option<PendingWindowSize>,
-    ui_wants_pointer: bool,
     ui_wants_keyboard: bool,
+    native_popup_open: bool,
     remote_keys: std::collections::HashMap<PhysicalKey, (String, String, i32)>,
     local_preedit: String,
+    last_trace: String,
     observed_url: String,
     observed_tab: Option<i64>,
+    tabs_geometry: Option<(Option<i64>, usize, u32)>,
     focus_new_tab: bool,
+    new_tab_source: Option<i64>,
     suggestion_index: Option<usize>,
     preferences: Preferences,
     saved_preferences: Preferences,
     layout: BrowserLayout,
     find_open: bool,
+    focus_find: bool,
     performance_open: bool,
     library_filter: String,
     viewport_candidate: Option<(i32, i32)>,
@@ -280,27 +268,33 @@ pub struct DesktopApp {
 impl DesktopApp {
     pub fn new(gl: &std::rc::Rc<glow::Context>) -> Result<Self, String> {
         let preferences = Preferences::load();
-        Ok(Self {
+        let mut app = Self {
             assets: crate::assets::Assets::new(gl)?,
             controller: ClientController::new_with_options(surf_client_app::ClientOptions {
                 dark_mode: preferences.dark,
                 mobile_mode: preferences.mobile,
+                auto_connect: std::env::var_os("SURF_UI_GALLERY").is_none(),
+                network_enabled: std::env::var_os("SURF_UI_GALLERY").is_none(),
             })?,
             video: VideoSurface::new(gl)?,
             page_input: PageInput::new(),
             page_rect: PageRect::default(),
             input_rect: PageRect::default(),
+            hit_regions: Vec::new(),
             cursor: None,
             modifiers: Modifiers::default(),
             page_focused: false,
             address: String::new(),
             address_editing: false,
             focus_address: false,
+            address_expansion: 0.0,
             omnibox_rect: [0.0; 4],
             endpoint: String::new(),
             pairing_code: String::new(),
             panel: None,
             previous_panel: None,
+            panel_started: Instant::now(),
+            more_height: 440.0,
             library_section: LibrarySection::History,
             dialog_input: String::new(),
             dialog_signature: String::new(),
@@ -315,18 +309,22 @@ impl DesktopApp {
             device_landscape: preferences.landscape,
             window_size_request: None,
             pending_window_size: None,
-            ui_wants_pointer: false,
             ui_wants_keyboard: false,
+            native_popup_open: false,
             remote_keys: std::collections::HashMap::new(),
             local_preedit: String::new(),
+            last_trace: String::new(),
             observed_url: String::new(),
             observed_tab: None,
+            tabs_geometry: None,
             focus_new_tab: false,
+            new_tab_source: None,
             suggestion_index: None,
             saved_preferences: preferences.clone(),
             preferences,
             layout: BrowserLayout::new([1180.0, 760.0], true, false),
             find_open: false,
+            focus_find: false,
             performance_open: false,
             library_filter: String::new(),
             viewport_candidate: None,
@@ -334,66 +332,13 @@ impl DesktopApp {
             viewport_committed: None,
             render_diagnostics: RenderDiagnostics::default(),
             smoke: SmokeState::from_environment(),
-        })
+        };
+        app.setup_gallery();
+        Ok(app)
     }
 
     pub fn report_host_error(&mut self, error: String) {
         self.controller.report_renderer_error(error);
-    }
-
-    fn release_page_input(&mut self) {
-        for (_, (key, code, key_code)) in std::mem::take(&mut self.remote_keys) {
-            if let Ok(command) = self.page_input.key(
-                false,
-                key,
-                code,
-                key_code,
-                String::new(),
-                Modifiers::default(),
-            ) {
-                self.controller.command(command);
-            }
-        }
-        for command in self
-            .page_input
-            .release_buttons(self.page_rect, self.video.surface_generation())
-        {
-            self.controller.command(command);
-        }
-        if self.page_input.composition_active()
-            && let Ok(command) = self.page_input.compose("cancel", String::new(), 0, 0)
-        {
-            self.controller.command(command);
-        }
-        self.page_focused = false;
-        self.local_preedit.clear();
-    }
-
-    // WinitPlatform currently does not forward IME events. This narrow host adapter
-    // commits local text once; preedit is presentation-only, never an InputText draft.
-    pub fn handle_local_ime(&mut self, io: &mut imgui::Io, event: &winit::event::Event<()>) {
-        if self.page_accepts_keyboard() {
-            return;
-        }
-        if let winit::event::Event::WindowEvent {
-            event: WindowEvent::Ime(ime),
-            ..
-        } = event
-        {
-            match ime {
-                Ime::Preedit(text, _) => self.local_preedit.clone_from(text),
-                Ime::Commit(text) => {
-                    self.local_preedit.clear();
-                    if io.want_text_input {
-                        for c in text.chars() {
-                            io.add_input_character(c);
-                        }
-                    }
-                }
-                Ime::Disabled => self.local_preedit.clear(),
-                Ime::Enabled => {}
-            }
-        }
     }
 
     pub fn tick(&mut self) {
@@ -404,13 +349,15 @@ impl DesktopApp {
         for effect in tick.effects {
             match effect {
                 HostEffect::ClearVideo => {
+                    self.assets.clear_icons();
                     self.video.clear();
                     self.page_input.reset();
                 }
                 HostEffect::ClearPagePresentation => {
+                    self.find_open = false;
                     if matches!(
                         self.panel,
-                        Some(Panel::Find | Panel::Reader | Panel::Media | Panel::Files)
+                        Some(Panel::Reader | Panel::Media | Panel::Files)
                     ) {
                         self.panel = None;
                     }
@@ -435,9 +382,17 @@ impl DesktopApp {
             self.controller.native_pointer,
             self.video.surface_generation(),
         );
+        if self.controller.connected {
+            self.controller.request_visible_icons();
+        }
+        for (path, bytes) in std::mem::take(&mut self.controller.icons) {
+            self.assets.decode_icon(path, bytes);
+        }
+        self.assets.upload_icons();
     }
 
     pub fn draw(&mut self, ui: &Ui, window: &Window) {
+        self.hit_regions.clear();
         let display = ui.io().display_size;
         let connected = self.controller.connected;
         let current_url = self.controller.snapshot.current_url.clone();
@@ -461,7 +416,10 @@ impl DesktopApp {
                 self.suggestion_index = None;
             }
         }
-        if self.focus_new_tab && tab_changed && current_url.starts_with("about:blank") {
+        if self.focus_new_tab
+            && current_tab != self.new_tab_source
+            && current_url.starts_with("about:blank")
+        {
             self.focus_new_tab = false;
             self.edit_address();
         }
@@ -527,8 +485,26 @@ impl DesktopApp {
             self.set_fullscreen(window, on);
         }
         self.update_window_size(window);
-        self.ui_wants_pointer = ui.io().want_capture_mouse;
         self.ui_wants_keyboard = ui.io().want_capture_keyboard;
+        if std::env::var_os("SURF_UI_GALLERY").is_some()
+            && std::env::var_os("SURF_UI_TRACE").is_some()
+        {
+            let trace=serde_json::json!({"draft":self.address,"editing":self.address_editing,
+                "page_focused":self.page_focused,"keyboard_capture":self.ui_wants_keyboard,
+                "panel":format!("{:?}",self.panel),"viewport":[self.page_rect.width,self.page_rect.height]}).to_string();
+            if trace != self.last_trace {
+                eprintln!("SURF_UI_STATE {trace}");
+                self.last_trace = trace;
+            }
+        }
+        // SAFETY: public ImGui query on its owning UI thread.
+        self.native_popup_open = unsafe {
+            imgui::sys::igIsPopupOpen(
+                std::ptr::null(),
+                imgui::sys::ImGuiPopupFlags_AnyPopupId as i32
+                    | imgui::sys::ImGuiPopupFlags_AnyPopupLevel as i32,
+            )
+        };
         self.preferences.dark = self.controller.dark_mode;
         self.preferences.mobile = self.controller.mobile_mode;
         self.preferences.device_preset = self.device_preset;
@@ -536,13 +512,20 @@ impl DesktopApp {
         if self.preferences != self.saved_preferences {
             match self.preferences.save() {
                 Ok(()) => self.saved_preferences = self.preferences.clone(),
-                Err(error) => self.report_host_error(format!("Could not save settings: {error}")),
+                Err(error) => {
+                    self.saved_preferences = self.preferences.clone();
+                    self.report_host_error(format!("Could not save settings: {error}"));
+                }
             }
         }
     }
 
     pub fn take_theme_request(&mut self) -> Option<bool> {
         self.theme_request.take()
+    }
+
+    pub fn canvas_color(&self) -> [f32; 4] {
+        Palette::new(self.controller.dark_mode).canvas
     }
 
     pub fn render_video(&mut self, gl: &glow::Context, scale: f64, framebuffer_height: u32) {
@@ -660,321 +643,14 @@ impl DesktopApp {
         true
     }
 
-    pub fn handle_window_event(&mut self, window: &Window, event: &WindowEvent) {
-        match event {
-            WindowEvent::ModifiersChanged(modifiers) => {
-                self.modifiers = modifiers_from_winit(*modifiers);
-            }
-            WindowEvent::CursorMoved { position, .. } => {
-                let position: LogicalPosition<f64> = position.to_logical(window.scale_factor());
-                self.cursor = Some((position.x, position.y));
-                if self.page_accepts_pointer(position.x, position.y) || self.page_input.dragging() {
-                    match self.page_input.motion(
-                        position.x,
-                        position.y,
-                        self.input_rect,
-                        self.video.surface_generation(),
-                        self.modifiers,
-                    ) {
-                        Ok(Some(command)) => self.controller.command(command),
-                        Ok(None) => {}
-                        Err(error) => self.report_host_error(format!("pointer input: {error}")),
-                    }
-                }
-            }
-            WindowEvent::MouseInput { state, button, .. } => {
-                let Some((x, y)) = self.cursor else {
-                    return;
-                };
-                let pressed = *state == ElementState::Pressed;
-                if pressed {
-                    // Dismissal is a local click, not an accidental click through to a page.
-                    if self.panel.is_some() && !self.ui_wants_pointer {
-                        self.panel = None;
-                        self.page_focused = false;
-                        return;
-                    }
-                    let page_hit = self.page_accepts_pointer(x, y);
-                    self.page_focused = page_hit;
-                    if page_hit {
-                        self.finish_address_edit();
-                    }
-                }
-                if (self.page_accepts_pointer(x, y) || !pressed)
-                    && let Some(number) = mouse_button_number(*button)
-                {
-                    match self.page_input.button(
-                        pressed,
-                        number,
-                        x,
-                        y,
-                        self.input_rect,
-                        self.video.surface_generation(),
-                        self.modifiers,
-                    ) {
-                        Ok(Some(command)) => self.controller.command(command),
-                        Ok(None) => {}
-                        Err(error) => self.report_host_error(format!("pointer input: {error}")),
-                    }
-                }
-            }
-            WindowEvent::MouseWheel { delta, .. } => {
-                let (dx, dy) = match delta {
-                    MouseScrollDelta::LineDelta(x, y) => {
-                        (f64::from(*x) * 50.0, f64::from(*y) * 50.0)
-                    }
-                    MouseScrollDelta::PixelDelta(position) => {
-                        let position: LogicalPosition<f64> =
-                            position.to_logical(window.scale_factor());
-                        (position.x, position.y)
-                    }
-                };
-                if self
-                    .cursor
-                    .is_some_and(|(x, y)| self.page_accepts_pointer(x, y))
-                {
-                    match self.page_input.wheel(
-                        dx,
-                        -dy,
-                        self.input_rect,
-                        self.video.surface_generation(),
-                        self.modifiers,
-                    ) {
-                        Ok(commands) => {
-                            for command in commands {
-                                self.controller.command(command);
-                            }
-                        }
-                        Err(error) => self.report_host_error(format!("wheel input: {error}")),
-                    }
-                }
-            }
-            WindowEvent::KeyboardInput { event, .. } => self.handle_key(event),
-            WindowEvent::Ime(ime) if self.page_accepts_keyboard() => {
-                let command = match ime {
-                    Ime::Preedit(text, cursor) if text.is_empty() => self
-                        .page_input
-                        .composition_active()
-                        .then(|| self.page_input.compose("cancel", String::new(), 0, 0)),
-                    Ime::Preedit(text, cursor) => {
-                        let (start, end) = cursor.unwrap_or((text.len(), text.len()));
-                        Some(self.page_input.compose(
-                            "update",
-                            text.clone(),
-                            utf16_offset(text, start),
-                            utf16_offset(text, end),
-                        ))
-                    }
-                    Ime::Commit(text) => Some(self.page_input.compose(
-                        if text.is_empty() { "cancel" } else { "commit" },
-                        text.clone(),
-                        0,
-                        0,
-                    )),
-                    Ime::Enabled | Ime::Disabled => None,
-                };
-                if let Some(command) = command {
-                    match command {
-                        Ok(command) => self.controller.command(command),
-                        Err(error) => self.report_host_error(format!("composition input: {error}")),
-                    }
-                }
-            }
-            WindowEvent::Focused(false) => self.release_page_input(),
-            _ => {}
-        }
-    }
-
-    fn handle_key(&mut self, event: &KeyEvent) {
-        let pressed = event.state == ElementState::Pressed;
-        if !pressed
-            && let Some((key, code, key_code)) = self.remote_keys.remove(&event.physical_key)
-        {
-            if let Ok(command) =
-                self.page_input
-                    .key(false, key, code, key_code, String::new(), self.modifiers)
-            {
-                self.controller.command(command);
-            }
-            return;
-        }
-        if self.controller.browser.dialog.is_none()
-            && self.controller.browser.select.is_none()
-            && self.panel != Some(Panel::Files)
-            && self.handle_shortcut(event, pressed)
-        {
-            return;
-        }
-        if !self.page_accepts_keyboard() {
-            return;
-        }
-        if pressed
-            && (self.modifiers.control || self.modifiers.command)
-            && logical_character(&event.logical_key)
-                .is_some_and(|value| value.eq_ignore_ascii_case("v"))
-        {
-            if let Ok(text) = arboard::Clipboard::new().and_then(|mut value| value.get_text())
-                && let Ok(command) = self.page_input.paste(text)
-            {
-                self.controller.command(command);
-            }
-            return;
-        }
-        let plain_text = plain_key_text(
-            &event.logical_key,
-            event.text.as_deref(),
-            self.modifiers,
-            pressed,
-            self.page_input.composition_active(),
-        );
-        if let Some(text) = plain_text {
-            match self
-                .page_input
-                .key(true, String::new(), String::new(), 0, text, self.modifiers)
-            {
-                Ok(command) => self.controller.command(command),
-                Err(error) => self.report_host_error(format!("text input: {error}")),
-            }
-            return;
-        }
-        let (key, code, key_code, _) = dom_key(event);
-        if pressed {
-            self.remote_keys
-                .insert(event.physical_key, (key.clone(), code.clone(), key_code));
-        }
-        let textual_key = logical_character(&event.logical_key).is_some()
-            || matches!(event.logical_key, Key::Named(NamedKey::Space));
-        if !pressed && textual_key && !self.modifiers.control && !self.modifiers.alt {
-            return;
-        }
-        match self
-            .page_input
-            .key(pressed, key, code, key_code, String::new(), self.modifiers)
-        {
-            Ok(command) => self.controller.command(command),
-            Err(error) => self.report_host_error(format!("keyboard input: {error}")),
-        }
-    }
-
-    fn handle_shortcut(&mut self, event: &KeyEvent, pressed: bool) -> bool {
-        let character = logical_character(&event.logical_key).map(str::to_ascii_lowercase);
-        let command = self.modifiers.control || self.modifiers.command;
-        if command {
-            match character {
-                Some(ref value) if value == "l" => {
-                    if pressed {
-                        self.edit_address();
-                    }
-                    return true;
-                }
-                Some(ref value) if value == "t" => {
-                    if pressed {
-                        self.new_tab();
-                    }
-                    return true;
-                }
-                Some(ref value) if value == "w" => {
-                    if pressed {
-                        self.close_active_tab();
-                    }
-                    return true;
-                }
-                Some(ref value) if value == "r" => {
-                    if pressed {
-                        self.reload_or_stop();
-                    }
-                    return true;
-                }
-                Some(ref value) if value == "d" => {
-                    if pressed {
-                        self.controller.command(Command::Bookmark {
-                            causal: Causal::default(),
-                        });
-                    }
-                    return true;
-                }
-                Some(ref value) if value == "f" => {
-                    if pressed {
-                        self.find_open = true;
-                        self.page_focused = false;
-                    }
-                    return true;
-                }
-                _ => {}
-            }
-        }
-        if self.modifiers.alt {
-            match event.logical_key {
-                Key::Named(NamedKey::ArrowLeft) => {
-                    if pressed {
-                        self.controller.command(Command::Back {
-                            causal: Causal::default(),
-                        });
-                    }
-                    return true;
-                }
-                Key::Named(NamedKey::ArrowRight) => {
-                    if pressed {
-                        self.controller.command(Command::Forward {
-                            causal: Causal::default(),
-                        });
-                    }
-                    return true;
-                }
-                _ => {}
-            }
-        }
-        match event.logical_key {
-            Key::Named(NamedKey::F5) => {
-                if pressed {
-                    self.reload_or_stop();
-                }
-                true
-            }
-            Key::Named(NamedKey::F11) => {
-                if pressed {
-                    let on = !self.fullscreen;
-                    self.set_fullscreen_command(on);
-                }
-                true
-            }
-            Key::Named(NamedKey::Escape) if pressed && self.panel.is_some() => {
-                if self.panel == Some(Panel::Files) {
-                    self.controller.choose_files(Vec::new());
-                    self.file_picker = None;
-                }
-                self.panel = None;
-                self.page_focused = true;
-                true
-            }
-            Key::Named(NamedKey::Escape) if pressed && self.address_editing => {
-                self.finish_address_edit();
-                true
-            }
-            _ => false,
-        }
-    }
-
-    fn page_accepts_pointer(&self, x: f64, y: f64) -> bool {
-        self.controller.connected
-            && !self.ui_wants_pointer
-            && self.controller.browser.dialog.is_none()
-            && self.controller.browser.select.is_none()
-            && self.controller.browser.page_error.is_none()
-            && self.input_rect.contains(x, y)
-    }
-
-    fn page_accepts_keyboard(&self) -> bool {
-        self.controller.connected
-            && self.page_focused
-            && !self.address_editing
-            && !self.ui_wants_keyboard
-            && self.controller.browser.dialog.is_none()
-            && self.controller.browser.select.is_none()
-            && self.controller.browser.page_error.is_none()
-    }
-
     fn edit_address(&mut self) {
+        // Re-entering an already active InputText must reselect its contents too.
+        // Public focus loss/reactivation preserves the widget ID and lets ImGui
+        // apply AutoSelectAll before processing queued text or clipboard input.
+        unsafe {
+            imgui::sys::igSetWindowFocus_Str(std::ptr::null());
+        }
+        self.panel = None;
         self.address = if self
             .controller
             .snapshot
@@ -1031,6 +707,7 @@ impl DesktopApp {
     }
 
     fn new_tab(&mut self) {
+        self.new_tab_source = self.observed_tab;
         self.focus_new_tab = true;
         self.controller.command(Command::Tab {
             action: "new".to_owned(),
@@ -1114,7 +791,17 @@ impl DesktopApp {
             (pending.viewport.is_none()
                 && window_size_matches(current, pending.request.size)
                 && self.controller.connected)
-                .then(|| viewport_for_window(current, window.scale_factor()))
+                .then(|| {
+                    let mut viewport = viewport_for_window(current, window.scale_factor());
+                    if self.find_open {
+                        viewport.1 = (viewport.1
+                            - (f64::from(crate::layout::FIND_HEIGHT) * window.scale_factor())
+                                .round() as i32)
+                            .max(64)
+                            & !1;
+                    }
+                    viewport
+                })
         });
         if let Some(candidate) = viewport_to_send
             && let Some(viewport) = self.controller.force_viewport(candidate.0, candidate.1)
@@ -1187,7 +874,6 @@ impl DesktopApp {
                     self.controller.pair(code, name);
                 }
                 Action::ConfirmPairing => self.controller.confirm_pairing(),
-                Action::Connect => self.controller.connect(),
                 Action::Disconnect => {
                     self.controller.disconnect();
                     self.panel = None;
@@ -1239,22 +925,21 @@ fn toggle(current: Option<Panel>, panel: Panel) -> Option<Panel> {
     (current != Some(panel)).then_some(panel)
 }
 
-fn compact_button(ui: &Ui, label: &str, tooltip: &str, size: [f32; 2]) -> bool {
-    let clicked = ui.button_with_size(label, size);
-    if ui.is_item_hovered() {
-        ui.tooltip_text(tooltip);
-    }
-    clicked
-}
-
-fn full_button(ui: &Ui, label: &str, width: f32) -> bool {
-    ui.button_with_size(label, [width, 20.0])
-}
-
 fn item_rect(ui: &Ui) -> [f32; 4] {
     let min = ui.item_rect_min();
     let max = ui.item_rect_max();
     [min[0], min[1], max[0], max[1]]
+}
+
+fn window_rect(ui: &Ui) -> PageRect {
+    let [x, y] = ui.window_pos();
+    let [width, height] = ui.window_size();
+    PageRect {
+        x: f64::from(x),
+        y: f64::from(y),
+        width: f64::from(width),
+        height: f64::from(height),
+    }
 }
 
 fn small_overlay(ui: &Ui, position: [f32; 2], text: &str) {
@@ -1272,15 +957,7 @@ fn metric(ui: &Ui, label: &str, value: String) {
     });
 }
 
-fn row_label(title: &str, url: &str, index: usize) -> String {
-    let title = if title.trim().is_empty() {
-        compact_address(url)
-    } else {
-        truncate(title, 42)
-    };
-    format!("{title}  {}##library-{index}", compact_address(url))
-}
-
+#[cfg(test)]
 fn truncate(text: &str, maximum: usize) -> String {
     if text.chars().count() <= maximum {
         return text.to_owned();

@@ -28,7 +28,7 @@ futures-util = "0.3.31"
 glutin = "0.32.3"
 glutin-winit = "0.5.0"
 hex = "0.4.3"
-image = { version = "0.25.9", default-features = false, features = ["png"] }
+image = { version = "0.25.9", default-features = false, features = ["png", "ico", "jpeg"] }
 imgui = { version = "0.12.0", features = ["tables-api"] }
 imgui-glow-renderer = "0.13.0"
 imgui-winit-support = "0.13.0"

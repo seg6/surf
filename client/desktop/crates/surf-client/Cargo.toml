@@ -27,3 +27,6 @@ serde.workspace = true
 [[bin]]
 name = "surf-client"
 path = "src/main.rs"
+
+[dev-dependencies]
+x11rb = { version = "0.13.2", features = ["xtest"] }

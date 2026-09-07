@@ -137,6 +137,10 @@ pub fn install_fonts(context: &mut Context, scale: f32) {
                 config: Some(FontConfig {
                     oversample_h: 2,
                     oversample_v: 2,
+                    glyph_ranges: FontGlyphRanges::from_slice(&[
+                        0x20, 0x24f, 0x370, 0x52f, 0x2000, 0x206f, 0x20a0, 0x214f, 0x2190, 0x27ff,
+                        0xfffd, 0xfffd, 0,
+                    ]),
                     ..FontConfig::default()
                 }),
             },

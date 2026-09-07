@@ -18,7 +18,7 @@ pub fn place_next(position: [f32; 2], size: [f32; 2]) {
 pub fn icon_button(ui: &Ui, id: &str, glyph: &str, help: &str) -> bool {
     let _id = ui.push_id(id);
     let _align = ui.push_style_var(StyleVar::ButtonTextAlign([0.5, 0.5]));
-    let clicked = ui.button_with_size(format!("{glyph}###control"), [30.0, 30.0]);
+    let clicked = ui.button_with_size(format!("{glyph}###control"), [crate::layout::CONTROL; 2]);
     if ui.is_item_hovered() {
         ui.tooltip_text(help);
     }
@@ -29,6 +29,21 @@ pub fn section(ui: &Ui, title: &str) {
     ui.dummy([0.0, 8.0]);
     ui.text_disabled(title);
     ui.dummy([0.0, 2.0]);
+}
+
+pub fn sheet_header(ui: &Ui, title: &str, open: &mut bool) {
+    let available = ui.content_region_avail()[0];
+    let start = ui.cursor_pos();
+    {
+        let _font = ui.push_font(ui.fonts().fonts()[3]);
+        ui.text(title);
+    }
+    ui.set_cursor_pos([start[0] + available - 30.0, start[1] - 4.0]);
+    if icon_button(ui, "close-sheet", super::icon::CLOSE, "Close") {
+        *open = false;
+    }
+    ui.set_cursor_pos([start[0], start[1] + 36.0]);
+    ui.separator();
 }
 
 pub fn ellipsize(ui: &Ui, text: &str, width: f32) -> String {

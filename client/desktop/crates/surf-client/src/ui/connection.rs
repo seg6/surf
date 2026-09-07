@@ -5,7 +5,7 @@ impl DesktopApp {
     pub(super) fn draw_start(&mut self, ui: &Ui) {
         let display = ui.io().display_size;
         let width = (display[0] - 32.0).min(420.0);
-        let height = (display[1] - 32.0).min(560.0);
+        let height = (display[1] - 32.0).min(480.0);
         let phase = self.controller.connection_phase.clone();
         let mut actions = Vec::new();
         let mut cancel = false;
@@ -13,14 +13,19 @@ impl DesktopApp {
             imgui::StyleColor::WindowBg,
             Palette::new(self.controller.dark_mode).canvas,
         );
+        let _border = ui.push_style_var(imgui::StyleVar::WindowBorderSize(0.0));
         ui.window("##connection")
             .position([display[0] * 0.5, display[1] * 0.5], Condition::Always)
             .position_pivot([0.5, 0.5])
             .size([width, height], Condition::Always)
             .flags(
-                WindowFlags::NO_DECORATION | WindowFlags::NO_MOVE | WindowFlags::NO_SAVED_SETTINGS,
+                WindowFlags::NO_TITLE_BAR
+                    | WindowFlags::NO_RESIZE
+                    | WindowFlags::NO_MOVE
+                    | WindowFlags::NO_SAVED_SETTINGS,
             )
             .build(|| {
+                self.hit_regions.push(window_rect(ui));
                 ui.set_cursor_pos([width * 0.5 - 34.0, 16.0]);
                 imgui::Image::new(self.assets.mark(), [68.0, 68.0]).build(ui);
                 ui.set_cursor_pos([12.0, 100.0]);
@@ -52,7 +57,7 @@ impl DesktopApp {
                             }
                         }
                         ui.child_window("##computers")
-                            .size([0.0, (height - 288.0).max(68.0)])
+                            .size([0.0, (height - 358.0).max(40.0)])
                             .build(|| {
                                 if servers.is_empty() {
                                     ui.text_disabled("Looking for nearby computers…");
@@ -156,6 +161,14 @@ impl DesktopApp {
 
     pub(super) fn draw_new_tab(&mut self, ui: &Ui) {
         let p = self.layout.page;
+        ui.get_background_draw_list()
+            .add_rect(
+                [p.x as f32, p.y as f32],
+                [(p.x + p.width) as f32, (p.y + p.height) as f32],
+                Palette::new(self.controller.dark_mode).canvas,
+            )
+            .filled(true)
+            .build();
         let width = (p.width as f32 - 32.0).min(520.0);
         let position = [
             p.x as f32 + p.width as f32 * 0.5,
@@ -176,6 +189,7 @@ impl DesktopApp {
                     | WindowFlags::NO_FOCUS_ON_APPEARING,
             )
             .build(|| {
+                self.hit_regions.push(window_rect(ui));
                 ui.set_cursor_pos([width * 0.5 - 32.0, 8.0]);
                 imgui::Image::new(self.assets.mark(), [64.0, 64.0]).build(ui);
                 ui.set_cursor_pos([12.0, 94.0]);

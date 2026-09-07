@@ -40,6 +40,7 @@ pub struct Tick {
 }
 
 pub struct ClientController {
+    network_enabled: bool,
     pub connection_phase: ConnectionPhase,
     core: Core,
     storage: Storage,
@@ -62,6 +63,9 @@ pub struct ClientController {
     pub dark_mode: bool,
     pub mobile_mode: bool,
     pub browser: BrowserState,
+    pub icons: std::collections::BTreeMap<String, Vec<u8>>,
+    requested_icons: std::collections::BTreeSet<String>,
+    icon_pending: usize,
     pub latest_diagnostics: Option<DiagnosticsReport>,
     pub native_pointer: bool,
     connect_after_inspect: bool,
@@ -93,6 +97,9 @@ pub enum ConnectionPhase {
 pub struct ClientOptions {
     pub dark_mode: bool,
     pub mobile_mode: bool,
+    pub auto_connect: bool,
+    /// Render/test the local interface without starting a network worker.
+    pub network_enabled: bool,
 }
 
 impl Default for ClientOptions {
@@ -100,6 +107,8 @@ impl Default for ClientOptions {
         Self {
             dark_mode: true,
             mobile_mode: false,
+            auto_connect: true,
+            network_enabled: true,
         }
     }
 }
@@ -132,19 +141,26 @@ impl ClientController {
             .map_err(|error| error.to_string())?;
         let saved_servers = storage.servers().unwrap_or_default();
         let media = MediaPipeline::spawn().map_err(|error| error.to_string())?;
-        let session = SessionClient::spawn_with_frame_sink(storage.clone(), media.frame_sink())
-            .map_err(|error| error.to_string())?;
+        let session = if options.network_enabled {
+            Some(
+                SessionClient::spawn_with_frame_sink(storage.clone(), media.frame_sink())
+                    .map_err(|e| e.to_string())?,
+            )
+        } else {
+            None
+        };
         let startup_endpoint =
             (saved_servers.len() == 1).then(|| saved_servers[0].endpoint.clone());
         let startup_url = std::env::args()
             .skip(1)
             .find(|argument| !argument.starts_with('-'));
         let mut controller = Self {
+            network_enabled: options.network_enabled,
             connection_phase: ConnectionPhase::Choose,
             core,
             storage,
             snapshot,
-            session: Some(session),
+            session,
             media: Some(media),
             endpoint: String::new(),
             status: if saved_servers.is_empty() {
@@ -166,6 +182,9 @@ impl ClientController {
             dark_mode: options.dark_mode,
             mobile_mode: options.mobile_mode,
             browser: BrowserState::default(),
+            icons: std::collections::BTreeMap::new(),
+            requested_icons: std::collections::BTreeSet::new(),
+            icon_pending: 0,
             latest_diagnostics: None,
             native_pointer: false,
             connect_after_inspect: false,
@@ -180,13 +199,18 @@ impl ClientController {
             requested_viewport: None,
             suggestions: suggestions::Suggestions::default(),
         };
-        if let Some(endpoint) = startup_endpoint {
+        if options.auto_connect
+            && let Some(endpoint) = startup_endpoint
+        {
             controller.inspect(endpoint, true);
         }
         Ok(controller)
     }
 
     pub fn inspect(&mut self, endpoint: impl Into<String>, connect_when_paired: bool) {
+        if self.connection_phase != ConnectionPhase::Choose {
+            self.cancel_connection();
+        }
         self.connection_phase = ConnectionPhase::Inspecting;
         self.endpoint = endpoint.into();
         self.inspected = None;
@@ -226,7 +250,9 @@ impl ClientController {
         self.connection_phase = ConnectionPhase::Choose;
         self.status = "Choose a computer".into();
         self.connect_after_inspect = false;
-        if let Some(media) = &self.media {
+        if self.network_enabled
+            && let Some(media) = &self.media
+        {
             match SessionClient::spawn_with_frame_sink(self.storage.clone(), media.frame_sink()) {
                 Ok(session) => self.session = Some(session),
                 Err(error) => self.status = error.to_string(),
@@ -235,6 +261,9 @@ impl ClientController {
     }
 
     pub fn command(&mut self, command: Command) {
+        if self.session.is_none() && std::env::var_os("SURF_UI_TRACE").is_some() {
+            eprintln!("SURF_UI_COMMAND {command:?}");
+        }
         if self.connected {
             self.send(SessionAction::Send(command));
         } else {
@@ -245,6 +274,27 @@ impl ClientController {
     pub fn clear_suggestions(&mut self) {
         self.browser.suggestions.clear();
         self.suggestions.clear();
+    }
+
+    pub fn request_visible_icons(&mut self) {
+        self.requested_icons
+            .retain(|p| self.snapshot.tabs.iter().any(|t| &t.icon == p));
+        let paths: Vec<_> = self
+            .snapshot
+            .tabs
+            .iter()
+            .map(|t| t.icon.clone())
+            .filter(|p| p.starts_with("/api/v1/tab-icons/") && !self.requested_icons.contains(p))
+            .take(4usize.saturating_sub(self.icon_pending))
+            .collect();
+        for path in paths {
+            if self.requested_icons.len() >= 128 {
+                break;
+            }
+            self.icon_pending += 1;
+            self.requested_icons.insert(path.clone());
+            self.send(SessionAction::FetchIcon(path));
+        }
     }
 
     pub fn suggest(&mut self, query: String) {
@@ -474,6 +524,15 @@ impl ClientController {
 
     fn apply_session(&mut self, event: SessionEvent, effects: &mut Vec<HostEffect>) {
         match event {
+            SessionEvent::Icon { path, bytes } => {
+                self.icon_pending = self.icon_pending.saturating_sub(1);
+                if !bytes.is_empty()
+                    && self.icons.len() < 128
+                    && self.snapshot.tabs.iter().any(|t| t.icon == path)
+                {
+                    self.icons.insert(path, bytes);
+                }
+            }
             SessionEvent::Status { phase, message } => {
                 self.status = format!("{phase}: {message}");
             }
@@ -541,12 +600,16 @@ impl ClientController {
                     .sort_by(|left, right| left.name.cmp(&right.name));
             }
             SessionEvent::Connected { info, config } => {
+                self.inspected = Some(info.clone());
                 self.connection_phase = ConnectionPhase::Connected;
                 if let Err(error) = self.core.begin_connection() {
                     self.status = error.to_string();
                     return;
                 }
                 self.browser.reset_connection();
+                self.icons.clear();
+                self.requested_icons.clear();
+                self.icon_pending = 0;
                 self.refresh();
                 self.connected = true;
                 self.clock_available = config.caps.iter().any(|capability| capability == "clock");
@@ -790,10 +853,16 @@ impl ClientController {
                 self.browser.bookmarks = bookmarks;
             }
             WireEvent::History { items, offset, .. } => {
-                if offset==0 {self.browser.history=items;}
-                else {
+                if offset == 0 {
+                    self.browser.history = items;
+                } else {
                     for item in items {
-                        if !self.browser.history.iter().any(|old|old.url==item.url && old.ts==item.ts) {
+                        if !self
+                            .browser
+                            .history
+                            .iter()
+                            .any(|old| old.url == item.url && old.ts == item.ts)
+                        {
                             self.browser.history.push(item);
                         }
                     }
@@ -805,6 +874,7 @@ impl ClientController {
                 text,
                 default,
             } => {
+                self.browser.dialog_revision = self.browser.dialog_revision.wrapping_add(1);
                 self.browser.dialog = Some(DialogPrompt {
                     kind,
                     text,

@@ -5,7 +5,24 @@ impl DesktopApp {
     pub(super) fn draw_chrome(&mut self, ui: &Ui) {
         let [_, y, width, height] = self.layout.rail;
         let density = self.layout.density;
+        let target = if self.address_editing { 1.0 } else { 0.0 };
+        self.address_expansion = if self.preferences.reduce_motion {
+            target
+        } else {
+            self.address_expansion
+                + (target - self.address_expansion)
+                    .clamp(-ui.io().delta_time / 0.18, ui.io().delta_time / 0.18)
+        };
+        let show_tabs =
+            density == Density::Wide && self.address_expansion < 0.001 && !self.address_editing;
         let palette = Palette::new(self.controller.dark_mode);
+        let geometry = (
+            self.observed_tab,
+            self.controller.snapshot.tabs.len(),
+            width as u32,
+        );
+        let reveal = self.tabs_geometry != Some(geometry);
+        self.tabs_geometry = Some(geometry);
         let _bg = ui.push_style_color(StyleColor::WindowBg, palette.rail);
         let _padding = ui.push_style_var(StyleVar::WindowPadding([6.0, 6.0]));
         let _rounding = ui.push_style_var(StyleVar::WindowRounding(0.0));
@@ -19,13 +36,18 @@ impl DesktopApp {
                     | WindowFlags::NO_BRING_TO_FRONT_ON_FOCUS,
             )
             .build(|| {
-                if icon_button(ui, "back", icon::BACK, "Back · Alt+Left") {
-                    self.controller.command(Command::Back {
-                        causal: Causal::default(),
-                    });
+                self.hit_regions.push(window_rect(ui));
+                {
+                    let _disabled = ui.begin_disabled(!self.controller.snapshot.can_go_back);
+                    if icon_button(ui, "back", icon::BACK, "Back · Alt+Left") {
+                        self.controller.command(Command::Back {
+                            causal: Causal::default(),
+                        });
+                    }
                 }
                 if density != Density::Minimal {
                     ui.same_line();
+                    let _disabled = ui.begin_disabled(!self.controller.snapshot.can_go_forward);
                     if icon_button(ui, "forward", icon::FORWARD, "Forward · Alt+Right") {
                         self.controller.command(Command::Forward {
                             causal: Causal::default(),
@@ -40,14 +62,28 @@ impl DesktopApp {
                     Density::Minimal => 68.0,
                 };
                 let available = ui.content_region_avail()[0] - utilities;
-                let address_width = if density == Density::Wide && !self.address_editing {
-                    (width * 0.32).clamp(240.0, 420.0).min(available)
+                let address_width = if density == Density::Wide {
+                    let compact = (width * 0.32).clamp(240.0, 420.0).min(available);
+                    let t = self.address_expansion;
+                    compact + (available - compact) * (t * t * (3.0 - 2.0 * t))
                 } else {
                     available
                 };
                 ui.group(|| {
-                    let _frame = ui.push_style_color(StyleColor::FrameBg, palette.surface);
-                    let _border = ui.push_style_var(StyleVar::FrameBorderSize(1.0));
+                    let origin = ui.cursor_screen_pos();
+                    let end = [origin[0] + address_width, origin[1] + 30.0];
+                    ui.get_window_draw_list()
+                        .add_rect(origin, end, palette.surface)
+                        .filled(true)
+                        .rounding(6.0)
+                        .build();
+                    ui.get_window_draw_list()
+                        .add_rect(origin, end, palette.border)
+                        .rounding(6.0)
+                        .build();
+                    let _frame = ui.push_style_color(StyleColor::FrameBg, [0.0; 4]);
+                    let _button = ui.push_style_color(StyleColor::Button, [0.0; 4]);
+                    let _border = ui.push_style_var(StyleVar::FrameBorderSize(0.0));
                     ui.set_next_item_width((address_width - 34.0).max(80.0));
                     if self.focus_address {
                         ui.set_keyboard_focus_here();
@@ -119,7 +155,7 @@ impl DesktopApp {
                         self.reload_or_stop();
                     }
                 });
-                if density == Density::Wide && !self.address_editing {
+                if show_tabs {
                     ui.same_line();
                     let tab_width = (ui.content_region_avail()[0] - 102.0).max(40.0);
                     ui.child_window("##inline-tabs")
@@ -152,9 +188,33 @@ impl DesktopApp {
                                 } else {
                                     tab.title.clone()
                                 };
-                                let label = widgets::ellipsize(ui, &title, 100.0);
-                                if ui.button_with_size(format!("{label}###activate"), [114.0, 30.0])
-                                {
+                                let item_width = (tab_width / tabs.len().max(1) as f32)
+                                    .clamp(142.0, 190.0)
+                                    - 30.0;
+                                let texture = self.assets.icon(&tab.icon);
+                                let inset = if texture.is_some() { 28.0 } else { 8.0 };
+                                let label =
+                                    widgets::ellipsize(ui, &title, item_width - inset - 8.0);
+                                let clicked = ui.button_with_size("##activate", [item_width, 30.0]);
+                                let origin = ui.item_rect_min();
+                                let draw = ui.get_window_draw_list();
+                                if let Some(texture) = texture {
+                                    draw.add_image(
+                                        texture,
+                                        [origin[0] + 6.0, origin[1] + 7.0],
+                                        [origin[0] + 22.0, origin[1] + 23.0],
+                                    )
+                                    .build();
+                                }
+                                draw.add_text(
+                                    [origin[0] + inset, origin[1] + 8.0],
+                                    palette.text,
+                                    &label,
+                                );
+                                if reveal && tab.active {
+                                    ui.set_scroll_here_x();
+                                }
+                                if clicked {
                                     self.activate_tab(tab.id);
                                 }
                                 if ui.is_item_hovered() {
@@ -179,18 +239,22 @@ impl DesktopApp {
                     }
                 }
                 if density != Density::Minimal {
-                    ui.same_line();
+                    if density == Density::Wide {
+                        ui.set_cursor_pos([width - 6.0 - if show_tabs { 98.0 } else { 64.0 }, 6.0]);
+                    } else {
+                        ui.same_line();
+                    }
                     if icon_button(ui, "new-tab", icon::PLUS, "New tab · Ctrl+T") {
                         self.new_tab();
                     }
                 }
-                if density == Density::Wide && !self.address_editing {
+                if show_tabs {
                     ui.same_line();
                     if icon_button(ui, "library", icon::BOOK, "Library") {
                         self.open_library();
                     }
                 }
-                ui.same_line();
+                ui.set_cursor_pos([width - 36.0, 6.0]);
                 if icon_button(ui, "more", icon::MORE, "Browser tools") {
                     self.panel = toggle(self.panel, Panel::More);
                     self.page_focused = false;
@@ -204,7 +268,11 @@ impl DesktopApp {
                     .add_line([0.0, edge], [width, edge], palette.border)
                     .build();
                 if self.controller.snapshot.loading {
-                    let t = (ui.time() as f32 * 0.7).fract();
+                    let t = if self.preferences.reduce_motion {
+                        0.5
+                    } else {
+                        (ui.time() as f32 * 0.7).fract()
+                    };
                     let length = width * 0.2;
                     let start = (width + length) * t - length;
                     ui.get_window_draw_list()
@@ -220,6 +288,7 @@ impl DesktopApp {
     }
 
     fn activate_tab(&mut self, id: i64) {
+        self.focus_new_tab = false;
         self.finish_address_edit();
         self.controller.command(Command::Tab {
             action: "select".into(),
@@ -229,6 +298,11 @@ impl DesktopApp {
     }
 
     pub(super) fn finish_address_edit(&mut self) {
+        // Public ImGui focus API: returning to the remote page relinquishes local
+        // navigation focus as well as the host's editing flag.
+        unsafe {
+            imgui::sys::igSetWindowFocus_Str(std::ptr::null());
+        }
         self.address_editing = false;
         self.focus_address = false;
         self.suggestion_index = None;
@@ -236,6 +310,7 @@ impl DesktopApp {
             .clone_from(&self.controller.snapshot.current_url);
         self.controller.clear_suggestions();
         self.page_focused = true;
+        self.ui_wants_keyboard = false;
     }
 
     pub(super) fn navigate_from_ui(&mut self, target: &str) {
@@ -265,6 +340,7 @@ impl DesktopApp {
             .size(size, Condition::Always)
             .flags(overlay_flags() | WindowFlags::NO_TITLE_BAR | WindowFlags::NO_RESIZE)
             .build(|| {
+                self.hit_regions.push(window_rect(ui));
                 ui.child_window("##tab-rows").size([0.0, -38.0]).build(|| {
                     for tab in &tabs {
                         let _id = ui.push_id(format!("switch-{}", tab.id));
@@ -319,6 +395,7 @@ impl DesktopApp {
                     | WindowFlags::NO_NAV,
             )
             .build(|| {
+                self.hit_regions.push(window_rect(ui));
                 for (index, item) in suggestions.iter().take(8).enumerate() {
                     let title = if item.title.trim().is_empty() {
                         compact_address(&item.url)

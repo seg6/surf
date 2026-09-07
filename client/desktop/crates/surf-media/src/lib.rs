@@ -1189,7 +1189,13 @@ mod tests {
         let mut render = AudioRenderState::default();
         render_audio(&mut output, 2, 48_000, &shared, &mut render);
         assert!(output.iter().all(|sample| *sample > 0.49 && *sample < 0.51));
-        assert!(output.chunks_exact(2).all(|frame| frame[0] == frame[1]));
+        assert!(
+            output
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .all(|frame| frame[0] == frame[1])
+        );
         assert_eq!(shared.counters.audio_underruns.load(Ordering::Relaxed), 0);
     }
 }
