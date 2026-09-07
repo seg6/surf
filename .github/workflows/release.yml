@@ -29,7 +29,7 @@ concurrency:
 jobs:
   release:
     name: Release build ${{ inputs.tag || github.ref_name }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       GH_TOKEN: ${{ github.token }}
@@ -142,7 +142,7 @@ jobs:
           echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
 
       - name: Restore Go cross-build cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ${{ env.GOCACHE }}
@@ -216,8 +216,7 @@ jobs:
           test -s "${client_debs[0]}"
           install -m 0644 "${client_debs[0]}" dist/native/
 
-      - name: Build and verify Linux client preview
-        if: env.CACHE_ONLY != 'true'
+      - name: Prepare Linux client dependencies
         shell: bash
         run: |
           set -euo pipefail
@@ -226,8 +225,26 @@ jobs:
           sudo apt-get install -y \
             libasound2-dev libavcodec-dev libavformat-dev libavutil-dev \
             libgl1-mesa-dev libxkbcommon-x11-0
-          rustup toolchain install 1.95.0 --profile minimal
-          rustup override set 1.95.0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: "1.95.0"
+          components: clippy, rustfmt
+
+      - name: Cache Rust release dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: client/desktop -> ../../.local/build/desktop-release
+          shared-key: desktop-release-ubuntu24.04
+          cache-on-failure: true
+
+      # Warm release-mode dependencies on verified main commits as well as
+      # building the archive on tags. Every run still compiles/verifies source.
+      - name: Build and verify Linux client preview
+        shell: bash
+        run: |
+          set -euo pipefail
           test "$(rustc --version | awk '{print $2}')" = "1.95.0"
 
           archive="$(client/desktop/package-linux.sh)"
