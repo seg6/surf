@@ -238,6 +238,7 @@ jobs:
           workspaces: client/desktop -> ../../.local/build/desktop-release
           shared-key: desktop-release-ubuntu24.04
           cache-on-failure: true
+          cache-bin: false
 
       # Warm release-mode dependencies on verified main commits as well as
       # building the archive on tags. Every run still compiles/verifies source.

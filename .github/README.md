@@ -12,6 +12,11 @@ failed debug test cannot leave an incomplete cache that prevents saving the
 release dependencies later. Both save compiled dependencies even when a later
 test fails.
 
+`cache-bin: false` keeps rustup-managed tools out of cache cleanup. Otherwise,
+the first post-job cache save can remove `cargo` before the second cache is
+saved. Toolchains are installed by the pinned setup action, not restored from
+the dependency cache.
+
 The release cache uses the same workspace mapping and shared key in CI and
 the release workflow. Verified main builds warm it before a signed release tag
 builds the archive. Both jobs use Ubuntu 24.04 and Rust 1.95.0; the cache action

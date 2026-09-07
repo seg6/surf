@@ -85,6 +85,8 @@ jobs:
           workspaces: client/desktop
           shared-key: desktop-debug-ubuntu24.04
           cache-on-failure: true
+          # Leave rustup/cargo installed for the second cache's post-job save.
+          cache-bin: false
 
       - name: Check formatting
         run: cargo fmt --manifest-path client/desktop/Cargo.toml --all -- --check
@@ -116,6 +118,7 @@ jobs:
           workspaces: client/desktop -> ../../.local/build/desktop-release
           shared-key: desktop-release-ubuntu24.04
           cache-on-failure: true
+          cache-bin: false
 
       - name: Build Linux desktop preview package
         run: |
