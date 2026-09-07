@@ -3,6 +3,46 @@
 A compatibility change requires matching client and server generations. App
 version differences alone do not.
 
+## 0.16.0 - 2026-09-07
+
+### Browse from Linux, too
+
+- Added a Linux desktop client preview. Connect to a Surf server, pair with a
+  code, and browse with tabs, bookmarks, history, downloads, clipboard, audio,
+  and keyboard and mouse input. The server still runs the browser; this is a
+  separate client, not a replacement for the desktop backend.
+- The desktop client has compact controls, searchable Library views, an
+  address bar with suggestions, and resolution presets for testing iPhone and
+  iPad layouts. Window resizing updates the remote browser viewport.
+- The iOS and Linux clients now share a small C99 core for session state,
+  browser state and protocol handling. Their interfaces and device-specific
+  rendering remain separate. Automated tests exercise the shared behavior,
+  real desktop input, pairing and streaming to catch regressions earlier.
+
+### More reliable downloads
+
+- Fixed downloads not starting after the browser-management changes.
+- Download progress now clears when a transfer finishes or fails. Incomplete
+  files are kept separate from completed downloads, and duplicate filenames
+  no longer overwrite existing files.
+- Fixed opening and saving downloads in both native clients, including names
+  containing spaces or special characters. iOS transfers use bounded chunks
+  to avoid loading a large file into memory at once.
+
+### A more consistent interface
+
+- Restored native iOS Settings rows, controls and grouped sections, with
+  clearer Library editing actions and fixes for backgrounds changing on scroll.
+- Improved dark-mode contrast across popup frames, menus, search fields and
+  address-bar controls. Classic iOS uses subdued toolbar icons.
+- The backend dashboard now follows the Cydia repository page's visual style.
+  Choose Light, Dark or System appearance; the repository page also follows
+  the browser's light/dark preference where supported.
+
+Upgrade normally; no uninstall or data reset is needed. Compatibility remains
+generation 1, so existing compatible clients and servers can still connect.
+The Linux client is a preview; the iOS client remains the established device app.
+
 ## 0.15.5 - 2026-09-01
 
 - Updates now install over the existing desktop and iOS packages. Browser data,
