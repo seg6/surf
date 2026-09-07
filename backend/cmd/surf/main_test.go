@@ -317,8 +317,6 @@ func TestManagementPairingUIUsesServerInitiatedInvitation(t *testing.T) {
 	app.managementHandler().ServeHTTP(response, request)
 	body := response.Body.String()
 	for _, required := range []string{
-		`href="https://seg6.space/surf/"`,
-		`>Get iOS app</a>`,
 		`>Pair device</button>`,
 		`id="pairing-code"`,
 		`id="pairing-address"`,
@@ -334,6 +332,7 @@ func TestManagementPairingUIUsesServerInitiatedInvitation(t *testing.T) {
 	}
 	lower := strings.ToLower(body)
 	for _, removed := range []string{
+		`>get ios app</a>`,
 		`id="copy-pairing-code"`,
 		`/admin/pairing/open`,
 		`/admin/pairing/close`,
@@ -345,6 +344,27 @@ func TestManagementPairingUIUsesServerInitiatedInvitation(t *testing.T) {
 		if strings.Contains(lower, removed) {
 			t.Errorf("management pairing UI still contains removed flow %q", removed)
 		}
+	}
+}
+
+func TestManagementAppearanceIsIndependentAndInFooter(t *testing.T) {
+	body := string(managementHTML)
+	for _, required := range []string{
+		`name="color-scheme" content="light dark"`,
+		`prefers-color-scheme: dark`, `:root[data-theme="dark"]`,
+		`localStorage.setItem('surf-dashboard-appearance'`,
+		`value="system"`, `value="light"`, `value="dark"`,
+		`input::placeholder, textarea::placeholder`,
+	} {
+		if !strings.Contains(body, required) {
+			t.Errorf("management appearance is missing %q", required)
+		}
+	}
+	footer := strings.Index(body, `<footer class="page-footer">`)
+	picker := strings.Index(body, `id="appearance"`)
+	footerEnd := strings.Index(body, `</footer>`)
+	if footer < 0 || picker < footer || picker > footerEnd {
+		t.Error("appearance picker must be in the dashboard footer")
 	}
 }
 

@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="format-detection" content="telephone=no">
+  <meta name="color-scheme" content="light dark">
   <title>Surf Repository</title>
   <link rel="icon" href="CydiaIcon.png">
   <style>
@@ -152,6 +153,30 @@
     }
     @media screen and (min-width: 700px) {
       .page { padding-top: 28px; }
+    }
+    a:focus { outline: 2px solid #1765a5; outline-offset: -3px; }
+    /* Keep literal light colors above for iOS 6 WebKit. Browsers that support
+       dark appearance use the same charcoal palette as the Surf dashboard. */
+    @media (prefers-color-scheme: dark) {
+      html { color-scheme: dark; }
+      body { background: #16181b; color: #f0f0f0; }
+      a { color: #91bfe6; }
+      a:focus { outline-color: #91bfe6; }
+      .navbar {
+        background: #30363c;
+        background: -webkit-linear-gradient(top, #43494f 0%, #30363c 50%, #292e33 51%, #22272c 100%);
+        background: linear-gradient(#43494f 0%, #30363c 50%, #292e33 51%, #22272c 100%);
+        border-color: #101215;
+      }
+      .package-name { text-shadow: none; }
+      .package-meta, .package-description, .section-title, .note {
+        color: #b2b7bc; text-shadow: none;
+      }
+      .group { background: #25282c; border-color: #555c63; box-shadow: 0 1px 0 rgba(255,255,255,.07); }
+      .row { border-color: #41464c; }
+      .row a, .source { color: #f0f0f0; }
+      .row a:active { background: #3a4856; }
+      .row a:after, .row-detail, .info-value { color: #b2b7bc; }
     }
   </style>
 </head>
