@@ -1,7 +1,15 @@
 #import "RBTheme.h"
 #import "RBConfig.h"
+#import "RBDarkPopoverBackgroundView.h"
 
 #import <QuartzCore/QuartzCore.h>
+#import <objc/runtime.h>
+
+// Compile with the iOS 8 SDK while opting into native appearance on iOS 13+.
+// The selector is only called after a runtime availability check.
+@protocol RBInterfaceStyleView <NSObject>
+- (void)setOverrideUserInterfaceStyle:(NSInteger)style;
+@end
 
 @interface RBGradientBar ()
 @property(nonatomic, strong) UIColor *lineColor;
@@ -60,106 +68,6 @@
 
 @end
 
-@interface RBDarkPopoverBackgroundView : UIPopoverBackgroundView {
-    CGFloat _rbArrowOffset;
-    UIPopoverArrowDirection _rbArrowDirection;
-}
-@end
-
-@implementation RBDarkPopoverBackgroundView
-
-+ (UIEdgeInsets)contentViewInsets { return UIEdgeInsetsMake(10.0, 10.0, 10.0, 10.0); }
-+ (CGFloat)arrowBase { return 28.0; }
-+ (CGFloat)arrowHeight { return 14.0; }
-+ (BOOL)wantsDefaultContentAppearance { return NO; }
-
-- (id)initWithFrame:(CGRect)frame {
-    self = [super initWithFrame:frame];
-    if (self) {
-        self.backgroundColor = [UIColor clearColor];
-        self.opaque = NO;
-    }
-    return self;
-}
-
-- (void)setArrowOffset:(CGFloat)arrowOffset {
-    _rbArrowOffset = arrowOffset;
-    [self setNeedsDisplay];
-}
-
-- (CGFloat)arrowOffset { return _rbArrowOffset; }
-
-- (void)setArrowDirection:(UIPopoverArrowDirection)arrowDirection {
-    _rbArrowDirection = arrowDirection;
-    [self setNeedsDisplay];
-}
-
-- (UIPopoverArrowDirection)arrowDirection { return _rbArrowDirection; }
-
-- (void)drawRect:(CGRect)rect {
-    CGRect body = self.bounds;
-    CGFloat arrowHeight = [[self class] arrowHeight];
-    CGFloat halfBase = [[self class] arrowBase] / 2.0;
-    if (self.arrowDirection == UIPopoverArrowDirectionUp) {
-        body.origin.y += arrowHeight;
-        body.size.height -= arrowHeight;
-    } else if (self.arrowDirection == UIPopoverArrowDirectionDown) {
-        body.size.height -= arrowHeight;
-    } else if (self.arrowDirection == UIPopoverArrowDirectionLeft) {
-        body.origin.x += arrowHeight;
-        body.size.width -= arrowHeight;
-    } else if (self.arrowDirection == UIPopoverArrowDirectionRight) {
-        body.size.width -= arrowHeight;
-    }
-
-    UIColor *fill = [RBTheme pageBackgroundColor];
-    UIColor *line = [RBTheme separatorColor];
-    UIBezierPath *bodyPath = [UIBezierPath bezierPathWithRoundedRect:CGRectInset(body, 0.5, 0.5)
-                                                        cornerRadius:9.0];
-    [fill setFill];
-    [bodyPath fill];
-    [line setStroke];
-    bodyPath.lineWidth = 1.0;
-    [bodyPath stroke];
-
-    UIBezierPath *arrow = [UIBezierPath bezierPath];
-    CGFloat center = 0.0;
-    if (self.arrowDirection == UIPopoverArrowDirectionUp ||
-        self.arrowDirection == UIPopoverArrowDirectionDown) {
-        center = CGRectGetMidX(self.bounds) + self.arrowOffset;
-        center = MIN(CGRectGetMaxX(body) - 16.0, MAX(CGRectGetMinX(body) + 16.0, center));
-        if (self.arrowDirection == UIPopoverArrowDirectionUp) {
-            [arrow moveToPoint:CGPointMake(center, 0.5)];
-            [arrow addLineToPoint:CGPointMake(center + halfBase, CGRectGetMinY(body) + 1.0)];
-            [arrow addLineToPoint:CGPointMake(center - halfBase, CGRectGetMinY(body) + 1.0)];
-        } else {
-            [arrow moveToPoint:CGPointMake(center, CGRectGetMaxY(self.bounds) - 0.5)];
-            [arrow addLineToPoint:CGPointMake(center - halfBase, CGRectGetMaxY(body) - 1.0)];
-            [arrow addLineToPoint:CGPointMake(center + halfBase, CGRectGetMaxY(body) - 1.0)];
-        }
-    } else {
-        center = CGRectGetMidY(self.bounds) + self.arrowOffset;
-        center = MIN(CGRectGetMaxY(body) - 16.0, MAX(CGRectGetMinY(body) + 16.0, center));
-        if (self.arrowDirection == UIPopoverArrowDirectionLeft) {
-            [arrow moveToPoint:CGPointMake(0.5, center)];
-            [arrow addLineToPoint:CGPointMake(CGRectGetMinX(body) + 1.0, center - halfBase)];
-            [arrow addLineToPoint:CGPointMake(CGRectGetMinX(body) + 1.0, center + halfBase)];
-        } else {
-            [arrow moveToPoint:CGPointMake(CGRectGetMaxX(self.bounds) - 0.5, center)];
-            [arrow addLineToPoint:CGPointMake(CGRectGetMaxX(body) - 1.0, center + halfBase)];
-            [arrow addLineToPoint:CGPointMake(CGRectGetMaxX(body) - 1.0, center - halfBase)];
-        }
-    }
-    [arrow closePath];
-    [fill setFill];
-    [arrow fill];
-    [line setStroke];
-    arrow.lineWidth = 1.0;
-    [arrow stroke];
-}
-
-@end
-
 @implementation RBTheme
 
 + (BOOL)isDarkMode {
@@ -167,66 +75,68 @@
 }
 
 + (BOOL)usesClassicAppearance {
-    // Retained as an API-availability predicate for older call sites. Surf's
-    // visual identity is intentionally the same on every supported OS.
+    // UIKit's classic tint and control rendering differ from iOS 7 onward.
     return [[[UIDevice currentDevice] systemVersion] floatValue] < 7.0;
 }
 
 + (UIColor *)deepTideColor {
-    return [self isDarkMode] ? [UIColor colorWithRed:0.082 green:0.086 blue:0.098 alpha:1.0]
-                             : [UIColor colorWithRed:0.063 green:0.165 blue:0.227 alpha:1.0];
+    return [UIColor colorWithWhite:[self isDarkMode] ? 0.085 : 0.13 alpha:1.0];
 }
 + (UIColor *)accentColor {
-    return [self isDarkMode] ? [UIColor colorWithRed:0.337 green:0.635 blue:0.808 alpha:1.0]
-                             : [UIColor colorWithRed:0.078 green:0.451 blue:0.722 alpha:1.0];
+    return [self isDarkMode] ? [UIColor colorWithRed:0.039 green:0.518 blue:1.0 alpha:1.0]
+                             : [UIColor colorWithRed:0.0 green:0.478 blue:1.0 alpha:1.0];
 }
 + (UIColor *)seaGlassColor {
-    return [self isDarkMode] ? [UIColor colorWithRed:0.412 green:0.714 blue:0.651 alpha:1.0]
-                             : [UIColor colorWithRed:0.208 green:0.663 blue:0.722 alpha:1.0];
+    return [self isDarkMode] ? [UIColor colorWithRed:0.19 green:0.82 blue:0.35 alpha:1.0]
+                             : [UIColor colorWithRed:0.20 green:0.65 blue:0.30 alpha:1.0];
 }
 + (UIColor *)foamColor {
-    return [self isDarkMode] ? [UIColor colorWithRed:0.059 green:0.063 blue:0.071 alpha:1.0]
-                             : [UIColor colorWithRed:0.969 green:0.980 blue:0.988 alpha:1.0];
+    return [UIColor colorWithWhite:[self isDarkMode] ? 0.06 : 0.96 alpha:1.0];
 }
 + (UIColor *)surfaceColor {
-    return [self isDarkMode] ? [UIColor colorWithRed:0.106 green:0.114 blue:0.129 alpha:1.0]
-                             : [UIColor whiteColor];
+    return [UIColor colorWithWhite:[self isDarkMode] ? 0.12 : 1.0 alpha:1.0];
+}
++ (UIColor *)panelColor {
+    return [self isDarkMode] ? [self surfaceColor] : [self pageBackgroundColor];
+}
++ (UIColor *)groupedCellColor {
+    return [self isDarkMode] ? [UIColor colorWithWhite:0.18 alpha:1.0] : [self surfaceColor];
 }
 + (UIColor *)mistColor {
-    return [self isDarkMode] ? [UIColor colorWithRed:0.208 green:0.220 blue:0.247 alpha:1.0]
-                             : [UIColor colorWithRed:0.863 green:0.910 blue:0.933 alpha:1.0];
+    return [UIColor colorWithWhite:[self isDarkMode] ? 0.25 : 0.80 alpha:1.0];
 }
 + (UIColor *)slateColor {
-    return [self isDarkMode] ? [UIColor colorWithRed:0.631 green:0.647 blue:0.686 alpha:1.0]
-                             : [UIColor colorWithRed:0.365 green:0.447 blue:0.502 alpha:1.0];
+    return [UIColor colorWithWhite:[self isDarkMode] ? 0.67 : 0.45 alpha:1.0];
 }
 
 + (UIColor *)barTopColor {
-    return [self isDarkMode] ? [UIColor colorWithRed:0.125 green:0.133 blue:0.149 alpha:1.0]
-                             : [UIColor colorWithRed:0.985 green:0.995 blue:1.0 alpha:1.0];
+    return [UIColor colorWithWhite:[self isDarkMode] ? 0.13 : 1.0 alpha:1.0];
 }
 + (UIColor *)barBottomColor {
-    return [self isDarkMode] ? [UIColor colorWithRed:0.098 green:0.102 blue:0.118 alpha:1.0]
-                             : [UIColor colorWithRed:0.945 green:0.972 blue:0.982 alpha:1.0];
+    return [UIColor colorWithWhite:[self isDarkMode] ? 0.10 : 0.94 alpha:1.0];
 }
 + (UIColor *)barLineColor {
-    return [self isDarkMode] ? [UIColor colorWithRed:0.235 green:0.247 blue:0.275 alpha:1.0]
-                             : [UIColor colorWithRed:0.760 green:0.840 blue:0.880 alpha:1.0];
+    return [UIColor colorWithWhite:[self isDarkMode] ? 0.27 : 0.75 alpha:1.0];
 }
 + (UIColor *)stripTopColor {
-    return [self isDarkMode] ? [UIColor colorWithRed:0.102 green:0.106 blue:0.122 alpha:1.0]
-                             : [UIColor colorWithRed:0.910 green:0.950 blue:0.970 alpha:1.0];
+    return [UIColor colorWithWhite:[self isDarkMode] ? 0.10 : 0.92 alpha:1.0];
 }
 + (UIColor *)stripBottomColor {
-    return [self isDarkMode] ? [UIColor colorWithRed:0.075 green:0.078 blue:0.090 alpha:1.0]
-                             : [UIColor colorWithRed:0.860 green:0.910 blue:0.940 alpha:1.0];
+    return [UIColor colorWithWhite:[self isDarkMode] ? 0.08 : 0.88 alpha:1.0];
 }
-+ (UIColor *)iconColor { return [self accentColor]; }
++ (UIColor *)iconColor {
+    // Classic toolbars use subdued monochrome symbols, not iOS 7's vivid blue.
+    // These icons sit on our light/dark browser surfaces; actual navigation-bar
+    // items are rendered by UIKit and keep their system treatment.
+    if ([self usesClassicAppearance]) {
+        return [UIColor colorWithWhite:[self isDarkMode] ? 0.88 : 0.30 alpha:1.0];
+    }
+    return [self isDarkMode] ? [UIColor whiteColor] : [self accentColor];
+}
 + (UIColor *)progressFillColor { return [self accentColor]; }
 + (UIColor *)pageBackgroundColor { return [self foamColor]; }
 + (UIColor *)primaryTextColor {
-    return [self isDarkMode] ? [UIColor colorWithRed:0.941 green:0.945 blue:0.957 alpha:1.0]
-                             : [self deepTideColor];
+    return [self isDarkMode] ? [UIColor colorWithWhite:0.94 alpha:1.0] : [UIColor blackColor];
 }
 + (UIColor *)secondaryTextColor { return [self slateColor]; }
 + (UIColor *)separatorColor { return [self mistColor]; }
@@ -264,37 +174,92 @@
 
 + (void)styleNavigationBar:(UINavigationBar *)navigationBar {
     if (!navigationBar) return;
-    navigationBar.tintColor = [UIColor whiteColor];
-    navigationBar.barStyle = UIBarStyleBlack;
-    [navigationBar setBackgroundImage:[self solidImage:[self deepTideColor] cornerRadius:0.0]
-                        forBarMetrics:UIBarMetricsDefault];
+    [self applyInterfaceStyleToView:navigationBar];
+    BOOL dark = [self isDarkMode];
+    // Keep UIKit's titles/buttons. In dark mode match the surrounding panel;
+    // in light mode restore this OS's unmodified native bar artwork.
+    UIImage *background = dark ? [self solidImage:[self panelColor] cornerRadius:0] : nil;
+    [navigationBar setBackgroundImage:background forBarMetrics:UIBarMetricsDefault];
+    [navigationBar setBackgroundImage:background forBarMetrics:UIBarMetricsLandscapePhone];
     if ([navigationBar respondsToSelector:@selector(setShadowImage:)]) {
-        navigationBar.shadowImage = [self solidImage:[[self seaGlassColor] colorWithAlphaComponent:0.72]
-                                          cornerRadius:0.0];
+        navigationBar.shadowImage = dark ? [self solidImage:[self separatorColor] cornerRadius:0] : nil;
     }
-    navigationBar.titleTextAttributes = @{
-        UITextAttributeTextColor: [UIColor whiteColor],
-        UITextAttributeTextShadowColor: [UIColor clearColor],
-        UITextAttributeFont: [self displayFontOfSize:17.0]
-    };
+    navigationBar.titleTextAttributes = nil;
+    navigationBar.barStyle = dark ? UIBarStyleBlack : UIBarStyleDefault;
+    navigationBar.translucent = !dark && ![self usesClassicAppearance];
+    if ([self usesClassicAppearance]) {
+        // iOS 6 tintColor paints the bar/buttons, not their foreground.
+        navigationBar.tintColor = dark ? [self panelColor] : nil;
+    } else {
+        navigationBar.barTintColor = nil;
+        navigationBar.tintColor = dark ? [UIColor whiteColor] : nil;
+    }
+}
+
++ (void)applyInterfaceStyleToView:(UIView *)view {
+    if ([view respondsToSelector:@selector(setOverrideUserInterfaceStyle:)]) {
+        [(id<RBInterfaceStyleView>)view setOverrideUserInterfaceStyle:[self isDarkMode] ? 2 : 1];
+    }
+}
+
++ (void)styleKeyboard:(UIResponder<UITextInputTraits> *)input {
+    if (!input || ![input respondsToSelector:@selector(setKeyboardAppearance:)]) return;
+    UIKeyboardAppearance appearance = [self isDarkMode]
+        ? ([self usesClassicAppearance] ? UIKeyboardAppearanceAlert : UIKeyboardAppearanceDark)
+        : UIKeyboardAppearanceDefault;
+    BOOL changed = input.keyboardAppearance != appearance;
+    input.keyboardAppearance = appearance;
+    // Keep the current text, selection and responder. Never dismiss/reopen the
+    // keyboard just to recolor it. Legacy keyboards may ignore this preference.
+    if (changed && [input isFirstResponder]) [input reloadInputViews];
 }
 
 + (void)stylePopoverController:(UIPopoverController *)popoverController {
-    if (!popoverController || ![self isDarkMode]) return;
+    if (!popoverController) return;
+    BOOL dark = [self isDarkMode];
+    // The native tint API only exists on iOS 7+. Use the documented background
+    // view extension on iOS 6, only for dark Surf-owned popovers.
+    popoverController.popoverBackgroundViewClass = dark && [self usesClassicAppearance]
+        ? [RBDarkPopoverBackgroundView class] : nil;
+    [self applyInterfaceStyleToView:popoverController.contentViewController.view];
     if ([popoverController respondsToSelector:@selector(setBackgroundColor:)]) {
-        [(id)popoverController setBackgroundColor:[self pageBackgroundColor]];
-    } else {
-        popoverController.popoverBackgroundViewClass = [RBDarkPopoverBackgroundView class];
+        [(id)popoverController setBackgroundColor:dark ? [self panelColor] : nil];
     }
 }
 
 + (void)styleTableView:(UITableView *)tableView {
     if (!tableView) return;
-    tableView.backgroundView = nil;
-    tableView.backgroundColor = [self foamColor];
-    tableView.separatorColor = [self mistColor];
+    [self applyInterfaceStyleToView:tableView];
+    // A fresh UIKit table supplies this OS's grouped background (including
+    // classic textures) and separators, without hardcoded modern substitutes.
+    UITableView *defaults = [[UITableView alloc] initWithFrame:CGRectZero style:tableView.style];
+    [self applyInterfaceStyleToView:defaults];
+    tableView.backgroundView = [self isDarkMode] ? nil : defaults.backgroundView;
+    tableView.backgroundColor = [self isDarkMode]
+        ? (tableView.style == UITableViewStyleGrouped ? [self pageBackgroundColor] : [self panelColor])
+        : defaults.backgroundColor;
+    tableView.separatorColor = [self isDarkMode] ? [self mistColor] : defaults.separatorColor;
     tableView.indicatorStyle = [self isDarkMode] ? UIScrollViewIndicatorStyleWhite
                                                  : UIScrollViewIndicatorStyleDefault;
+}
+
++ (void)styleTableSectionView:(UIView *)view {
+    // Keep native header/footer layout, typography and casing. Only supply the
+    // missing legacy dark foreground; UIKit itself handles light mode.
+    if ([view isKindOfClass:[UITableViewHeaderFooterView class]]) {
+        UITableViewHeaderFooterView *header = (UITableViewHeaderFooterView *)view;
+        static char nativeSectionColorsKey;
+        NSDictionary *native = objc_getAssociatedObject(view, &nativeSectionColorsKey);
+        if (!native) {
+            native = @{@"text":header.textLabel.textColor ?: [UIColor grayColor],
+                       @"shadow":header.textLabel.shadowColor ?: [NSNull null]};
+            objc_setAssociatedObject(view, &nativeSectionColorsKey, native, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        id shadow = [native objectForKey:@"shadow"];
+        header.textLabel.textColor = [self isDarkMode] ? [self secondaryTextColor] : [native objectForKey:@"text"];
+        header.textLabel.shadowColor = [self isDarkMode] ? [UIColor clearColor] :
+            (shadow == [NSNull null] ? nil : shadow);
+    }
 }
 
 + (void)stylePrimaryButton:(UIButton *)button {
@@ -331,7 +296,7 @@
     [button setImage:[self icon:icon size:20.0 color:highlight] forState:UIControlStateHighlighted];
     [button setImage:[self icon:icon size:20.0 color:[[self slateColor] colorWithAlphaComponent:0.42]]
              forState:UIControlStateDisabled];
-    [button setBackgroundImage:[self solidImage:[[self accentColor] colorWithAlphaComponent:0.12]
+    [button setBackgroundImage:[self solidImage:[[self iconColor] colorWithAlphaComponent:0.12]
                                       cornerRadius:9.0]
                       forState:UIControlStateHighlighted];
     button.adjustsImageWhenHighlighted = NO;

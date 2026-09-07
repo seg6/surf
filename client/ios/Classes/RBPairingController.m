@@ -105,8 +105,7 @@ typedef enum {
     self.codeField.borderStyle = UITextBorderStyleRoundedRect;
     self.codeField.backgroundColor = [RBTheme surfaceColor];
     self.codeField.textColor = [RBTheme primaryTextColor];
-    self.codeField.keyboardAppearance = [RBTheme isDarkMode] ? UIKeyboardAppearanceDark
-                                                             : UIKeyboardAppearanceDefault;
+    [RBTheme styleKeyboard:self.codeField];
     self.codeField.textAlignment = NSTextAlignmentCenter;
     self.codeField.font = [RBTheme fontOfSize:23.0 bold:YES];
     self.codeField.contentVerticalAlignment = UIControlContentVerticalAlignmentCenter;

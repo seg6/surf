@@ -35,8 +35,7 @@
     self.addressField.delegate = self;
     self.addressField.font = [RBTheme fontOfSize:16.0 bold:NO];
     self.addressField.textColor = [RBTheme primaryTextColor];
-    self.addressField.keyboardAppearance = [RBTheme isDarkMode] ? UIKeyboardAppearanceDark
-                                                                : UIKeyboardAppearanceDefault;
+    [RBTheme styleKeyboard:self.addressField];
     self.addressField.placeholder = @"192.168.1.25:7777";
     self.addressField.keyboardType = UIKeyboardTypeURL;
     self.addressField.returnKeyType = UIReturnKeyGo;

@@ -9,6 +9,7 @@
 @property(nonatomic, strong) UITextField *field;
 @property(nonatomic, strong) UIButton *starButton;
 @property(nonatomic, strong) UIButton *reloadButton;
+@property(nonatomic, strong) UIButton *clearButton;
 @property(nonatomic, strong) UIImageView *securityView;
 @property(nonatomic, assign) BOOL lockVisible;
 @property(nonatomic, assign) BOOL loading;
@@ -66,6 +67,15 @@
         [self.field addTarget:self action:@selector(fieldChanged:) forControlEvents:UIControlEventEditingChanged];
         [self.fieldBackground addSubview:self.field];
 
+        // Classic UIKit's built-in clear glyph cannot be tinted. Supply a
+        // dark-mode accessory through the public rightView API, not by reaching
+        // into UITextField's private clear-button subviews.
+        self.clearButton = [UIButton buttonWithType:UIButtonTypeCustom];
+        self.clearButton.frame = CGRectMake(0, 0, 32, 28);
+        self.clearButton.accessibilityLabel = @"Clear address";
+        [self.clearButton addTarget:self action:@selector(clearTapped:)
+                   forControlEvents:UIControlEventTouchUpInside];
+
         self.starButton = [UIButton buttonWithType:UIButtonTypeCustom];
         [self styleStar:NO];
         [self.starButton addTarget:self action:@selector(starTapped:) forControlEvents:UIControlEventTouchUpInside];
@@ -93,6 +103,9 @@
     self.fieldBackground.frame = CGRectMake(0.0, 0.0, w, h);
     CGFloat side = h;
     BOOL editing = [self.field isFirstResponder];
+    if ([RBTheme isDarkMode]) {
+        self.field.rightViewMode = [self.field.text length] ? UITextFieldViewModeWhileEditing : UITextFieldViewModeNever;
+    }
     // Safari-style: star and reload/stop step out of the way while editing —
     // the field's left/right insets below already assume the space is free
     // (10pt/4pt vs. a full button-width inset), so leaving these visible
@@ -252,8 +265,16 @@
     self.fieldBackground.layer.borderColor = [[RBTheme mistColor] CGColor];
     self.field.textColor = [RBTheme primaryTextColor];
     [self applyPlaceholderAppearance];
-    self.field.keyboardAppearance = [RBTheme isDarkMode] ? UIKeyboardAppearanceDark
-                                                         : UIKeyboardAppearanceDefault;
+    [RBTheme styleKeyboard:self.field];
+    BOOL dark = [RBTheme isDarkMode];
+    self.field.clearButtonMode = dark ? UITextFieldViewModeNever : UITextFieldViewModeWhileEditing;
+    self.field.rightView = dark ? self.clearButton : nil;
+    self.field.rightViewMode = dark && [self.field.text length]
+        ? UITextFieldViewModeWhileEditing : UITextFieldViewModeNever;
+    [self.clearButton setImage:[RBTheme icon:RBIconClose size:16 color:[RBTheme secondaryTextColor]]
+                     forState:UIControlStateNormal];
+    [self.clearButton setImage:[RBTheme icon:RBIconClose size:16 color:[RBTheme primaryTextColor]]
+                     forState:UIControlStateHighlighted];
     ((CAGradientLayer *)self.progressLayer).colors = @[(id)[[RBTheme accentColor] CGColor],
                                                        (id)[[RBTheme seaGlassColor] CGColor]];
     [self styleStar:self.starred];
@@ -312,7 +333,14 @@
 - (void)reloadTapped:(id)sender { [self.delegate omniboxReloadOrStopTapped:self]; }
 
 - (void)fieldChanged:(id)sender {
+    [self setNeedsLayout];
     [self.delegate omnibox:self textChanged:self.field.text ?: @""];
+}
+
+- (void)clearTapped:(id)sender {
+    self.field.text = @"";
+    [self.field sendActionsForControlEvents:UIControlEventEditingChanged];
+    // Remain in editing with the keyboard open; the committed page is unchanged.
 }
 
 - (BOOL)textFieldShouldBeginEditing:(UITextField *)textField {

@@ -33,8 +33,8 @@
     [super viewDidLoad];
     [RBTheme styleTableView:self.tableView];
     [RBTheme styleNavigationBar:self.navigationController.navigationBar];
-    self.view.backgroundColor = [RBTheme pageBackgroundColor];
-    self.tableView.backgroundColor = [RBTheme pageBackgroundColor];
+    self.view.backgroundColor = [RBTheme panelColor];
+    self.tableView.backgroundColor = [RBTheme panelColor];
     self.tableView.separatorColor = [RBTheme separatorColor];
     self.tableView.rowHeight = 44.0;
     self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
@@ -50,7 +50,7 @@
     [super viewWillAppear:animated];
     [RBTheme styleTableView:self.tableView];
     [RBTheme styleNavigationBar:self.navigationController.navigationBar];
-    self.view.backgroundColor = [RBTheme pageBackgroundColor];
+    self.view.backgroundColor = [RBTheme panelColor];
     [self.tableView reloadData];
 }
 

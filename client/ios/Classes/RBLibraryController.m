@@ -57,36 +57,31 @@ static UITextField *RBLibrarySearchTextField(UIView *view) {
 - (void)applyAppearance {
     [RBTheme styleTableView:self.tableView];
     [RBTheme styleNavigationBar:self.navigationController.navigationBar];
-    self.view.backgroundColor = [RBTheme pageBackgroundColor];
-    self.libraryHeader.backgroundColor = [RBTheme pageBackgroundColor];
+    self.view.backgroundColor = [RBTheme panelColor];
+    self.libraryHeader.backgroundColor = [RBTheme panelColor];
     self.emptyLabel.textColor = [RBTheme secondaryTextColor];
 
-    UIColor *segmentTint = [RBTheme isDarkMode] ? [RBTheme separatorColor]
-                                                 : [RBTheme accentColor];
-    self.segments.tintColor = segmentTint;
-    [self.segments setTitleTextAttributes:@{
-        UITextAttributeTextColor: [RBTheme primaryTextColor],
-        UITextAttributeFont: [RBTheme fontOfSize:12.0 bold:YES]
-    } forState:UIControlStateNormal];
-    [self.segments setTitleTextAttributes:@{
-        UITextAttributeTextColor: [UIColor whiteColor],
-        UITextAttributeFont: [RBTheme fontOfSize:12.0 bold:YES]
-    } forState:UIControlStateSelected];
+    BOOL dark = [RBTheme isDarkMode];
+    [RBTheme applyInterfaceStyleToView:self.segments];
+    self.segments.tintColor = dark ? ([RBTheme usesClassicAppearance] ? [UIColor darkGrayColor] : [UIColor whiteColor]) : nil;
+    [self.segments setTitleTextAttributes:nil forState:UIControlStateNormal];
+    [self.segments setTitleTextAttributes:nil forState:UIControlStateSelected];
 
-    self.searchBar.barStyle = [RBTheme isDarkMode] ? UIBarStyleBlack : UIBarStyleDefault;
+    [RBTheme applyInterfaceStyleToView:self.searchBar];
+    self.searchBar.barStyle = dark ? UIBarStyleBlack : UIBarStyleDefault;
     self.searchBar.translucent = NO;
-    self.searchBar.tintColor = [RBTheme accentColor];
-    self.searchBar.backgroundColor = [RBTheme pageBackgroundColor];
-    [self.searchBar setBackgroundImage:[RBTheme solidImage:[RBTheme pageBackgroundColor]
-                                                 cornerRadius:0.0]];
+    self.searchBar.tintColor = [RBTheme usesClassicAppearance] ? nil : (dark ? [UIColor whiteColor] : nil);
+    self.searchBar.backgroundColor = [UIColor clearColor];
+    [self.searchBar setBackgroundImage:dark ? [RBTheme solidImage:[RBTheme panelColor] cornerRadius:0] : nil];
+    // UIKit keeps the search-field layout, icons and editing behavior. Only
+    // replace its light artwork in dark mode, through the public appearance API.
+    [self.searchBar setSearchFieldBackgroundImage:dark
+        ? [RBTheme solidImage:[RBTheme groupedCellColor] cornerRadius:8] : nil
+                                       forState:UIControlStateNormal];
+    [RBTheme styleKeyboard:self.searchBar];
     UITextField *field = RBLibrarySearchTextField(self.searchBar);
-    field.backgroundColor = [RBTheme surfaceColor];
     field.textColor = [RBTheme primaryTextColor];
-    if ([field respondsToSelector:@selector(setTintColor:)]) field.tintColor = [RBTheme accentColor];
-    field.keyboardAppearance = [RBTheme isDarkMode] ? UIKeyboardAppearanceDark
-                                                     : UIKeyboardAppearanceDefault;
-    field.layer.cornerRadius = 7.0;
-    field.layer.masksToBounds = YES;
+    [RBTheme styleKeyboard:field];
     [self.tableView reloadData];
 }
 
@@ -98,10 +93,11 @@ static UITextField *RBLibrarySearchTextField(UIView *view) {
     self.segments.segmentedControlStyle = UISegmentedControlStyleBar;
     self.segments.selectedSegmentIndex = RBLibraryTabBookmarks;
     [self.segments addTarget:self action:@selector(segmentChanged:) forControlEvents:UIControlEventValueChanged];
-    self.navigationItem.rightBarButtonItem =
-        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
-                                                      target:self action:@selector(doneTapped:)];
-    [self refreshLeftButton];
+    // Dismissal and ending row editing must never be two competing Done buttons.
+    self.navigationItem.leftBarButtonItem =
+        [[UIBarButtonItem alloc] initWithTitle:@"Close" style:UIBarButtonItemStylePlain
+                                      target:self action:@selector(closeTapped:)];
+    [self refreshEditingButton];
 
     self.searchBar = [[UISearchBar alloc] initWithFrame:CGRectMake(0.0, 0.0, self.view.bounds.size.width, 44.0)];
     self.searchBar.delegate = self;
@@ -130,6 +126,10 @@ static UITextField *RBLibrarySearchTextField(UIView *view) {
     self.libraryHeader.frame = CGRectMake(0.0, 0.0, width, 78.0);
     self.segments.frame = CGRectMake(6.0, 5.0, MAX(1.0, width - 12.0), 29.0);
     self.searchBar.frame = CGRectMake(0.0, 34.0, width, 44.0);
+    // On older UIKit the search field may be created only during layout.
+    UITextField *field = RBLibrarySearchTextField(self.searchBar);
+    field.textColor = [RBTheme primaryTextColor];
+    [RBTheme styleKeyboard:field];
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -142,7 +142,8 @@ static UITextField *RBLibrarySearchTextField(UIView *view) {
     [self applyAppearance];
 }
 
-- (void)doneTapped:(id)sender {
+- (void)closeTapped:(id)sender {
+    [self.searchBar resignFirstResponder];
     if (self.onDismiss) {
         self.onDismiss();
     } else {
@@ -150,21 +151,26 @@ static UITextField *RBLibrarySearchTextField(UIView *view) {
     }
 }
 
-- (void)refreshLeftButton {
+- (void)refreshEditingButton {
     if ([self tab] == RBLibraryTabHistory) {
-        self.navigationItem.leftBarButtonItem =
+        self.navigationItem.rightBarButtonItem =
             [[UIBarButtonItem alloc] initWithTitle:@"Clear" style:UIBarButtonItemStylePlain
                                             target:self action:@selector(clearHistoryTapped:)];
     } else {
-        self.navigationItem.leftBarButtonItem = self.editButtonItem;
+        self.navigationItem.rightBarButtonItem = self.editButtonItem;
     }
+}
+
+- (void)setEditing:(BOOL)editing animated:(BOOL)animated {
+    if (editing) [self.searchBar resignFirstResponder];
+    [super setEditing:editing animated:animated];
 }
 
 - (void)segmentChanged:(id)sender {
     [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(fireSearch) object:nil];
     self.historyInFlight = NO;
-    [self refreshLeftButton];
     [self setEditing:NO animated:NO];
+    [self refreshEditingButton];
     self.searchBar.text = @"";
     self.query = @"";
     static NSString *const placeholders[] = {@"Search bookmarks", @"Search history", @"Search downloads"};
@@ -357,10 +363,7 @@ static NSString *RBLibFormatDate(long long timestamp) {
     cell.backgroundColor = [RBTheme surfaceColor];
     cell.textLabel.textColor = [RBTheme primaryTextColor];
     cell.detailTextLabel.textColor = [RBTheme secondaryTextColor];
-    if (!cell.selectedBackgroundView) {
-        cell.selectedBackgroundView = [[UIView alloc] initWithFrame:CGRectZero];
-    }
-    cell.selectedBackgroundView.backgroundColor = [[RBTheme separatorColor] colorWithAlphaComponent:0.62];
+    // Leave selection, including the classic blue highlight, to UIKit.
     NSDictionary *entry = [rows objectAtIndex:(NSUInteger)indexPath.row];
     if ([self tab] == RBLibraryTabDownloads) {
         NSString *name = [entry objectForKey:@"name"] ?: @"download";

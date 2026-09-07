@@ -137,7 +137,7 @@
         self.searchButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
         self.searchButton.contentEdgeInsets = UIEdgeInsetsMake(0.0, 14.0, 0.0, 14.0);
         self.searchButton.titleEdgeInsets = UIEdgeInsetsMake(0.0, 9.0, 0.0, 0.0);
-        [self.searchButton setImage:[RBTheme icon:RBIconSearch size:18.0 color:[RBTheme accentColor]]
+        [self.searchButton setImage:[RBTheme icon:RBIconSearch size:18.0 color:[RBTheme iconColor]]
                            forState:UIControlStateNormal];
         [self.searchButton setTitle:@"Search or enter address" forState:UIControlStateNormal];
         [self.searchButton setTitleColor:[RBTheme secondaryTextColor] forState:UIControlStateNormal];
@@ -158,7 +158,7 @@
 
         self.libraryButton = [UIButton buttonWithType:UIButtonTypeCustom];
         [self.libraryButton setTitle:@"Open Library" forState:UIControlStateNormal];
-        [self.libraryButton setImage:[RBTheme icon:RBIconBook size:17.0 color:[RBTheme accentColor]]
+        [self.libraryButton setImage:[RBTheme icon:RBIconBook size:17.0 color:[RBTheme iconColor]]
                             forState:UIControlStateNormal];
         self.libraryButton.titleEdgeInsets = UIEdgeInsetsMake(0.0, 7.0, 0.0, 0.0);
         [RBTheme styleSecondaryButton:self.libraryButton];
@@ -194,12 +194,12 @@
     self.titleLabel.textColor = [RBTheme primaryTextColor];
     self.searchButton.backgroundColor = [RBTheme surfaceColor];
     self.searchButton.layer.borderColor = [[RBTheme mistColor] CGColor];
-    [self.searchButton setImage:[RBTheme icon:RBIconSearch size:18.0 color:[RBTheme accentColor]]
+    [self.searchButton setImage:[RBTheme icon:RBIconSearch size:18.0 color:[RBTheme iconColor]]
                        forState:UIControlStateNormal];
     [self.searchButton setTitleColor:[RBTheme secondaryTextColor] forState:UIControlStateNormal];
     self.favoritesLabel.textColor = [RBTheme primaryTextColor];
     for (RBFavoriteButton *button in self.favoritesView.subviews) [button applyAppearance];
-    [self.libraryButton setImage:[RBTheme icon:RBIconBook size:17.0 color:[RBTheme accentColor]]
+    [self.libraryButton setImage:[RBTheme icon:RBIconBook size:17.0 color:[RBTheme iconColor]]
                         forState:UIControlStateNormal];
     [RBTheme styleSecondaryButton:self.libraryButton];
 }

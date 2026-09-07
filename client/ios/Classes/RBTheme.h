@@ -57,6 +57,8 @@ typedef enum {
 + (UIColor *)progressFillColor;
 + (UIColor *)pageBackgroundColor;
 + (UIColor *)surfaceColor;
++ (UIColor *)panelColor;
++ (UIColor *)groupedCellColor;
 + (UIColor *)primaryTextColor;
 + (UIColor *)secondaryTextColor;
 + (UIColor *)separatorColor;
@@ -72,6 +74,9 @@ typedef enum {
 + (void)styleNavigationBar:(UINavigationBar *)navigationBar;
 + (void)stylePopoverController:(UIPopoverController *)popoverController;
 + (void)styleTableView:(UITableView *)tableView;
++ (void)styleTableSectionView:(UIView *)view;
++ (void)applyInterfaceStyleToView:(UIView *)view;
++ (void)styleKeyboard:(UIResponder<UITextInputTraits> *)input;
 + (void)stylePrimaryButton:(UIButton *)button;
 + (void)styleSecondaryButton:(UIButton *)button;
 @end

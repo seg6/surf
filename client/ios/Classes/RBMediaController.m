@@ -74,7 +74,7 @@
     UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
     [RBTheme styleSecondaryButton:button];
     [button setTitle:title forState:UIControlStateNormal];
-    [button setImage:[RBTheme icon:icon size:17.0 color:[RBTheme accentColor]] forState:UIControlStateNormal];
+    [button setImage:[RBTheme icon:icon size:17.0 color:[RBTheme iconColor]] forState:UIControlStateNormal];
     button.imageEdgeInsets = UIEdgeInsetsMake(0.0, -5.0, 0.0, 5.0);
     return button;
 }
@@ -133,7 +133,7 @@ static NSString *RBMediaTime(double seconds) {
     [self.playButton setTitle:([[state objectForKey:@"paused"] boolValue] ? @"Play" : @"Pause")
                      forState:UIControlStateNormal];
     RBIcon playbackIcon = [[state objectForKey:@"paused"] boolValue] ? RBIconMedia : RBIconPause;
-    [self.playButton setImage:[RBTheme icon:playbackIcon size:17.0 color:[RBTheme accentColor]]
+    [self.playButton setImage:[RBTheme icon:playbackIcon size:17.0 color:[RBTheme iconColor]]
                      forState:UIControlStateNormal];
     [self.muteButton setTitle:([[state objectForKey:@"muted"] boolValue] ? @"Unmute" : @"Mute")
                      forState:UIControlStateNormal];

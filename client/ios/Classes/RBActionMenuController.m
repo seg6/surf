@@ -45,7 +45,7 @@
 - (void)setItem:(RBActionMenuItem *)item {
     _item = item;
     self.titleLabel.text = item.title;
-    UIColor *color = item.enabled ? [RBTheme accentColor] : [[RBTheme slateColor] colorWithAlphaComponent:0.30];
+    UIColor *color = item.enabled ? [RBTheme iconColor] : [[RBTheme slateColor] colorWithAlphaComponent:0.30];
     self.iconView.image = [RBTheme icon:item.icon size:(self.compactLayout ? 22.0 : 26.0)
                                       color:color];
     self.enabled = item.enabled;
@@ -55,7 +55,7 @@
 
 - (void)setHighlighted:(BOOL)highlighted {
     [super setHighlighted:highlighted];
-    self.backgroundColor = highlighted ? [[RBTheme accentColor] colorWithAlphaComponent:0.10]
+    self.backgroundColor = highlighted ? [[RBTheme iconColor] colorWithAlphaComponent:0.10]
                                        : [UIColor clearColor];
     self.transform = highlighted ? CGAffineTransformMakeScale(0.97, 0.97) : CGAffineTransformIdentity;
 }
@@ -101,7 +101,7 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.view.backgroundColor = self.phoneLayout ? [UIColor clearColor] : [RBTheme foamColor];
+    self.view.backgroundColor = self.phoneLayout ? [UIColor clearColor] : [RBTheme panelColor];
 
     self.backdrop = [[UIControl alloc] initWithFrame:CGRectZero];
     self.backdrop.backgroundColor = [UIColor colorWithWhite:0.02 alpha:0.34];
@@ -110,7 +110,7 @@
     [self.view addSubview:self.backdrop];
 
     self.card = [[UIView alloc] initWithFrame:CGRectZero];
-    self.card.backgroundColor = [RBTheme foamColor];
+    self.card.backgroundColor = [RBTheme panelColor];
     self.card.layer.cornerRadius = self.phoneLayout ? 16.0 : 0.0;
     self.card.layer.borderWidth = self.phoneLayout ? 1.0 : 0.0;
     self.card.layer.borderColor = [[RBTheme mistColor] CGColor];

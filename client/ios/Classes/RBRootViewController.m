@@ -73,6 +73,7 @@ static BOOL RBValidClipboardText(id value) {
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [RBTheme styleNavigationBar:self.navigationBar];
+    [RBTheme applyInterfaceStyleToView:self.view];
     self.view.backgroundColor = [RBTheme pageBackgroundColor];
     // UIKit owns the form-sheet mask. Clipping the child navigation view too
     // exposes the system's white backing through both sets of rounded corners.
@@ -411,6 +412,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
 }
 
 - (void)applyAppearance {
+    [RBTheme applyInterfaceStyleToView:self.view];
     [self.chromeBar applyAppearance];
     [self.phoneToolbar applyAppearance];
     [self.tabStrip applyAppearance];
@@ -427,9 +429,9 @@ static CGFloat RBEvenExtent(CGFloat value) {
     self.connectionPill.backgroundColor = floatingSurface;
     UIToolbar *inputBar = (UIToolbar *)self.hiddenInput.inputAccessoryView;
     inputBar.barStyle = [RBTheme isDarkMode] ? UIBarStyleBlack : UIBarStyleDefault;
-    self.hiddenInput.keyboardAppearance = [RBTheme isDarkMode] ? UIKeyboardAppearanceDark
-                                                               : UIKeyboardAppearanceDefault;
+    [RBTheme styleKeyboard:self.hiddenInput];
     [RBTheme styleNavigationBar:self.modalNavigationController.navigationBar];
+    [RBTheme applyInterfaceStyleToView:self.modalNavigationController.view];
     self.modalNavigationController.view.backgroundColor = [RBTheme pageBackgroundColor];
     [self.view setNeedsLayout];
 }

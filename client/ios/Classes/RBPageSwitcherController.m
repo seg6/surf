@@ -105,7 +105,7 @@
     [self.view addSubview:self.bottomBar];
     self.addPageButton = [UIButton buttonWithType:UIButtonTypeCustom];
     [self.addPageButton setTitle:@"New Tab" forState:UIControlStateNormal];
-    [self.addPageButton setImage:[RBTheme icon:RBIconPlus size:17.0 color:[RBTheme accentColor]]
+    [self.addPageButton setImage:[RBTheme icon:RBIconPlus size:17.0 color:[RBTheme iconColor]]
                         forState:UIControlStateNormal];
     self.addPageButton.titleEdgeInsets = UIEdgeInsetsMake(0.0, 7.0, 0.0, 0.0);
     [self.addPageButton setTitleColor:[RBTheme iconColor] forState:UIControlStateNormal];

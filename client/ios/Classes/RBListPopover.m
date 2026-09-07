@@ -22,7 +22,7 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     [RBTheme styleTableView:self.tableView];
-    self.view.backgroundColor = [RBTheme pageBackgroundColor];
+    self.view.backgroundColor = [RBTheme panelColor];
     self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
 }
 
@@ -67,7 +67,7 @@
     NSString *title = [self tableView:tableView titleForHeaderInSection:section];
     if (![title length]) return nil;
     UIView *header = [[UIView alloc] initWithFrame:CGRectZero];
-    header.backgroundColor = [RBTheme pageBackgroundColor];
+    header.backgroundColor = [RBTheme panelColor];
     UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(12.0, 0.0,
                                                                MAX(1.0, tableView.bounds.size.width - 24.0), 28.0)];
     label.autoresizingMask = UIViewAutoresizingFlexibleWidth;

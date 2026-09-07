@@ -109,8 +109,7 @@
                        lineColor:[RBTheme barLineColor]];
     self.field.backgroundColor = [RBTheme surfaceColor];
     self.field.textColor = [RBTheme primaryTextColor];
-    self.field.keyboardAppearance = [RBTheme isDarkMode] ? UIKeyboardAppearanceDark
-                                                         : UIKeyboardAppearanceDefault;
+    [RBTheme styleKeyboard:self.field];
     self.field.layer.borderColor = [[RBTheme mistColor] CGColor];
     [RBTheme styleBarButton:self.prevButton icon:RBIconChevronUp];
     [RBTheme styleBarButton:self.nextButton icon:RBIconChevronDown];
