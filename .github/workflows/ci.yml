@@ -124,7 +124,8 @@ jobs:
           cache-dependency-path: backend/go.sum
 
       - name: Test all backend packages
-        run: make test
+        working-directory: backend
+        run: go test ./...
 
       - name: Verify the test tree stayed clean
         run: git diff --exit-code
