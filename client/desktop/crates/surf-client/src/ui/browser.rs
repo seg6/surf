@@ -213,6 +213,7 @@ impl DesktopApp {
                                     palette.text,
                                     &label,
                                 );
+                                drop(draw);
                                 if reveal && tab.active {
                                     ui.set_scroll_here_x();
                                 }
