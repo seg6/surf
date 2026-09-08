@@ -3,6 +3,15 @@
 A compatibility change requires matching client and server generations. App
 version differences alone do not.
 
+## Unreleased
+
+- Fixed a browser worker startup stall that prevented Facebook Reels and
+  other features that depend on dedicated web workers from loading.
+- Fixed live browser view startup failures caused by overlapping capture
+  requests or requesting a new stream before releasing the existing one.
+- Browser capture failures now report their cause promptly instead of waiting
+  for video startup to time out. Capture can recover after transient errors.
+
 ## 0.16.0 - 2026-09-07
 
 ### Browse from Linux, too
