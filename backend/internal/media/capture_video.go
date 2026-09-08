@@ -64,12 +64,18 @@ func (s *Capture) StartVideo(config EncoderConfig, handler func(VideoFrame)) err
 	ready := s.videoReady
 	mediaActive := s.mediaActive
 	reacquire := mediaActive && previousConfig != config
-	var captureReady <-chan error
-	if !mediaActive || reacquire {
-		s.ready = make(chan error, 1)
-		captureReady = s.ready
-	}
+	// Even a parked capture can fail when a startup retry reacquires it.
+	// Keep listening until the encoder starts, independently of audio waiters.
+	captureReady := make(chan error, 1)
+	s.videoCaptureReady = captureReady
 	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		if s.videoCaptureReady == captureReady {
+			s.videoCaptureReady = nil
+		}
+		s.mu.Unlock()
+	}()
 
 	if reacquire {
 		if err := s.stopCaptureForReconfigure(); err != nil {
@@ -79,7 +85,7 @@ func (s *Capture) StartVideo(config EncoderConfig, handler func(VideoFrame)) err
 	}
 	s.sendVideoConfig()
 	if !mediaActive || reacquire {
-		if _, err := s.triggerActive(true); err != nil {
+		if _, err := s.triggerActive(true, captureReady); err != nil {
 			s.StopVideo()
 			return err
 		}
@@ -91,7 +97,6 @@ func (s *Capture) StartVideo(config EncoderConfig, handler func(VideoFrame)) err
 	for {
 		select {
 		case err := <-captureReady:
-			captureReady = nil
 			if err != nil {
 				s.StopVideo()
 				return fmt.Errorf("reacquire tab capture for video: %w", err)
@@ -108,7 +113,7 @@ func (s *Capture) StartVideo(config EncoderConfig, handler func(VideoFrame)) err
 			// while its offscreen document is still coming up. Re-trigger
 			// capture here so the native client does not have to reconnect.
 			log.Printf("video: tab capture cold start pending, retrying")
-			if _, err := s.triggerActive(false); err != nil {
+			if _, err := s.triggerActive(false, nil); err != nil {
 				log.Printf("video: tab capture retry: %v", err)
 			}
 		case <-timeout.C:

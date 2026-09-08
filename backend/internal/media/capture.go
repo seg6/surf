@@ -54,7 +54,10 @@ type Capture struct {
 	videoActive  bool
 	videoRunning bool
 	videoReady   chan error
-	videoWriteMu sync.Mutex
+	// Capture acquisition and encoder readiness are separate: a tab switch or
+	// startup retry can lose its source before the encoder becomes ready.
+	videoCaptureReady chan error
+	videoWriteMu      sync.Mutex
 }
 
 type capture struct {
@@ -184,7 +187,7 @@ func (s *Capture) Start() error {
 	ready := s.ready
 	s.mu.Unlock()
 
-	started, err := s.triggerActive(true)
+	started, err := s.triggerActive(true, ready)
 	if err != nil {
 		return err
 	}
@@ -232,7 +235,7 @@ func (s *Capture) OpenAudio() (io.ReadCloser, error) {
 		return next, nil
 	}
 
-	started, err := s.triggerActive(true)
+	started, err := s.triggerActive(true, ready)
 	if err != nil {
 		next.close()
 		return nil, err
@@ -263,12 +266,12 @@ func (s *Capture) SwitchActive() {
 	if !active {
 		return
 	}
-	if _, err := s.triggerActive(false); err != nil {
+	if _, err := s.triggerActive(false, nil); err != nil {
 		log.Printf("audio: switch active tab: %v", err)
 	}
 }
 
-func (s *Capture) triggerActive(coldStart bool) (bool, error) {
+func (s *Capture) triggerActive(coldStart bool, ready <-chan error) (bool, error) {
 	s.mu.Lock()
 	client, extensionID := s.client, s.extensionID
 	s.mu.Unlock()
@@ -294,9 +297,6 @@ func (s *Capture) triggerActive(coldStart bool) (bool, error) {
 	// Usually the listener is already registered and the first action starts
 	// capture. Do not immediately fire a second action: two overlapping
 	// getMediaStreamId calls can invalidate one another.
-	s.mu.Lock()
-	ready := s.ready
-	s.mu.Unlock()
 	if ready != nil {
 		select {
 		case err := <-ready:
@@ -466,15 +466,28 @@ func (s *Capture) handleBridgeMessage(data []byte) {
 		if strings.TrimSpace(message.Error) == "" {
 			message.Error = "unknown extension error"
 		}
+		log.Printf("tab capture: capture failed: %s", message.Error)
 		s.signalReady(errors.New(message.Error))
 	}
 }
 
 func (s *Capture) signalReady(err error) {
 	s.mu.Lock()
-	ready := s.ready
-	s.mu.Unlock()
-	if ready != nil {
+	defer s.mu.Unlock()
+	if err != nil {
+		// startCapture tears down the previous stream before reacquiring it.
+		// Failure therefore invalidates both the parked source and its encoder.
+		s.mediaActive = false
+		s.videoRunning = false
+	}
+	for _, ready := range []chan error{s.ready, s.videoCaptureReady} {
+		if err != nil {
+			// An unread "active" notification must not hide a later failure.
+			select {
+			case <-ready:
+			default:
+			}
+		}
 		select {
 		case ready <- err:
 		default:
@@ -516,13 +529,14 @@ func (s *Capture) Close() error {
 	}
 	s.closed = true
 	current, conn, videoConn := s.capture, s.conn, s.videoConn
-	ready, videoReady := s.ready, s.videoReady
+	ready, videoReady, videoCaptureReady := s.ready, s.videoReady, s.videoCaptureReady
 	s.capture, s.conn, s.videoConn = nil, nil, nil
 	s.mediaActive = false
 	s.videoActive = false
 	s.videoRunning = false
 	s.ready = nil
 	s.videoReady = nil
+	s.videoCaptureReady = nil
 	s.mu.Unlock()
 	closedErr := errors.New("tab capture source closed")
 	if ready != nil {
@@ -534,6 +548,12 @@ func (s *Capture) Close() error {
 	if videoReady != nil {
 		select {
 		case videoReady <- closedErr:
+		default:
+		}
+	}
+	if videoCaptureReady != nil {
+		select {
+		case videoCaptureReady <- closedErr:
 		default:
 		}
 	}
