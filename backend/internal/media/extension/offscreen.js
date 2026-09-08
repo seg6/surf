@@ -574,9 +574,20 @@ async function startCapture(streamId) {
   }
 }
 
-chrome.runtime.onMessage.addListener((message) => {
-  if (message.type === "capture") {
-    void startCapture(message.streamId);
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === "prepare-capture") {
+    captureGeneration++;
+    stopCapture();
+    sendJSON({type: "inactive"});
+    sendResponse();
+  } else if (message.type === "capture") {
+    // Keep the background request pending until acquisition has finished so
+    // another action cannot race getUserMedia or invalidate its stream ID.
+    void startCapture(message.streamId).then(sendResponse, (error) => {
+      sendJSON({type: "error", error: String(error)});
+      sendResponse();
+    });
+    return true;
   } else if (message.type === "capture-error") {
     void connectSocket().then(() => {
       sendJSON({type: "error", error: message.error});

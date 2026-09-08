@@ -173,20 +173,33 @@ func editableObserverParams(source string, runImmediately bool) map[string]any {
 	return params
 }
 
+// Chrome can pause dedicated workers before applying the auto-attach filter.
+// Include them so we receive a session and can immediately resume and detach;
+// excluding them leaves worker-backed sites waiting forever for a debugger.
+func editableAutoAttachParams() map[string]any {
+	return map[string]any{
+		"autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true,
+		"filter": []any{
+			map[string]any{"type": "iframe", "exclude": false},
+			map[string]any{"type": "worker", "exclude": false},
+			map[string]any{"exclude": true},
+		},
+	}
+}
+
 // Target.setAutoAttach is scoped to a target. Enabling it on every page and
 // attached iframe observes isolated cross-origin frames recursively without
 // auto-attaching unrelated top-level tabs.
 func (b *Controller) setupEditableAutoAttach(session string) {
-	_ = b.cdp.Dispatch(session, "Target.setAutoAttach", map[string]any{
-		"autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true,
-		"filter": []any{
-			map[string]any{"type": "iframe", "exclude": false},
-			map[string]any{"exclude": true},
-		},
-	})
+	_ = b.cdp.Dispatch(session, "Target.setAutoAttach", editableAutoAttachParams())
 }
 
 func (b *Controller) onEditableTargetAttached(event cdp.Event) {
+	// Root-session notifications also describe Surf's explicit page and
+	// capture attachments. Only child sessions belong to this auto-attacher.
+	if event.SessionID == "" {
+		return
+	}
 	var attached struct {
 		SessionID  string `json:"sessionId"`
 		TargetInfo struct {
@@ -194,7 +207,14 @@ func (b *Controller) onEditableTargetAttached(event cdp.Event) {
 		} `json:"targetInfo"`
 		WaitingForDebugger bool `json:"waitingForDebugger"`
 	}
-	if json.Unmarshal(event.Params, &attached) != nil || attached.SessionID == "" || attached.TargetInfo.Type != "iframe" {
+	if json.Unmarshal(event.Params, &attached) != nil || attached.SessionID == "" {
+		return
+	}
+	if attached.TargetInfo.Type == "worker" {
+		go b.resumeAndDetachTarget(event.SessionID, attached.SessionID, attached.WaitingForDebugger)
+		return
+	}
+	if attached.TargetInfo.Type != "iframe" {
 		return
 	}
 	b.mu.Lock()
@@ -204,9 +224,22 @@ func (b *Controller) onEditableTargetAttached(event cdp.Event) {
 	}
 	b.mu.Unlock()
 	if tab == nil {
+		go b.resumeAndDetachTarget(event.SessionID, attached.SessionID, attached.WaitingForDebugger)
 		return
 	}
 	go b.initializeEditableTarget(attached.SessionID, attached.WaitingForDebugger)
+}
+
+func (b *Controller) resumeAndDetachTarget(parent, session string, waitingForDebugger bool) {
+	if waitingForDebugger {
+		// Wait for the worker to acknowledge resume before dropping its session.
+		if _, err := b.cdp.Call(session, "Runtime.runIfWaitingForDebugger", nil); err != nil {
+			log.Printf("editable: resume unused target: %v", err)
+		}
+	}
+	if _, err := b.cdp.Call(parent, "Target.detachFromTarget", map[string]any{"sessionId": session}); err != nil {
+		log.Printf("editable: detach unused target: %v", err)
+	}
 }
 
 func (b *Controller) initializeEditableTarget(session string, waitingForDebugger bool) {
@@ -223,13 +256,7 @@ func (b *Controller) initializeEditableTarget(session string, waitingForDebugger
 		{"Page.addScriptToEvaluateOnNewDocument", editableObserverParams(observer, !waitingForDebugger)},
 		{"Page.addScriptToEvaluateOnNewDocument", selectSensorParams(selectSensor, !waitingForDebugger)},
 		{"Page.addScriptToEvaluateOnNewDocument", selectObserverParams(selectObserver, !waitingForDebugger)},
-		{"Target.setAutoAttach", map[string]any{
-			"autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true,
-			"filter": []any{
-				map[string]any{"type": "iframe", "exclude": false},
-				map[string]any{"exclude": true},
-			},
-		}},
+		{"Target.setAutoAttach", editableAutoAttachParams()},
 	}
 	for _, command := range commands {
 		if _, err := b.cdp.Call(session, command.method, command.params); err != nil {
