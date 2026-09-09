@@ -89,7 +89,7 @@ static void test_event_fixtures(void) {
     char *data = read_file(SURF_PROTOCOL_EVENT_FIXTURES, &length);
     void *memory;
     surf_protocol_workspace_t *workspace = create_workspace(&memory);
-    SURF_CHECK(decode_fixture_array(workspace, data, length) == 32);
+    SURF_CHECK(decode_fixture_array(workspace, data, length) == 33);
     free(memory);
     free(data);
 }
@@ -332,6 +332,9 @@ static void initialize_command(surf_protocol_command_t *command,
     case SURF_PROTOCOL_COMMAND_MEDIA_VOLUME:
         command->data.volume.value = 0.75;
         break;
+    case SURF_PROTOCOL_COMMAND_BROWSER_RESUME:
+        command->data.browser_resume.revision = 7;
+        break;
     case SURF_PROTOCOL_COMMAND_CLIPBOARD_RESULT:
         command->data.clipboard_result.id = surf_string_from_cstr("clip-1");
         command->data.clipboard_result.ok = 1;
@@ -348,7 +351,7 @@ static void initialize_command(surf_protocol_command_t *command,
 static void emit_commands(void) {
     surf_protocol_command_kind_t kind;
     for (kind = SURF_PROTOCOL_COMMAND_SIZE;
-         kind <= SURF_PROTOCOL_COMMAND_MEDIA_QUERY;
+         kind <= SURF_PROTOCOL_COMMAND_BROWSER_RESUME;
          kind = (surf_protocol_command_kind_t)(kind + 1)) {
         surf_protocol_command_t command;
         char buffer[8192];
@@ -374,6 +377,10 @@ static void test_command_encoding(void) {
     SURF_CHECK(surf_protocol_encode_command(&command, buffer, 8, &length) ==
                SURF_PROTOCOL_ERROR_BUFFER);
     SURF_CHECK(length > 8);
+    initialize_command(&command, SURF_PROTOCOL_COMMAND_BROWSER_RESUME);
+    command.data.browser_resume.revision = 0;
+    SURF_CHECK(surf_protocol_encode_command(&command, buffer, sizeof(buffer),
+                                            &length) == SURF_PROTOCOL_ERROR_FIELD);
 }
 
 int main(int argc, char **argv) {

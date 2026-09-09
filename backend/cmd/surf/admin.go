@@ -24,6 +24,7 @@ import (
 	"surf-backend/internal/config"
 	"surf-backend/internal/control"
 	"surf-backend/internal/logstore"
+	"surf-backend/internal/protocol"
 	"surf-backend/internal/web"
 
 	qrcode "github.com/skip2/go-qrcode"
@@ -118,6 +119,14 @@ func runStatusCommand() error {
 	if err != nil {
 		return err
 	}
+	if admin.descriptor.Standalone {
+		var state protocol.BrowserModeEvent
+		if err := admin.request(http.MethodGet, web.APIRoot+"/admin/browser", nil, &state); err != nil {
+			return err
+		}
+		printBrowserStatus(state)
+		return nil
+	}
 	if err := admin.request(http.MethodGet, web.APIRoot+"/health", nil, nil); err != nil {
 		return err
 	}
@@ -169,6 +178,11 @@ func runQuitCommand() error {
 		if err := quitDesktopInstance(home); err != nil {
 			return err
 		}
+		if descriptor, err := control.Load(home); err == nil && descriptor.Standalone {
+			if admin, err := newLocalAdmin(); err == nil {
+				_ = admin.request(http.MethodPost, web.APIRoot+"/admin/shutdown", nil, nil)
+			}
+		}
 		fmt.Println("Surf is closing.")
 		return nil
 	}
@@ -204,6 +218,9 @@ func runPairCommandContext(ctx context.Context) error {
 	admin, err := newLocalAdmin()
 	if err != nil {
 		return err
+	}
+	if admin.descriptor.Standalone {
+		return fmt.Errorf("standalone browser setup cannot pair devices; close it and start Surf first")
 	}
 	address := pairCommandAddress(admin.descriptor.PublicPort)
 	var session struct {

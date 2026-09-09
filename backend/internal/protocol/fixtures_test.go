@@ -33,8 +33,8 @@ func TestPortableCCommandsDecode(t *testing.T) {
 	if err := scanner.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if count != 43 {
-		t.Fatalf("C command count = %d, want 43", count)
+	if count != 45 {
+		t.Fatalf("C command count = %d, want 45", count)
 	}
 }
 
@@ -58,8 +58,8 @@ func loadFixtures(t *testing.T, name string) []json.RawMessage {
 
 func TestCanonicalCommandFixturesDecode(t *testing.T) {
 	fixtures := loadFixtures(t, "commands.json")
-	if len(fixtures) != 43 {
-		t.Fatalf("command fixture count = %d, want 43", len(fixtures))
+	if len(fixtures) != 45 {
+		t.Fatalf("command fixture count = %d, want 45", len(fixtures))
 	}
 	for _, fixture := range fixtures {
 		if _, err := DecodeCommand(fixture); err != nil {
@@ -103,6 +103,7 @@ func TestCanonicalEventFixturesMatchGoEncoders(t *testing.T) {
 		ClipboardSyncEvent{Type: "clipboard-sync", Enabled: true, Known: true, Text: "copied"},
 		EmptyEvent{Type: "log-request"},
 		EmptyEvent{Type: "log-clear"},
+		BrowserModeEvent{Type: "browser-mode", State: "setup", Revision: 7, Host: "Workstation", Message: "Browsing is paused."},
 	}
 	fixtures := loadFixtures(t, "events.json")
 	if len(fixtures) != len(events) {

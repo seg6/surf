@@ -65,6 +65,8 @@ func main() {
 		} else {
 			err = runQuitCommand()
 		}
+	case "browser":
+		err = runBrowserCommand(args[1:])
 	case "doctor":
 		if len(args) != 1 {
 			err = fmt.Errorf("usage: surf doctor")
@@ -97,7 +99,7 @@ func main() {
 	case "clipboard":
 		err = runClipboardCommand(args[1:])
 	default:
-		fmt.Fprintln(os.Stderr, "Usage: surf [--home PATH] [serve|status|quit|pair|devices|clipboard|logs|doctor|update|version]")
+		fmt.Fprintln(os.Stderr, "Usage: surf [--home PATH] [serve|status|quit|browser|pair|devices|clipboard|logs|doctor|update|version]")
 		err = fmt.Errorf("unknown command %q", args[0])
 	}
 	if err != nil {

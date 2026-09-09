@@ -13,6 +13,19 @@ type HelloEvent struct {
 	H    int    `json:"vh"`
 }
 
+// BrowserModeEvent describes an intentional browser handoff, not a media error.
+type BrowserModeEvent struct {
+	Type       string `json:"t"`
+	State      string `json:"state"`
+	Revision   uint64 `json:"revision"`
+	Host       string `json:"host"`
+	Message    string `json:"message"`
+	Standalone bool   `json:"standalone"`
+	CanForce   bool   `json:"canForce"`
+}
+
+func (BrowserModeEvent) isClientEvent() {}
+
 type TabsEvent struct {
 	Type string    `json:"t"`
 	Tabs []TabInfo `json:"tabs"`

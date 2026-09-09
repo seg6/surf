@@ -109,6 +109,23 @@ func TestChangedBrowserSessionIsSavedBeforeShutdown(t *testing.T) {
 	}
 }
 
+func TestHandoffSnapshotIsNotRewrittenWhileBrowserCloses(t *testing.T) {
+	home := t.TempDir()
+	b := &Controller{cfg: &config.Config{SurfHome: home}, tabs: map[int]*Tab{1: {ID: 1, URL: "https://one.test"}, 2: {ID: 2, URL: "https://two.test"}}, activeID: 2}
+	if err := b.flushSession(); err != nil {
+		t.Fatal(err)
+	}
+	delete(b.tabs, 2) // Chromium's target-destroyed events during shutdown.
+	b.scheduleSessionSave()
+	if err := b.flushSession(); err != nil {
+		t.Fatal(err)
+	}
+	got := loadBrowserSession(home)
+	if len(got.Tabs) != 2 || got.Active != 1 {
+		t.Fatalf("shutdown replaced handoff: %+v", got)
+	}
+}
+
 func TestRestoredTargetsKeepOrderAndActiveTabAcrossAttachRace(t *testing.T) {
 	controller := &Controller{tabs: map[int]*Tab{}}
 	targets := []targetInfo{

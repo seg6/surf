@@ -224,6 +224,9 @@ func validWheelCommand(command *protocol.WheelCommand) bool {
 }
 
 func (in *pointerInput) process(work pointerWork) {
+	if in.b.inputSuspended() {
+		return
+	}
 	if work.command != nil {
 		in.processCommand(work)
 		return

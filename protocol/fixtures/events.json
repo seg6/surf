@@ -30,5 +30,6 @@
   {"t":"clipboard","id":"clip-1","text":"copied","sync":true},
   {"t":"clipboard-sync","enabled":true,"known":true,"text":"copied"},
   {"t":"log-request"},
-  {"t":"log-clear"}
+  {"t":"log-clear"},
+  {"t":"browser-mode","state":"setup","revision":7,"host":"Workstation","message":"Browsing is paused.","standalone":false,"canForce":false}
 ]

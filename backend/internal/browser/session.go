@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"surf-backend/internal/atomicfile"
+	"surf-backend/internal/cdp"
 )
 
 const (
@@ -19,11 +20,12 @@ const (
 )
 
 type browserSession struct {
-	Version int      `json:"version"`
-	Tabs    []string `json:"tabs"`
-	Active  int      `json:"active"`
-	Mobile  bool     `json:"mobile"`
-	Dark    bool     `json:"dark"`
+	Version   int      `json:"version"`
+	Tabs      []string `json:"tabs"`
+	Active    int      `json:"active"`
+	Mobile    bool     `json:"mobile"`
+	Dark      bool     `json:"dark"`
+	FromSetup bool     `json:"fromSetup,omitempty"`
 }
 
 func browserSessionPath(home string) string {
@@ -75,11 +77,15 @@ func (b *Controller) SaveSession() error {
 	if len(session.Tabs) == 0 {
 		return nil
 	}
+	return writeBrowserSession(b.cfg.SurfHome, session)
+}
+
+func writeBrowserSession(home string, session browserSession) error {
 	data, err := json.MarshalIndent(session, "", "  ")
 	if err != nil {
 		return err
 	}
-	path := browserSessionPath(b.cfg.SurfHome)
+	path := browserSessionPath(home)
 	temporary := path + ".tmp"
 	if err := os.WriteFile(temporary, append(data, '\n'), 0o600); err != nil {
 		return fmt.Errorf("write browser session: %w", err)
@@ -89,6 +95,55 @@ func (b *Controller) SaveSession() error {
 		return fmt.Errorf("install browser session: %w", err)
 	}
 	return nil
+}
+
+// Restore the explicit handoff snapshot, never Chromium's stale native session.
+// Create replacement pages before closing old ones so visible Chrome stays open.
+func restoreHandoff(client *cdp.Client, session browserSession, restored ...func([]targetInfo, string)) error {
+	raw, err := client.Call("", "Target.getTargets", nil)
+	if err != nil {
+		return err
+	}
+	var old struct {
+		Targets []targetInfo `json:"targetInfos"`
+	}
+	if err := json.Unmarshal(raw, &old); err != nil {
+		return err
+	}
+	urls := session.Tabs
+	if len(urls) == 0 {
+		urls = []string{"about:blank#surf-new"}
+	}
+	active := ""
+	var created []targetInfo
+	for i, url := range urls {
+		raw, err := client.Call("", "Target.createTarget", map[string]any{"url": url})
+		if err != nil {
+			return err
+		}
+		var target struct {
+			ID string `json:"targetId"`
+		}
+		if err := json.Unmarshal(raw, &target); err != nil {
+			return err
+		}
+		if active == "" || i == session.Active {
+			active = target.ID
+		}
+		created = append(created, targetInfo{TargetID: target.ID, Type: "page", URL: url})
+	}
+	for _, target := range old.Targets {
+		if target.Type == "page" {
+			_, _ = client.Call("", "Target.closeTarget", map[string]any{"targetId": target.TargetID})
+		}
+	}
+	_, err = client.Call("", "Target.activateTarget", map[string]any{"targetId": active})
+	if err == nil {
+		for _, fn := range restored {
+			fn(created, active)
+		}
+	}
+	return err
 }
 
 func restorableURL(raw string) bool {
@@ -124,14 +179,18 @@ func (b *Controller) runScheduledSessionSave(generation uint64) {
 		return
 	}
 	b.sessionTimer = nil
-	b.sessionTimerMu.Unlock()
 	if err := b.SaveSession(); err != nil {
 		log.Printf("browser: save changed session: %v", err)
 	}
+	b.sessionTimerMu.Unlock()
 }
 
 func (b *Controller) flushSession() error {
 	b.sessionTimerMu.Lock()
+	if b.sessionClosed {
+		b.sessionTimerMu.Unlock()
+		return nil
+	}
 	b.sessionClosed = true
 	b.sessionTimerGen++
 	if b.sessionTimer != nil {

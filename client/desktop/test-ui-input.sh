@@ -120,5 +120,20 @@ drive click 155 378
 expect '"viewport":\[768.0,982.0\]'
 drive key Escape
 expect '"panel":"None"'
-printf 'Surf real X11 input: focus, spaces, page input, popup Escape, resize, tab close, new-tab search and settings categories passed.\n'
+
+restart_scene browser-setup
+expect '"browser_setup":true'
+drive key ctrl+l
+drive type "must not reach the page"
+expect '"editing":false'
+expect '"page_focused":false'
+drive click 512 414
+expect '"confirming":true'
+if rg -q 'SURF_UI_COMMAND (Navigate|Key|BrowserResume)' "$SURF_UI_TEST_ROOT/client.log"; then
+    echo "Paused input or unconfirmed resume reached the server" >&2
+    exit 1
+fi
+drive key Escape
+expect '"confirming":false'
+printf 'Surf real X11 input: focus, spaces, page input, popups, resize, tabs, settings and browser-setup confirmation passed.\n'
 X11

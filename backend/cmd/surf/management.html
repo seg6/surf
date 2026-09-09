@@ -61,6 +61,9 @@
       gap: 18px; min-height: 0; padding: 18px;
     }
     .hero-actions { display: flex; align-items: center; gap: 8px; }
+    #browser-setup { margin-top: 16px; }
+    #browser-setup [hidden] { display: none !important; }
+    #browser-setup .hero-actions { flex-wrap: wrap; margin-top: 12px; }
     .engine { display: flex; align-items: center; gap: 13px; min-width: 0; }
     .engine-icon { width: 57px; height: 57px; flex-shrink: 0; }
     .engine-icon img { display: block; width: 100%; height: 100%; object-fit: contain; }
@@ -315,6 +318,16 @@
           </div>
       </div>
 
+      <section class="panel" id="browser-setup" aria-labelledby="browser-setup-title">
+        <h2 id="browser-setup-title">Browser setup</h2>
+        <p class="panel-copy" id="browser-mode-copy" role="status" aria-live="polite">Use Surf’s browser on this computer to sign in or change browser settings. Connected devices pause until you close the browser.</p>
+        <div class="hero-actions">
+          <button class="button" id="browser-open" type="button" disabled>Open browser on this computer…</button>
+          <button class="button primary" id="browser-resume" type="button" hidden>Resume on devices…</button>
+          <button class="button danger" id="browser-force" type="button" hidden>Force close and resume…</button>
+        </div>
+      </section>
+
       <div class="panel first-run" id="first-run">
         <h2>Start Surf automatically?</h2>
         <p class="panel-copy">Clients can connect while Surf is running.</p>
@@ -446,6 +459,63 @@
       applyDashboardAppearance();
     });
     let config = null, previousAU = null, previousAt = null, toastTimer = null, pairingAddress = '', pairingCode = '', pairingOpen = false;
+    function renderBrowserMode(mode) {
+      if (!mode) return;
+      $('add-device').disabled = mode.standalone;
+      const switching = ['starting', 'opening', 'resuming'].includes(mode.state);
+      const setup = mode.state === 'setup';
+      $('browser-open').disabled = switching || mode.state === 'failed' || mode.canForce;
+      $('browser-open').textContent = setup ? 'Show setup browser' : 'Open browser on this computer…';
+      $('browser-resume').hidden = mode.standalone || (!setup && mode.state !== 'failed');
+      $('browser-force').hidden = mode.standalone || !mode.canForce;
+      $('browser-mode-copy').textContent = mode.standalone
+        ? 'Standalone browser setup is active. Close all setup windows to finish; no streaming server is running.'
+        : mode.state === 'streaming'
+          ? (mode.message || 'Open your current tabs on this computer to sign in or change browser settings. Devices pause until you close all setup windows.')
+          : `Browser on ${mode.host}. ${mode.message}`;
+      if (mode.state !== 'streaming') $('hero-status-text').textContent = mode.standalone ? 'Standalone browser setup' : (switching ? 'Switching browser…' : 'Browser setup · devices paused');
+      $('browser-resume').disabled = switching;
+    }
+    async function browserAction(action, force = false) {
+      try {
+        const mode = await (await request('/api/backend/api/v1/admin/browser')).json();
+        renderBrowserMode(mode);
+        const focus = action === 'open' && mode.state === 'setup';
+        const warning = force
+          ? 'Force close Surf’s unresponsive browser? Recent profile changes and unsaved work may be lost.'
+          : action === 'open'
+            ? 'Open your Surf tabs on this computer? Connected devices will pause. Pages reload; unsaved work and active transfers may be lost.'
+            : 'Close the browser on this computer and resume on devices? Pages reload; unsaved work and active transfers may be lost.';
+        if (!focus && !confirm(warning)) return;
+        $('browser-open').disabled = $('browser-resume').disabled = $('browser-force').disabled = true;
+        await request('/api/backend/api/v1/admin/browser', {
+          method: 'POST', headers: {'X-Surf-Desktop':'1', 'Content-Type':'application/json'},
+          body: JSON.stringify({action, revision: mode.revision, force})
+        });
+        await pollStatus();
+      } catch (error) { toast(error.message); await pollStatus(); }
+      finally { $('browser-force').disabled = false; }
+    }
+    $('browser-open').addEventListener('click', () => browserAction('open'));
+    $('browser-resume').addEventListener('click', () => browserAction('resume'));
+    $('browser-force').addEventListener('click', () => browserAction('resume', true));
+
+    async function interruptionHeaders() {
+      const headers = {'X-Surf-Desktop':'1'};
+      let mode;
+      try { mode = await (await request('/api/backend/api/v1/admin/browser')).json(); }
+      catch (_) {
+        // Settings/restart must also work when the backend is stopped. The
+        // supervisor rechecks ownership before stopping any live browser.
+        return headers;
+      }
+      if (mode.state !== 'streaming') {
+        if (mode.standalone) throw new Error('Close standalone browser setup first.');
+        if (!confirm('This will close the setup browser. Unsaved work and active transfers may be lost. Continue?')) throw new Error('Canceled; browser unchanged.');
+        headers['X-Surf-Browser-Revision'] = String(mode.revision);
+      }
+      return headers;
+    }
 
     function toast(message) {
       const node = $('toast'); node.textContent = message; node.classList.add('show');
@@ -484,6 +554,7 @@
       try {
         const stats = await (await request('/api/status')).json();
         setOnline(true);
+        renderBrowserMode(stats.browserMode);
         const now = performance.now(), au = Number(stats.video_access_units || 0);
         if (previousAU !== null && au >= previousAU) $('metric-fps').textContent = ((au - previousAU) * 1000 / (now - previousAt)).toFixed(1);
         previousAU = au; previousAt = now;
@@ -497,7 +568,7 @@
     }
     async function restart() {
       try {
-        await request('/api/restart', {method:'POST', headers:{'X-Surf-Desktop':'1'}});
+        await request('/api/restart', {method:'POST', headers:await interruptionHeaders()});
         toast('Backend restarting…'); setOnline(false); previousAU = null;
       } catch (error) { toast(error.message); }
     }
@@ -524,14 +595,16 @@
     $('update-button').addEventListener('click', async () => {
       const action = $('update-button').dataset.action === 'apply' ? 'apply' : 'check';
       try {
-        await request(`/api/update/${action}`, {method:'POST', headers:{'X-Surf-Desktop':'1'}});
+        await request(`/api/update/${action}`, {method:'POST', headers:action === 'apply' ? await interruptionHeaders() : {'X-Surf-Desktop':'1'}});
         await updateStatus();
       } catch (error) { toast(error.message); }
     });
     $('settings-form').addEventListener('submit', async event => {
       event.preventDefault();
       try {
-        await request('/settings', {method:'POST', headers:{'X-Surf-Desktop':'1'}, body:new FormData(event.currentTarget)});
+        const body = new FormData(event.currentTarget);
+        const headers = await interruptionHeaders();
+        await request('/settings', {method:'POST', headers, body});
         await loadConfig(); toast('Settings saved · backend restarting'); setOnline(false); previousAU = null;
       } catch (error) { toast(error.message); }
     });
@@ -864,6 +937,9 @@
       if (location.hash === '#logs') $('logs').open = true;
       await pollStatus();
       setInterval(pollStatus, 2000);
+      if (location.hash === '#browser-setup-open') await browserAction('open');
+      if (location.hash === '#browser-resume') await browserAction('resume');
+      if (location.hash === '#restart-engine') await restart();
       await updateStatus();
       setInterval(updateStatus, 2000);
     })();

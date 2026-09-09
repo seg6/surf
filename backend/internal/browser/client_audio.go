@@ -32,7 +32,7 @@ func (b *Controller) pumpAudio(c *transport.Client, sub *media.AudioSubscription
 		if !chunk.T.IsZero() {
 			b.noteAudioLatency(time.Since(chunk.T))
 		}
-		_ = c.SendBinary(protocol.EncodeAudioPCM(chunk.Seq, chunk.SampleRate, chunk.Channels, chunk.Data))
+		_ = b.sendBinary(c, protocol.EncodeAudioPCM(chunk.Seq, chunk.SampleRate, chunk.Channels, chunk.Data))
 	}
 	b.send(c, protocol.AudioConfigEvent{Type: "audio-config"})
 	b.stopAudio(c)

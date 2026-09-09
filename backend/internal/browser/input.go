@@ -108,6 +108,10 @@ func (b *Controller) HandleMessage(c *transport.Client, command protocol.Command
 }
 
 func (b *Controller) handleCommand(c *transport.Client, command protocol.Command, receivedNS uint64) {
+	if !b.beginInput() {
+		return
+	}
+	defer b.inputMu.RUnlock()
 	kind := command.Kind()
 	telemetry.Emit("client_command", "input", "controller", map[string]any{"type": kind})
 	iid, _ := command.Causal()

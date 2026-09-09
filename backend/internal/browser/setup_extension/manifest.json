@@ -1,0 +1,7 @@
+{
+  "manifest_version": 3,
+  "name": "Surf Browser Setup",
+  "version": "1.0.0",
+  "permissions": ["tabs"],
+  "background": {"service_worker": "background.js"}
+}

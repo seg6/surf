@@ -123,6 +123,15 @@ func (b *Controller) handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
 		return
 	}
+	finished := make(chan struct{})
+	defer close(finished)
+	go func() {
+		select {
+		case <-b.stop:
+			_ = r.Body.Close()
+		case <-finished:
+		}
+	}()
 	b.verbMu.Lock()
 	session, node := b.chooserSession, b.chooserNode
 	b.chooserSession, b.chooserNode = "", 0
@@ -157,6 +166,12 @@ func (b *Controller) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Empty selection = cancel: attach nothing, page sees no change.
+	if !b.beginInput() {
+		cleanupUploadedFiles(paths)
+		http.Error(w, "browser setup is active; upload canceled", http.StatusConflict)
+		return
+	}
+	defer b.inputMu.RUnlock()
 	if len(paths) > 0 {
 		if _, err := b.cdp.Call(session, "DOM.setFileInputFiles", map[string]any{
 			"files": paths, "backendNodeId": node,

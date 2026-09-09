@@ -423,6 +423,44 @@ static uint32_t next_random(uint32_t *state) {
     return *state;
 }
 
+static void test_browser_setup_is_scoped_and_clears_page_state(void) {
+    surf_core_t *core = create_core();
+    surf_protocol_event_t event;
+    surf_browser_mode_snapshot_t mode;
+    surf_event_t page;
+    memset(&page, 0, sizeof(page));
+    page.kind = SURF_EVENT_EDITABLE;
+    page.data.editable.on = page.data.editable.show_keyboard = 1;
+    page.data.editable.kind = surf_string_from_cstr("text");
+    dispatch_ok(core, &page);
+    page.kind = SURF_EVENT_FULLSCREEN;
+    page.data.boolean.on = 1;
+    dispatch_ok(core, &page);
+    memset(&event, 0, sizeof(event));
+    event.kind = SURF_PROTOCOL_EVENT_BROWSER_MODE;
+    event.data.browser_mode.state = surf_string_from_cstr("setup");
+    event.data.browser_mode.host = surf_string_from_cstr("Workstation");
+    event.data.browser_mode.message = surf_string_from_cstr("Paused");
+    event.data.browser_mode.revision = 7;
+    SURF_CHECK(surf_core_dispatch_protocol(core, 1, &event) == SURF_CORE_OK);
+    SURF_CHECK(surf_core_browser_mode(core, &mode) == SURF_CORE_OK);
+    SURF_CHECK(mode.paused && mode.revision == 7 && view_is(mode.host, "Workstation"));
+    SURF_CHECK(!snapshot(core).editable && !snapshot(core).fullscreen && !snapshot(core).keyboard_visible);
+    event.data.browser_mode.revision = 6;
+    event.data.browser_mode.state = surf_string_from_cstr("streaming");
+    SURF_CHECK(surf_core_dispatch_protocol(core, 1, &event) == SURF_CORE_OK);
+    SURF_CHECK(surf_core_browser_mode(core, &mode) == SURF_CORE_OK && mode.paused);
+    event.data.browser_mode.revision = 8;
+    SURF_CHECK(surf_core_dispatch_protocol(core, 1, &event) == SURF_CORE_OK);
+    SURF_CHECK(surf_core_browser_mode(core, &mode) == SURF_CORE_OK && !mode.paused);
+    SURF_CHECK(surf_core_begin_connection(core, 2) == SURF_CORE_OK);
+    SURF_CHECK(surf_core_browser_mode(core, &mode) == SURF_CORE_OK && mode.revision == 0);
+    event.data.browser_mode.state = surf_string_from_cstr("setup");
+    SURF_CHECK(surf_core_dispatch_protocol(core, 1, &event) == SURF_CORE_OK);
+    SURF_CHECK(surf_core_browser_mode(core, &mode) == SURF_CORE_OK && !mode.paused);
+    surf_core_destroy(core);
+}
+
 static void test_randomized_transition_invariants(void) {
     surf_core_t *core = create_core();
     uint32_t random = UINT32_C(0x51f15e);
@@ -500,6 +538,7 @@ int main(void) {
     test_connection_generations_reject_stale_events();
     test_protocol_semantic_state_and_tab_cleanup();
     test_presented_frames_are_surface_scoped();
+    test_browser_setup_is_scoped_and_clears_page_state();
     test_randomized_transition_invariants();
     test_abi_layout();
     puts("surf_core: all tests passed");

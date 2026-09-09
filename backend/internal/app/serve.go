@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -16,6 +17,7 @@ import (
 
 	"surf-backend/internal/auth"
 	"surf-backend/internal/browser"
+	"surf-backend/internal/cdp"
 	"surf-backend/internal/chromium"
 	"surf-backend/internal/config"
 	"surf-backend/internal/contentblocker"
@@ -36,6 +38,12 @@ func Serve() error {
 // parent ownership belong to the command entrypoint; every shutdown source is
 // represented by cancellation so deferred cleanup is never skipped.
 func ServeContext(parent context.Context, ready chan<- control.Descriptor) error {
+	return ServeBrowserContext(parent, ready, false)
+}
+
+// ServeBrowserContext also supplies private local control for a standalone
+// setup session, without opening a public listener or advertising a server.
+func ServeBrowserContext(parent context.Context, ready chan<- control.Descriptor, standalone bool) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	cfg, err := config.Load()
@@ -59,6 +67,16 @@ func ServeContext(parent context.Context, ready chan<- control.Descriptor) error
 		log.SetFlags(previousFlags)
 		_ = serverLog.Close()
 	}()
+	// Observers use descriptor removal as completion of a foreground owner's
+	// shutdown. Remove it only after the browser, listeners and locks close.
+	var publishedDescriptor *control.Descriptor
+	defer func() {
+		if publishedDescriptor != nil {
+			if err := control.RemoveOwned(cfg.SurfHome, publishedDescriptor.AdminToken); err != nil {
+				log.Printf("remove server control descriptor: %v", err)
+			}
+		}
+	}()
 	instance, acquired, err := process.AcquireInstanceLock(
 		filepath.Join(cfg.SurfHome, "server.lock"))
 	if err != nil {
@@ -68,6 +86,11 @@ func ServeContext(parent context.Context, ready chan<- control.Descriptor) error
 		return fmt.Errorf("another Surf backend is already using %s", cfg.Profile)
 	}
 	defer instance.Close()
+	profileLock, err := chromium.LockProfile(cfg.Profile)
+	if err != nil {
+		return err
+	}
+	defer profileLock.Close()
 	if err := Prepare(cfg); err != nil {
 		return err
 	}
@@ -89,13 +112,16 @@ func ServeContext(parent context.Context, ready chan<- control.Descriptor) error
 			log.Printf("remove revoked device log: %v", err)
 		}
 	})
-	b, err := browser.New(cfg, hub)
-	if err != nil {
-		return err
-	}
+	b := browser.NewManager(cfg, hub, standalone)
 	hub.SetHandler(b)
 	defer b.Shutdown()
 	if err := b.Start(); err != nil {
+		if standalone {
+			return err
+		}
+		if errors.Is(err, cdp.ErrUnverifiedLaunch) {
+			return err
+		}
 		recoverProfile, recoveryErr := noteBrowserStartupFailure(cfg.SurfHome, cfg.Profile, time.Now())
 		if recoveryErr != nil {
 			log.Printf("browser recovery state: %v", recoveryErr)
@@ -120,16 +146,22 @@ func ServeContext(parent context.Context, ready chan<- control.Descriptor) error
 	clearBrowserStartupFailures(cfg.SurfHome)
 	srv := web.New(cfg, a, ident, hub)
 	srv.SetServerLog(serverLog)
-	srv.StartClipboardSync(ctx)
+	if !standalone {
+		srv.StartClipboardSync(ctx)
+	}
 	srv.SetShutdown(cancel)
 	srv.SetHealthCheck(b.Health)
 	srv.SetStats(b.Stats)
+	srv.SetBrowserControl(b)
 	b.RegisterRoutes(srv)
-	publicListener, err := net.Listen("tcp", net.JoinHostPort(cfg.BindAddr, fmt.Sprint(cfg.Port)))
-	if err != nil {
-		return fmt.Errorf("listen on %s:%d: %w", cfg.BindAddr, cfg.Port, err)
+	var publicListener net.Listener
+	if !standalone {
+		publicListener, err = net.Listen("tcp", net.JoinHostPort(cfg.BindAddr, fmt.Sprint(cfg.Port)))
+		if err != nil {
+			return fmt.Errorf("listen on %s:%d: %w", cfg.BindAddr, cfg.Port, err)
+		}
+		defer publicListener.Close()
 	}
-	defer publicListener.Close()
 	controlListener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		return fmt.Errorf("listen for local control: %w", err)
@@ -139,24 +171,23 @@ func ServeContext(parent context.Context, ready chan<- control.Descriptor) error
 	if err != nil {
 		return err
 	}
+	descriptor.Standalone = standalone
 	srv.SetAdminToken(descriptor.AdminToken)
 
 	serverErr := make(chan error, 2)
-	go func() {
-		serverErr <- fmt.Errorf("public listener: %w", web.ServeTLS(publicListener, ident, srv.Handler()))
-	}()
+	if publicListener != nil {
+		go func() {
+			serverErr <- fmt.Errorf("public listener: %w", web.ServeTLS(publicListener, ident, srv.Handler()))
+		}()
+	}
 	go func() {
 		serverErr <- fmt.Errorf("control listener: %w", web.ServeTLS(controlListener, ident, srv.Handler()))
 	}()
 	if err := control.Write(cfg.SurfHome, descriptor); err != nil {
 		return err
 	}
-	defer func() {
-		if err := control.RemoveOwned(cfg.SurfHome, descriptor.AdminToken); err != nil {
-			log.Printf("remove server control descriptor: %v", err)
-		}
-	}()
-	if os.Getenv("SURF_ADVERTISE") != "0" {
+	publishedDescriptor = &descriptor
+	if !standalone && os.Getenv("SURF_ADVERTISE") != "0" {
 		port := cfg.Port
 		if value, err := strconv.Atoi(os.Getenv("SURF_ADVERTISE_PORT")); err == nil && value > 0 {
 			port = value
@@ -171,7 +202,11 @@ func ServeContext(parent context.Context, ready chan<- control.Descriptor) error
 			log.Printf("bonjour advertised Surf on _surf._tcp port %d", port)
 		}
 	}
-	log.Printf("surf server listening with TLS on %s:%d identity=%s", cfg.BindAddr, cfg.Port, ident.Fingerprint)
+	if !standalone {
+		log.Printf("surf server listening with TLS on %s:%d identity=%s", cfg.BindAddr, cfg.Port, ident.Fingerprint)
+	} else {
+		log.Printf("standalone browser setup: no public listener or streaming server")
+	}
 	log.Printf("surf server control endpoint %s", descriptor.ControlURL)
 	if ready != nil {
 		select {
@@ -184,6 +219,9 @@ func ServeContext(parent context.Context, ready chan<- control.Descriptor) error
 	case err := <-serverErr:
 		return err
 	case <-b.Died():
+		if standalone {
+			return nil
+		}
 		return fmt.Errorf("browser connection lost")
 	case <-ctx.Done():
 		log.Printf("server shutdown requested")

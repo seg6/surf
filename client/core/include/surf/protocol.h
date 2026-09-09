@@ -110,12 +110,18 @@ typedef enum surf_protocol_event_kind {
     SURF_PROTOCOL_EVENT_CLIPBOARD,
     SURF_PROTOCOL_EVENT_CLIPBOARD_SYNC,
     SURF_PROTOCOL_EVENT_LOG_REQUEST,
-    SURF_PROTOCOL_EVENT_LOG_CLEAR
+    SURF_PROTOCOL_EVENT_LOG_CLEAR,
+    SURF_PROTOCOL_EVENT_BROWSER_MODE
 } surf_protocol_event_kind_t;
 
 typedef struct surf_protocol_event {
     surf_protocol_event_kind_t kind;
     union {
+        struct {
+            surf_string_view_t state, host, message;
+            uint64_t revision;
+            int standalone, can_force;
+        } browser_mode;
         struct { int32_t width, height; } viewport;
         struct { const surf_tab_event_t *items; size_t count; } tabs;
         struct {
@@ -235,13 +241,16 @@ typedef enum surf_protocol_command_kind {
     SURF_PROTOCOL_COMMAND_READER,
     SURF_PROTOCOL_COMMAND_MEDIA_PLAY_PAUSE,
     SURF_PROTOCOL_COMMAND_MEDIA_MUTE,
-    SURF_PROTOCOL_COMMAND_MEDIA_QUERY
+    SURF_PROTOCOL_COMMAND_MEDIA_QUERY,
+    SURF_PROTOCOL_COMMAND_BROWSER_WATCH,
+    SURF_PROTOCOL_COMMAND_BROWSER_RESUME
 } surf_protocol_command_kind_t;
 
 typedef struct surf_protocol_command {
     surf_protocol_command_kind_t kind;
     surf_protocol_causal_t causal;
     union {
+        struct { uint64_t revision; int force; } browser_resume;
         struct { int32_t width, height; } size;
         struct { uint64_t client_send_ns; } clock;
         struct { surf_string_view_t action; int32_t id; } tab;

@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -51,7 +52,16 @@ type Server struct {
 	hostClipboard *clipboard.Controller
 	tunnelSlots   chan struct{}
 	serverLog     *logstore.Writer
+	browser       BrowserControl
 }
+
+type BrowserControl interface {
+	Status() protocol.BrowserModeEvent
+	Request(action string, revision uint64, force bool) error
+	PrepareShutdown(revision uint64) error
+}
+
+func (s *Server) SetBrowserControl(browser BrowserControl) { s.browser = browser }
 
 type clipboardRequest struct {
 	expected map[string]bool
@@ -179,6 +189,10 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	}
 	if p == APIRoot+"/config" {
 		s.handleConfig(w, r, deviceID)
+		return
+	}
+	if p == APIRoot+"/browser-mode" {
+		s.handleBrowserMode(w, r, false)
 		return
 	}
 	if p == APIRoot+"/client/logs" {
@@ -430,6 +444,10 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
 	switch {
 	case p == APIRoot+"/admin/pairing/session" && r.Method == http.MethodPost:
+		if s.browser != nil && s.browser.Status().Standalone {
+			http.Error(w, "Close standalone browser setup and start Surf before pairing a device", http.StatusConflict)
+			return
+		}
 		var request struct {
 			PublicAddress string `json:"publicAddress"`
 		}
@@ -502,8 +520,21 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "shutdown unavailable", http.StatusServiceUnavailable)
 			return
 		}
+		if value := r.Header.Get("X-Surf-Browser-Revision"); value != "" {
+			revision, err := strconv.ParseUint(value, 10, 64)
+			if err != nil || s.browser == nil {
+				http.Error(w, "invalid browser revision", http.StatusConflict)
+				return
+			}
+			if err := s.browser.PrepareShutdown(revision); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+		}
 		w.WriteHeader(http.StatusAccepted)
 		go s.shutdown()
+	case p == APIRoot+"/admin/browser":
+		s.handleBrowserMode(w, r, true)
 	default:
 		http.NotFound(w, r)
 	}

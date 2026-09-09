@@ -33,6 +33,7 @@ var ErrNotRunning = errors.New("Surf server is not running")
 // the permission-restricted descriptor rather than in command-line arguments
 // or the environment, where it could be exposed by process inspection.
 type Descriptor struct {
+	Standalone bool   `json:"standalone,omitempty"`
 	Schema     int    `json:"schema"`
 	PID        int    `json:"pid"`
 	ControlURL string `json:"controlURL"`

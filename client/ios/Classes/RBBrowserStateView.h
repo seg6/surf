@@ -7,7 +7,10 @@ typedef enum {
     RBBrowserStateReconnecting,
     RBBrowserStateDisconnected,
     RBBrowserStatePageError,
-    RBBrowserStateVideoUnavailable
+    RBBrowserStateVideoUnavailable,
+    RBBrowserStateSetup,
+    RBBrowserStateSetupClosing,
+    RBBrowserStateSetupForce
 } RBBrowserState;
 
 @class RBBrowserStateView;

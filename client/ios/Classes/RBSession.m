@@ -18,6 +18,7 @@ static NSString *RBURLEscape(NSString *s);
 @property(nonatomic, assign) NSInteger viewWidth;
 @property(nonatomic, assign) NSInteger viewHeight;
 @property(nonatomic, assign) BOOL socketOpen;
+@property(nonatomic, assign) BOOL browserSetupAvailable;
 @property(nonatomic, assign) BOOL active;
 @property(nonatomic, assign) NSTimeInterval reconnectDelay;
 @property(nonatomic, assign) NSUInteger generation;
@@ -243,6 +244,7 @@ static NSString *RBURLEscape(NSString *s);
                       RBURLEscape(RBWireCompatibilityVersion())];
     NSDictionary *json = [self sendJSONPath:path method:@"GET" body:nil status:nil error:error];
     if (!json) return NO;
+    self.browserSetupAvailable = [[json objectForKey:@"caps"] containsObject:@"browser-setup"];
     self.wsTicket = [json objectForKey:@"ticket"];
     NSInteger serverWidth = [[json objectForKey:@"vw"] integerValue] ?: 1024;
     NSInteger serverHeight = [[json objectForKey:@"vh"] integerValue] ?: 768;
@@ -369,6 +371,7 @@ static NSString *RBURLEscape(NSString *s) {
     });
     self.reconnectDelay = 1.0;
     [self moveToState:RBSessionStateOpen];
+    if (self.browserSetupAvailable) [self sendMessage:@{@"t": @"browser-watch"}];
     [self.delegate session:self status:@"websocket open"];
     [self uploadNativeLogNow];
 }

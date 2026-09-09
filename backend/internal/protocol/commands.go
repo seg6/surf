@@ -22,6 +22,11 @@ func (c CommandBase) Kind() string             { return c.T }
 func (c CommandBase) Causal() (uint64, uint64) { return c.IID, c.ClientNS }
 
 type EmptyCommand struct{ CommandBase }
+type BrowserResumeCommand struct {
+	CommandBase
+	Revision uint64 `json:"revision"`
+	Force    bool   `json:"force"`
+}
 type SizeCommand struct {
 	CommandBase
 	W int `json:"w"`
@@ -197,6 +202,10 @@ func DecodeCommand(data []byte) (Command, error) {
 	}
 	var dst Command
 	switch header.T {
+	case "browser-watch":
+		dst = &EmptyCommand{}
+	case "browser-resume":
+		dst = &BrowserResumeCommand{}
 	case "size":
 		dst = &SizeCommand{}
 	case "tab":

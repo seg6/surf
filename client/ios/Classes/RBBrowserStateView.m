@@ -34,6 +34,7 @@
         self.detailLabel.backgroundColor = [UIColor clearColor];
         self.detailLabel.textAlignment = NSTextAlignmentCenter;
         self.detailLabel.numberOfLines = 0;
+        self.detailLabel.lineBreakMode = NSLineBreakByTruncatingTail;
         self.detailLabel.font = [RBTheme fontOfSize:14.0 bold:NO];
         self.detailLabel.textColor = [RBTheme secondaryTextColor];
         [self addSubview:self.detailLabel];
@@ -61,6 +62,20 @@
     self.primaryButton.hidden = NO;
     self.secondaryButton.hidden = NO;
     switch (state) {
+        case RBBrowserStateSetup:
+        case RBBrowserStateSetupForce:
+            self.titleLabel.text = @"Browser setup";
+            self.detailLabel.text = detail ?: @"Your browser is open on the computer. Browsing is paused.";
+            [self.primaryButton setTitle:@"Resume here" forState:UIControlStateNormal];
+            [self.secondaryButton setTitle:state == RBBrowserStateSetupForce ? @"Force close and resume…" : @"Choose Server" forState:UIControlStateNormal];
+            break;
+        case RBBrowserStateSetupClosing:
+            self.titleLabel.text = @"Switching browser";
+            self.detailLabel.text = detail ?: @"Waiting for the computer’s browser…";
+            [self.spinner startAnimating];
+            self.primaryButton.hidden = YES;
+            [self.secondaryButton setTitle:@"Choose Server" forState:UIControlStateNormal];
+            break;
         case RBBrowserStateConnecting:
             self.titleLabel.text = @"Connecting to Surf";
             self.detailLabel.text = detail ?: @"Starting your browser session…";
@@ -119,16 +134,27 @@
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGFloat w = self.bounds.size.width, h = self.bounds.size.height;
-    CGFloat boxW = MIN(480.0, w - 60.0);
-    CGFloat y = MAX(28.0, floorf(h * 0.15));
+    CGFloat boxW = MIN(480.0, MAX(160.0, w - 40.0));
+    BOOL compact = h < 340.0;
+    CGFloat markH = compact ? 0.0 : 70.0;
+    CGFloat spinnerH = self.spinner.isAnimating ? 30.0 : 0.0;
+    CGFloat buttonsH = (self.primaryButton.hidden ? 0.0 : 50.0) + (self.secondaryButton.hidden ? 0.0 : 42.0);
+    CGFloat detailH = MIN([self.detailLabel sizeThatFits:CGSizeMake(boxW, CGFLOAT_MAX)].height,
+                         MAX(40.0, h - markH - spinnerH - buttonsH - 78.0));
+    CGFloat totalH = markH + spinnerH + 40.0 + detailH + 16.0 + buttonsH;
+    CGFloat y = MAX(12.0, floorf((h - totalH) / 2.0));
+    self.markView.hidden = compact;
     self.markView.frame = CGRectMake((w - 58.0) / 2.0, y, 58.0, 58.0);
-    y += 70.0;
+    y += markH;
     self.spinner.frame = CGRectMake((w - 24.0) / 2.0, y, 24.0, 24.0);
-    if (self.spinner.isAnimating) y += 38.0;
+    y += spinnerH;
     self.titleLabel.frame = CGRectMake((w - boxW) / 2.0, y, boxW, 30.0);
-    self.detailLabel.frame = CGRectMake((w - boxW) / 2.0, y + 40.0, boxW, 56.0);
-    self.primaryButton.frame = CGRectMake((w - 190.0) / 2.0, y + 112.0, 190.0, 42.0);
-    self.secondaryButton.frame = CGRectMake((w - 190.0) / 2.0, y + 160.0, 190.0, 38.0);
+    self.detailLabel.frame = CGRectMake((w - boxW) / 2.0, y + 40.0, boxW, detailH);
+    y += 40.0 + detailH + 16.0;
+    CGFloat buttonW = MIN(260.0, boxW);
+    self.primaryButton.frame = CGRectMake((w - buttonW) / 2.0, y, buttonW, 42.0);
+    if (!self.primaryButton.hidden) y += 50.0;
+    self.secondaryButton.frame = CGRectMake((w - buttonW) / 2.0, y, buttonW, 38.0);
 }
 
 - (void)primary:(id)sender { [self.delegate browserStateViewPrimaryAction:self]; }

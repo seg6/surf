@@ -109,6 +109,10 @@ static CGFloat RBEvenExtent(CGFloat value) {
 @property(nonatomic, strong) RBStreamView *streamView;
 @property(nonatomic, strong) RBNewTabView *startPageView;
 @property(nonatomic, strong) RBBrowserStateView *browserStateView;
+@property(nonatomic, strong) NSDictionary *browserMode;
+@property(nonatomic, strong) UIAlertView *browserResumeAlert;
+@property(nonatomic, assign) unsigned long long browserResumeRevision;
+@property(nonatomic, assign) BOOL browserResumeForce;
 @property(nonatomic, strong) RBChromeBar *chromeBar;
 @property(nonatomic, strong) RBPhoneToolbar *phoneToolbar;
 @property(nonatomic, strong) RBTabStrip *tabStrip;
@@ -1110,6 +1114,12 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
             self.audioRequested = NO;
             break;
         case RBSessionStateConnecting:
+            self.browserMode = nil;
+            self.chromeBar.userInteractionEnabled = YES;
+            self.phoneToolbar.userInteractionEnabled = YES;
+            self.streamView.userInteractionEnabled = YES;
+            [self.browserResumeAlert dismissWithClickedButtonIndex:self.browserResumeAlert.cancelButtonIndex animated:NO];
+            self.browserResumeAlert = nil;
             [self.clientCore reset];
             [self dismissSelectControllerSendingCancel:NO];
             self.connectionPill.hidden = YES;
@@ -1150,6 +1160,7 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
 }
 
 - (void)handleVideoConfig:(NSDictionary *)message {
+    if (self.browserMode && ![[self.browserMode objectForKey:@"state"] isEqualToString:@"streaming"]) return;
     NSString *state = [message objectForKey:@"state"];
     NSString *profile = [message objectForKey:@"profile"];
     if ([profile isKindOfClass:[NSString class]] && [profile length] > 0)
@@ -1242,6 +1253,7 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
 // --------------------------------------------------------- incoming frames
 
 - (void)session:(RBSession *)session didReceiveFrameData:(NSData *)data {
+    if (self.browserMode && ![[self.browserMode objectForKey:@"state"] isEqualToString:@"streaming"]) return;
     if (self.applicationInBackground) return;
     [self.mediaPipeline consumeFrameData:data];
 }
@@ -1287,6 +1299,38 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
         [self.clientCore consumeEffect:RBCoreEffectClearPagePresentation])
         [self clearPagePresentation];
     NSString *t = [message objectForKey:@"t"];
+    if ([t isEqualToString:@"browser-mode"]) {
+        if ([[message objectForKey:@"revision"] unsignedLongLongValue] < [[self.browserMode objectForKey:@"revision"] unsignedLongLongValue]) return;
+        if (self.browserResumeAlert && [[message objectForKey:@"revision"] unsignedLongLongValue] != self.browserResumeRevision) {
+            [self.browserResumeAlert dismissWithClickedButtonIndex:self.browserResumeAlert.cancelButtonIndex animated:NO];
+            self.browserResumeAlert = nil;
+        }
+        BOOL wasPaused = self.browserMode && ![[self.browserMode objectForKey:@"state"] isEqualToString:@"streaming"];
+        self.browserMode = message;
+        BOOL paused = ![[message objectForKey:@"state"] isEqualToString:@"streaming"];
+        self.chromeBar.userInteractionEnabled = !paused;
+        self.phoneToolbar.userInteractionEnabled = !paused;
+        self.streamView.userInteractionEnabled = !paused;
+        if (paused) {
+            [self.view endEditing:YES];
+            [self leaveVideoMode];
+            [self.mediaPipeline stopAudio];
+            self.audioRequested = NO;
+            self.startPageView.hidden = YES;
+            self.fullscreen = NO;
+            [self.view setNeedsLayout];
+            NSString *state = [message objectForKey:@"state"];
+            BOOL switching = [state isEqualToString:@"opening"] || [state isEqualToString:@"resuming"] || [state isEqualToString:@"starting"];
+            NSString *detail = [NSString stringWithFormat:@"Browser on %@. %@", [message objectForKey:@"host"] ?: @"computer", [message objectForKey:@"message"] ?: @""];
+            [self.browserStateView showState:switching ? RBBrowserStateSetupClosing : ([[message objectForKey:@"canForce"] boolValue] ? RBBrowserStateSetupForce : RBBrowserStateSetup) detail:detail];
+        } else if (wasPaused) {
+            [self.browserStateView showState:RBBrowserStateStartingVideo detail:@"Resuming your browser…"];
+            [self sendCurrentViewportSizeForced:YES];
+            [self.session sendMessage:@{@"t": @"mobile", @"on": @([[NSUserDefaults standardUserDefaults] boolForKey:RBDefaultsMobileLayoutKey])}];
+            [self.session sendMessage:@{@"t": @"dark", @"on": @([[NSUserDefaults standardUserDefaults] boolForKey:RBDefaultsDarkModeKey])}];
+        }
+        return;
+    }
     if ([t isEqualToString:@"url"]) {
         NSString *url = coreValid ? self.clientCore.currentURL : [message objectForKey:@"url"];
         self.currentURL = url ?: @"";
@@ -2055,6 +2099,10 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
 
 - (void)browserStateViewPrimaryAction:(RBBrowserStateView *)view {
     switch (view.state) {
+        case RBBrowserStateSetup:
+        case RBBrowserStateSetupForce:
+            [self confirmBrowserResume:NO];
+            break;
         case RBBrowserStatePageError:
             [view showState:RBBrowserStateHidden detail:nil];
             [self.session sendMessage:@{@"t": @"reload"}];
@@ -2072,8 +2120,21 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
     }
 }
 
+- (void)confirmBrowserResume:(BOOL)force {
+    if (self.browserResumeAlert) return;
+    self.browserResumeRevision = [[self.browserMode objectForKey:@"revision"] unsignedLongLongValue];
+    self.browserResumeForce = force;
+    self.browserResumeAlert = [[UIAlertView alloc] initWithTitle:force ? @"Force close browser?" : @"Resume here?"
+        message:force ? @"Terminate Surf’s unresponsive browser on the computer? Recent settings and unsaved work may be lost." : @"Close the browser on the computer and resume here? Pages reload; unsaved work and active transfers may be lost."
+        delegate:self cancelButtonTitle:@"Cancel" otherButtonTitles:force ? @"Force close" : @"Close and resume", nil];
+    [self.browserResumeAlert show];
+}
+
 - (void)browserStateViewSecondaryAction:(RBBrowserStateView *)view {
     switch (view.state) {
+        case RBBrowserStateSetupForce:
+            [self confirmBrowserResume:YES];
+            break;
         case RBBrowserStatePageError:
             [view showState:RBBrowserStateHidden detail:nil];
             [self.session sendMessage:@{@"t": @"back"}];
@@ -2719,6 +2780,12 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
 }
 
 - (void)alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex {
+    if (alertView == self.browserResumeAlert) {
+        self.browserResumeAlert = nil;
+        if (buttonIndex != alertView.cancelButtonIndex)
+            [self.session sendMessage:@{@"t": @"browser-resume", @"revision": @(self.browserResumeRevision), @"force": @(self.browserResumeForce)}];
+        return;
+    }
     if (alertView == self.updateAlert) {
         self.updateAlert = nil;
         if (buttonIndex != alertView.cancelButtonIndex) [self startClientUpdate];

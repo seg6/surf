@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"surf-backend/internal/cdp"
+	"surf-backend/internal/chromium"
 	"surf-backend/internal/config"
 	"surf-backend/internal/media"
 	"surf-backend/internal/process"
@@ -68,6 +69,7 @@ type Controller struct {
 	resizeClosed        bool
 	adaptiveApplyMu     sync.Mutex
 	startupSession      browserSession
+	exactSession        bool
 	restorePending      map[string]struct{}
 	restoreOrder        map[string]int
 	restoreActiveTarget string
@@ -89,7 +91,9 @@ type Controller struct {
 	capture     *media.Capture
 	mediaMu     sync.Mutex // guards client media subscriptions below
 	lifecycleMu sync.RWMutex
+	inputMu     sync.RWMutex
 	alive       bool
+	suspended   bool
 	shutdown    sync.Once
 	videoSubs   map[*transport.Client]*media.VideoSubscription
 	audioSubs   map[*transport.Client]*media.AudioSubscription
@@ -251,6 +255,9 @@ func (b *Controller) Start() (err error) {
 			b.Shutdown()
 		}
 	}()
+	if err := chromium.CheckProfileAvailable(b.cfg.Profile); err != nil {
+		return fmt.Errorf("%w: %v", cdp.ErrUnverifiedLaunch, err)
+	}
 	extensionPaths := []string{}
 	if b.cfg.ContentBlockerPath != "" {
 		extensionPaths = append(extensionPaths, b.cfg.ContentBlockerPath)
@@ -259,12 +266,13 @@ func (b *Controller) Start() (err error) {
 		extensionPaths = append(extensionPaths, b.capture.ExtensionPath())
 	}
 	client, cmd, err := cdp.Launch(cdp.LaunchConfig{
-		ChromePath:     b.cfg.ChromePath,
-		Profile:        b.cfg.Profile,
-		W:              b.cfg.ViewW,
-		H:              b.cfg.ViewH,
-		NoSandbox:      b.cfg.ChromeNoSandbox,
-		ExtensionPaths: extensionPaths,
+		ChromePath:      b.cfg.ChromePath,
+		Profile:         b.cfg.Profile,
+		W:               b.cfg.ViewW,
+		H:               b.cfg.ViewH,
+		NoSandbox:       b.cfg.ChromeNoSandbox,
+		ExtensionPaths:  extensionPaths,
+		ContinueSession: b.exactSession,
 	})
 	if err != nil {
 		return err
@@ -305,12 +313,20 @@ func (b *Controller) Start() (err error) {
 		case <-b.stop:
 		}
 	})
-	b.prepareStartupSession()
+	if b.exactSession {
+		if err := restoreHandoff(client, b.startupSession, b.beginRestore); err != nil {
+			return err
+		}
+	} else {
+		b.prepareStartupSession()
+	}
 	// Full Chrome restores its previous pages and also creates the explicit
 	// about:blank launch target. Remove only those redundant startup blanks
 	// before discovery; otherwise an empty target can win the asynchronous
 	// attach race and make a healthy capture look frozen.
-	b.normalizeStartupTargets()
+	if !b.exactSession {
+		b.normalizeStartupTargets()
+	}
 	// targetCreated also fires for pre-existing targets on subscribe, so
 	// startup and runtime tab discovery share one code path.
 	_, err = client.Call("", "Target.setDiscoverTargets", map[string]any{"discover": true})
@@ -365,6 +381,7 @@ func (b *Controller) newTargetParams(rawURL string) map[string]any {
 
 func (b *Controller) Shutdown() {
 	b.shutdown.Do(func() {
+		b.setSuspended(true)
 		b.lifecycleMu.Lock()
 		b.alive = false
 		b.lifecycleMu.Unlock()
@@ -413,12 +430,13 @@ func (b *Controller) Shutdown() {
 			select {
 			case <-b.cmd.Done:
 			case <-time.After(time.Second):
-				process.Kill(b.cmd.Process.Pid)
+				_ = b.cmd.Kill()
 				<-b.cmd.Done
 			}
 			if b.cmd.Stdin != nil {
 				_ = b.cmd.Stdin.Close()
 			}
+			b.cmd.ReleaseOwned()
 		}
 		if b.cdp != nil {
 			b.cdp.Close()
@@ -430,7 +448,7 @@ func (b *Controller) Shutdown() {
 func (b *Controller) broadcast(event protocol.Event) {
 	b.lifecycleMu.RLock()
 	defer b.lifecycleMu.RUnlock()
-	if b.alive {
+	if b.alive && !b.suspended {
 		b.hub.BroadcastJSON(event)
 	}
 }
@@ -438,9 +456,42 @@ func (b *Controller) broadcast(event protocol.Event) {
 func (b *Controller) send(client *transport.Client, event protocol.Event) {
 	b.lifecycleMu.RLock()
 	defer b.lifecycleMu.RUnlock()
-	if b.alive {
+	if b.alive && !b.suspended {
 		client.SendJSON(event)
 	}
+}
+
+func (b *Controller) setSuspended(paused bool) {
+	b.lifecycleMu.Lock()
+	b.suspended = paused
+	b.lifecycleMu.Unlock()
+}
+
+// beginInput is the execution boundary, not just the admission boundary.
+// Commands queued before a handoff cannot mutate the captured session later.
+func (b *Controller) beginInput() bool {
+	b.inputMu.RLock()
+	paused := b.inputSuspended()
+	if paused {
+		b.inputMu.RUnlock()
+	}
+	return !paused
+}
+
+func (b *Controller) inputSuspended() bool {
+	b.lifecycleMu.RLock()
+	paused := b.suspended
+	b.lifecycleMu.RUnlock()
+	return paused
+}
+
+func (b *Controller) sendBinary(client *transport.Client, data []byte) error {
+	b.lifecycleMu.RLock()
+	defer b.lifecycleMu.RUnlock()
+	if !b.alive || b.suspended {
+		return fmt.Errorf("browser is paused")
+	}
+	return client.SendBinary(data)
 }
 
 // Died signals that the Chromium connection is gone.

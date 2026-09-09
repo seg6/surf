@@ -82,6 +82,14 @@ impl DesktopApp {
         }
         self.endpoint = "Office computer".into();
         match scene.as_str() {
+            "browser-setup" | "browser-setup-force" | "browser-resuming" => {
+                self.controller.browser_mode = Some(surf_client_app::BrowserMode {
+                    state: if scene == "browser-resuming" { "resuming" } else { "setup" }.into(),
+                    revision: 7, host: "Office computer".into(),
+                    message: "Browsing is paused. Close the setup windows on your computer to resume automatically, or resume here.".into(),
+                    can_force: scene == "browser-setup-force",
+                });
+            }
             "code"=>{
                 self.controller.connected=false;
                 self.controller.connection_phase=surf_client_app::ConnectionPhase::Code;

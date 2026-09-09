@@ -5,6 +5,27 @@ version differences alone do not.
 
 ## Unreleased
 
+### Set up Surf's browser on your computer
+
+- Open your Surf tabs on the computer to sign in or change browser settings.
+  Choose **Browser setup…** in the tray or dashboard, or run `surf browser`.
+- Connected devices show a paused screen. Close the setup windows to resume
+  automatically, or choose **Resume here** on an iOS or desktop client and
+  confirm that the computer's browser will close.
+- Tabs, sign-ins and browser settings carry over using the same Surf profile.
+  Pages reload when switching, so unsaved forms and active transfers may be
+  lost. Completed downloads, bookmarks and history stay in place.
+- With Surf stopped, `surf browser` lets you configure its browser without
+  starting a streaming server. Closing the setup windows exits the command.
+  Use `surf browser --status` to check its state or `surf quit` to close it.
+- Surf prevents two browsers from using its profile at once. If the setup
+  browser will not close normally, a separate force-close confirmation lets
+  you recover without closing unrelated browsers.
+
+### Fixes
+
+- Fixed **Save & restart** in the dashboard failing with a form-data error
+  when changing the server name, port or other connection settings.
 - Fixed a browser worker startup stall that prevented Facebook Reels and
   other features that depend on dedicated web workers from loading.
 - Fixed live browser view startup failures caused by overlapping capture

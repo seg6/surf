@@ -41,5 +41,7 @@
   {"t":"reader"},
   {"t":"media-playpause"},
   {"t":"media-mute"},
-  {"t":"media-query"}
+  {"t":"media-query"},
+  {"t":"browser-watch"},
+  {"t":"browser-resume","revision":7,"force":false}
 ]

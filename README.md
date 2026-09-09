@@ -92,6 +92,12 @@ surf quit
 
 Surf listens on port `18080` by default. Windows archives contain `surf.exe`.
 
+To sign in or change settings in Surf's browser on the computer, choose
+**Browser setup…** in the tray/dashboard or run `surf browser`. Connected
+devices pause until you close the setup windows or choose to resume.
+See [browser setup](docs/backend.md#browser-setup-on-the-computer) for standalone
+use, confirmations and what carries over.
+
 Updates install over the existing copy. `SURF_HOME` contains the server
 identity, paired devices, and browser profile, so it should remain in place.
 

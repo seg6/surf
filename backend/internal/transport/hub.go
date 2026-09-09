@@ -165,9 +165,10 @@ func (h *Hub) Stats() map[string]uint64 {
 }
 
 type outMsg struct {
-	msgType int
-	data    []byte
-	clock   *clockReply
+	msgType    int
+	data       []byte
+	clock      *clockReply
+	mediaEpoch uint64
 }
 
 type clockReply struct {
@@ -187,6 +188,29 @@ type Client struct {
 
 	mu            sync.Mutex
 	videoDropping bool
+	mediaPaused   atomic.Bool
+	mediaEpoch    atomic.Uint64
+}
+
+// SetMediaPaused makes a browser handoff a queue boundary without closing the
+// authenticated socket. Already selected messages are rejected by writeOne;
+// a write in flight precedes the ordered browser-mode event on that socket.
+func (c *Client) SetMediaPaused(paused bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.mediaPaused.Swap(paused) == paused {
+		return
+	}
+	c.mediaEpoch.Add(1)
+	c.videoDropping = false
+	for _, lane := range []chan outMsg{c.video, c.audio} {
+		for len(lane) > 0 {
+			select {
+			case <-lane:
+			default:
+			}
+		}
+	}
 }
 
 // SendBinary enqueues a pre-encoded binary media message. It never blocks; an
@@ -339,6 +363,9 @@ func (c *Client) writeLoop() {
 }
 
 func (c *Client) writeOne(m outMsg) bool {
+	if m.msgType == websocket.BinaryMessage && (c.mediaPaused.Load() || m.mediaEpoch != c.mediaEpoch.Load()) {
+		return true
+	}
 	_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 	if m.clock != nil {
 		// s2 is the time this reply actually reaches the head of the socket
@@ -397,6 +424,12 @@ func (c *Client) write(msgType int, data []byte) error {
 			return errBackpressure
 		}
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.mediaPaused.Load() {
+		return errBackpressure
+	}
+	m.mediaEpoch = c.mediaEpoch.Load()
 	if len(data) > 4 && data[4] == protocol.FrameTypeAudio {
 		select {
 		case c.audio <- m:
@@ -420,8 +453,6 @@ func (c *Client) write(msgType int, data []byte) error {
 	}
 	if len(data) > 5 && data[4] == protocol.FrameTypeVideo {
 		idr := data[5]&1 != 0
-		c.mu.Lock()
-		defer c.mu.Unlock()
 		if c.videoDropping && !idr {
 			return errBackpressure
 		}

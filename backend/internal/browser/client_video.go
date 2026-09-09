@@ -25,6 +25,9 @@ func (b *Controller) hasVideoSubscribers() bool {
 }
 
 func (b *Controller) subscribeVideo(c *transport.Client) {
+	if b.inputSuspended() {
+		return
+	}
 	b.mu.Lock()
 	viewW, viewH := b.viewW, b.viewH
 	b.mu.Unlock()
@@ -40,6 +43,10 @@ func (b *Controller) subscribeVideo(c *transport.Client) {
 	b.video.SetSize(viewW, viewH)
 	b.send(c, protocol.VideoConfigEvent{Type: "video-config", State: "starting", Generation: b.video.Generation(), Profile: b.profileName()})
 	sub := b.video.Subscribe()
+	if b.inputSuspended() {
+		sub.Close()
+		return
+	}
 	select {
 	case <-c.Closed():
 		sub.Close()
@@ -163,7 +170,7 @@ func (b *Controller) deliverAU(c *transport.Client, sub *media.VideoSubscription
 		CDPAcceptedNS:     au.CDPAcceptedNS,
 		Profile:           au.Profile,
 	}
-	if err := c.SendBinary(protocol.EncodeVideo(meta, au.IDR, au.Data)); err != nil {
+	if err := b.sendBinary(c, protocol.EncodeVideo(meta, au.IDR, au.Data)); err != nil {
 		// Outbox dropped the AU — every P-frame after it is garbage, so make
 		// the subscription resume at an immediate IDR. Healthy streams do not
 		// carry periodic IDRs, so this request is the dependency boundary;

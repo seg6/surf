@@ -145,6 +145,9 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
+      - name: Install browser test display
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
       - name: Test all backend packages
         working-directory: backend
         run: go test ./...

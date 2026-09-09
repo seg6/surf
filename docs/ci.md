@@ -39,6 +39,12 @@ GHCR build-environment image.
 
 ## Go
 
+Visible browser-setup tests run as part of `go test ./...`, using private
+Chromium profiles and Xvfb displays. CI installs Xvfb and uses its bundled
+Chrome; local runs skip these tests if either dependency is absent. They cover
+tab/profile handoff, standalone CLI lifetime, rollback, stale confirmations and
+explicit force-close recovery. They never open windows on the user's desktop.
+
 CI uses `setup-go` caching with `backend/go.sum`. The release workflow keeps
 its separate cross-platform Go module/build cache, keyed by Go version,
 dependency checksum, and verified source commit with a dependency-prefix

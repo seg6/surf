@@ -67,9 +67,11 @@ type desktopApp struct {
 	killProcess    func(int)
 	matchesProcess func(int, string) bool
 
-	tray       *tray.App
-	statusItem *tray.Item
-	updateItem *tray.Item
+	tray        *tray.App
+	statusItem  *tray.Item
+	updateItem  *tray.Item
+	browserItem *tray.Item
+	resumeItem  *tray.Item
 
 	updateRelease *updater.Release
 	updateState   string
@@ -265,10 +267,11 @@ func (a *desktopApp) onReady() {
 	a.statusItem = a.tray.AddItem("Starting Surf…", nil)
 	a.statusItem.SetDisabled(true)
 	a.tray.AddItem("Settings…", func() { a.openManagement("") })
+	a.browserItem = a.tray.AddItem("Browser setup…", a.openBrowserSetup)
+	a.resumeItem = a.tray.AddItem("Resume on devices…", func() { a.openManagement("#browser-resume") })
+	a.resumeItem.SetDisabled(true)
 	a.tray.AddItem("Restart Backend", func() {
-		a.setStatus("Restarting Surf…")
-		a.stopBackend()
-		_ = a.startBackend()
+		a.openManagement("#restart-engine")
 	})
 	a.updateItem = a.tray.AddItem("Check for Updates…", func() {
 		a.startUpdateCheck()
@@ -308,6 +311,14 @@ func (a *desktopApp) onExit() {
 
 func (a *desktopApp) takeControlOfExistingBackend() error {
 	descriptor, err := control.Load(a.home)
+	if err == nil && descriptor.Standalone && process.Running(descriptor.PID) {
+		return fmt.Errorf("standalone browser setup is active; close it before starting Surf")
+	}
+	if err == nil && process.Running(descriptor.PID) {
+		if mode, modeErr := a.browserStatus(); modeErr == nil && mode.State != "streaming" {
+			return fmt.Errorf("browser setup is active; attached to its existing control endpoint")
+		}
+	}
 	if errors.Is(err, control.ErrNotRunning) {
 		return nil
 	}
@@ -384,6 +395,14 @@ func (a *desktopApp) takeControlOfExistingBackend() error {
 }
 
 func (a *desktopApp) startBackend() error {
+	if descriptor, err := control.Load(a.home); err == nil && descriptor.Standalone && process.Running(descriptor.PID) {
+		a.setStatus("Standalone browser setup — close it to start Surf")
+		return fmt.Errorf("standalone browser setup owns this profile")
+	}
+	if mode, err := a.browserStatus(); err == nil && mode.State != "streaming" {
+		a.updateBrowserItems(mode)
+		return nil
+	}
 	a.mu.Lock()
 	if a.closing || a.cmd != nil {
 		a.mu.Unlock()
@@ -453,25 +472,35 @@ func (a *desktopApp) startBackend() error {
 	return nil
 }
 
-func (a *desktopApp) stopBackend() {
+func (a *desktopApp) stopBackend(confirmations ...string) error {
 	a.mu.Lock()
 	a.cancelBackendRestartLocked()
 	a.restartAttempt = 0
 	cmd, done, parentGuard := a.cmd, a.done, a.parentGuard
-	if cmd != nil {
-		a.cmd = nil
-		a.done = nil
-		a.parentGuard = nil
-	}
 	a.mu.Unlock()
-	if cmd == nil || cmd.Process == nil {
-		return
+	descriptor, descriptorErr := control.Load(a.home)
+	if cmd == nil && errors.Is(descriptorErr, control.ErrNotRunning) {
+		return nil
+	}
+	revision := ""
+	if len(confirmations) != 0 {
+		mode, err := a.browserStatus()
+		if err != nil {
+			return err
+		}
+		if mode.State != "streaming" && (mode.Standalone || confirmations[0] != strconv.FormatUint(mode.Revision, 10)) {
+			return fmt.Errorf("browser setup changed; confirm closing its current windows first")
+		}
+		revision = strconv.FormatUint(mode.Revision, 10)
 	}
 	graceful := false
 	if client, err := a.backendHTTPClient(2 * time.Second); err == nil {
 		request, requestErr := http.NewRequest(http.MethodPost,
 			"https://127.0.0.1"+web.APIRoot+"/admin/shutdown", nil)
 		if requestErr == nil {
+			if revision != "" {
+				request.Header.Set("X-Surf-Browser-Revision", revision)
+			}
 			if response, requestErr := client.Do(request); requestErr == nil {
 				_, _ = io.Copy(io.Discard, response.Body)
 				_ = response.Body.Close()
@@ -479,6 +508,27 @@ func (a *desktopApp) stopBackend() {
 			}
 		}
 	}
+	if !graceful && (len(confirmations) != 0 || cmd == nil) {
+		return fmt.Errorf("browser could not confirm shutdown; its owner was left running")
+	}
+	if cmd == nil {
+		// An observed foreground/standalone owner is controlled by its private
+		// endpoint, not killed by PID. Wait until it releases the descriptor.
+		deadline := time.Now().Add(15 * time.Second)
+		for time.Now().Before(deadline) {
+			current, err := control.Load(a.home)
+			if errors.Is(err, control.ErrNotRunning) || (err == nil && current.AdminToken != descriptor.AdminToken) {
+				return nil
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		return fmt.Errorf("the foreground browser is still closing")
+	}
+	a.mu.Lock()
+	if a.cmd == cmd {
+		a.cmd, a.done, a.parentGuard = nil, nil, nil
+	}
+	a.mu.Unlock()
 	if !graceful {
 		// Closing the private ownership pipe is the portable shutdown signal.
 		// On macOS the guardian forwards EOF to the server and enforces the
@@ -490,13 +540,14 @@ func (a *desktopApp) stopBackend() {
 	}
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(15 * time.Second):
 		process.Kill(cmd.Process.Pid)
 		<-done
 	}
 	if parentGuard != nil {
 		_ = parentGuard.Close()
 	}
+	return nil
 }
 
 func backendRestartDelay(attempt int) time.Duration {
@@ -594,7 +645,11 @@ func (a *desktopApp) monitorHealth() {
 		}
 		if err == nil && response.StatusCode >= 200 && response.StatusCode < 300 {
 			a.backendHealthy()
-			a.setStatus("Surf is running")
+			if mode, modeErr := a.browserStatus(); modeErr == nil {
+				a.updateBrowserItems(mode)
+			} else {
+				a.setStatus("Surf is running")
+			}
 		} else {
 			a.mu.Lock()
 			owned := a.cmd != nil
@@ -793,6 +848,9 @@ func (a *desktopApp) managementUpdateApply(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
+	if !a.confirmBrowserInterruption(w, r) {
+		return
+	}
 	a.mu.Lock()
 	if a.updateState != "available" || a.updateRelease == nil {
 		a.mu.Unlock()
@@ -802,7 +860,7 @@ func (a *desktopApp) managementUpdateApply(w http.ResponseWriter, r *http.Reques
 	release := *a.updateRelease
 	a.updateState, a.updateError = "downloading", ""
 	a.mu.Unlock()
-	go a.applyDesktopUpdate(release)
+	go a.applyDesktopUpdate(release, r.Header.Get("X-Surf-Browser-Revision"))
 	w.WriteHeader(http.StatusAccepted)
 }
 
@@ -811,7 +869,7 @@ func validDesktopMutation(r *http.Request) bool {
 		r.Header.Get("X-Surf-Desktop") == "1"
 }
 
-func (a *desktopApp) applyDesktopUpdate(release updater.Release) {
+func (a *desktopApp) applyDesktopUpdate(release updater.Release, confirmation string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	if runtime.GOOS == "windows" && release.Package.URL != "" {
@@ -823,7 +881,10 @@ func (a *desktopApp) applyDesktopUpdate(release updater.Release) {
 		a.mu.Lock()
 		a.updateState = "applying"
 		a.mu.Unlock()
-		a.stopBackend()
+		if err := a.stopBackend(confirmation); err != nil {
+			a.setUpdateFailure(err)
+			return
+		}
 		command := exec.Command(installer, windowsInstallerArguments()...)
 		if err := command.Start(); err != nil {
 			a.setUpdateFailure(err)
@@ -842,7 +903,10 @@ func (a *desktopApp) applyDesktopUpdate(release updater.Release) {
 		a.mu.Lock()
 		a.updateState = "applying"
 		a.mu.Unlock()
-		a.stopBackend()
+		if err := a.stopBackend(confirmation); err != nil {
+			a.setUpdateFailure(err)
+			return
+		}
 		target := os.Getenv("APPIMAGE")
 		if err := updater.ReplaceExecutable(staged, target); err != nil {
 			a.setUpdateFailure(err)
@@ -869,7 +933,10 @@ func (a *desktopApp) applyDesktopUpdate(release updater.Release) {
 	a.mu.Lock()
 	a.updateState = "applying"
 	a.mu.Unlock()
-	a.stopBackend()
+	if err := a.stopBackend(confirmation); err != nil {
+		a.setUpdateFailure(err)
+		return
+	}
 	if runtime.GOOS == "windows" {
 		err = launchUpdateHelper(staged, target, true)
 	} else {
@@ -993,10 +1060,16 @@ func (a *desktopApp) managementRestart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
+	if !a.confirmBrowserInterruption(w, r) {
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 	go func() {
 		a.setStatus("Restarting Surf…")
-		a.stopBackend()
+		if err := a.stopBackend(r.Header.Get("X-Surf-Browser-Revision")); err != nil {
+			a.logf("restart canceled: %v", err)
+			return
+		}
 		if err := a.startBackend(); err != nil {
 			a.logf("restart: %v", err)
 		}
@@ -1006,6 +1079,9 @@ func (a *desktopApp) managementRestart(w http.ResponseWriter, r *http.Request) {
 func (a *desktopApp) managementSettings(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost || r.Header.Get("X-Surf-Desktop") != "1" {
 		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if !a.confirmBrowserInterruption(w, r) {
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
@@ -1050,7 +1126,10 @@ func (a *desktopApp) managementSettings(w http.ResponseWriter, r *http.Request) 
 	}
 	go func() {
 		a.setStatus("Restarting Surf…")
-		a.stopBackend()
+		if err := a.stopBackend(r.Header.Get("X-Surf-Browser-Revision")); err != nil {
+			a.logf("settings saved; restart canceled: %v", err)
+			return
+		}
 		if err := a.startBackend(); err != nil {
 			a.logf("restart after settings: %v", err)
 		}

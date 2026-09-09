@@ -58,6 +58,10 @@ pub struct TouchPoint {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "t", deny_unknown_fields)]
 pub enum Command {
+    #[serde(rename = "browser-watch")]
+    BrowserWatch,
+    #[serde(rename = "browser-resume")]
+    BrowserResume { revision: u64, force: bool },
     #[serde(rename = "size")]
     Size {
         w: i32,
@@ -421,6 +425,16 @@ pub struct SelectOption {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "t", deny_unknown_fields)]
 pub enum Event {
+    #[serde(rename = "browser-mode")]
+    BrowserMode {
+        state: String,
+        revision: u64,
+        host: String,
+        message: String,
+        standalone: bool,
+        #[serde(rename = "canForce")]
+        can_force: bool,
+    },
     #[serde(rename = "hello")]
     Hello { vw: i32, vh: i32 },
     #[serde(rename = "tabs")]

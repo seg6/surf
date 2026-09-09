@@ -71,6 +71,36 @@ func TestAudioOverflowDropsOldest(t *testing.T) {
 	}
 }
 
+func TestBrowserHandoffDiscardsOldMediaWithoutClosingControl(t *testing.T) {
+	c := testClient()
+	video := protocol.EncodeVideoAU(1, true, 10, 10, []byte{1})
+	audio := protocol.EncodeAudioPCM(1, 16000, 1, []byte{1})
+	_ = c.SendBinary(video)
+	_ = c.SendBinary(audio)
+	selected := <-c.video
+	_ = c.SendBinary(video)
+	c.SetMediaPaused(true)
+	if len(c.video) != 0 || len(c.audio) != 0 {
+		t.Fatal("old media retained")
+	}
+	if c.SendBinary(video) == nil || c.SendBinary(audio) == nil {
+		t.Fatal("accepted paused media")
+	}
+	c.SendJSON(protocol.EmptyEvent{Type: "log-request"})
+	if len(c.control) != 1 {
+		t.Fatal("control stopped during handoff")
+	}
+	c.SetMediaPaused(false)
+	// No connection is installed: this can only succeed by discarding the
+	// message selected before the transition, without attempting a write.
+	if !c.writeOne(selected) {
+		t.Fatal("stale selected media closed the socket")
+	}
+	if c.SendBinary(video) != nil || len(c.video) != 1 {
+		t.Fatal("new generation did not resume")
+	}
+}
+
 func TestConnectedDeviceTargetingDeduplicatesSockets(t *testing.T) {
 	hub := New()
 	first, second, other := testClient(), testClient(), testClient()

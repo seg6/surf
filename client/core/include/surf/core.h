@@ -43,6 +43,15 @@ typedef enum surf_core_result {
     SURF_CORE_ERROR_STATE
 } surf_core_result_t;
 
+typedef struct surf_browser_mode_snapshot {
+    surf_string_view_t state, host, message;
+    uint64_t revision;
+    int paused, standalone, can_force;
+} surf_browser_mode_snapshot_t;
+
+surf_core_result_t surf_core_browser_mode(const surf_core_t *core,
+    surf_browser_mode_snapshot_t *out_snapshot);
+
 typedef struct surf_tab_event {
     int64_t id;
     surf_string_view_t title;

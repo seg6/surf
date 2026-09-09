@@ -60,6 +60,7 @@ func ParseClientCompatibility(value, legacy string) (int, bool) {
 // feature-gates on these instead of parsing version strings, so server and app
 // can ship independently once both understand a capability.
 var Caps = []string{
+	"browser-setup",
 	"dialog",         // JS dialog forwarding + dialogreply
 	"filechooser",    // upload intercept + POST /api/v1/uploads
 	"history2",       // paginated history query + histdel/clear

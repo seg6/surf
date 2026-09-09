@@ -2,6 +2,71 @@ use super::*;
 use imgui::{StyleColor, StyleVar};
 
 impl DesktopApp {
+    pub(super) fn draw_browser_setup(&mut self, ui: &Ui) {
+        let Some(mode) = self.controller.browser_mode.clone() else {
+            return;
+        };
+        self.address_editing = false;
+        self.focus_address = false;
+        self.page_focused = false;
+        self.page_input.reset();
+        if ui.is_key_pressed(imgui::Key::Escape) {
+            self.browser_resume_confirmation = None;
+        }
+        let display = ui.io().display_size;
+        let width = (display[0] - 32.0).min(440.0);
+        let switching = matches!(mode.state.as_str(), "opening" | "resuming" | "starting");
+        if self
+            .browser_resume_confirmation
+            .is_some_and(|(revision, _)| revision != mode.revision)
+        {
+            self.browser_resume_confirmation = None;
+        }
+        ui.window("##browser-setup-state")
+            .position([display[0] * 0.5, display[1] * 0.5], Condition::Always)
+            .position_pivot([0.5, 0.5])
+            .size_constraints([width, 0.0], [width, display[1] - 24.0])
+            .flags(WindowFlags::NO_TITLE_BAR | WindowFlags::NO_RESIZE | WindowFlags::NO_MOVE
+                | WindowFlags::NO_SAVED_SETTINGS | WindowFlags::ALWAYS_AUTO_RESIZE)
+            .build(|| {
+                self.hit_regions.push(window_rect(ui));
+                let start = ui.cursor_pos();
+                imgui::Image::new(self.assets.mark(), [42.0, 42.0]).build(ui);
+                ui.set_cursor_pos([start[0] + 54.0, start[1] + 2.0]);
+                {
+                    let _font = ui.push_font(ui.fonts().fonts()[3]);
+                    ui.text_wrapped(if switching { "Switching browser" } else { "Browser setup" });
+                }
+                ui.set_cursor_pos([start[0] + 54.0, ui.cursor_pos()[1]]);
+                widgets::description(ui, &mode.host);
+                ui.set_cursor_pos([start[0], ui.cursor_pos()[1].max(start[1] + 52.0)]);
+                ui.separator();
+                ui.spacing();
+                ui.text_wrapped(&mode.message);
+                ui.spacing();
+                if let Some((revision, force)) = self.browser_resume_confirmation {
+                    ui.text_wrapped(if force {
+                        "Force close Surf's browser? Recent settings and unsaved work may be lost."
+                    } else {
+                        "Close the browser on the computer and resume here? Pages reload; unsaved work and active transfers may be lost."
+                    });
+                    ui.spacing();
+                    if widgets::primary_button(ui, if force { "Force close and resume" } else { "Close and resume" }, ui.content_region_avail()[0]) {
+                        self.controller.command(Command::BrowserResume { revision, force });
+                        self.browser_resume_confirmation = None;
+                    }
+                    if ui.button_with_size("Cancel", [ui.content_region_avail()[0], 28.0]) { self.browser_resume_confirmation = None; }
+                } else if !switching {
+                    if widgets::primary_button(ui, "Resume here…", ui.content_region_avail()[0]) { self.browser_resume_confirmation = Some((mode.revision, false)); }
+                    if mode.can_force && ui.button_with_size("Force close…", [ui.content_region_avail()[0], 28.0]) {
+                        self.browser_resume_confirmation = Some((mode.revision, true));
+                    }
+                }
+                ui.spacing();
+                if ui.button_with_size("Disconnect", [ui.content_region_avail()[0], 28.0]) { self.controller.disconnect(); }
+            });
+    }
+
     pub(super) fn draw_chrome(&mut self, ui: &Ui) {
         let [_, y, width, height] = self.layout.rail;
         let density = self.layout.density;

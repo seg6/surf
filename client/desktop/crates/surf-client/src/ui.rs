@@ -187,6 +187,7 @@ impl SmokeState {
 }
 
 pub struct DesktopApp {
+    browser_resume_confirmation: Option<(u64, bool)>,
     assets: crate::assets::Assets,
     controller: ClientController,
     video: VideoSurface,
@@ -290,6 +291,7 @@ impl DesktopApp {
             fullscreen: false,
             fullscreen_request: None,
             fullscreen_pending: None,
+            browser_resume_confirmation: None,
             theme_request: Some(preferences.dark),
             device_preset: preferences.device_preset.min(DEVICE_PRESETS.len() - 1),
             device_landscape: preferences.landscape,
@@ -383,6 +385,32 @@ impl DesktopApp {
             .prepare(ui.io().display_framebuffer_scale[0]);
         self.hit_regions.clear();
         let display = ui.io().display_size;
+        if self.controller.connected && self.controller.browser_paused() {
+            self.viewport_candidate = None;
+            self.viewport_committed = None;
+            self.fullscreen_pending = None;
+            self.fullscreen_request = None;
+            self.pending_window_size = None;
+            self.panel = None;
+            if self.fullscreen {
+                self.set_fullscreen(window, false);
+            }
+            window.set_title("Browser setup — Surf");
+            self.draw_browser_setup(ui);
+            self.draw_toast(ui);
+            self.ui_wants_keyboard = ui.io().want_capture_keyboard;
+            if std::env::var_os("SURF_UI_GALLERY").is_some()
+                && std::env::var_os("SURF_UI_TRACE").is_some()
+            {
+                let trace = serde_json::json!({"browser_setup":true,"confirming":self.browser_resume_confirmation.is_some(),"editing":self.address_editing,"page_focused":self.page_focused}).to_string();
+                if trace != self.last_trace {
+                    eprintln!("SURF_UI_STATE {trace}");
+                    self.last_trace = trace;
+                }
+            }
+            return;
+        }
+        self.browser_resume_confirmation = None;
         let connected = self.controller.connected;
         let current_url = self.controller.snapshot.current_url.clone();
         let current_tab = self

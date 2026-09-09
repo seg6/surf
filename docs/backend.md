@@ -34,6 +34,61 @@ Paired devices can be listed or revoked without restarting Chromium.
 Revocation closes the device connections and invalidates its sessions,
 challenges, and tickets.
 
+## Browser setup on the computer
+
+Choose **Browser setup…** in the tray or the dashboard, or run:
+
+```sh
+surf browser
+surf browser --status
+surf browser --resume
+```
+
+This opens Surf's browser with its existing profile and current tabs, so you can
+sign in or change browser settings using the computer's keyboard and screen.
+It does not open your personal browser profile or copy Surf's profile elsewhere.
+Surf uses the same configured browser, whether that is Chrome, Chromium, Edge,
+or another supported Chromium browser.
+
+When Surf is running, opening setup pauses browsing on every connected device.
+Pairings and connections remain intact, and the app explains which computer
+has the browser. Close all normal setup windows to resume automatically, choose
+**Resume on devices** in the dashboard/tray, or confirm **Resume here** on any
+paired client. Resuming closes the local setup windows.
+
+Normal web tabs, their order and active selection come back to Surf. Multiple
+windows are flattened into one tab list. Private windows and browser settings
+pages are not carried over; if no web tabs remain, Surf opens a new tab. Cookies
+and settings remain in Chromium's profile. Handoffs use Chromium's own
+[session-cookie restore behavior](https://github.com/chromium/chromium/blob/main/chrome/browser/profiles/profile_impl.cc),
+not a separate cookie export. Pages reload: unsaved forms, page JavaScript state,
+back/forward history and in-progress transfers may be lost. Completed downloads
+and Surf's bookmarks and history remain available. Chromium bookmarks and
+Surf's Library are separate.
+
+With Surf stopped, `surf browser` instead runs **standalone setup** in the
+foreground. There is no public Surf listener, pairing or streaming. Closing
+the setup windows exits the command; it does not start Surf automatically.
+Start Surf normally when you are ready to use a device. `surf quit` also closes
+standalone setup. Another Surf instance cannot use the same profile meanwhile.
+
+A visible desktop session is required. On Linux, run Surf from the logged-in
+desktop, not a display-less SSH session. On Windows, a service/session without
+an interactive desktop cannot show the browser window.
+
+If normal resume cannot close the browser, Surf stays paused and offers a
+separate force-close confirmation. It never force-closes merely because a
+handoff times out. The CLI equivalent, available only after a failed close, is:
+
+```sh
+surf browser --resume --force
+```
+
+Force closing may lose recent profile changes. Only Surf's own browser process
+group/job can be terminated, not unrelated browser windows. Commands that need
+confirmation accept `--yes` for scripts. State revisions reject confirmations
+that refer to a setup session which has already changed.
+
 ## Network and TLS
 
 First launch creates an RSA 2048 certificate in `SURF_HOME`. Clients save its
@@ -102,7 +157,8 @@ $SURF_HOME/browser-session.json
 ```
 
 `daemon.json` tells local CLI commands how to reach the running server and
-contains its control token. CLI commands do not start another backend.
+contains its control token. CLI commands control that owner; `surf browser`
+starts standalone setup only when there is no running owner.
 
 The desktop app uses a parent pipe to supervise the server. Closing the app
 closes the backend and Chromium tree. `desktop.lock` and `server.lock` use
@@ -112,9 +168,14 @@ The rest of `SURF_HOME` contains the browser profile, downloads, uploads,
 managed browser, updates, logs, and desktop settings. Backing up the whole
 directory preserves the server identity and pairings.
 
-Chromium starts and stops with the backend. Capture and transport stop when the
-last client disconnects. If Chromium or its DevTools connection exits, the
-backend exits so its supervisor can restart both.
+The server owns a browser manager for its complete lifetime. During normal
+browsing, Chromium starts and stops with the backend; an unexpected Chromium
+exit still ends the server so its supervisor can restart both. During browser
+setup, the manager intentionally replaces the streaming browser with a visible
+one while keeping TLS, authentication and connected sockets alive. Setup is a
+healthy paused state, not a crash for the tray to restart. A profile lock beside
+the profile directory spans both modes. Chromium's native singleton files are
+left intact; a live or uncertain owner prevents startup and profile recovery.
 
 Tabs, the active tab, website mode, appearance, cookies, and site storage are
 restored after restart. Tab state is written after changes and once more during

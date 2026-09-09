@@ -284,6 +284,9 @@ func validTouchCommand(command *protocol.TouchCommand) bool {
 }
 
 func (in *touchInput) process(work touchWork) {
+	if in.b.inputSuspended() {
+		return
+	}
 	command := work.command
 	if !validTouchCommand(command) {
 		in.cancelActive()

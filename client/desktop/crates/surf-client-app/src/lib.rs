@@ -40,6 +40,7 @@ pub struct Tick {
 }
 
 pub struct ClientController {
+    pub browser_mode: Option<BrowserMode>,
     network_enabled: bool,
     pub connection_phase: ConnectionPhase,
     core: Core,
@@ -91,6 +92,15 @@ pub enum ConnectionPhase {
     Connecting,
     Connected,
     Failed(surf_session::SessionFailure),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BrowserMode {
+    pub state: String,
+    pub revision: u64,
+    pub host: String,
+    pub message: String,
+    pub can_force: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -156,6 +166,7 @@ impl ClientController {
             .find(|argument| !argument.starts_with('-'));
         let mut controller = Self {
             network_enabled: options.network_enabled,
+            browser_mode: None,
             connection_phase: ConnectionPhase::Choose,
             core,
             storage,
@@ -261,6 +272,18 @@ impl ClientController {
     }
 
     pub fn command(&mut self, command: Command) {
+        if self.browser_paused()
+            && !matches!(
+                command,
+                Command::BrowserWatch
+                    | Command::BrowserResume { .. }
+                    | Command::Size { .. }
+                    | Command::Dark { .. }
+                    | Command::Mobile { .. }
+            )
+        {
+            return;
+        }
         if self.session.is_none() && std::env::var_os("SURF_UI_TRACE").is_some() {
             eprintln!("SURF_UI_COMMAND {command:?}");
         }
@@ -274,6 +297,12 @@ impl ClientController {
     pub fn clear_suggestions(&mut self) {
         self.browser.suggestions.clear();
         self.suggestions.clear();
+    }
+
+    pub fn browser_paused(&self) -> bool {
+        self.browser_mode
+            .as_ref()
+            .is_some_and(|mode| mode.state != "streaming")
     }
 
     pub fn request_visible_icons(&mut self) {
@@ -487,6 +516,12 @@ impl ClientController {
             let _ = self.core.complete_semantic(SemanticCompletion::Toast);
         }
         self.update_diagnostics();
+        if self.browser_paused() {
+            tick.frame = None;
+            if let Some(media) = &self.media {
+                media.clear();
+            }
+        }
         tick
     }
 
@@ -600,6 +635,7 @@ impl ClientController {
                     .sort_by(|left, right| left.name.cmp(&right.name));
             }
             SessionEvent::Connected { info, config } => {
+                self.browser_mode = None;
                 self.inspected = Some(info.clone());
                 self.connection_phase = ConnectionPhase::Connected;
                 if let Err(error) = self.core.begin_connection() {
@@ -612,6 +648,9 @@ impl ClientController {
                 self.icon_pending = 0;
                 self.refresh();
                 self.connected = true;
+                if config.caps.iter().any(|cap| cap == "browser-setup") {
+                    self.command(Command::BrowserWatch);
+                }
                 self.clock_available = config.caps.iter().any(|capability| capability == "clock");
                 self.media_stats_available = config
                     .caps
@@ -805,6 +844,55 @@ impl ClientController {
                     media.set_clock_offset(self.clock_sync.server_minus_client_ns());
                 }
             }
+            WireEvent::BrowserMode {
+                state,
+                revision,
+                host,
+                message,
+                can_force,
+                ..
+            } => {
+                if self
+                    .browser_mode
+                    .as_ref()
+                    .is_some_and(|mode| mode.revision > revision)
+                {
+                    return;
+                }
+                let was_paused = self.browser_paused();
+                self.browser_mode = Some(BrowserMode {
+                    state,
+                    revision,
+                    host,
+                    message,
+                    can_force,
+                });
+                if self.browser_paused() {
+                    if let Some(media) = &self.media {
+                        media.clear();
+                    }
+                    self.video_dimensions = None;
+                    self.last_frame_dimensions = None;
+                    self.clear_suggestions();
+                    effects.push(HostEffect::ClearVideo);
+                } else if was_paused {
+                    self.requested_viewport = None;
+                    self.command(Command::Mobile {
+                        on: self.mobile_mode,
+                        causal: Causal::default(),
+                    });
+                    self.command(Command::Dark {
+                        on: self.dark_mode,
+                        causal: Causal::default(),
+                    });
+                    if self.audio_available {
+                        self.command(Command::Audio {
+                            on: true,
+                            causal: Causal::default(),
+                        });
+                    }
+                }
+            }
             WireEvent::Hello { vw, vh } => self.remote_viewport = Some((vw, vh)),
             WireEvent::VideoConfig {
                 state,
@@ -823,7 +911,9 @@ impl ClientController {
                     self.status = format!("Video: {reason}");
                 }
             }
-            WireEvent::AudioConfig { ok, .. } => self.audio_available = ok,
+            // This event describes the remote subscription, not whether our
+            // local output device can play. A handoff ends that subscription.
+            WireEvent::AudioConfig { .. } => {}
             WireEvent::Found { on } => self.browser.find_found = Some(on),
             WireEvent::Toast { text } => self.browser.toast(text),
             WireEvent::Download { name } => {

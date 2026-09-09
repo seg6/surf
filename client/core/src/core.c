@@ -49,6 +49,9 @@ struct surf_core {
     surf_owned_string_t toast_text;
     surf_owned_string_t download_name;
     surf_owned_string_t history_query;
+    surf_owned_string_t browser_mode, browser_host, browser_message;
+    uint64_t browser_revision;
+    int browser_paused, browser_standalone, browser_can_force;
     double editable_rect[4];
     uint64_t revision;
     uint64_t connection_generation;
@@ -393,6 +396,11 @@ static void surf_clear_browser_state(surf_core_t *core) {
     surf_owned_string_clear(core, &core->toast_text);
     surf_owned_string_clear(core, &core->download_name);
     surf_owned_string_clear(core, &core->history_query);
+    surf_owned_string_clear(core, &core->browser_mode);
+    surf_owned_string_clear(core, &core->browser_host);
+    surf_owned_string_clear(core, &core->browser_message);
+    core->browser_revision = 0;
+    core->browser_paused = core->browser_standalone = core->browser_can_force = 0;
     surf_owned_string_clear(core, &core->clipboard_text);
     core->history_count = 0;
     core->bookmark_count = 0;
@@ -825,6 +833,30 @@ surf_core_result_t surf_core_dispatch_protocol(
         mapped.data.tabs.items = event->data.tabs.items;
         mapped.data.tabs.count = event->data.tabs.count;
         return surf_core_dispatch_scoped(core, generation, &mapped);
+    case SURF_PROTOCOL_EVENT_BROWSER_MODE:
+        if (event->data.browser_mode.revision < core->browser_revision) return SURF_CORE_OK;
+        destinations[0] = &core->browser_mode;
+        destinations[1] = &core->browser_host;
+        destinations[2] = &core->browser_message;
+        sources[0] = event->data.browser_mode.state;
+        sources[1] = event->data.browser_mode.host;
+        sources[2] = event->data.browser_mode.message;
+        result = surf_owned_string_group_replace(core, destinations, sources, 3, SURF_MAX_TITLE_BYTES);
+        if (result != SURF_CORE_OK) return result;
+        core->browser_revision = event->data.browser_mode.revision;
+        core->browser_paused = !(sources[0].length == 9 && memcmp(sources[0].data, "streaming", 9) == 0);
+        core->browser_standalone = event->data.browser_mode.standalone;
+        core->browser_can_force = event->data.browser_mode.can_force;
+        if (core->browser_paused) {
+            surf_clear_page_transients(core);
+            core->fullscreen = core->keyboard_visible = 0;
+            core->video_generation = 0;
+            result = surf_queue_effect(core, SURF_EFFECT_CLEAR_PAGE_PRESENTATION);
+            if (result != SURF_CORE_OK) return result;
+            result = surf_queue_effect(core, SURF_EFFECT_HIDE_KEYBOARD);
+        }
+        core->revision++;
+        return result;
     case SURF_PROTOCOL_EVENT_URL:
         mapped.kind = SURF_EVENT_URL;
         mapped.data.url.url = event->data.url.url;
@@ -1039,13 +1071,26 @@ surf_core_result_t surf_core_dispatch_protocol_json(
     return surf_core_dispatch_protocol(core, generation, &event);
 }
 
+surf_core_result_t surf_core_browser_mode(const surf_core_t *core,
+    surf_browser_mode_snapshot_t *out_snapshot) {
+    if (core == NULL || out_snapshot == NULL) return SURF_CORE_ERROR_ARGUMENT;
+    out_snapshot->state = surf_owned_string_view(&core->browser_mode);
+    out_snapshot->host = surf_owned_string_view(&core->browser_host);
+    out_snapshot->message = surf_owned_string_view(&core->browser_message);
+    out_snapshot->revision = core->browser_revision;
+    out_snapshot->paused = core->browser_paused;
+    out_snapshot->standalone = core->browser_standalone;
+    out_snapshot->can_force = core->browser_can_force;
+    return SURF_CORE_OK;
+}
+
 surf_core_result_t surf_core_present_frame(
     surf_core_t *core, uint64_t connection_generation,
     uint32_t video_generation, uint32_t source_sequence) {
     surf_event_t event;
     if (core == NULL || connection_generation == 0)
         return SURF_CORE_ERROR_ARGUMENT;
-    if (connection_generation != core->connection_generation ||
+    if (core->browser_paused || connection_generation != core->connection_generation ||
         (core->video_generation != 0 && video_generation != 0 &&
          video_generation != core->video_generation)) {
         core->stale_event_count++;

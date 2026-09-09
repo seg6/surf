@@ -89,6 +89,10 @@ type VideoPipeline struct {
 	fanoutDrops atomic.Uint64
 }
 
+// Encoder generations must stay unique across browser handoffs while client
+// sockets remain connected to the same server.
+var videoGeneration atomic.Uint32
+
 func NewVideoPipeline(cfg VideoPipelineConfig) *VideoPipeline {
 	if cfg.CaptureW == 0 || cfg.CaptureH == 0 {
 		cfg.CaptureW, cfg.CaptureH = cfg.W, cfg.H
@@ -407,7 +411,7 @@ func (s *VideoPipeline) startLocked() {
 		return
 	}
 	s.cancelStartRetryLocked()
-	s.gen++
+	s.gen = int(videoGeneration.Add(1))
 	gen := s.gen
 	s.running = true
 	settings := VideoStartConfig{
@@ -434,7 +438,7 @@ func (s *VideoPipeline) stopLocked() {
 		return
 	}
 	s.running = false
-	s.gen++
+	s.gen = int(videoGeneration.Add(1))
 	if s.cfg.Stop != nil {
 		s.cfg.Stop()
 	}

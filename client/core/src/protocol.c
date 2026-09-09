@@ -1162,6 +1162,16 @@ surf_protocol_result_t surf_protocol_decode_event(
         SURF_EVENT_FIELDS("t", "on");
         SURF_TRY(surf_get_bool(&parser, root, "on", 1, 0,
                                &out_event->data.boolean.on));
+    } else if (surf_view_equal_cstr(kind, "browser-mode")) {
+        out_event->kind = SURF_PROTOCOL_EVENT_BROWSER_MODE;
+        SURF_EVENT_FIELDS("t", "state", "revision", "host", "message", "standalone", "canForce");
+        SURF_TRY(surf_get_string(&parser, root, "state", 1, &out_event->data.browser_mode.state));
+        SURF_TRY(surf_get_string(&parser, root, "host", 1, &out_event->data.browser_mode.host));
+        SURF_TRY(surf_get_string(&parser, root, "message", 1, &out_event->data.browser_mode.message));
+        SURF_TRY(surf_get_u64(&parser, root, "revision", 1, 0, &out_event->data.browser_mode.revision));
+        SURF_TRY(surf_get_bool(&parser, root, "standalone", 1, 0, &out_event->data.browser_mode.standalone));
+        SURF_TRY(surf_get_bool(&parser, root, "canForce", 1, 0, &out_event->data.browser_mode.can_force));
+        if (out_event->data.browser_mode.revision == 0) return SURF_PROTOCOL_ERROR_FIELD;
     } else if (surf_view_equal_cstr(kind, "toast")) {
         out_event->kind = SURF_PROTOCOL_EVENT_TOAST;
         SURF_EVENT_FIELDS("t", "text");
@@ -1485,6 +1495,8 @@ static void surf_write_field_bool(surf_writer_t *writer, const char *name,
 
 static const char *surf_command_name(surf_protocol_command_kind_t kind) {
     switch (kind) {
+    case SURF_PROTOCOL_COMMAND_BROWSER_WATCH: return "browser-watch";
+    case SURF_PROTOCOL_COMMAND_BROWSER_RESUME: return "browser-resume";
     case SURF_PROTOCOL_COMMAND_SIZE: return "size";
     case SURF_PROTOCOL_COMMAND_CLOCK: return "clock";
     case SURF_PROTOCOL_COMMAND_TAB: return "tab";
@@ -1572,7 +1584,11 @@ surf_protocol_result_t surf_protocol_encode_command(
     surf_write_cstr(&writer, name);
     surf_write_cstr(&writer, "\"");
 
-    if (command->kind == SURF_PROTOCOL_COMMAND_SIZE) {
+    if (command->kind == SURF_PROTOCOL_COMMAND_BROWSER_RESUME) {
+        if (command->data.browser_resume.revision == 0) return SURF_PROTOCOL_ERROR_FIELD;
+        surf_write_field_u64(&writer, "revision", command->data.browser_resume.revision);
+        surf_write_field_bool(&writer, "force", command->data.browser_resume.force);
+    } else if (command->kind == SURF_PROTOCOL_COMMAND_SIZE) {
         surf_write_field_i64(&writer, "w", command->data.size.width);
         surf_write_field_i64(&writer, "h", command->data.size.height);
     } else if (command->kind == SURF_PROTOCOL_COMMAND_CLOCK) {
