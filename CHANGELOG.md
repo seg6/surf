@@ -5,6 +5,8 @@ version differences alone do not.
 
 ## Unreleased
 
+## 0.17.0 - 2026-09-09
+
 ### Set up Surf's browser on your computer
 
 - Open your Surf tabs on the computer to sign in or change browser settings.
@@ -32,6 +34,10 @@ version differences alone do not.
   requests or requesting a new stream before releasing the existing one.
 - Browser capture failures now report their cause promptly instead of waiting
   for video startup to time out. Capture can recover after transient errors.
+
+Upgrade normally; no uninstall or data reset is needed. Compatibility remains
+generation 1. Existing clients can still connect; update the client to get the
+browser setup screen and remote resume controls.
 
 ## 0.16.0 - 2026-09-07
 

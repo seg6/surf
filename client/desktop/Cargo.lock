@@ -3245,7 +3245,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "surf-client"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "arboard",
  "chrono",
@@ -3270,7 +3270,7 @@ dependencies = [
 
 [[package]]
 name = "surf-client-app"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "directories",
  "serde_json",
@@ -3282,7 +3282,7 @@ dependencies = [
 
 [[package]]
 name = "surf-core"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "surf-core-sys",
  "surf-protocol",
@@ -3290,14 +3290,14 @@ dependencies = [
 
 [[package]]
 name = "surf-core-sys"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "surf-media"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "bytes",
  "cpal",
@@ -3310,7 +3310,7 @@ dependencies = [
 
 [[package]]
 name = "surf-protocol"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -3319,7 +3319,7 @@ dependencies = [
 
 [[package]]
 name = "surf-session"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "base64",
  "bytes",
