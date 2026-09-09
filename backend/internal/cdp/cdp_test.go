@@ -71,6 +71,23 @@ func TestLaunchArgsNoSandbox(t *testing.T) {
 	}
 }
 
+func TestVisibleHandoffUsesTheSameProfileWithoutHeadlessFlags(t *testing.T) {
+	visible := LaunchConfig{Profile: "/tmp/surf-profile", W: 1100, H: 800, Visible: true, ContinueSession: true}.Args()
+	for _, arg := range []string{"--headless=new", "--hide-scrollbars"} {
+		if hasArg(visible, arg) {
+			t.Fatalf("visible browser has %s", arg)
+		}
+	}
+	for _, arg := range []string{"--user-data-dir=/tmp/surf-profile", "--restore-last-session", "--disable-background-mode", "--password-store=basic", "--use-mock-keychain"} {
+		if !hasArg(visible, arg) {
+			t.Fatalf("handoff missing %s", arg)
+		}
+	}
+	if hasArg(LaunchConfig{}.Args(), "--restore-last-session") {
+		t.Fatal("ordinary startup changed cookie lifetime")
+	}
+}
+
 func TestLaunchArgsExtraArgsAppendedBeforeURL(t *testing.T) {
 	args := LaunchConfig{Profile: "/tmp/profile", W: 1024, H: 768, ExtraArgs: []string{"--foo=bar"}}.Args()
 	if !hasArg(args, "--foo=bar") {

@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestPrepareProfileRemovesOnlyChromiumSingletonFiles(t *testing.T) {
+func TestPrepareProfilePreservesChromiumSingletonFiles(t *testing.T) {
 	profile := filepath.Join(t.TempDir(), "profile")
 	if err := os.MkdirAll(profile, 0o755); err != nil {
 		t.Fatal(err)
@@ -22,8 +22,8 @@ func TestPrepareProfileRemovesOnlyChromiumSingletonFiles(t *testing.T) {
 		t.Fatalf("PrepareProfile: %v", err)
 	}
 	for _, name := range []string{"SingletonLock", "SingletonCookie"} {
-		if _, err := os.Stat(filepath.Join(profile, name)); !os.IsNotExist(err) {
-			t.Fatalf("%s was not removed: %v", name, err)
+		if _, err := os.Stat(filepath.Join(profile, name)); err != nil {
+			t.Fatalf("%s was removed: %v", name, err)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(profile, "bookmarks.json")); err != nil {

@@ -7,11 +7,12 @@ import (
 	"path/filepath"
 	"time"
 
+	"surf-backend/internal/process"
 	"surf-backend/internal/statefile"
 )
 
-// PrepareProfile creates the persistent browser profile and clears stale
-// Chromium singleton files where the host requires it.
+// PrepareProfile creates the persistent browser profile. Chromium owns its
+// singleton files; Surf must never delete a live browser's ownership markers.
 func PrepareProfile(profile string) error {
 	if profile == "" {
 		return nil
@@ -19,7 +20,40 @@ func PrepareProfile(profile string) error {
 	if err := os.MkdirAll(profile, 0o755); err != nil {
 		return fmt.Errorf("create browser profile %s: %w", profile, err)
 	}
-	return cleanupProfileLocks(profile)
+	return nil
+}
+
+// CheckProfileAvailable checks native ownership before each handoff launch.
+// Chromium remains the final lock authority; no singleton file is removed.
+func CheckProfileAvailable(profile string) error { return checkProfileOwner(profile) }
+
+// LockProfile is shared by streaming and standalone setup, including homes
+// configured to use the same profile. Keep the lock outside the profile so a
+// recovery rename cannot release ownership of its replacement.
+func LockProfile(profile string) (*process.InstanceLock, error) {
+	if err := PrepareProfile(profile); err != nil {
+		return nil, err
+	}
+	canonical, err := filepath.EvalSymlinks(profile)
+	if err != nil {
+		return nil, err
+	}
+	canonical, err = filepath.Abs(canonical)
+	if err != nil {
+		return nil, err
+	}
+	lock, acquired, err := process.AcquireInstanceLock(canonical + ".surf-lock")
+	if err != nil {
+		return nil, err
+	}
+	if !acquired {
+		return nil, fmt.Errorf("browser profile is in use by Surf or standalone browser setup; close that session first")
+	}
+	if err := checkProfileOwner(canonical); err != nil {
+		_ = lock.Close()
+		return nil, err
+	}
+	return lock, nil
 }
 
 // QuarantineProfile preserves a browser profile that repeatedly prevents

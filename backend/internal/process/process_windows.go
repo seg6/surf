@@ -87,6 +87,12 @@ func Kill(pid int) {
 // Start launches path without allocating or showing a console window.
 func Start(path string, args []string, opts Options) (*Started, error) {
 	cmd := hiddenCommand(path, args...)
+	if opts.Visible {
+		cmd.SysProcAttr.HideWindow = false
+	}
+	if opts.Contain {
+		cmd.SysProcAttr.CreationFlags |= windows.CREATE_SUSPENDED
+	}
 	cmd.Env = opts.Env
 	started := &Started{}
 	if opts.Stdin {
@@ -119,6 +125,13 @@ func Start(path string, args []string, opts Options) (*Started, error) {
 	}
 	started.Process = cmd.Process
 	started.Pid = cmd.Process.Pid
+	if opts.Contain {
+		if err := containWindowsChild(started); err != nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			return nil, err
+		}
+	}
 	done := make(chan error, 1)
 	started.Done = done
 	go func() {

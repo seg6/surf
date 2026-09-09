@@ -4,6 +4,7 @@
 package process
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"time"
@@ -11,6 +12,10 @@ import (
 
 // Options configures Start.
 type Options struct {
+	// Visible permits a GUI browser window; helpers still suppress consoles.
+	Visible bool
+	// Contain requests an independently owned browser process group/job.
+	Contain bool
 	// Env is the child's full environment (same convention as
 	// exec.Cmd.Env: nil means inherit the caller's).
 	Env []string
@@ -34,14 +39,31 @@ type Options struct {
 // Started is a launched child process plus whichever pipes Options asked
 // for.
 type Started struct {
-	Process *os.Process
-	Pid     int
-	Stdin   io.WriteCloser
-	Stdout  io.ReadCloser
-	Stderr  io.ReadCloser
+	killOwned    func() error
+	waitOwned    func(time.Duration) error
+	releaseOwned func()
+	verifyOwned  func(uintptr) error
+	Process      *os.Process
+	Pid          int
+	Stdin        io.WriteCloser
+	Stdout       io.ReadCloser
+	Stderr       io.ReadCloser
 	// Done receives the result of exec.Cmd.Wait exactly once. Start always
 	// reaps the child, even when its caller only needs the OS process handle.
 	Done <-chan error
+}
+
+func (s *Started) WaitOwned(timeout time.Duration) error {
+	if s != nil && s.waitOwned != nil {
+		return s.waitOwned(timeout)
+	}
+	return nil
+}
+
+func (s *Started) ReleaseOwned() {
+	if s != nil && s.releaseOwned != nil {
+		s.releaseOwned()
+	}
 }
 
 // Kill terminates the complete owned process tree, never only the root PID.
@@ -49,6 +71,13 @@ func (s *Started) Kill() error {
 	if s == nil || s.Process == nil {
 		return nil
 	}
-	Kill(s.Process.Pid)
-	return nil
+	if s.killOwned != nil {
+		return s.killOwned()
+	}
+	select {
+	case <-s.Done:
+		return fmt.Errorf("owned browser process already exited; refusing an unverified PID kill")
+	default:
+	}
+	return killOwnedProcess(s.Process.Pid)
 }

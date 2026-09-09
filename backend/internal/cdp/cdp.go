@@ -9,12 +9,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -70,6 +72,10 @@ type envelope struct {
 
 var devtoolsRe = regexp.MustCompile(`DevTools listening on (ws://\S+)`)
 
+// An unverified launch is not evidence of a corrupt profile. Never quarantine
+// a profile merely because another browser may already be using it.
+var ErrUnverifiedLaunch = errors.New("browser ownership could not be established")
+
 const (
 	browserStartupTimeout = 30 * time.Second
 	stderrTailLines       = 12
@@ -107,12 +113,14 @@ func (t *boundedLineTail) string() string {
 }
 
 type LaunchConfig struct {
-	ChromePath     string
-	Profile        string
-	W, H           int
-	NoSandbox      bool
-	ExtensionPaths []string
-	ExtraArgs      []string
+	ChromePath      string
+	Profile         string
+	W, H            int
+	NoSandbox       bool
+	ExtensionPaths  []string
+	ExtraArgs       []string
+	Visible         bool
+	ContinueSession bool
 }
 
 // Args builds the managed Chrome headless-new launch flags.
@@ -147,7 +155,27 @@ func (cfg LaunchConfig) Args() []string {
 	}
 	// Permit native driver selection in modern headless Chrome. Hosts without
 	// a usable GPU retain Chromium's built-in software fallback.
-	args = append(args, "--test-type", "--headless=new", "--enable-gpu")
+	args = append(args, "--test-type", "--enable-gpu")
+	if cfg.ContinueSession {
+		// Let Chromium retain its own session cookies across a mode handoff.
+		// The caller still replaces the restored tab list with Surf's snapshot.
+		args = append(args, "--restore-last-session")
+	}
+	if !cfg.Visible {
+		args = append(args, "--headless=new")
+	}
+	if cfg.Visible {
+		filtered := args[:0]
+		for _, arg := range args {
+			if arg != "--hide-scrollbars" {
+				filtered = append(filtered, arg)
+			}
+		}
+		args = filtered
+		if runtime.GOOS == "linux" && os.Getenv("WAYLAND_DISPLAY") == "" && os.Getenv("DISPLAY") != "" {
+			args = append(args, "--ozone-platform=x11")
+		}
+	}
 	if cfg.NoSandbox {
 		args = append(args, "--no-sandbox")
 	}
@@ -166,7 +194,7 @@ func (cfg LaunchConfig) Args() []string {
 	return args
 }
 
-// Launch starts headless Chromium (see Args) and returns a connected browser
+// Launch starts Surf's headless or visible Chromium and returns a connected browser
 // client.
 func Launch(cfg LaunchConfig) (*Client, *process.Started, error) {
 	// A browser killed without a normal shutdown can leave this file behind.
@@ -174,7 +202,7 @@ func Launch(cfg LaunchConfig) (*Client, *process.Started, error) {
 	// instance to an older Chromium that happens to use the same profile.
 	previousEndpoint := readActivePortState(cfg.Profile)
 	started, err := process.Start(cfg.ChromePath, cfg.Args(), process.Options{
-		Stderr: true, Guardian: true,
+		Stderr: true, Guardian: true, Visible: cfg.Visible, Contain: true,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -201,7 +229,8 @@ func Launch(cfg LaunchConfig) (*Client, *process.Started, error) {
 
 	url, err := waitForURL(wsURL, cfg.Profile, previousEndpoint, started.Done)
 	if err != nil {
-		process.Kill(started.Process.Pid)
+		_ = started.Kill()
+		started.ReleaseOwned()
 		select {
 		case <-stderrDone:
 		case <-time.After(250 * time.Millisecond):
@@ -209,19 +238,49 @@ func Launch(cfg LaunchConfig) (*Client, *process.Started, error) {
 		if detail := stderrTail.string(); detail != "" {
 			err = fmt.Errorf("%w; chromium stderr: %s", err, detail)
 		}
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("%w: %v", ErrUnverifiedLaunch, err)
 	}
 	c, err := Dial(url)
 	if err != nil {
-		process.Kill(started.Process.Pid)
-		return nil, nil, err
+		_ = started.Kill()
+		started.ReleaseOwned()
+		return nil, nil, fmt.Errorf("%w: %v", ErrUnverifiedLaunch, err)
+	}
+	if err := trackBrowserOwner(c, started); err != nil {
+		c.Close()
+		_ = started.Kill()
+		started.ReleaseOwned()
+		return nil, nil, fmt.Errorf("%w: %v", ErrUnverifiedLaunch, err)
 	}
 	if err := ensureUnpackedExtensions(c, cfg.ExtensionPaths); err != nil {
 		c.Close()
-		process.Kill(started.Process.Pid)
+		_ = started.Kill()
+		started.ReleaseOwned()
 		return nil, nil, err
 	}
 	return c, started, nil
+}
+
+func trackBrowserOwner(client *Client, started *process.Started) error {
+	raw, err := client.Call("", "SystemInfo.getProcessInfo", nil)
+	if err != nil {
+		return err
+	}
+	var result struct {
+		Processes []struct {
+			Type string `json:"type"`
+			ID   int    `json:"id"`
+		} `json:"processInfo"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return err
+	}
+	for _, p := range result.Processes {
+		if p.Type == "browser" {
+			return started.TrackBrowser(p.ID)
+		}
+	}
+	return fmt.Errorf("browser did not report its process identity")
 }
 
 type extensionCaller interface {
@@ -484,6 +543,11 @@ func (c *Client) failAll(err error) {
 // Call issues a command on a session ("" = browser session) and waits for the
 // reply. Result is raw JSON; callers unmarshal what they need.
 func (c *Client) Call(sessionID, method string, params any) (json.RawMessage, error) {
+	return c.CallTimeout(sessionID, method, params, 15*time.Second)
+}
+
+// CallTimeout bounds best-effort observers independently of browser startup.
+func (c *Client) CallTimeout(sessionID, method string, params any, timeout time.Duration) (json.RawMessage, error) {
 	var raw json.RawMessage
 	if params != nil {
 		b, err := json.Marshal(params)
@@ -514,7 +578,7 @@ func (c *Client) Call(sessionID, method string, params any) (json.RawMessage, er
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	select {
 	case r := <-ch:
