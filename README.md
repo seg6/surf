@@ -1,6 +1,12 @@
+<img src="backend/cmd/surf/surf-icon.png" alt="Surf icon" width="96" height="96" align="right">
+
 # Surf
 
 Surf brings the modern web to older iPhones, iPod touches, and iPads.
+
+[Download Surf](https://github.com/seg6/surf/releases/latest) ·
+[Get started](#quick-start) ·
+[Documentation](#documentation)
 
 Websites run in Chromium on a Windows, macOS, or Linux computer and stream to
 your device. You browse through a native iOS app with touch, keyboard input,
@@ -8,6 +14,15 @@ video, and audio, without being limited by the device's outdated web engine.
 
 The iOS app has native tabs, an address bar, bookmarks, history, downloads,
 uploads, sharing, fullscreen media, and separate phone and tablet layouts.
+
+## See it in action
+
+<a href="docs/media/surf-demo.mp4">
+  <img src="docs/media/surf-demo.jpg" alt="Watch the Surf demo: browsing, maps, video, tabs, bookmarks, and downloads" width="720">
+</a>
+
+[Watch the 50-second demo, with sound](docs/media/surf-demo.mp4) ·
+[About the recording and credits](docs/media/README.md)
 
 ## Compatibility
 

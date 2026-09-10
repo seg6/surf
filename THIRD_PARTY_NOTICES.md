@@ -1,5 +1,11 @@
 # Third-party notices
 
+## Repository demo
+
+The demonstration video and poster in `docs/media` contain third-party website
+content and media. See [demo credits](docs/media/README.md) for sources and
+licensing notes; these materials are not covered by Surf's MIT license.
+
 ## Deta Surf application icon
 
 The native application icon is sourced from
