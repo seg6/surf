@@ -79,6 +79,14 @@ explanation can sit over scrolling footage; it does not need a static title hold
 Keep footage at normal speed when tightening the edit. Netflix review/rights
 notes belong in the accompanying credits, not as a draft label in the picture.
 
+For GitHub publication, a repository MP4 link opens the file viewer; use an
+uploaded media attachment URL on its own line for the README's inline player.
+Keep a copy below 10 MB for GitHub's free-plan upload limit. The published demo
+uses two-pass H.264 at 1250 kbit/s, preserving dimensions and frame rate and
+copying the original AAC audio. See [GitHub's attachment documentation](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli).
+Uploading the attachment is a separate publication action; the recorder and
+editors do not upload files or create issues, comments, or releases.
+
 Inspect the entire result before sharing. The scene scripts use public sites
 whose controls and content may change; readiness failures stop the take rather
 than silently including a broken interaction. The download scene can also cause

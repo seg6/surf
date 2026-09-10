@@ -1,6 +1,13 @@
 # Surf demo
 
-[Watch the video](surf-demo.mp4) — 50 seconds, with audio.
+https://github.com/user-attachments/assets/5e684036-9bbf-4fce-a088-0d95dcc1a890
+
+50 seconds. Unmute for audio. [Download MP4](surf-demo.mp4?raw=true) ·
+[Poster](surf-demo.jpg)
+
+The README uses a GitHub media attachment for inline playback, not the
+repository's file-preview page. The downloadable copy is 8.5 MB, H.264 at
+1280×1080 and 60 fps. Its AAC audio is unchanged from the approved edit.
 
 The walkthrough shows browsing, interactive maps, YouTube and fullscreen video,
 Netflix playback, WebGL, tabs, bookmarks, and downloads. It uses the desktop
