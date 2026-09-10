@@ -5,6 +5,9 @@ version differences alone do not.
 
 ## Unreleased
 
+- Desktop fullscreen now hides Surf's browser bar and gives the page the whole
+  window. Player controls, Escape and F11 restore normal browsing on exit.
+
 ## 0.17.0 - 2026-09-09
 
 ### Set up Surf's browser on your computer

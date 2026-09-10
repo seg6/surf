@@ -26,7 +26,10 @@ The bar starts at the bottom; Settings → Appearance moves it to the top.
 Wide windows show horizontally scrollable tabs. Narrow windows use a tab
 switcher. Ctrl+L selects the address; Enter navigates, Escape restores the current
 address. Ctrl+T opens a tab, Ctrl+W closes one, Ctrl+F opens Find, and F11 toggles
-fullscreen. Find and Performance can remain visible together.
+fullscreen. Fullscreen also follows the page's own player controls, hides the
+browser bar and expands the remote viewport. Escape exits; Ctrl+L, Ctrl+T and
+Ctrl+F leave fullscreen before opening their controls. Find and Performance can
+remain visible together outside fullscreen.
 
 Settings separates Appearance, Browsing, Computers, Device testing, and About.
 Wide windows use category navigation; narrow windows use a category selector.
@@ -104,7 +107,7 @@ The opt-in gallery uses production widgets and isolated fixture data, without a
 network worker. Scenes include `start`, `browser`, `new-tab`, `address`,
 `settings`, `library`, `tools`, `tabs`, `find`, `performance`, `code`, `words`,
 `reader`, `dialog`, `select`, `files`, `media`, and `error`.
-Additional stress fixtures are `start-populated`, `settings-testing`,
+Additional stress fixtures are `browser-fullscreen`, `start-populated`, `settings-testing`,
 `settings-browsing`, `settings-about`, `library-long`, `library-empty`, and `downloads`.
 
 ```sh
@@ -117,6 +120,17 @@ exits after the entrance transition and at least 20 frames. `SURF_UI_THEME=light
 and `SURF_UI_CHROME=top` select gallery
 variants. On X11, `WINIT_X11_SCALE_FACTOR=1.25` also exercises fractional scaling.
 Use a temporary `SURF_CLIENT_HOME` when experimenting with persisted settings.
+
+`SURF_UI_TRACE=1` also works in live sessions. It logs UI state, page URL/title,
+loading and first-video readiness for opt-in automation. These logs can contain
+browsing data: use an isolated profile and do not enable them for normal use.
+The `ui-input` example supports `move X Y [MS]` and `scroll STEPS [MS]` as well
+as clicks, keyboard input and resizing; it sends real X11 events to the client.
+For isolated touch demonstrations, `SURF_UI_TOUCH=1` maps page drags through
+the existing touch path even when the server supports desktop pointer input.
+`ui-input swipe X1 Y1 X2 Y2 [MS]` emits a paced press/move/release sequence;
+Chromium handles the resulting scroll and inertia. Normal mouse behavior and
+the separate mobile-site setting are unchanged when this opt-in is absent.
 
 Inter and Lucide are bundled, with their licenses included in the package.
 Favicons are fetched only from the verified Surf server, with bounded downloads,

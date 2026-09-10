@@ -270,12 +270,18 @@ impl DesktopApp {
             match character {
                 Some(ref value) if value == "l" => {
                     if pressed {
+                        if self.fullscreen {
+                            self.set_fullscreen_command(false);
+                        }
                         self.edit_address();
                     }
                     return true;
                 }
                 Some(ref value) if value == "t" => {
                     if pressed {
+                        if self.fullscreen {
+                            self.set_fullscreen_command(false);
+                        }
                         self.new_tab();
                     }
                     return true;
@@ -302,6 +308,9 @@ impl DesktopApp {
                 }
                 Some(ref value) if value == "f" => {
                     if pressed {
+                        if self.fullscreen {
+                            self.set_fullscreen_command(false);
+                        }
                         self.find_open = true;
                         self.focus_find = true;
                         self.page_focused = false;
@@ -369,6 +378,12 @@ impl DesktopApp {
                     dir: 0,
                     causal: Causal::default(),
                 });
+                true
+            }
+            Key::Named(NamedKey::Escape) if self.fullscreen => {
+                if pressed {
+                    self.set_fullscreen_command(false);
+                }
                 true
             }
             _ => false,

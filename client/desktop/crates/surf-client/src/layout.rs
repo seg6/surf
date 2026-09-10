@@ -21,26 +21,31 @@ pub struct BrowserLayout {
 }
 
 impl BrowserLayout {
-    pub fn new(size: [f32; 2], bottom: bool, find: bool) -> Self {
+    pub fn new(size: [f32; 2], bottom: bool, find: bool, fullscreen: bool) -> Self {
         let [w, h] = size;
-        let extra = if find { FIND_HEIGHT } else { 0.0 };
-        let rail_y = if bottom {
-            (h - RAIL_HEIGHT).max(0.0)
+        let rail_height = if fullscreen { 0.0 } else { RAIL_HEIGHT };
+        let extra = if find && !fullscreen {
+            FIND_HEIGHT
         } else {
             0.0
         };
-        let find_y = if bottom { rail_y - extra } else { RAIL_HEIGHT };
+        let rail_y = if bottom {
+            (h - rail_height).max(0.0)
+        } else {
+            0.0
+        };
+        let find_y = if bottom { rail_y - extra } else { rail_height };
         Self {
-            rail: [0.0, rail_y, w, RAIL_HEIGHT],
+            rail: [0.0, rail_y, w, rail_height],
             page: PageRect {
                 x: 0.0,
                 y: if bottom {
                     0.0
                 } else {
-                    f64::from(RAIL_HEIGHT + extra)
+                    f64::from(rail_height + extra)
                 },
                 width: f64::from(w.max(1.0)),
-                height: f64::from((h - RAIL_HEIGHT - extra).max(1.0)),
+                height: f64::from((h - rail_height - extra).max(1.0)),
             },
             find: [0.0, find_y, w, extra],
             density: if w >= 720.0 {
@@ -80,7 +85,7 @@ mod tests {
     fn rail_never_changes_height_across_devices() {
         for width in [320.0, 375.0, 480.0, 768.0, 1180.0] {
             for bottom in [true, false] {
-                let l = BrowserLayout::new([width, 760.0], bottom, false);
+                let l = BrowserLayout::new([width, 760.0], bottom, false, false);
                 assert_eq!(l.page.height, 718.0);
                 assert_eq!(l.rail[3], 42.0);
             }
@@ -88,9 +93,34 @@ mod tests {
     }
     #[test]
     fn find_is_the_only_overlay_that_takes_page_space() {
-        let l = BrowserLayout::new([375.0, 667.0], true, true);
+        let l = BrowserLayout::new([375.0, 667.0], true, true, false);
         assert_eq!(l.page.height, 583.0);
         assert_eq!(l.find[1], 583.0);
+    }
+    #[test]
+    fn fullscreen_returns_all_chrome_space_to_page_and_input() {
+        for size in [[1024.0, 768.0], [768.0, 1024.0], [320.0, 480.0]] {
+            for bottom in [true, false] {
+                for find in [true, false] {
+                    let l = BrowserLayout::new(size, bottom, find, true);
+                    assert_eq!(
+                        l.page,
+                        PageRect {
+                            x: 0.0,
+                            y: 0.0,
+                            width: f64::from(size[0]),
+                            height: f64::from(size[1])
+                        }
+                    );
+                    assert_eq!(l.rail[3], 0.0);
+                    assert_eq!(l.find[3], 0.0);
+                    assert!(
+                        l.page
+                            .contains(f64::from(size[0] - 1.0), f64::from(size[1] - 1.0))
+                    );
+                }
+            }
+        }
     }
     #[test]
     fn popup_flips_and_clamps() {

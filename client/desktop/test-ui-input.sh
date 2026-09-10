@@ -121,6 +121,35 @@ expect '"viewport":\[768.0,982.0\]'
 drive key Escape
 expect '"panel":"None"'
 
+# Gallery scenes have no presented video surface, so remote gestures must stay
+# suppressed. Exercise the driver here; the demo recorder checks resulting page
+# movement on a live surface rather than faking a generation in the gallery.
+export SURF_UI_TOUCH=1
+restart_scene browser
+drive swipe 400 500 400 300 160
+expect '"page_focused":true'
+if rg -q 'SURF_UI_COMMAND Touch' "$SURF_UI_TEST_ROOT/client.log"; then
+    echo 'Touch input reached a nonexistent gallery video surface' >&2
+    exit 1
+fi
+unset SURF_UI_TOUCH
+
+restart_scene browser-fullscreen
+expect '"fullscreen":true'
+expect '"chrome_visible":false'
+expect '"viewport":\[1024.0,768.0\]'
+drive key Escape
+expect '"fullscreen":false'
+expect '"chrome_visible":true'
+expect '"viewport":\[1024.0,726.0\]'
+
+restart_scene browser-fullscreen
+drive key ctrl+l
+drive type 'fullscreen search'
+expect '"fullscreen":false'
+expect '"draft":"fullscreen search","editing":true'
+expect '"chrome_visible":true'
+
 restart_scene browser-setup
 expect '"browser_setup":true'
 drive key ctrl+l
@@ -135,5 +164,5 @@ if rg -q 'SURF_UI_COMMAND (Navigate|Key|BrowserResume)' "$SURF_UI_TEST_ROOT/clie
 fi
 drive key Escape
 expect '"confirming":false'
-printf 'Surf real X11 input: focus, spaces, page input, popups, resize, tabs, settings and browser-setup confirmation passed.\n'
+printf 'Surf real X11 input: focus, spaces, page input, popups, resize, tabs, settings, fullscreen and browser-setup confirmation passed.\n'
 X11

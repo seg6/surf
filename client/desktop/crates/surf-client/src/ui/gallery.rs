@@ -82,6 +82,7 @@ impl DesktopApp {
         }
         self.endpoint = "Office computer".into();
         match scene.as_str() {
+            "browser-fullscreen" => self.controller.snapshot.fullscreen = true,
             "browser-setup" | "browser-setup-force" | "browser-resuming" => {
                 self.controller.browser_mode = Some(surf_client_app::BrowserMode {
                     state: if scene == "browser-resuming" { "resuming" } else { "setup" }.into(),

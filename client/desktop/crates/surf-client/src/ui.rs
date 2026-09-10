@@ -192,6 +192,7 @@ pub struct DesktopApp {
     controller: ClientController,
     video: VideoSurface,
     page_input: PageInput,
+    automation_touch: bool,
     page_rect: PageRect,
     input_rect: PageRect,
     hit_regions: Vec<PageRect>,
@@ -263,6 +264,7 @@ impl DesktopApp {
             })?,
             video: VideoSurface::new(gl)?,
             page_input: PageInput::new(),
+            automation_touch: std::env::var("SURF_UI_TOUCH").is_ok_and(|v| v == "1"),
             page_rect: PageRect::default(),
             input_rect: PageRect::default(),
             hit_regions: Vec::new(),
@@ -310,7 +312,7 @@ impl DesktopApp {
             suggestion_index: None,
             saved_preferences: preferences.clone(),
             preferences,
-            layout: BrowserLayout::new([1180.0, 760.0], true, false),
+            layout: BrowserLayout::new([1180.0, 760.0], true, false, false),
             find_open: false,
             focus_find: false,
             performance_open: false,
@@ -367,7 +369,7 @@ impl DesktopApp {
             self.panel = Some(Panel::Reader);
         }
         self.page_input.configure(
-            self.controller.native_pointer,
+            self.controller.native_pointer && !self.automation_touch,
             self.video.surface_generation(),
         );
         if self.controller.connected {
@@ -399,9 +401,7 @@ impl DesktopApp {
             self.draw_browser_setup(ui);
             self.draw_toast(ui);
             self.ui_wants_keyboard = ui.io().want_capture_keyboard;
-            if std::env::var_os("SURF_UI_GALLERY").is_some()
-                && std::env::var_os("SURF_UI_TRACE").is_some()
-            {
+            if std::env::var_os("SURF_UI_TRACE").is_some() {
                 let trace = serde_json::json!({"browser_setup":true,"confirming":self.browser_resume_confirmation.is_some(),"editing":self.address_editing,"page_focused":self.page_focused}).to_string();
                 if trace != self.last_trace {
                     eprintln!("SURF_UI_STATE {trace}");
@@ -412,6 +412,31 @@ impl DesktopApp {
         }
         self.browser_resume_confirmation = None;
         let connected = self.controller.connected;
+        // Apply remote/local fullscreen before computing layout and viewport.
+        // OS fullscreen alone does not hide Surf's own chrome.
+        if !connected {
+            self.fullscreen_pending = None;
+            self.fullscreen_request = None;
+            if self.fullscreen {
+                self.set_fullscreen(window, false);
+            }
+        } else {
+            if self.fullscreen_pending.as_ref().is_some_and(|pending| {
+                pending.command_sent
+                    && (self.controller.snapshot.fullscreen == pending.on
+                        || pending.started.elapsed() > Duration::from_secs(3))
+            }) {
+                self.fullscreen_pending = None;
+            }
+            if self.fullscreen_pending.is_none()
+                && self.fullscreen != self.controller.snapshot.fullscreen
+            {
+                self.set_fullscreen(window, self.controller.snapshot.fullscreen);
+            }
+            if let Some(on) = self.fullscreen_request.take() {
+                self.set_fullscreen(window, on);
+            }
+        }
         let current_url = self.controller.snapshot.current_url.clone();
         let current_tab = self
             .controller
@@ -443,13 +468,20 @@ impl DesktopApp {
             self.focus_new_tab = false;
             self.edit_address();
         }
-        self.layout = BrowserLayout::new(display, self.preferences.bottom, self.find_open);
+        self.layout = BrowserLayout::new(
+            display,
+            self.preferences.bottom,
+            self.find_open,
+            self.fullscreen,
+        );
         self.page_rect = self.layout.page;
         if connected {
             if current_url.starts_with("about:blank") {
                 self.draw_new_tab(ui);
             }
-            self.draw_chrome(ui);
+            if !self.fullscreen {
+                self.draw_chrome(ui);
+            }
             if self.pending_window_size.is_none() {
                 self.update_viewport(window.scale_factor());
             }
@@ -489,27 +521,17 @@ impl DesktopApp {
             format!("{title} — Surf")
         };
         window.set_title(&window_title);
-        if self.fullscreen_pending.as_ref().is_some_and(|pending| {
-            pending.command_sent && self.controller.snapshot.fullscreen == pending.on
-        }) || self.fullscreen_pending.as_ref().is_some_and(|pending| {
-            pending.command_sent && pending.started.elapsed() > Duration::from_secs(3)
-        }) {
-            self.fullscreen_pending = None;
-        }
-        if self.fullscreen_pending.is_none()
-            && self.fullscreen != self.controller.snapshot.fullscreen
-        {
-            self.set_fullscreen(window, self.controller.snapshot.fullscreen);
-        }
-        if let Some(on) = self.fullscreen_request.take() {
-            self.set_fullscreen(window, on);
-        }
         self.update_window_size(window);
         self.ui_wants_keyboard = ui.io().want_capture_keyboard;
-        if std::env::var_os("SURF_UI_GALLERY").is_some()
-            && std::env::var_os("SURF_UI_TRACE").is_some()
-        {
+        if std::env::var_os("SURF_UI_TRACE").is_some() {
             let trace=serde_json::json!({"draft":self.address,"editing":self.address_editing,
+                "connected":connected,"url":current_url,"title":self.controller.snapshot.active_title,
+                "loading":self.controller.snapshot.loading,"video_ready":self.render_diagnostics.presented > 0,
+                "video_dimensions":self.controller.last_frame_dimensions,
+                "fullscreen":self.fullscreen,"chrome_visible":connected && !self.fullscreen,"window":display,
+                "tabs":self.controller.snapshot.tabs.iter().map(|t|serde_json::json!({"id":t.id,"title":t.title,"active":t.active})).collect::<Vec<_>>(),
+                "library_section":format!("{:?}",self.library_section),"bookmarks_count":self.controller.browser.bookmarks.len(),
+                "download_names":self.controller.browser.downloads.iter().map(|d|&d.name).collect::<Vec<_>>(),
                 "new_tab_query":self.new_tab_query,"settings_category":format!("{:?}",self.settings_category),
                 "page_focused":self.page_focused,"keyboard_capture":self.ui_wants_keyboard,
                 "panel":format!("{:?}",self.panel),"viewport":[self.page_rect.width,self.page_rect.height]}).to_string();
@@ -784,6 +806,24 @@ impl DesktopApp {
     }
 
     fn set_fullscreen(&mut self, window: &Window, on: bool) {
+        if on {
+            self.release_page_input();
+            self.finish_address_edit();
+            self.panel = None;
+            if self.find_open {
+                self.controller.command(Command::Find {
+                    q: String::new(),
+                    dir: 0,
+                    causal: Causal::default(),
+                });
+            }
+            self.find_open = false;
+            self.performance_open = false;
+            self.local_preedit.clear();
+            self.omnibox_rect = [0.0; 4];
+            self.hit_regions.clear();
+            self.native_popup_open = false;
+        }
         window.set_fullscreen(on.then(|| Fullscreen::Borderless(None)));
         self.fullscreen = on;
     }
