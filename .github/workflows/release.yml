@@ -1,11 +1,6 @@
 name: Release
 
 on:
-  push:
-    branches:
-      - main
-    tags:
-      - v*
   workflow_dispatch:
     inputs:
       tag:
@@ -19,23 +14,21 @@ permissions:
   packages: write
 
 concurrency:
-  # A trusted main build warms the cache before its signed tag consumes it.
   group: surf-release-build
   cancel-in-progress: false
 
-# One Linux runner warms cross-build state on trusted main commits. Signed tags
-# then build the universal native client and every cgo-free desktop target from
-# the same verified source and publish without intermediate Actions artifacts.
+# Manual only: dispatch with a signed annotated tag. Builds the universal native
+# client and every cgo-free desktop target from that verified source, publishes
+# the GitHub release, then queues Package Repository for apt + site.
 jobs:
   release:
-    name: Release build ${{ inputs.tag || github.ref_name }}
+    name: Release build ${{ inputs.tag }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-      CACHE_ONLY: ${{ github.event_name == 'push' && github.ref_type == 'branch' }}
+      RELEASE_TAG: ${{ inputs.tag }}
       GOCACHE: ${{ github.workspace }}/.cache/go-build
       GOMODCACHE: ${{ github.workspace }}/.cache/go-mod
     steps:
@@ -45,72 +38,23 @@ jobs:
         run: |
           set -euo pipefail
 
-          for command in curl file gh git jq make sha256sum tar unzip; do
+          for command in base64 curl file gh git jq make sha256sum tar unzip; do
             command -v "$command" >/dev/null || {
               echo "required command is unavailable: $command" >&2
               exit 1
             }
           done
 
+          # Load the helper from the dispatch ref (normally main), then build
+          # strictly from the signed tag commit.
+          gh api "repos/$GH_REPO/contents/.github/scripts/require-signed-tag.sh?ref=$GITHUB_SHA" \
+            --jq .content | base64 -d > "$RUNNER_TEMP/require-signed-tag.sh"
+          chmod +x "$RUNNER_TEMP/require-signed-tag.sh"
+          tag_commit="$("$RUNNER_TEMP/require-signed-tag.sh" "$RELEASE_TAG")"
+
           git init .
           git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
           gh auth setup-git
-
-          if [ "$CACHE_ONLY" = "true" ]; then
-            test "$GITHUB_EVENT_NAME" = "push"
-            test "$GITHUB_REF_TYPE" = "branch"
-            test "$GITHUB_REF_NAME" = "main"
-            commit_json="$(gh api "repos/$GH_REPO/commits/$GITHUB_SHA")"
-            test "$(jq -r '.sha' <<< "$commit_json")" = "$GITHUB_SHA"
-            test "$(jq -r '.commit.verification.verified' <<< "$commit_json")" = "true" || {
-              echo "main cache source commit is not signature-verified" >&2
-              exit 1
-            }
-            git fetch --force --depth=1 origin \
-              "refs/heads/main:refs/remotes/origin/main"
-            git checkout --detach "$GITHUB_SHA"
-            test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-            git diff --exit-code
-            echo "commit=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
-            echo "Verified trusted cache source at $GITHUB_SHA"
-            exit 0
-          fi
-
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || {
-            echo "invalid release tag: $RELEASE_TAG" >&2
-            exit 1
-          }
-
-          tag_ref="$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG")"
-          tag_object_type="$(jq -r '.object.type' <<< "$tag_ref")"
-          tag_object_sha="$(jq -r '.object.sha' <<< "$tag_ref")"
-          test "$tag_object_type" = "tag" || {
-            echo "$RELEASE_TAG is not an annotated tag" >&2
-            exit 1
-          }
-
-          tag_json="$(gh api "repos/$GH_REPO/git/tags/$tag_object_sha")"
-          tag_name="$(jq -r '.tag' <<< "$tag_json")"
-          tag_target_type="$(jq -r '.object.type' <<< "$tag_json")"
-          tag_commit="$(jq -r '.object.sha' <<< "$tag_json")"
-          tag_verified="$(jq -r '.verification.verified' <<< "$tag_json")"
-          tag_verification_reason="$(jq -r '.verification.reason' <<< "$tag_json")"
-          test "$tag_name" = "$RELEASE_TAG"
-          test "$tag_target_type" = "commit" || {
-            echo "$RELEASE_TAG does not point directly to a commit" >&2
-            exit 1
-          }
-          test "$tag_verified" = "true" || {
-            echo "$RELEASE_TAG signature is not verified: $tag_verification_reason" >&2
-            exit 1
-          }
-          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            test "$tag_commit" = "$GITHUB_SHA" || {
-              echo "$RELEASE_TAG points to $tag_commit but the workflow received $GITHUB_SHA" >&2
-              exit 1
-            }
-          fi
-
           git fetch --force --depth=1 origin \
             "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
           git checkout --detach "$tag_commit"
@@ -191,7 +135,6 @@ jobs:
           docker logout ghcr.io
 
       - name: Build and verify universal native package
-        if: env.CACHE_ONLY != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -240,8 +183,6 @@ jobs:
           cache-on-failure: true
           cache-bin: false
 
-      # Warm release-mode dependencies on verified main commits as well as
-      # building the archive on tags. Every run still compiles/verifies source.
       - name: Build and verify Linux client preview
         shell: bash
         run: |
@@ -286,21 +227,7 @@ jobs:
           test "$(go env GOVERSION)" = "go$required_go"
           go version
 
-      - name: Warm cross-platform Go cache
-        if: env.CACHE_ONLY == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          make surf-binary SURF_GOOS=linux SURF_GOARCH=amd64
-          make surf-binary SURF_GOOS=linux SURF_GOARCH=arm64
-          make surf-binary SURF_GOOS=windows SURF_GOARCH=amd64
-          make surf-binary SURF_GOOS=darwin SURF_GOARCH=amd64
-          make surf-binary SURF_GOOS=darwin SURF_GOARCH=arm64
-          echo "Warmed $(go env GOCACHE) and $(go env GOMODCACHE)"
-
       - name: Prepare cross-platform packaging tools
-        if: env.CACHE_ONLY != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -319,7 +246,6 @@ jobs:
           "$makensis" -VERSION
 
       - name: Build and verify every desktop package
-        if: env.CACHE_ONLY != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -376,7 +302,6 @@ jobs:
           sha256sum dist/packages/*
 
       - name: Generate and verify release metadata
-        if: env.CACHE_ONLY != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -414,7 +339,6 @@ jobs:
           sha256sum dist/native/*.deb dist/surf-desktop-*-linux-amd64.tar.gz update.json
 
       - name: Publish verified release
-        if: env.CACHE_ONLY != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -486,10 +410,10 @@ jobs:
           jq -r '.url, (.assets[].name)' <<< "$published"
 
       - name: Queue package repository publication
-        if: env.CACHE_ONLY != 'true'
         shell: bash
         run: |
           set -euo pipefail
 
+          # Site/docs publish from current main; the .deb comes from this tag.
           gh workflow run repository.yml --ref main -f "tag=$RELEASE_TAG"
-          echo "Queued $RELEASE_TAG for the Cydia and Sileo repository"
+          echo "Queued Package Repository for $RELEASE_TAG (apt + site on gh-pages)"

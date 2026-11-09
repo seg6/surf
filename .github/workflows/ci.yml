@@ -1,3 +1,5 @@
+# Continuous Integration: every PR and every push to main.
+# Tests and packaging checks only. Does not publish releases or gh-pages.
 name: Continuous Integration
 
 on:
@@ -16,7 +18,7 @@ concurrency:
 jobs:
   client-core:
     name: Client core (${{ matrix.compiler }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -133,7 +135,7 @@ jobs:
 
   backend-test:
     name: Backend tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Check out source
@@ -157,7 +159,7 @@ jobs:
 
   backend-cross-build:
     name: Backend ${{ matrix.goos }}/${{ matrix.goarch }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -188,7 +190,7 @@ jobs:
 
   native-package:
     name: iOS 6/7 universal package
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Check out source
@@ -220,3 +222,42 @@ jobs:
 
       - name: Verify tracked files stayed clean
         run: git diff --exit-code
+
+  site:
+    name: Documentation site
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Build Astro site
+        working-directory: site
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+
+      - name: Check iOS 6 WebKit CSS profile
+        run: |
+          set -euo pipefail
+          # Match packaging/repository/verify.sh: scripts in HTML, layout features in CSS.
+          if grep -REqi '<script[[:space:]>]' site/dist --include='*.html'; then
+            echo "iOS 6 forbidden <script> found in site/dist" >&2
+            grep -REni '<script[[:space:]>]' site/dist --include='*.html' | head -20 >&2
+            exit 1
+          fi
+          if grep -REqi 'display:[[:space:]]*(flex|grid)|var\(|@font-face|linear-gradient\(' \
+              site/dist --include='*.css'; then
+            echo "iOS 6 forbidden CSS found in site/dist" >&2
+            grep -REni 'display:[[:space:]]*(flex|grid)|var\(|@font-face|linear-gradient\(' \
+              site/dist --include='*.css' | head -40 >&2
+            exit 1
+          fi

@@ -68,7 +68,11 @@ func TestManagedSetupHandoffIntegration(t *testing.T) {
 	waitBrowserState(t, manager, "setup")
 	manager.op.Lock()
 	setup := manager.setup
-	_, err := setup.client.Call("", "Storage.setCookies", map[string]any{"cookies": []any{map[string]any{"name": "surf-setup-test", "value": "retained", "url": "https://example.test"}}})
+	// Session cookies die with the setup browser. Persist across handoff.
+	expires := float64(time.Now().Add(24 * time.Hour).Unix())
+	_, err := setup.client.Call("", "Storage.setCookies", map[string]any{"cookies": []any{map[string]any{
+		"name": "surf-setup-test", "value": "retained", "url": "https://example.test", "expires": expires,
+	}}})
 	if err == nil {
 		err = setup.client.Dispatch(setup.sessionID, "Runtime.evaluate", map[string]any{"expression": `chrome.windows.getAll({windowTypes:['normal']}).then(ws=>Promise.all(ws.map(w=>chrome.windows.remove(w.id))))`})
 	}
@@ -245,7 +249,10 @@ func TestStandaloneSetupExitsWithoutStreamingIntegration(t *testing.T) {
 		t.Fatal("standalone resume accepted")
 	}
 	m.op.Lock()
-	_, err := m.setup.client.Call("", "Storage.setCookies", map[string]any{"cookies": []any{map[string]any{"name": "standalone-sign-in", "value": "retained", "url": "https://example.test"}}})
+	expires := float64(time.Now().Add(24 * time.Hour).Unix())
+	_, err := m.setup.client.Call("", "Storage.setCookies", map[string]any{"cookies": []any{map[string]any{
+		"name": "standalone-sign-in", "value": "retained", "url": "https://example.test", "expires": expires,
+	}}})
 	if err == nil {
 		err = m.setup.client.Dispatch("", "Browser.close", nil)
 	}

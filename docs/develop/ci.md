@@ -1,8 +1,17 @@
 # CI and build caches
 
-CI always runs the C99, Go, Rust, desktop interaction/session, and native
-package checks. A cache hit reuses compiler dependencies; it never substitutes
-for tests or skips compiling the current source.
+Three workflows, three jobs:
+
+| Workflow | Trigger | Purpose |
+| --- | --- | --- |
+| Continuous Integration | PR and push to `main` | Test and verify; never publishes |
+| Release | Manual `workflow_dispatch` with a signed tag | Build host + client assets and publish the GitHub release |
+| Package Repository | Manual (also queued by Release) | Build Astro site + apt metadata and push `gh-pages` |
+
+CI always runs the C99, Go, Rust, desktop interaction/session, native package,
+and documentation site checks. A cache hit reuses compiler dependencies; it
+never substitutes for tests or skips compiling the current source. All CI jobs
+use Ubuntu 24.04.
 
 ## Rust desktop
 
@@ -18,16 +27,16 @@ saved. Toolchains are installed by the pinned setup action, not restored from
 the dependency cache.
 
 The release cache uses the same workspace mapping and shared key in CI and
-the release workflow. Verified main builds warm it before a signed release tag
-builds the archive. Both jobs use Ubuntu 24.04 and Rust 1.95.0; the cache action
-also keys by compiler, build environment, and Cargo manifests/lockfile. Bump
-the shared key in **both workflows** when changing the native library ABI or
-runner distribution.
+the release workflow. Release runs only when dispatched manually for a signed
+tag; the first release after a cache key bump may still be cold. Both jobs use
+Ubuntu 24.04 and Rust 1.95.0; the cache action also keys by compiler, build
+environment, and Cargo manifests/lockfile. Bump the shared key in **both
+workflows** when changing the native library ABI or runner distribution.
 
-GitHub scopes PR caches to their PR merge ref. Main/tag release builds do not
-consume a PR's cache; their initial build may still be cold. Lockfile changes
-can restore compatible dependency artifacts, but changed dependencies and Surf
-source still rebuild. Debug and optimized release code require separate builds.
+GitHub scopes PR caches to their PR merge ref. Manual release builds do not
+consume a PR's cache. Lockfile changes can restore compatible dependency
+artifacts, but changed dependencies and Surf source still rebuild. Debug and
+optimized release code require separate builds.
 
 ## Native iOS
 
@@ -49,6 +58,12 @@ CI uses `setup-go` caching with `backend/go.sum`. The release workflow keeps
 its separate cross-platform Go module/build cache, keyed by Go version,
 dependency checksum, and verified source commit with a dependency-prefix
 fallback.
+
+## Documentation site
+
+CI builds the Astro site (`site/`) and rejects CSS/JS that iOS 6 WebKit cannot
+use (flex, grid, custom properties, `@font-face`, unprefixed
+`linear-gradient`, and script tags in the static output).
 
 ## Headless integration
 

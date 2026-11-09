@@ -1,3 +1,6 @@
+# Package Repository: manual publish of apt metadata + Astro site to gh-pages.
+# Usually queued by Release after a successful publish. Also dispatchable alone
+# to republish the site/docs against an already-published signed release.
 name: Package Repository
 
 on:
@@ -18,8 +21,8 @@ concurrency:
 jobs:
   publish:
     name: Publish ${{ inputs.tag }} for Cydia and Sileo
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -32,40 +35,24 @@ jobs:
           set -euo pipefail
 
           for command in ar bzip2 gh git gzip jq md5sum sed sha1sum \
-              sha256sum sha512sum stat tar; do
+              sha256sum sha512sum stat tar base64; do
             command -v "$command" >/dev/null || {
               echo "required command is unavailable: $command" >&2
               exit 1
             }
           done
 
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || {
-            echo "invalid release tag: $RELEASE_TAG" >&2
-            exit 1
-          }
+          # Site/docs come from the dispatched ref (normally main). The .deb
+          # comes from a published, signed release tag that is an ancestor of
+          # that ref. Write access + signed tag + non-draft release gate publish;
+          # the dispatch commit itself need not be signature-verified.
+          test "$(gh api "repos/$GH_REPO/commits/$GITHUB_SHA" --jq .sha)" = \
+            "$GITHUB_SHA"
 
-          main_commit="$(gh api "repos/$GH_REPO/commits/$GITHUB_SHA")"
-          test "$(jq -r '.sha' <<< "$main_commit")" = "$GITHUB_SHA"
-          test "$(jq -r '.commit.verification.verified' <<< "$main_commit")" = "true" || {
-            echo "package repository source commit is not signature-verified" >&2
-            exit 1
-          }
-
-          tag_ref="$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG")"
-          tag_object_type="$(jq -r '.object.type' <<< "$tag_ref")"
-          tag_object_sha="$(jq -r '.object.sha' <<< "$tag_ref")"
-          test "$tag_object_type" = "tag" || {
-            echo "$RELEASE_TAG is not an annotated tag" >&2
-            exit 1
-          }
-          tag_json="$(gh api "repos/$GH_REPO/git/tags/$tag_object_sha")"
-          tag_commit="$(jq -r '.object.sha' <<< "$tag_json")"
-          test "$(jq -r '.tag' <<< "$tag_json")" = "$RELEASE_TAG"
-          test "$(jq -r '.object.type' <<< "$tag_json")" = "commit"
-          test "$(jq -r '.verification.verified' <<< "$tag_json")" = "true" || {
-            echo "$RELEASE_TAG signature is not verified" >&2
-            exit 1
-          }
+          gh api "repos/$GH_REPO/contents/.github/scripts/require-signed-tag.sh?ref=$GITHUB_SHA" \
+            --jq .content | base64 -d > "$RUNNER_TEMP/require-signed-tag.sh"
+          chmod +x "$RUNNER_TEMP/require-signed-tag.sh"
+          tag_commit="$("$RUNNER_TEMP/require-signed-tag.sh" "$RELEASE_TAG")"
 
           release_json="$(gh release view "$RELEASE_TAG" \
             --json assets,isDraft,isPrerelease,publishedAt,tagName)"
