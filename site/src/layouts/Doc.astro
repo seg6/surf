@@ -1,0 +1,87 @@
+---
+import Base from './Base.astro';
+import '../styles/docs.css';
+import { getCollection } from 'astro:content';
+
+interface Props {
+  title: string;
+  currentSlug?: string;
+}
+const { title, currentSlug } = Astro.props;
+const base = import.meta.env.BASE_URL;
+const docs = await getCollection('docs');
+
+const guideOrder = [
+  'guide/overview',
+  'guide/install-host',
+  'guide/install-ios',
+  'guide/install-desktop',
+  'guide/pairing',
+  'guide/daily-use',
+  'guide/browser-setup',
+  'guide/remote-access',
+  'guide/updates',
+  'guide/configuration',
+];
+
+function sortSection(key: string, items: typeof docs) {
+  if (key === 'guide') {
+    return [...items].sort((a, b) => {
+      const ai = guideOrder.indexOf(a.id);
+      const bi = guideOrder.indexOf(b.id);
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    });
+  }
+  return [...items].sort((a, b) => a.data.title.localeCompare(b.data.title));
+}
+
+const sections: Record<string, typeof docs> = {};
+for (const doc of docs) {
+  (sections[doc.data.section] ||= []).push(doc);
+}
+
+const order = [
+  { key: 'guide', label: 'Guide' },
+  { key: 'reference', label: 'Reference' },
+  { key: 'concepts', label: 'Internals' },
+  { key: 'clients', label: 'Clients' },
+  { key: 'develop', label: 'Build' },
+];
+---
+<Base title={`${title} | Surf`} description={`${title}. Surf documentation.`}>
+  <div class="doc-shell">
+    <div class="doc-layout">
+      <aside class="doc-side">
+        <nav aria-label="Documentation">
+          <ul>
+            <li>
+              <a href={`${base}docs/`} aria-current={!currentSlug ? 'page' : undefined}>Docs home</a>
+            </li>
+          </ul>
+          {order.map(({ key, label }) => (
+            sections[key]?.length ? (
+              <div>
+                <h2>{label}</h2>
+                <ul>
+                  {sortSection(key, sections[key]).map((doc) => (
+                    <li>
+                      <a
+                        href={`${base}docs/${doc.id}/`}
+                        aria-current={doc.id === currentSlug ? 'page' : undefined}
+                      >
+                        {doc.data.title}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null
+          ))}
+        </nav>
+      </aside>
+      <article class="doc-main">
+        <slot />
+      </article>
+    </div>
+  </div>
+</Base>

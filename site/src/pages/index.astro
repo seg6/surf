@@ -1,0 +1,100 @@
+---
+import Base from '../layouts/Base.astro';
+const base = import.meta.env.BASE_URL;
+---
+<Base title="Surf">
+  <div class="wrap">
+    <section class="hero">
+      <p class="brand-mark">Surf</p>
+      <h1>Remote browser on hardware you already have</h1>
+      <p class="deck">
+        Surf runs Chromium on a Windows, macOS, or Linux computer and streams
+        that page to a native app. The app draws the chrome (tabs, address bar,
+        library) and sends input back. Page content never goes through the
+        device's own web engine.
+      </p>
+      <ul class="cta-row">
+        <li><a class="cta cta-primary" href={`${base}install/host/`}>Install the host</a></li>
+        <li><a class="cta cta-secondary" href={`${base}install/ios/`}>iOS client</a></li>
+        <li><a class="cta cta-secondary" href={`${base}install/desktop/`}>Linux client</a></li>
+      </ul>
+    </section>
+
+    <section class="section">
+      <h2>How it works</h2>
+      <p>
+        The host owns a Chromium profile: cookies, JavaScript, downloads, and
+        site sign-in all happen there. The client opens a pinned TLS connection,
+        shows the live stream, and forwards touch, keyboard, pointer, and files.
+        You pair once with a QR code or a short code, then confirm the six words
+        match on both ends.
+      </p>
+      <p>
+        Surf is not a hosted service. There is no account and no shared password.
+        Run the host on your LAN, or on any address the client can reach. Each
+        device keeps its own key. Clients pin the host certificate and refuse a
+        different fingerprint.
+      </p>
+    </section>
+
+    <section class="section">
+      <h2>In practice</h2>
+      <div class="point">
+        <p class="point-title">Chromium does the browsing</p>
+        <p>
+          You get whatever that desktop Chromium can load. For awkward logins,
+          open Browser setup on the computer, finish there, then continue from
+          the client.
+        </p>
+      </div>
+      <div class="point">
+        <p class="point-title">The client is a browser UI</p>
+        <p>
+          Tabs, suggestions, bookmarks, history, downloads, find, and reader
+          are built into the app. It is not a full-desktop remote-desktop
+          session.
+        </p>
+      </div>
+      <div class="point">
+        <p class="point-title">Data stays on the host</p>
+        <p>
+          Identity, pairings, and the browser profile live under
+          <code>SURF_HOME</code>. Revoke a device from the host when you want
+          it gone.
+        </p>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Clients</h2>
+      <div class="point">
+        <p class="point-title">
+          <a href={`${base}install/ios/`}>iOS / iPadOS 6-14</a>
+        </p>
+        <p>
+          Jailbreak package for iOS 6 through 14. Install steps (Cydia / Sileo)
+          are on the iOS page.
+        </p>
+      </div>
+      <div class="point">
+        <p class="point-title">
+          <a href={`${base}install/desktop/`}>Linux</a>
+        </p>
+        <p>
+          Desktop client for the same host and pairing flow.
+        </p>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Docs</h2>
+      <p>
+        <a href={`${base}install/host/`}>Host install</a>,
+        <a href={`${base}docs/guide/pairing/`}>pairing</a>,
+        <a href={`${base}docs/guide/overview/`}>overview</a>,
+        <a href={`${base}docs/reference/security/`}>security</a>,
+        <a href={`${base}docs/`}>full index</a>.
+      </p>
+    </section>
+  </div>
+</Base>

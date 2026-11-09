@@ -1,0 +1,24 @@
+---
+import Base from '../../layouts/Base.astro';
+const base = import.meta.env.BASE_URL;
+---
+<Base title="Linux client | Surf" description="Install the Surf Linux desktop client.">
+  <div class="wrap">
+    <section class="page-lead">
+      <h1>Linux client</h1>
+      <p class="deck">
+        Native desktop client that pairs with a Surf host the same way as iOS.
+        This is not the host program.
+      </p>
+      <ul class="cta-row">
+        <li><a class="cta cta-primary" href={`${base}docs/guide/install-desktop/`}>Install guide</a></li>
+        <li><a class="cta cta-secondary" href={`${base}docs/clients/desktop/`}>Details</a></li>
+      </ul>
+    </section>
+
+    <section class="section">
+      <h2>From source</h2>
+      <pre class="code">cargo run --manifest-path client/desktop/Cargo.toml -p surf-client</pre>
+    </section>
+  </div>
+</Base>

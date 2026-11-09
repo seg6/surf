@@ -1,0 +1,125 @@
+/* Docs - same iOS 6-safe profile as site.css */
+
+.doc-shell {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 16px 16px 48px;
+}
+.doc-layout {
+  display: table;
+  width: 100%;
+  table-layout: fixed;
+}
+.doc-side,
+.doc-main {
+  display: table-cell;
+  vertical-align: top;
+}
+.doc-side {
+  width: 190px;
+  padding-right: 20px;
+}
+.doc-side nav {
+  background: #fff;
+  border: 1px solid #c8c8c8;
+  -webkit-border-radius: 6px;
+  border-radius: 6px;
+  padding: 10px 12px 12px;
+}
+.doc-side h2 {
+  margin: 12px 0 4px;
+  font-size: 11px;
+  font-weight: bold;
+  color: #888;
+}
+.doc-side h2:first-child { margin-top: 0; }
+.doc-side ul { list-style: none; margin: 0; padding: 0; }
+.doc-side li { margin: 0; }
+.doc-side a {
+  display: block;
+  text-decoration: none;
+  color: #1a6eb5;
+  font-size: 13px;
+  line-height: 1.35;
+  padding: 3px 0;
+}
+.doc-side a:hover { text-decoration: underline; }
+.doc-side a[aria-current="page"] {
+  color: #111;
+  font-weight: bold;
+}
+
+.doc-main {
+  background: #fff;
+  border: 1px solid #c8c8c8;
+  -webkit-border-radius: 6px;
+  border-radius: 6px;
+  padding: 18px 20px 28px;
+}
+.doc-main > :first-child { margin-top: 0; }
+.doc-main h1 {
+  margin: 0 0 0.6em;
+  font-size: 24px;
+  line-height: 1.2;
+  color: #111;
+}
+.doc-main h2 {
+  margin: 1.35em 0 0.45em;
+  font-size: 17px;
+  padding-top: 0.35em;
+  border-top: 1px solid #ddd;
+  color: #111;
+}
+.doc-main h2:first-of-type { border-top: 0; padding-top: 0; }
+.doc-main h3 { margin: 1.1em 0 0.35em; font-size: 15px; }
+.doc-main p, .doc-main li { max-width: 42em; }
+.doc-main p { margin: 0 0 0.8em; color: #222; }
+.doc-main ul, .doc-main ol { margin: 0 0 0.9em; padding-left: 1.25em; }
+.doc-main pre, .doc-main code {
+  font-family: Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+}
+.doc-main code {
+  background: #f0f0f0;
+  padding: 0.1em 0.3em;
+  -webkit-border-radius: 2px;
+  border-radius: 2px;
+}
+.doc-main pre {
+  background: #2a2a2a;
+  color: #e8e8e8;
+  border: 0;
+  -webkit-border-radius: 4px;
+  border-radius: 4px;
+  overflow: auto;
+  padding: 11px 12px;
+}
+.doc-main pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+.doc-main table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 14px;
+  margin: 0 0 1em;
+}
+.doc-main th, .doc-main td {
+  border: 1px solid #ccc;
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.doc-main th { background: #f7f7f7; }
+.doc-main blockquote {
+  margin: 0 0 1em;
+  padding: 0 0 0 10px;
+  border-left: 3px solid #ccc;
+  color: #555;
+}
+
+@media screen and (max-width: 720px) {
+  .doc-layout, .doc-side, .doc-main { display: block; width: auto; }
+  .doc-side { padding: 0 0 14px; }
+}

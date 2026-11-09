@@ -1,0 +1,14 @@
+{
+  "name": "surf-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare-content": "node scripts/prepare-content.mjs",
+    "dev": "npm run prepare-content && astro dev",
+    "build": "npm run prepare-content && astro build",
+    "preview": "npm run prepare-content && astro preview"
+  },
+  "dependencies": {
+    "astro": "^5.7.10"
+  }
+}

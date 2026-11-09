@@ -2,12 +2,12 @@
 
 https://github.com/user-attachments/assets/5e684036-9bbf-4fce-a088-0d95dcc1a890
 
-50 seconds. Unmute for audio. [Download MP4](surf-demo.mp4?raw=true) ·
+50 seconds. Unmute for audio. [Download MP4](surf-demo.mp4?raw=true) | 
 [Poster](surf-demo.jpg)
 
 The README uses a GitHub media attachment for inline playback, not the
 repository's file-preview page. The downloadable copy is 8.5 MB, H.264 at
-1280×1080 and 60 fps. Its AAC audio is unchanged from the approved edit.
+1280x1080 and 60 fps. Its AAC audio is unchanged from the approved edit.
 
 The walkthrough shows browsing, interactive maps, YouTube and fullscreen video,
 Netflix playback, WebGL, tabs, bookmarks, and downloads. It uses the desktop
@@ -24,9 +24,9 @@ here; raw captures, browser profiles, and authentication data stay private.
 - Browsing: Wikipedia's [Jellyfish](https://en.wikipedia.org/wiki/Jellyfish) and
   [Octopus](https://en.wikipedia.org/wiki/Octopus) articles. See their pages for
   contributor and individual image credits.
-- Maps: [© OpenStreetMap contributors](https://www.openstreetmap.org/copyright).
-- YouTube: [CHARGE — Blender Open Movie](https://www.youtube.com/watch?v=UXqq0ZvbOnk),
-  © 2022 Blender Foundation / [Blender Studio](https://studio.blender.org/),
+- Maps: [(c) OpenStreetMap contributors](https://www.openstreetmap.org/copyright).
+- YouTube: [CHARGE. Blender Open Movie](https://www.youtube.com/watch?v=UXqq0ZvbOnk),
+  (c) 2022 Blender Foundation / [Blender Studio](https://studio.blender.org/),
   [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The excerpt is
   trimmed, uniformly scaled, and framed with captions and audio fades.
 - Netflix: a brief authenticated playback excerpt. The title is third-party

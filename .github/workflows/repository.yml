@@ -119,10 +119,25 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "Verified $RELEASE_TAG and $client_name from signed source"
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Build website
+        working-directory: site
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+
       - name: Build and verify package repository
         shell: bash
         env:
           SURF_REPOSITORY_DATE: ${{ steps.source.outputs.published_at }}
+          SITE_DIST: site/dist
         run: |
           set -euo pipefail
 
@@ -140,7 +155,6 @@ jobs:
 
           repository_dir="$RUNNER_TEMP/surf-repository"
           publish_dir="$RUNNER_TEMP/surf-pages"
-          client_name="${{ steps.source.outputs.client_name }}"
           git init "$publish_dir"
           cd "$publish_dir"
           git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
@@ -155,17 +169,8 @@ jobs:
             git checkout --orphan gh-pages
           fi
 
-          install -d debs
-          install -m 0644 "$repository_dir/.nojekyll" .nojekyll
-          install -m 0644 "$repository_dir/CydiaIcon.png" CydiaIcon.png
-          install -m 0644 "$repository_dir/Packages" Packages
-          install -m 0644 "$repository_dir/Packages.gz" Packages.gz
-          install -m 0644 "$repository_dir/Packages.bz2" Packages.bz2
-          install -m 0644 "$repository_dir/Release" Release
-          install -m 0644 "$repository_dir/index.html" index.html
-          install -m 0644 "$repository_dir/debs/$client_name" "debs/$client_name"
-          git add -- .nojekyll CydiaIcon.png Packages Packages.gz Packages.bz2 \
-            Release index.html "debs/$client_name"
+          tar -C "$repository_dir" -cf - . | tar -xf -
+          git add -- .
 
           git config user.name 'github-actions[bot]'
           git config user.email \
@@ -174,5 +179,5 @@ jobs:
             echo "$RELEASE_TAG is already the published package repository"
             exit 0
           fi
-          git commit -m "Publish Surf $RELEASE_TAG package repository"
+          git commit -m "Publish Surf $RELEASE_TAG site and package repository"
           git push origin gh-pages

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [ "$#" -ne 2 ]; then
-  echo "usage: build.sh CLIENT_DEB OUTPUT_DIRECTORY" >&2
+  echo "usage: SITE_DIST=/path/to/astro/dist build.sh CLIENT_DEB OUTPUT_DIRECTORY" >&2
   exit 2
 fi
 
@@ -10,6 +10,11 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 client_deb="$1"
 output_dir="$2"
 repository_url="https://seg6.space/surf/"
+site_dist="${SITE_DIST:-}"
+if [ -z "$site_dist" ]; then
+  echo "SITE_DIST is required (build the Astro site first: make site-build)" >&2
+  exit 2
+fi
 
 for command in \
     ar basename bzip2 cut date find grep gzip install md5sum sed sha1sum \
@@ -125,7 +130,7 @@ fi
   printf 'Version: %s\n' "$app_version"
   printf 'Architectures: iphoneos-arm\n'
   printf 'Components: main\n'
-  printf 'Description: Surf browser client for legacy iOS\n'
+  printf 'Description: Surf remote browser (iOS client package source)\n'
   printf 'Date: %s\n' "$release_date"
   for algorithm in MD5Sum SHA1 SHA256; do
     printf '%s:\n' "$algorithm"
@@ -142,12 +147,69 @@ fi
   done
 } > "$output_dir/Release"
 
-sed \
-  -e "s|@APP_VERSION@|$app_version|g" \
-  -e "s|@PACKAGE_VERSION@|$package_version|g" \
-  -e "s|@PACKAGE_PATH@|$package_path|g" \
-  -e "s|@PACKAGE_SIZE@|$package_size|g" \
-  -e "s|@PACKAGE_SHA256@|$package_sha256|g" \
-  "$script_dir/index.html.in" > "$output_dir/index.html"
+test -d "$site_dist" || {
+  echo "SITE_DIST is not a directory: $site_dist" >&2
+  exit 1
+}
+test -f "$site_dist/index.html" || {
+  echo "SITE_DIST is missing index.html: $site_dist" >&2
+  exit 1
+}
+
+# Merge the static site without replacing apt metadata or the package.
+tar -C "$site_dist" -cf - . | tar -C "$output_dir" -xf -
+install -m 0644 "$client_deb" "$output_dir/debs/$client_name"
+install -m 0644 "$script_dir/../../client/ios/Resources/icon-144.png" \
+  "$output_dir/CydiaIcon.png"
+: > "$output_dir/.nojekyll"
+{
+  printf '%s\n' "$control"
+  printf 'Homepage: %s\n' "$repository_url"
+  printf 'Icon: %sCydiaIcon.png\n' "$repository_url"
+  printf 'Filename: %s\n' "$package_path"
+  printf 'Size: %s\n' "$package_size"
+  printf 'MD5sum: %s\n' "$package_md5"
+  printf 'SHA1: %s\n' "$package_sha1"
+  printf 'SHA256: %s\n' "$package_sha256"
+  printf 'SHA512: %s\n\n' "$package_sha512"
+} > "$output_dir/Packages"
+gzip -9 -n -c "$output_dir/Packages" > "$output_dir/Packages.gz"
+bzip2 -9 -c "$output_dir/Packages" > "$output_dir/Packages.bz2"
+{
+  printf 'Origin: Surf\n'
+  printf 'Label: Surf\n'
+  printf 'Suite: stable\n'
+  printf 'Codename: surf\n'
+  printf 'Version: %s\n' "$app_version"
+  printf 'Architectures: iphoneos-arm\n'
+  printf 'Components: main\n'
+  printf 'Description: Surf remote browser (iOS client package source)\n'
+  printf 'Date: %s\n' "$release_date"
+  for algorithm in MD5Sum SHA1 SHA256; do
+    printf '%s:\n' "$algorithm"
+    case "$algorithm" in
+      MD5Sum) hash_command=md5sum ;;
+      SHA1) hash_command=sha1sum ;;
+      SHA256) hash_command=sha256sum ;;
+    esac
+    for metadata in Packages Packages.gz Packages.bz2; do
+      metadata_hash="$($hash_command "$output_dir/$metadata" | cut -d ' ' -f 1)"
+      metadata_size="$(stat -c '%s' "$output_dir/$metadata")"
+      printf ' %s %16s %s\n' "$metadata_hash" "$metadata_size" "$metadata"
+    done
+  done
+} > "$output_dir/Release"
+package_identity="<p class=\"meta\">Package ${package_version} · ${package_size} bytes · SHA-256 ${package_sha256}</p>"
+while IFS= read -r -d '' html; do
+  # PATH must stay a plain token so hrefs resolve after publish.
+  sed -i \
+    -e "s|__SURF_APP_VERSION__|$app_version|g" \
+    -e "s|__SURF_PACKAGE_PATH__|$package_path|g" \
+    -e "s|<!--SURF_PACKAGE_IDENTITY-->|$package_identity|g" \
+    -e "s|__SURF_PACKAGE_VERSION__|$package_version|g" \
+    -e "s|__SURF_PACKAGE_SIZE__|$package_size|g" \
+    -e "s|__SURF_PACKAGE_SHA256__|$package_sha256|g" \
+    "$html"
+done < <(find "$output_dir" -type f -name '*.html' -print0)
 
 printf 'Built Surf %s package repository in %s\n' "$package_version" "$output_dir"

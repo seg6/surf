@@ -5,6 +5,12 @@ version differences alone do not.
 
 ## Unreleased
 
+- Docs reorganized under guide / reference / concepts / clients / develop, with
+  stubs at the old paths. README points at the new index and website.
+- New Astro site (`site/`) publishes at the apt root alongside Packages; Cydia
+  and Sileo install links live on the iOS install page. CSS targets iOS 6
+  WebKit; `packaging/repository/index.html.in` removed.
+
 - Desktop fullscreen now hides Surf's browser bar and gives the page the whole
   window. Player controls, Escape and F11 restore normal browsing on exit.
 
@@ -13,7 +19,7 @@ version differences alone do not.
 ### Set up Surf's browser on your computer
 
 - Open your Surf tabs on the computer to sign in or change browser settings.
-  Choose **Browser setup…** in the tray or dashboard, or run `surf browser`.
+  Choose **Browser setup...** in the tray or dashboard, or run `surf browser`.
 - Connected devices show a paused screen. Close the setup windows to resume
   automatically, or choose **Resume here** on an iOS or desktop client and
   confirm that the computer's browser will close.

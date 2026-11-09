@@ -1,0 +1,62 @@
+---
+import '../styles/site.css';
+
+interface Props {
+  title: string;
+  description?: string;
+}
+const {
+  title,
+  description = 'Surf runs Chromium on your computer and streams it to a native client over pinned TLS.',
+} = Astro.props;
+const base = import.meta.env.BASE_URL;
+const path = Astro.url.pathname;
+const nav = [
+  { href: `${base}install/ios/`, label: 'iOS', match: '/install/ios' },
+  { href: `${base}install/host/`, label: 'Host', match: '/install/host' },
+  { href: `${base}docs/`, label: 'Docs', match: '/docs' },
+  { href: 'https://github.com/seg6/surf', label: 'Source', external: true },
+];
+---
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="description" content={description} />
+    <title>{title}</title>
+    <link rel="icon" href={`${base}CydiaIcon.png`} />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="site-header-inner">
+        <a class="site-brand" href={base}>
+          <img src={`${base}CydiaIcon.png`} alt="" width="22" height="22" />
+          Surf
+        </a>
+        <nav class="site-nav">
+          {nav.map((item) => (
+            <a
+              href={item.href}
+              aria-current={!item.external && path.indexOf(item.match) !== -1 ? 'page' : undefined}
+            >
+              {item.label}
+            </a>
+          ))}
+        </nav>
+      </div>
+    </header>
+    <div class="site-main">
+      <slot />
+    </div>
+    <footer class="site-footer">
+      <div class="site-footer-inner">
+        Surf | MIT  | 
+        <a href={`${base}install/ios/`}>iOS</a>  | 
+        <a href={`${base}docs/`}>Docs</a>  | 
+        <a href="https://github.com/seg6/surf">GitHub</a>
+      </div>
+    </footer>
+  </body>
+</html>

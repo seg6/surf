@@ -11,7 +11,7 @@ repository_dir="$2"
 client_name="$(basename "$client_deb")"
 package_path="debs/$client_name"
 
-for command in basename bzip2 cmp cut grep gzip md5sum sha1sum sha256sum stat; do
+for command in basename bzip2 cmp cut find grep gzip md5sum sha1sum sha256sum stat; do
   command -v "$command" >/dev/null || {
     echo "required command is unavailable: $command" >&2
     exit 1
@@ -20,7 +20,7 @@ done
 
 for path in \
   .nojekyll CydiaIcon.png Packages Packages.gz Packages.bz2 Release index.html \
-  "$package_path"; do
+  docs/index.html install/ios/index.html "$package_path"; do
   test -e "$repository_dir/$path" || {
     echo "repository output is missing $path" >&2
     exit 1
@@ -47,20 +47,36 @@ for algorithm in md5sum sha1sum sha256sum; do
   done
 done
 
-if grep -Eq '@[A-Z0-9_]+@' "$repository_dir/index.html"; then
-  echo "landing page contains an unresolved template value" >&2
-  exit 1
-fi
-if grep -Eqi '<script|display:[[:space:]]*(flex|grid)|var\(|@font-face' \
-    "$repository_dir/index.html"; then
-  echo "landing page uses a feature outside its iOS 6 compatibility profile" >&2
-  exit 1
-fi
+# Whole site must stay inside the iOS 6 WebKit profile and resolve package fields.
+while IFS= read -r -d '' page; do
+  if grep -Eq '@[A-Z0-9_]+@|__SURF_[A-Z0-9_]+__' "$page"; then
+    echo "unresolved template value in ${page#"$repository_dir"/}" >&2
+    exit 1
+  fi
+  if grep -Eqi '<script|display:[[:space:]]*(flex|grid)|var\(|@font-face|linear-gradient\(' "$page"; then
+    echo "${page#"$repository_dir"/} uses a feature outside the iOS 6 compatibility profile" >&2
+    exit 1
+  fi
+done < <(find "$repository_dir" -type f -name '*.html' -print0)
+
+# Also scan bundled CSS emitted next to pages.
+while IFS= read -r -d '' css; do
+  if grep -Eqi 'display:[[:space:]]*(flex|grid)|var\(|@font-face|linear-gradient\(' "$css"; then
+    echo "${css#"$repository_dir"/} uses a feature outside the iOS 6 compatibility profile" >&2
+    exit 1
+  fi
+done < <(find "$repository_dir" -type f -name '*.css' -print0)
+
+ios_page="$repository_dir/install/ios/index.html"
 grep -Fq 'cydia://url/https://cydia.saurik.com/api/share#?source=https://seg6.space/surf/' \
-  "$repository_dir/index.html"
-grep -Fq 'sileo://source/https://seg6.space/surf/' "$repository_dir/index.html"
-grep -Fq "href=\"$package_path\"" "$repository_dir/index.html"
-grep -Fq 'https://seg6.space/surf/' "$repository_dir/index.html"
-grep -Fq 'href="https://ko-fi.com/seg6_"' "$repository_dir/index.html"
+  "$ios_page"
+grep -Fq 'sileo://source/https://seg6.space/surf/' "$ios_page"
+grep -Eq "href=\"(/surf/)?$package_path\"" "$ios_page"
+grep -Fq 'https://seg6.space/surf/' "$ios_page"
+
+grep -Fq '/surf/docs/' "$repository_dir/index.html" || \
+  grep -Fq 'href="/surf/docs/' "$repository_dir/index.html" || \
+  grep -Fq 'docs/' "$repository_dir/index.html"
+# Cydia / Sileo deep links live on the iOS install page only.
 
 printf 'Verified Surf package repository in %s\n' "$repository_dir"

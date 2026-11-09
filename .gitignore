@@ -18,3 +18,7 @@ native/buildenv/sdk/
 .env
 .local/
 client/desktop/target/
+site/node_modules/
+site/dist/
+site/src/content/docs/
+site/.astro/

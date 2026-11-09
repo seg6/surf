@@ -1,0 +1,20 @@
+---
+import Doc from '../../layouts/Doc.astro';
+const base = import.meta.env.BASE_URL;
+---
+<Doc title="Documentation">
+  <h1>Documentation</h1>
+  <p>
+    Start with the overview, then install and pair. The sidebar has everything else.
+  </p>
+  <ul>
+    <li><a href={`${base}docs/guide/overview/`}>Overview</a></li>
+    <li><a href={`${base}docs/guide/install-host/`}>Install the host</a></li>
+    <li><a href={`${base}docs/guide/install-ios/`}>Install on iOS</a></li>
+    <li><a href={`${base}docs/guide/pairing/`}>Pairing</a></li>
+    <li><a href={`${base}docs/reference/troubleshooting/`}>Troubleshooting</a></li>
+  </ul>
+  <p>
+    Protocol and security are under Reference. Architecture is under Internals.
+  </p>
+</Doc>

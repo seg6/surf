@@ -1,4 +1,4 @@
-.PHONY: test client-core-build client-core-test client-core-sanitize desktop-build desktop-test desktop-run desktop-package surf-binary surf-dist surf-release-dist native-sdk native-package
+.PHONY: test client-core-build client-core-test client-core-sanitize desktop-build desktop-test desktop-run desktop-package surf-binary surf-dist surf-release-dist native-sdk native-package site-build
 
 VERSION := $(shell tr -d '[:space:]' < VERSION)
 COMPATIBILITY_VERSION := $(shell tr -d '[:space:]' < COMPATIBILITY_VERSION)
@@ -131,3 +131,6 @@ native-sdk:
 native-package: native-sdk
 	docker run --rm --network host -v "$(CURDIR):/src" surf-buildenv bash -c \
 		'make -C /src/client/ios clean package DEBUG=0 && bash /src/client/ios/verify-package.sh'
+
+site-build:
+	cd site && npm ci && npm run build
