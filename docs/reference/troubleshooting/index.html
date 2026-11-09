@@ -1,0 +1,128 @@
+<!DOCTYPE html><html lang="en"> <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="format-detection" content="telephone=no"><meta name="description" content="Troubleshooting. Surf documentation."><title>Troubleshooting | Surf</title><link rel="icon" href="/surf/CydiaIcon.png"><style>html,body{margin:0;padding:0}body{background:#ececec;color:#222;font-family:Helvetica Neue,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.45;-webkit-text-size-adjust:100%}a{color:#1a6eb5}a:hover{text-decoration:underline}a:focus{outline:1px dotted #1a6eb5}img{border:0;max-width:100%;height:auto;vertical-align:middle}code,pre{font-family:Menlo,Monaco,Consolas,Courier New,monospace;font-size:13px}.site-header{background:#fff;border-bottom:1px solid #c8c8c8}.site-header-inner{max-width:720px;margin:0 auto;padding:10px 16px;display:table;width:100%}.site-brand,.site-nav{display:table-cell;vertical-align:middle}.site-brand{width:100px;font-weight:700;font-size:17px;color:#222;text-decoration:none}.site-brand img{width:22px;height:22px;-webkit-border-radius:5px;border-radius:5px;margin-right:6px}.site-nav{text-align:right}.site-nav a{color:#555;text-decoration:none;margin-left:14px;font-size:14px}.site-nav a:hover,.site-nav a[aria-current=page]{color:#1a6eb5}.wrap{max-width:720px;margin:0 auto;padding:20px 16px 48px}.site-footer{border-top:1px solid #c8c8c8;padding:14px 16px 28px;color:#777;font-size:12px;background:#e4e4e4}.site-footer-inner{max-width:720px;margin:0 auto}.site-footer a{color:#555}.site-footer code{font-size:11px}.hero{margin:0 0 28px;padding:10px 0 22px;border-bottom:1px solid #c8c8c8}.hero .brand-mark{margin:0 0 8px;font-size:44px;line-height:1.05;font-weight:700;color:#111}.hero h1{margin:0 0 12px;font-size:22px;line-height:1.3;font-weight:400;color:#222}.hero .deck{margin:0 0 18px;font-size:16px;line-height:1.5;color:#444;max-width:36em}.cta-row{margin:0;padding:0;list-style:none}.cta-row li{display:inline-block;margin:0 8px 8px 0;vertical-align:top}.cta{display:inline-block;padding:8px 14px;-webkit-border-radius:4px;border-radius:4px;text-decoration:none;font-size:14px;font-weight:700}.cta-primary{background:#1a6eb5;color:#fff;border:1px solid #155a96}.cta-primary:hover{background:#155a96;color:#fff;text-decoration:none}.cta-secondary{background:#fff;color:#222;border:1px solid #bbb}.cta-secondary:hover{border-color:#1a6eb5;color:#1a6eb5;text-decoration:none}.apt{background:#fff;border:1px solid #c8c8c8;-webkit-border-radius:6px;border-radius:6px;padding:14px 16px 16px;margin:0 0 28px}.apt h2{margin:0 0 6px;font-size:15px;font-weight:700;color:#111}.apt .source{margin:0 0 12px;font-family:Menlo,Monaco,Consolas,monospace;font-size:14px;color:#111;word-break:break-all}.apt .meta{margin:10px 0 0;font-size:12px;color:#777}.section{margin:0 0 28px}.section h2{margin:0 0 10px;font-size:13px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:.04em}.section>p{margin:0 0 12px;color:#333;max-width:38em;font-size:15px;line-height:1.5}.point{margin:0 0 16px;padding:0 0 14px;border-bottom:1px solid #ddd;max-width:38em}.point:last-child{border-bottom:0;padding-bottom:0;margin-bottom:0}.point-title{margin:0 0 4px;font-size:16px;font-weight:700;color:#111}.point-title a{color:#1a6eb5;text-decoration:none}.point-title a:hover{text-decoration:underline}.point>p:last-child{margin:0;font-size:15px;line-height:1.5;color:#444}.doc-links{margin:0;padding:0;list-style:none;background:#fff;border:1px solid #c8c8c8}.doc-links li{margin:0;padding:10px 12px;border-bottom:1px solid #ddd}.doc-links li:last-child{border-bottom:0}.doc-links a{font-weight:700;text-decoration:none;color:#1a6eb5;font-size:15px}.doc-links a:hover{text-decoration:underline}.doc-links span{display:block;margin-top:2px;font-size:13px;color:#666;font-weight:400}.section .more{margin:10px 0 0;font-size:14px}.code{background:#2a2a2a;color:#e8e8e8;border:0;-webkit-border-radius:4px;border-radius:4px;padding:12px 14px;overflow:auto}.page-lead{margin:0 0 18px}.page-lead h1{margin:0 0 8px;font-size:26px;line-height:1.15}.page-lead .deck{margin:0 0 14px;font-size:15px;color:#555;max-width:36em}@media screen and (max-width:560px){.hero .brand-mark{font-size:34px}.site-header-inner,.site-brand,.site-nav{display:block;width:auto;text-align:left}.site-nav{margin-top:8px}.site-nav a{margin:0 12px 0 0}}
+.doc-shell{max-width:920px;margin:0 auto;padding:16px 16px 48px}.doc-layout{display:table;width:100%;table-layout:fixed}.doc-side,.doc-main{display:table-cell;vertical-align:top}.doc-side{width:190px;padding-right:20px}.doc-side nav{background:#fff;border:1px solid #c8c8c8;-webkit-border-radius:6px;border-radius:6px;padding:10px 12px 12px}.doc-side h2{margin:12px 0 4px;font-size:11px;font-weight:700;color:#888}.doc-side h2:first-child{margin-top:0}.doc-side ul{list-style:none;margin:0;padding:0}.doc-side li{margin:0}.doc-side a{display:block;text-decoration:none;color:#1a6eb5;font-size:13px;line-height:1.35;padding:3px 0}.doc-side a:hover{text-decoration:underline}.doc-side a[aria-current=page]{color:#111;font-weight:700}.doc-main{background:#fff;border:1px solid #c8c8c8;-webkit-border-radius:6px;border-radius:6px;padding:18px 20px 28px}.doc-main>:first-child{margin-top:0}.doc-main h1{margin:0 0 .6em;font-size:24px;line-height:1.2;color:#111}.doc-main h2{margin:1.35em 0 .45em;font-size:17px;padding-top:.35em;border-top:1px solid #ddd;color:#111}.doc-main h2:first-of-type{border-top:0;padding-top:0}.doc-main h3{margin:1.1em 0 .35em;font-size:15px}.doc-main p,.doc-main li{max-width:42em}.doc-main p{margin:0 0 .8em;color:#222}.doc-main ul,.doc-main ol{margin:0 0 .9em;padding-left:1.25em}.doc-main pre,.doc-main code{font-family:Menlo,Monaco,Consolas,monospace;font-size:13px}.doc-main code{background:#f0f0f0;padding:.1em .3em;-webkit-border-radius:2px;border-radius:2px}.doc-main pre{background:#2a2a2a;color:#e8e8e8;border:0;-webkit-border-radius:4px;border-radius:4px;overflow:auto;padding:11px 12px}.doc-main pre code{background:transparent;padding:0;color:inherit}.doc-main table{border-collapse:collapse;width:100%;font-size:14px;margin:0 0 1em}.doc-main th,.doc-main td{border:1px solid #ccc;padding:6px 8px;text-align:left;vertical-align:top}.doc-main th{background:#f7f7f7}.doc-main blockquote{margin:0 0 1em;padding:0 0 0 10px;border-left:3px solid #ccc;color:#555}@media screen and (max-width:720px){.doc-layout,.doc-side,.doc-main{display:block;width:auto}.doc-side{padding:0 0 14px}}
+</style></head> <body> <header class="site-header"> <div class="site-header-inner"> <a class="site-brand" href="/surf/"> <img src="/surf/CydiaIcon.png" alt="" width="22" height="22">
+Surf
+</a> <nav class="site-nav"> <a href="/surf/install/ios/"> iOS </a><a href="/surf/install/host/"> Host </a><a href="/surf/docs/" aria-current="page"> Docs </a><a href="https://github.com/seg6/surf"> Source </a> </nav> </div> </header> <div class="site-main">  <div class="doc-shell"> <div class="doc-layout"> <aside class="doc-side"> <nav aria-label="Documentation"> <ul> <li> <a href="/surf/docs/">Docs home</a> </li> </ul> <div> <h2>Guide</h2> <ul> <li> <a href="/surf/docs/guide/overview/"> Overview </a> </li><li> <a href="/surf/docs/guide/install-host/"> Install the host </a> </li><li> <a href="/surf/docs/guide/install-ios/"> Install on iOS </a> </li><li> <a href="/surf/docs/guide/install-desktop/"> Install the desktop client </a> </li><li> <a href="/surf/docs/guide/pairing/"> Pairing </a> </li><li> <a href="/surf/docs/guide/daily-use/"> Daily use </a> </li><li> <a href="/surf/docs/guide/browser-setup/"> Browser setup </a> </li><li> <a href="/surf/docs/guide/remote-access/"> Remote access </a> </li><li> <a href="/surf/docs/guide/updates/"> Updates </a> </li><li> <a href="/surf/docs/guide/configuration/"> Configuration </a> </li> </ul> </div><div> <h2>Reference</h2> <ul> <li> <a href="/surf/docs/reference/capabilities/"> Capabilities </a> </li><li> <a href="/surf/docs/reference/api/"> HTTP API </a> </li><li> <a href="/surf/docs/reference/protocol/"> Protocol </a> </li><li> <a href="/surf/docs/reference/security/"> Security </a> </li><li> <a href="/surf/docs/reference/troubleshooting/" aria-current="page"> Troubleshooting </a> </li><li> <a href="/surf/docs/reference/versioning/"> Versioning </a> </li> </ul> </div><div> <h2>Internals</h2> <ul> <li> <a href="/surf/docs/concepts/architecture/"> Architecture </a> </li><li> <a href="/surf/docs/concepts/browser-lifetime/"> Browser lifetime </a> </li><li> <a href="/surf/docs/concepts/client-core/"> Client core </a> </li><li> <a href="/surf/docs/concepts/media/"> Media </a> </li> </ul> </div><div> <h2>Clients</h2> <ul> <li> <a href="/surf/docs/clients/desktop/"> Desktop client (Linux) </a> </li><li> <a href="/surf/docs/clients/ios/"> iOS client </a> </li><li> <a href="/surf/docs/clients/porting/"> Porting Surf clients </a> </li> </ul> </div><div> <h2>Build</h2> <ul> <li> <a href="/surf/docs/develop/build/"> Build </a> </li><li> <a href="/surf/docs/develop/ci/"> CI and build caches </a> </li><li> <a href="/surf/docs/develop/native-ios/"> Native build </a> </li><li> <a href="/surf/docs/develop/releasing/"> Releasing </a> </li><li> <a href="/surf/docs/develop/testing/"> Testing </a> </li> </ul> </div> </nav> </aside> <article class="doc-main">  <h1 id="troubleshooting">Troubleshooting</h1>
+<h2 id="client-cannot-find-the-server">Client cannot find the server</h2>
+<ol>
+<li>Confirm Surf is running (<code>surf status</code>).</li>
+<li>Allow TCP port <code>18080</code> (or your <code>PORT</code>) through the host firewall.</li>
+<li>Test the local endpoint:</li>
+</ol>
+<pre><code class="language-sh">curl -k https://127.0.0.1:18080/api/v1/health
+</code></pre>
+<p>Bonjour only discovers hosts. Enter the host name or LAN address when
+multicast discovery is unavailable. The address must belong to the computer
+running Surf, not the client device.</p>
+<h2 id="pairing-is-closed">Pairing is closed</h2>
+<p>Open <strong>Paired Devices</strong> -> <strong>Pair device</strong>, or run <code>surf pair</code>. An invitation
+closes after use, cancellation, server restart, or five wrong manual codes.</p>
+<p>Manual pairing must show the same six words on both ends. Different words mean
+another server identity was presented. Cancel.</p>
+<p>CLI commands must use the same <code>SURF_HOME</code> as the running backend.</p>
+<h2 id="pairing-shows-an-ssl-error">Pairing shows an SSL error</h2>
+<p>Surf uses a self-signed certificate and pins its fingerprint. Public CA
+validation is not involved.</p>
+<p>Check both system clocks and use the host LAN address instead of <code>127.0.0.1</code>
+from another machine. Never bypass a changed identity warning for a saved
+server.</p>
+<h2 id="server-identity-changed">Server Identity Changed</h2>
+<p>The certificate no longer matches the saved fingerprint. Causes: wrong host,
+replaced <code>SURF_HOME</code>, or interception. Confirm the host. A reinstalled server
+must be forgotten and paired again.</p>
+<h2 id="paired-device-is-rejected">Paired device is rejected</h2>
+<pre><code class="language-sh">surf devices list
+</code></pre>
+<p>A revoked device must pair again. Loss of the client private key (iOS Keychain
+item) also requires pairing again. App preferences do not contain that key.</p>
+<h2 id="qr-scanning-fails-on-ios-6">QR scanning fails on iOS 6</h2>
+<p>Surf includes a software QR decoder. Devices without a working camera can use
+the address, six-digit code, and six-word comparison.</p>
+<h2 id="video-audio-or-input-fails">Video, audio, or input fails</h2>
+<p>Open the client performance overlay and check host logs for capture or
+WebCodecs errors.</p>
+<pre><code class="language-sh">surf logs --follow
+</code></pre>
+<p>Rotation and fullscreen should recover without manual action. <strong>Retry Video</strong>
+is for a recovery that ended with video unavailable.</p>
+<p>Compatibility values in client Settings and <code>surf status</code> must match. App
+versions may differ.</p>
+<p>FFmpeg, PulseAudio, and virtual audio devices are not part of the Chromium tab
+capture path on the host.</p>
+<h2 id="stuck-in-browser-setup--paused">Stuck in browser setup / paused</h2>
+<p>Clients pause while the host has setup open. Close setup windows, choose
+<strong>Resume on devices</strong>, or confirm <strong>Resume here</strong> on a client. If close fails,
+use the separate force-close confirmation (<code>surf browser --resume --force</code>
+only after a failed close). See <a href="/surf/docs/guide/browser-setup/">Browser setup</a>.</p>
+<h2 id="rotation-or-fullscreen-has-the-wrong-size">Rotation or fullscreen has the wrong size</h2>
+<p>Surf fullscreen and page fullscreen are synchronized. The native Exit control
+leaves both.</p>
+<p>After a size change, the backend log should show the client surface and one
+settled encoder resize. The WebSocket should remain open. If the client
+reconnects, confirm matching compatibility generations and collect both logs
+around the transition.</p>
+<h2 id="widevine-or-site-sign-in-fails">Widevine or site sign-in fails</h2>
+<p>Check authenticated runtime statistics for the Widevine EME probe. Surf does
+not ship a CDM. A browser-supplied CDM can work without appearing in
+<code>chrome://components</code>.</p>
+<p>Sites may still reject playback or sign-in because of account, IP, DRM, output
+protection, or browser policy.</p>
+<p><strong>Mobile Websites</strong> requests a mobile identity. Disable it when checking a
+site’s desktop support. Use <a href="/surf/docs/guide/browser-setup/">Browser setup</a> for
+awkward sign-in flows.</p>
+<h2 id="ios-package-will-not-install">iOS package will not install</h2>
+<pre><code class="language-sh">docker run --rm -v "$PWD:/src" surf-buildenv \
+  bash /src/client/ios/verify-package.sh
+</code></pre>
+<p>The package must contain armv7 and arm64 builds, both device families, and the
+update helper with root ownership and setuid mode.</p>
+<p>After manual installation, run <code>uicache</code> as <code>mobile</code> if needed, then respring.</p>
+<h2 id="desktop-opens-but-the-backend-does-not">Desktop opens but the backend does not</h2>
+<p>Read <strong>Settings -> Logs</strong> or <code>$SURF_HOME/logs/desktop.log</code> before changing
+state.</p>
+<p>A forced desktop exit should not leave the backend, Chromium, listener, or a
+live lock. Empty <code>.lock</code> files do not hold locks. Surf can move a failed
+Chromium profile aside while keeping server identity and pairings.</p>
+<p>Deleting all of <code>SURF_HOME</code> also deletes the server identity and forces every
+client to pair again. Repair invalid TLS material under <code>identity/</code> only after
+preserving the old contents.</p>
+<h2 id="windows-update-does-not-reopen-surf">Windows update does not reopen Surf</h2>
+<p>Install Surf 0.10.3 or later. Those installers stop the existing process before
+replacement and start the new version afterward. <code>SURF_HOME</code> remains in place.</p>
+<h2 id="clipboard-sync-has-no-host-integration">Clipboard sync has no host integration</h2>
+<pre><code class="language-sh">surf clipboard status
+</code></pre>
+<p>Windows and macOS use system clipboard APIs. Wayland needs <code>wl-copy</code> /
+<code>wl-paste</code>. X11 needs <code>xclip</code> or <code>xsel</code>. The display environment must be
+available to the Surf process.</p>
+<p>A headless service can still sync text between Surf clients via
+<code>surf clipboard get</code> / <code>set</code>.</p>
+<h2 id="collect-logs">Collect logs</h2>
+<pre><code class="language-sh">surf logs --follow
+surf logs --source device --device DEVICE_ID
+</code></pre>
+<p>Host copies are bounded under <code>$SURF_HOME/logs/</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Client</th>
+<th>Location</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>iOS</td>
+<td>Settings -> Diagnostics -> Logs; <code>/var/mobile/Library/Surf/surf.log</code></td>
+</tr>
+<tr>
+<td>Desktop</td>
+<td>In-app diagnostics; preferences directory logs as documented in the client</td>
+</tr>
+</tbody>
+</table>
+<p>Surf omits credentials, clipboard text, tickets, query strings, and full URLs
+from logs where possible. Review exports before publication.</p>  </article> </div> </div>  </div> <footer class="site-footer"> <div class="site-footer-inner">
+Surf | MIT  |
+<a href="/surf/install/ios/">iOS</a> |
+<a href="/surf/docs/">Docs</a> |
+<a href="https://github.com/seg6/surf">GitHub</a> </div> </footer> </body></html>

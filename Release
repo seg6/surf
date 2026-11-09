@@ -2,20 +2,20 @@ Origin: Surf
 Label: Surf
 Suite: stable
 Codename: surf
-Version: 0.17.0
+Version: 0.18.0
 Architectures: iphoneos-arm
 Components: main
-Description: Surf browser client for legacy iOS
-Date: Wed, 09 Sep 2026 19:48:26 +0000
+Description: Surf remote browser (iOS client package source)
+Date: Mon, 09 Nov 2026 23:48:49 +0000
 MD5Sum:
- 838fa9618254bc0fba8097086a7a4cb5              706 Packages
- 20fbeeef7fc11721b0b352eef1aebabf              480 Packages.gz
- c39f2cf09a1c292e046ad27783160f28              528 Packages.bz2
+ 4433bbd92acc4043b8da4e2a59038a30              706 Packages
+ 5c36273ec204af4f208ae8a12baebf86              481 Packages.gz
+ f92eb14539d527d5d53518c3101c901c              524 Packages.bz2
 SHA1:
- 4cb5c1c553999c273f8c48837a5483372209c588              706 Packages
- ec9dede191867c03336b82ce9ecacdbe1a32592d              480 Packages.gz
- efa13239127ba874f82146fbd0d711cc6911658c              528 Packages.bz2
+ f5a4546e44d2b45e1c1ea0b8885df996b25c61bf              706 Packages
+ 48b9d249ea6d8a80ac9884dc8c68255c2dad734a              481 Packages.gz
+ 6b4bbbc38c51d4ba7358f8281016e231b80bb22a              524 Packages.bz2
 SHA256:
- 6f18388bc29acb2e9cee1121607f5ab0c81a783bbcb4ff85ba90c8ee4feb6dc0              706 Packages
- 414b9dc2b0648c1b078faf4356ef0496dedb4b0601dc6b84b713ee99fcc34ba9              480 Packages.gz
- aac3a69abf95a714d3e490112b047bb4d9e371f30fa9e33f625aa1ac0d52392a              528 Packages.bz2
+ 20a093955f02a9ceda7252d385af6e289f5c00aa207ed4f0414d6eb7c457a497              706 Packages
+ 656ed3032425b0a887cfe6f2bc8ef6d45de84f8bc7332fe18515d6ac6b1a26df              481 Packages.gz
+ a2371bf6776ec7c1800ce62f3f8ca9870acaad94b4ef0ba51173ce8be2b8722d              524 Packages.bz2

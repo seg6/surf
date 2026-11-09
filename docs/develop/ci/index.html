@@ -1,0 +1,91 @@
+<!DOCTYPE html><html lang="en"> <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="format-detection" content="telephone=no"><meta name="description" content="CI and build caches. Surf documentation."><title>CI and build caches | Surf</title><link rel="icon" href="/surf/CydiaIcon.png"><style>html,body{margin:0;padding:0}body{background:#ececec;color:#222;font-family:Helvetica Neue,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.45;-webkit-text-size-adjust:100%}a{color:#1a6eb5}a:hover{text-decoration:underline}a:focus{outline:1px dotted #1a6eb5}img{border:0;max-width:100%;height:auto;vertical-align:middle}code,pre{font-family:Menlo,Monaco,Consolas,Courier New,monospace;font-size:13px}.site-header{background:#fff;border-bottom:1px solid #c8c8c8}.site-header-inner{max-width:720px;margin:0 auto;padding:10px 16px;display:table;width:100%}.site-brand,.site-nav{display:table-cell;vertical-align:middle}.site-brand{width:100px;font-weight:700;font-size:17px;color:#222;text-decoration:none}.site-brand img{width:22px;height:22px;-webkit-border-radius:5px;border-radius:5px;margin-right:6px}.site-nav{text-align:right}.site-nav a{color:#555;text-decoration:none;margin-left:14px;font-size:14px}.site-nav a:hover,.site-nav a[aria-current=page]{color:#1a6eb5}.wrap{max-width:720px;margin:0 auto;padding:20px 16px 48px}.site-footer{border-top:1px solid #c8c8c8;padding:14px 16px 28px;color:#777;font-size:12px;background:#e4e4e4}.site-footer-inner{max-width:720px;margin:0 auto}.site-footer a{color:#555}.site-footer code{font-size:11px}.hero{margin:0 0 28px;padding:10px 0 22px;border-bottom:1px solid #c8c8c8}.hero .brand-mark{margin:0 0 8px;font-size:44px;line-height:1.05;font-weight:700;color:#111}.hero h1{margin:0 0 12px;font-size:22px;line-height:1.3;font-weight:400;color:#222}.hero .deck{margin:0 0 18px;font-size:16px;line-height:1.5;color:#444;max-width:36em}.cta-row{margin:0;padding:0;list-style:none}.cta-row li{display:inline-block;margin:0 8px 8px 0;vertical-align:top}.cta{display:inline-block;padding:8px 14px;-webkit-border-radius:4px;border-radius:4px;text-decoration:none;font-size:14px;font-weight:700}.cta-primary{background:#1a6eb5;color:#fff;border:1px solid #155a96}.cta-primary:hover{background:#155a96;color:#fff;text-decoration:none}.cta-secondary{background:#fff;color:#222;border:1px solid #bbb}.cta-secondary:hover{border-color:#1a6eb5;color:#1a6eb5;text-decoration:none}.apt{background:#fff;border:1px solid #c8c8c8;-webkit-border-radius:6px;border-radius:6px;padding:14px 16px 16px;margin:0 0 28px}.apt h2{margin:0 0 6px;font-size:15px;font-weight:700;color:#111}.apt .source{margin:0 0 12px;font-family:Menlo,Monaco,Consolas,monospace;font-size:14px;color:#111;word-break:break-all}.apt .meta{margin:10px 0 0;font-size:12px;color:#777}.section{margin:0 0 28px}.section h2{margin:0 0 10px;font-size:13px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:.04em}.section>p{margin:0 0 12px;color:#333;max-width:38em;font-size:15px;line-height:1.5}.point{margin:0 0 16px;padding:0 0 14px;border-bottom:1px solid #ddd;max-width:38em}.point:last-child{border-bottom:0;padding-bottom:0;margin-bottom:0}.point-title{margin:0 0 4px;font-size:16px;font-weight:700;color:#111}.point-title a{color:#1a6eb5;text-decoration:none}.point-title a:hover{text-decoration:underline}.point>p:last-child{margin:0;font-size:15px;line-height:1.5;color:#444}.doc-links{margin:0;padding:0;list-style:none;background:#fff;border:1px solid #c8c8c8}.doc-links li{margin:0;padding:10px 12px;border-bottom:1px solid #ddd}.doc-links li:last-child{border-bottom:0}.doc-links a{font-weight:700;text-decoration:none;color:#1a6eb5;font-size:15px}.doc-links a:hover{text-decoration:underline}.doc-links span{display:block;margin-top:2px;font-size:13px;color:#666;font-weight:400}.section .more{margin:10px 0 0;font-size:14px}.code{background:#2a2a2a;color:#e8e8e8;border:0;-webkit-border-radius:4px;border-radius:4px;padding:12px 14px;overflow:auto}.page-lead{margin:0 0 18px}.page-lead h1{margin:0 0 8px;font-size:26px;line-height:1.15}.page-lead .deck{margin:0 0 14px;font-size:15px;color:#555;max-width:36em}@media screen and (max-width:560px){.hero .brand-mark{font-size:34px}.site-header-inner,.site-brand,.site-nav{display:block;width:auto;text-align:left}.site-nav{margin-top:8px}.site-nav a{margin:0 12px 0 0}}
+.doc-shell{max-width:920px;margin:0 auto;padding:16px 16px 48px}.doc-layout{display:table;width:100%;table-layout:fixed}.doc-side,.doc-main{display:table-cell;vertical-align:top}.doc-side{width:190px;padding-right:20px}.doc-side nav{background:#fff;border:1px solid #c8c8c8;-webkit-border-radius:6px;border-radius:6px;padding:10px 12px 12px}.doc-side h2{margin:12px 0 4px;font-size:11px;font-weight:700;color:#888}.doc-side h2:first-child{margin-top:0}.doc-side ul{list-style:none;margin:0;padding:0}.doc-side li{margin:0}.doc-side a{display:block;text-decoration:none;color:#1a6eb5;font-size:13px;line-height:1.35;padding:3px 0}.doc-side a:hover{text-decoration:underline}.doc-side a[aria-current=page]{color:#111;font-weight:700}.doc-main{background:#fff;border:1px solid #c8c8c8;-webkit-border-radius:6px;border-radius:6px;padding:18px 20px 28px}.doc-main>:first-child{margin-top:0}.doc-main h1{margin:0 0 .6em;font-size:24px;line-height:1.2;color:#111}.doc-main h2{margin:1.35em 0 .45em;font-size:17px;padding-top:.35em;border-top:1px solid #ddd;color:#111}.doc-main h2:first-of-type{border-top:0;padding-top:0}.doc-main h3{margin:1.1em 0 .35em;font-size:15px}.doc-main p,.doc-main li{max-width:42em}.doc-main p{margin:0 0 .8em;color:#222}.doc-main ul,.doc-main ol{margin:0 0 .9em;padding-left:1.25em}.doc-main pre,.doc-main code{font-family:Menlo,Monaco,Consolas,monospace;font-size:13px}.doc-main code{background:#f0f0f0;padding:.1em .3em;-webkit-border-radius:2px;border-radius:2px}.doc-main pre{background:#2a2a2a;color:#e8e8e8;border:0;-webkit-border-radius:4px;border-radius:4px;overflow:auto;padding:11px 12px}.doc-main pre code{background:transparent;padding:0;color:inherit}.doc-main table{border-collapse:collapse;width:100%;font-size:14px;margin:0 0 1em}.doc-main th,.doc-main td{border:1px solid #ccc;padding:6px 8px;text-align:left;vertical-align:top}.doc-main th{background:#f7f7f7}.doc-main blockquote{margin:0 0 1em;padding:0 0 0 10px;border-left:3px solid #ccc;color:#555}@media screen and (max-width:720px){.doc-layout,.doc-side,.doc-main{display:block;width:auto}.doc-side{padding:0 0 14px}}
+</style></head> <body> <header class="site-header"> <div class="site-header-inner"> <a class="site-brand" href="/surf/"> <img src="/surf/CydiaIcon.png" alt="" width="22" height="22">
+Surf
+</a> <nav class="site-nav"> <a href="/surf/install/ios/"> iOS </a><a href="/surf/install/host/"> Host </a><a href="/surf/docs/" aria-current="page"> Docs </a><a href="https://github.com/seg6/surf"> Source </a> </nav> </div> </header> <div class="site-main">  <div class="doc-shell"> <div class="doc-layout"> <aside class="doc-side"> <nav aria-label="Documentation"> <ul> <li> <a href="/surf/docs/">Docs home</a> </li> </ul> <div> <h2>Guide</h2> <ul> <li> <a href="/surf/docs/guide/overview/"> Overview </a> </li><li> <a href="/surf/docs/guide/install-host/"> Install the host </a> </li><li> <a href="/surf/docs/guide/install-ios/"> Install on iOS </a> </li><li> <a href="/surf/docs/guide/install-desktop/"> Install the desktop client </a> </li><li> <a href="/surf/docs/guide/pairing/"> Pairing </a> </li><li> <a href="/surf/docs/guide/daily-use/"> Daily use </a> </li><li> <a href="/surf/docs/guide/browser-setup/"> Browser setup </a> </li><li> <a href="/surf/docs/guide/remote-access/"> Remote access </a> </li><li> <a href="/surf/docs/guide/updates/"> Updates </a> </li><li> <a href="/surf/docs/guide/configuration/"> Configuration </a> </li> </ul> </div><div> <h2>Reference</h2> <ul> <li> <a href="/surf/docs/reference/capabilities/"> Capabilities </a> </li><li> <a href="/surf/docs/reference/api/"> HTTP API </a> </li><li> <a href="/surf/docs/reference/protocol/"> Protocol </a> </li><li> <a href="/surf/docs/reference/security/"> Security </a> </li><li> <a href="/surf/docs/reference/troubleshooting/"> Troubleshooting </a> </li><li> <a href="/surf/docs/reference/versioning/"> Versioning </a> </li> </ul> </div><div> <h2>Internals</h2> <ul> <li> <a href="/surf/docs/concepts/architecture/"> Architecture </a> </li><li> <a href="/surf/docs/concepts/browser-lifetime/"> Browser lifetime </a> </li><li> <a href="/surf/docs/concepts/client-core/"> Client core </a> </li><li> <a href="/surf/docs/concepts/media/"> Media </a> </li> </ul> </div><div> <h2>Clients</h2> <ul> <li> <a href="/surf/docs/clients/desktop/"> Desktop client (Linux) </a> </li><li> <a href="/surf/docs/clients/ios/"> iOS client </a> </li><li> <a href="/surf/docs/clients/porting/"> Porting Surf clients </a> </li> </ul> </div><div> <h2>Build</h2> <ul> <li> <a href="/surf/docs/develop/build/"> Build </a> </li><li> <a href="/surf/docs/develop/ci/" aria-current="page"> CI and build caches </a> </li><li> <a href="/surf/docs/develop/native-ios/"> Native build </a> </li><li> <a href="/surf/docs/develop/releasing/"> Releasing </a> </li><li> <a href="/surf/docs/develop/testing/"> Testing </a> </li> </ul> </div> </nav> </aside> <article class="doc-main">  <h1 id="ci-and-build-caches">CI and build caches</h1>
+<p>Three workflows, three jobs:</p>
+<table>
+<thead>
+<tr>
+<th>Workflow</th>
+<th>Trigger</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Continuous Integration</td>
+<td>PR and push to <code>main</code></td>
+<td>Test and verify; never publishes</td>
+</tr>
+<tr>
+<td>Release</td>
+<td>Manual <code>workflow_dispatch</code> with a signed tag</td>
+<td>Build host + client assets and publish the GitHub release</td>
+</tr>
+<tr>
+<td>Package Repository</td>
+<td>Manual (also queued by Release)</td>
+<td>Build Astro site + apt metadata and push <code>gh-pages</code></td>
+</tr>
+</tbody>
+</table>
+<p>CI always runs the C99, Go, Rust, desktop interaction/session, native package,
+and documentation site checks. A cache hit reuses compiler dependencies; it
+never substitutes for tests or skips compiling the current source. All CI jobs
+use Ubuntu 24.04.</p>
+<h2 id="rust-desktop">Rust desktop</h2>
+<p>Debug tests use <code>client/desktop/target</code>. Release packaging uses
+<code>.local/build/desktop-release</code>. They have separate <code>rust-cache</code> entries so a
+failed debug test cannot leave an incomplete cache that prevents saving the
+release dependencies later. Both save compiled dependencies even when a later
+test fails.</p>
+<p><code>cache-bin: false</code> keeps rustup-managed tools out of cache cleanup. Otherwise,
+the first post-job cache save can remove <code>cargo</code> before the second cache is
+saved. Toolchains are installed by the pinned setup action, not restored from
+the dependency cache.</p>
+<p>The release cache uses the same workspace mapping and shared key in CI and
+the release workflow. Release runs only when dispatched manually for a signed
+tag; the first release after a cache key bump may still be cold. Both jobs use
+Ubuntu 24.04 and Rust 1.95.0; the cache action also keys by compiler, build
+environment, and Cargo manifests/lockfile. Bump the shared key in <strong>both
+workflows</strong> when changing the native library ABI or runner distribution.</p>
+<p>GitHub scopes PR caches to their PR merge ref. Manual release builds do not
+consume a PR’s cache. Lockfile changes can restore compatible dependency
+artifacts, but changed dependencies and Surf source still rebuild. Debug and
+optimized release code require separate builds.</p>
+<h2 id="native-ios">Native iOS</h2>
+<p>The downloaded, verified SDK has its own cache keyed by its fetch script.
+Buildx caches the pinned Theos/toolchain Docker layers in GitHub’s cache with
+scope <code>native-buildenv</code>. Native source and package verification still run on
+every build. The release workflow separately retains its trusted, content-keyed
+GHCR build-environment image.</p>
+<h2 id="go">Go</h2>
+<p>Visible browser-setup tests run as part of <code>go test ./...</code>, using private
+Chromium profiles and Xvfb displays. CI installs Xvfb and uses its bundled
+Chrome; local runs skip these tests if either dependency is absent. They cover
+tab/profile handoff, standalone CLI lifetime, rollback, stale confirmations and
+explicit force-close recovery. They never open windows on the user’s desktop.</p>
+<p>CI uses <code>setup-go</code> caching with <code>backend/go.sum</code>. The release workflow keeps
+its separate cross-platform Go module/build cache, keyed by Go version,
+dependency checksum, and verified source commit with a dependency-prefix
+fallback.</p>
+<h2 id="documentation-site">Documentation site</h2>
+<p>CI builds the Astro site (<code>site/</code>) and rejects CSS/JS that iOS 6 WebKit cannot
+use (flex, grid, custom properties, <code>@font-face</code>, unprefixed
+<code>linear-gradient</code>, and script tags in the static output).</p>
+<h2 id="headless-integration">Headless integration</h2>
+<p>The desktop job explicitly installs X11 keyboard support, software OpenGL,
+Xvfb, ripgrep, and PulseAudio. Its clocked null audio sink allows the real ALSA
+playback path to run without a physical sound card.</p>
+<p>The session test checks complete frame delivery, input, audio, reconnect,
+resize, bounded queues, and UI-stall recovery. FPS is reported; a fixed FPS
+gate is opt-in on controlled hardware with <code>SURF_TEST_MIN_FPS=55</code>. Shared
+software-rendered runners are functional test hosts, not reference benchmark
+machines.</p>
+<p>Updated action revisions are pinned to commit SHAs with their versions in
+comments. Checkout, cache, and Docker JavaScript actions use Node 24.</p>  </article> </div> </div>  </div> <footer class="site-footer"> <div class="site-footer-inner">
+Surf | MIT  |
+<a href="/surf/install/ios/">iOS</a> |
+<a href="/surf/docs/">Docs</a> |
+<a href="https://github.com/seg6/surf">GitHub</a> </div> </footer> </body></html>

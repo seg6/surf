@@ -1,0 +1,221 @@
+<!DOCTYPE html><html lang="en"> <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="format-detection" content="telephone=no"><meta name="description" content="HTTP API. Surf documentation."><title>HTTP API | Surf</title><link rel="icon" href="/surf/CydiaIcon.png"><style>html,body{margin:0;padding:0}body{background:#ececec;color:#222;font-family:Helvetica Neue,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.45;-webkit-text-size-adjust:100%}a{color:#1a6eb5}a:hover{text-decoration:underline}a:focus{outline:1px dotted #1a6eb5}img{border:0;max-width:100%;height:auto;vertical-align:middle}code,pre{font-family:Menlo,Monaco,Consolas,Courier New,monospace;font-size:13px}.site-header{background:#fff;border-bottom:1px solid #c8c8c8}.site-header-inner{max-width:720px;margin:0 auto;padding:10px 16px;display:table;width:100%}.site-brand,.site-nav{display:table-cell;vertical-align:middle}.site-brand{width:100px;font-weight:700;font-size:17px;color:#222;text-decoration:none}.site-brand img{width:22px;height:22px;-webkit-border-radius:5px;border-radius:5px;margin-right:6px}.site-nav{text-align:right}.site-nav a{color:#555;text-decoration:none;margin-left:14px;font-size:14px}.site-nav a:hover,.site-nav a[aria-current=page]{color:#1a6eb5}.wrap{max-width:720px;margin:0 auto;padding:20px 16px 48px}.site-footer{border-top:1px solid #c8c8c8;padding:14px 16px 28px;color:#777;font-size:12px;background:#e4e4e4}.site-footer-inner{max-width:720px;margin:0 auto}.site-footer a{color:#555}.site-footer code{font-size:11px}.hero{margin:0 0 28px;padding:10px 0 22px;border-bottom:1px solid #c8c8c8}.hero .brand-mark{margin:0 0 8px;font-size:44px;line-height:1.05;font-weight:700;color:#111}.hero h1{margin:0 0 12px;font-size:22px;line-height:1.3;font-weight:400;color:#222}.hero .deck{margin:0 0 18px;font-size:16px;line-height:1.5;color:#444;max-width:36em}.cta-row{margin:0;padding:0;list-style:none}.cta-row li{display:inline-block;margin:0 8px 8px 0;vertical-align:top}.cta{display:inline-block;padding:8px 14px;-webkit-border-radius:4px;border-radius:4px;text-decoration:none;font-size:14px;font-weight:700}.cta-primary{background:#1a6eb5;color:#fff;border:1px solid #155a96}.cta-primary:hover{background:#155a96;color:#fff;text-decoration:none}.cta-secondary{background:#fff;color:#222;border:1px solid #bbb}.cta-secondary:hover{border-color:#1a6eb5;color:#1a6eb5;text-decoration:none}.apt{background:#fff;border:1px solid #c8c8c8;-webkit-border-radius:6px;border-radius:6px;padding:14px 16px 16px;margin:0 0 28px}.apt h2{margin:0 0 6px;font-size:15px;font-weight:700;color:#111}.apt .source{margin:0 0 12px;font-family:Menlo,Monaco,Consolas,monospace;font-size:14px;color:#111;word-break:break-all}.apt .meta{margin:10px 0 0;font-size:12px;color:#777}.section{margin:0 0 28px}.section h2{margin:0 0 10px;font-size:13px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:.04em}.section>p{margin:0 0 12px;color:#333;max-width:38em;font-size:15px;line-height:1.5}.point{margin:0 0 16px;padding:0 0 14px;border-bottom:1px solid #ddd;max-width:38em}.point:last-child{border-bottom:0;padding-bottom:0;margin-bottom:0}.point-title{margin:0 0 4px;font-size:16px;font-weight:700;color:#111}.point-title a{color:#1a6eb5;text-decoration:none}.point-title a:hover{text-decoration:underline}.point>p:last-child{margin:0;font-size:15px;line-height:1.5;color:#444}.doc-links{margin:0;padding:0;list-style:none;background:#fff;border:1px solid #c8c8c8}.doc-links li{margin:0;padding:10px 12px;border-bottom:1px solid #ddd}.doc-links li:last-child{border-bottom:0}.doc-links a{font-weight:700;text-decoration:none;color:#1a6eb5;font-size:15px}.doc-links a:hover{text-decoration:underline}.doc-links span{display:block;margin-top:2px;font-size:13px;color:#666;font-weight:400}.section .more{margin:10px 0 0;font-size:14px}.code{background:#2a2a2a;color:#e8e8e8;border:0;-webkit-border-radius:4px;border-radius:4px;padding:12px 14px;overflow:auto}.page-lead{margin:0 0 18px}.page-lead h1{margin:0 0 8px;font-size:26px;line-height:1.15}.page-lead .deck{margin:0 0 14px;font-size:15px;color:#555;max-width:36em}@media screen and (max-width:560px){.hero .brand-mark{font-size:34px}.site-header-inner,.site-brand,.site-nav{display:block;width:auto;text-align:left}.site-nav{margin-top:8px}.site-nav a{margin:0 12px 0 0}}
+.doc-shell{max-width:920px;margin:0 auto;padding:16px 16px 48px}.doc-layout{display:table;width:100%;table-layout:fixed}.doc-side,.doc-main{display:table-cell;vertical-align:top}.doc-side{width:190px;padding-right:20px}.doc-side nav{background:#fff;border:1px solid #c8c8c8;-webkit-border-radius:6px;border-radius:6px;padding:10px 12px 12px}.doc-side h2{margin:12px 0 4px;font-size:11px;font-weight:700;color:#888}.doc-side h2:first-child{margin-top:0}.doc-side ul{list-style:none;margin:0;padding:0}.doc-side li{margin:0}.doc-side a{display:block;text-decoration:none;color:#1a6eb5;font-size:13px;line-height:1.35;padding:3px 0}.doc-side a:hover{text-decoration:underline}.doc-side a[aria-current=page]{color:#111;font-weight:700}.doc-main{background:#fff;border:1px solid #c8c8c8;-webkit-border-radius:6px;border-radius:6px;padding:18px 20px 28px}.doc-main>:first-child{margin-top:0}.doc-main h1{margin:0 0 .6em;font-size:24px;line-height:1.2;color:#111}.doc-main h2{margin:1.35em 0 .45em;font-size:17px;padding-top:.35em;border-top:1px solid #ddd;color:#111}.doc-main h2:first-of-type{border-top:0;padding-top:0}.doc-main h3{margin:1.1em 0 .35em;font-size:15px}.doc-main p,.doc-main li{max-width:42em}.doc-main p{margin:0 0 .8em;color:#222}.doc-main ul,.doc-main ol{margin:0 0 .9em;padding-left:1.25em}.doc-main pre,.doc-main code{font-family:Menlo,Monaco,Consolas,monospace;font-size:13px}.doc-main code{background:#f0f0f0;padding:.1em .3em;-webkit-border-radius:2px;border-radius:2px}.doc-main pre{background:#2a2a2a;color:#e8e8e8;border:0;-webkit-border-radius:4px;border-radius:4px;overflow:auto;padding:11px 12px}.doc-main pre code{background:transparent;padding:0;color:inherit}.doc-main table{border-collapse:collapse;width:100%;font-size:14px;margin:0 0 1em}.doc-main th,.doc-main td{border:1px solid #ccc;padding:6px 8px;text-align:left;vertical-align:top}.doc-main th{background:#f7f7f7}.doc-main blockquote{margin:0 0 1em;padding:0 0 0 10px;border-left:3px solid #ccc;color:#555}@media screen and (max-width:720px){.doc-layout,.doc-side,.doc-main{display:block;width:auto}.doc-side{padding:0 0 14px}}
+</style></head> <body> <header class="site-header"> <div class="site-header-inner"> <a class="site-brand" href="/surf/"> <img src="/surf/CydiaIcon.png" alt="" width="22" height="22">
+Surf
+</a> <nav class="site-nav"> <a href="/surf/install/ios/"> iOS </a><a href="/surf/install/host/"> Host </a><a href="/surf/docs/" aria-current="page"> Docs </a><a href="https://github.com/seg6/surf"> Source </a> </nav> </div> </header> <div class="site-main">  <div class="doc-shell"> <div class="doc-layout"> <aside class="doc-side"> <nav aria-label="Documentation"> <ul> <li> <a href="/surf/docs/">Docs home</a> </li> </ul> <div> <h2>Guide</h2> <ul> <li> <a href="/surf/docs/guide/overview/"> Overview </a> </li><li> <a href="/surf/docs/guide/install-host/"> Install the host </a> </li><li> <a href="/surf/docs/guide/install-ios/"> Install on iOS </a> </li><li> <a href="/surf/docs/guide/install-desktop/"> Install the desktop client </a> </li><li> <a href="/surf/docs/guide/pairing/"> Pairing </a> </li><li> <a href="/surf/docs/guide/daily-use/"> Daily use </a> </li><li> <a href="/surf/docs/guide/browser-setup/"> Browser setup </a> </li><li> <a href="/surf/docs/guide/remote-access/"> Remote access </a> </li><li> <a href="/surf/docs/guide/updates/"> Updates </a> </li><li> <a href="/surf/docs/guide/configuration/"> Configuration </a> </li> </ul> </div><div> <h2>Reference</h2> <ul> <li> <a href="/surf/docs/reference/capabilities/"> Capabilities </a> </li><li> <a href="/surf/docs/reference/api/" aria-current="page"> HTTP API </a> </li><li> <a href="/surf/docs/reference/protocol/"> Protocol </a> </li><li> <a href="/surf/docs/reference/security/"> Security </a> </li><li> <a href="/surf/docs/reference/troubleshooting/"> Troubleshooting </a> </li><li> <a href="/surf/docs/reference/versioning/"> Versioning </a> </li> </ul> </div><div> <h2>Internals</h2> <ul> <li> <a href="/surf/docs/concepts/architecture/"> Architecture </a> </li><li> <a href="/surf/docs/concepts/browser-lifetime/"> Browser lifetime </a> </li><li> <a href="/surf/docs/concepts/client-core/"> Client core </a> </li><li> <a href="/surf/docs/concepts/media/"> Media </a> </li> </ul> </div><div> <h2>Clients</h2> <ul> <li> <a href="/surf/docs/clients/desktop/"> Desktop client (Linux) </a> </li><li> <a href="/surf/docs/clients/ios/"> iOS client </a> </li><li> <a href="/surf/docs/clients/porting/"> Porting Surf clients </a> </li> </ul> </div><div> <h2>Build</h2> <ul> <li> <a href="/surf/docs/develop/build/"> Build </a> </li><li> <a href="/surf/docs/develop/ci/"> CI and build caches </a> </li><li> <a href="/surf/docs/develop/native-ios/"> Native build </a> </li><li> <a href="/surf/docs/develop/releasing/"> Releasing </a> </li><li> <a href="/surf/docs/develop/testing/"> Testing </a> </li> </ul> </div> </nav> </aside> <article class="doc-main">  <h1 id="http-api">HTTP API</h1>
+<p><code>/api/v1</code> on the Surf TLS listener. No plaintext HTTP.</p>
+<table>
+<thead>
+<tr>
+<th>Class</th>
+<th>Requirement</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Public</td>
+<td>Reachability / pairing bootstrap</td>
+</tr>
+<tr>
+<td>Device session</td>
+<td>Cookie/session after challenge</td>
+</tr>
+<tr>
+<td>WebSocket</td>
+<td>Single-use device-bound ticket</td>
+</tr>
+<tr>
+<td>Admin</td>
+<td>Loopback + control token from <code>daemon.json</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>/api/v1/health</code> and <code>/api/v1/server</code> are unauthenticated (reachability /
+metadata). Browser, media, files, stats, updates, and WebSockets need a paired
+device (or admin where noted).</p>
+<h2 id="public-and-pairing">Public and pairing</h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/api/v1/health</code></td>
+<td>Liveness</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/v1/server</code></td>
+<td>Server metadata for discovery/UI</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/v1/tunnel</code></td>
+<td>Tunnel helper when <code>SURF_TUNNEL_HOST</code> is set</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/v1/pairing/request</code></td>
+<td>Start/continue a pairing attempt</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/v1/pairing/status/{id}</code></td>
+<td>Pairing status</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/v1/pairing/confirm/{id}</code></td>
+<td>Client confirmation</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/v1/pairing/cancel/{id}</code></td>
+<td>Cancel</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/v1/pairing/ack/{id}</code></td>
+<td>Acknowledge completion</td>
+</tr>
+</tbody>
+</table>
+<p>Pairing is closed until the owner opens an invitation on the host.</p>
+<h2 id="authentication">Authentication</h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>POST</td>
+<td><code>/api/v1/auth/challenge</code></td>
+<td>Fresh 30s challenge</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/v1/auth/complete</code></td>
+<td>Signature -> HTTP session</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/v1/auth/revoke</code></td>
+<td>Device self-revoke (gated)</td>
+</tr>
+</tbody>
+</table>
+<p>Challenges bind API v1, server ID, device ID, challenge ID, and nonce. Success
+yields a session cookie (<code>surf_device</code>, 24h) used for subsequent device routes.</p>
+<h2 id="session-device-routes">Session device routes</h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/api/v1/config</code></td>
+<td>Caps, compatibility, client configuration</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/v1/ws</code></td>
+<td>WebSocket upgrade with single-use ticket</td>
+</tr>
+<tr>
+<td>GET/POST</td>
+<td><code>/api/v1/browser-mode</code></td>
+<td>Setup status / resume (device)</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/v1/client/logs</code></td>
+<td>Upload bounded client log snapshots</td>
+</tr>
+<tr>
+<td>*</td>
+<td><code>/api/v1/tab-icons/*</code></td>
+<td>Favicon assets</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/v1/uploads</code></td>
+<td>File chooser uploads</td>
+</tr>
+<tr>
+<td>*</td>
+<td><code>/api/v1/downloads/*</code></td>
+<td>List/fetch downloads (GET/HEAD, ranges, ETags)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/v1/updates/client</code></td>
+<td>Embedded iOS package when present</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-sh">curl -k https://127.0.0.1:18080/api/v1/health
+</code></pre>
+<h2 id="admin-loopback">Admin (loopback)</h2>
+<p>Under <code>/api/v1/admin/...</code> with the control token:</p>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Examples</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Pairing</td>
+<td>Create/get/delete session; list/reject candidates</td>
+</tr>
+<tr>
+<td>Devices</td>
+<td>List; revoke</td>
+</tr>
+<tr>
+<td>Logs</td>
+<td>Sources, fetch, stream, refresh, clear</td>
+</tr>
+<tr>
+<td>Clipboard</td>
+<td>Get/set text; enable/disable sync</td>
+</tr>
+<tr>
+<td>Browser</td>
+<td>GET status; POST <code>open</code> / <code>resume</code> with revision</td>
+</tr>
+<tr>
+<td>Config / shutdown</td>
+<td>Local dashboard operations</td>
+</tr>
+</tbody>
+</table>
+<p>Admin is for the tray, dashboard, and <code>surf</code> CLI on the same machine. Not for
+remote administration over the public port.</p>
+<h2 id="websocket">WebSocket</h2>
+<p>After authentication, the client obtains a short-lived ticket and connects to
+<code>/api/v1/ws</code>. The socket carries:</p>
+<ul>
+<li>Text frames: control JSON (commands in, events out)</li>
+<li>Binary frames: <code>RBR1</code> media</li>
+</ul>
+<p>See <a href="/surf/docs/reference/protocol/">Protocol</a>.</p>  </article> </div> </div>  </div> <footer class="site-footer"> <div class="site-footer-inner">
+Surf | MIT  |
+<a href="/surf/install/ios/">iOS</a> |
+<a href="/surf/docs/">Docs</a> |
+<a href="https://github.com/seg6/surf">GitHub</a> </div> </footer> </body></html>

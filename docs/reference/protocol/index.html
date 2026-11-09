@@ -1,0 +1,374 @@
+<!DOCTYPE html><html lang="en"> <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="format-detection" content="telephone=no"><meta name="description" content="Protocol. Surf documentation."><title>Protocol | Surf</title><link rel="icon" href="/surf/CydiaIcon.png"><style>html,body{margin:0;padding:0}body{background:#ececec;color:#222;font-family:Helvetica Neue,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.45;-webkit-text-size-adjust:100%}a{color:#1a6eb5}a:hover{text-decoration:underline}a:focus{outline:1px dotted #1a6eb5}img{border:0;max-width:100%;height:auto;vertical-align:middle}code,pre{font-family:Menlo,Monaco,Consolas,Courier New,monospace;font-size:13px}.site-header{background:#fff;border-bottom:1px solid #c8c8c8}.site-header-inner{max-width:720px;margin:0 auto;padding:10px 16px;display:table;width:100%}.site-brand,.site-nav{display:table-cell;vertical-align:middle}.site-brand{width:100px;font-weight:700;font-size:17px;color:#222;text-decoration:none}.site-brand img{width:22px;height:22px;-webkit-border-radius:5px;border-radius:5px;margin-right:6px}.site-nav{text-align:right}.site-nav a{color:#555;text-decoration:none;margin-left:14px;font-size:14px}.site-nav a:hover,.site-nav a[aria-current=page]{color:#1a6eb5}.wrap{max-width:720px;margin:0 auto;padding:20px 16px 48px}.site-footer{border-top:1px solid #c8c8c8;padding:14px 16px 28px;color:#777;font-size:12px;background:#e4e4e4}.site-footer-inner{max-width:720px;margin:0 auto}.site-footer a{color:#555}.site-footer code{font-size:11px}.hero{margin:0 0 28px;padding:10px 0 22px;border-bottom:1px solid #c8c8c8}.hero .brand-mark{margin:0 0 8px;font-size:44px;line-height:1.05;font-weight:700;color:#111}.hero h1{margin:0 0 12px;font-size:22px;line-height:1.3;font-weight:400;color:#222}.hero .deck{margin:0 0 18px;font-size:16px;line-height:1.5;color:#444;max-width:36em}.cta-row{margin:0;padding:0;list-style:none}.cta-row li{display:inline-block;margin:0 8px 8px 0;vertical-align:top}.cta{display:inline-block;padding:8px 14px;-webkit-border-radius:4px;border-radius:4px;text-decoration:none;font-size:14px;font-weight:700}.cta-primary{background:#1a6eb5;color:#fff;border:1px solid #155a96}.cta-primary:hover{background:#155a96;color:#fff;text-decoration:none}.cta-secondary{background:#fff;color:#222;border:1px solid #bbb}.cta-secondary:hover{border-color:#1a6eb5;color:#1a6eb5;text-decoration:none}.apt{background:#fff;border:1px solid #c8c8c8;-webkit-border-radius:6px;border-radius:6px;padding:14px 16px 16px;margin:0 0 28px}.apt h2{margin:0 0 6px;font-size:15px;font-weight:700;color:#111}.apt .source{margin:0 0 12px;font-family:Menlo,Monaco,Consolas,monospace;font-size:14px;color:#111;word-break:break-all}.apt .meta{margin:10px 0 0;font-size:12px;color:#777}.section{margin:0 0 28px}.section h2{margin:0 0 10px;font-size:13px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:.04em}.section>p{margin:0 0 12px;color:#333;max-width:38em;font-size:15px;line-height:1.5}.point{margin:0 0 16px;padding:0 0 14px;border-bottom:1px solid #ddd;max-width:38em}.point:last-child{border-bottom:0;padding-bottom:0;margin-bottom:0}.point-title{margin:0 0 4px;font-size:16px;font-weight:700;color:#111}.point-title a{color:#1a6eb5;text-decoration:none}.point-title a:hover{text-decoration:underline}.point>p:last-child{margin:0;font-size:15px;line-height:1.5;color:#444}.doc-links{margin:0;padding:0;list-style:none;background:#fff;border:1px solid #c8c8c8}.doc-links li{margin:0;padding:10px 12px;border-bottom:1px solid #ddd}.doc-links li:last-child{border-bottom:0}.doc-links a{font-weight:700;text-decoration:none;color:#1a6eb5;font-size:15px}.doc-links a:hover{text-decoration:underline}.doc-links span{display:block;margin-top:2px;font-size:13px;color:#666;font-weight:400}.section .more{margin:10px 0 0;font-size:14px}.code{background:#2a2a2a;color:#e8e8e8;border:0;-webkit-border-radius:4px;border-radius:4px;padding:12px 14px;overflow:auto}.page-lead{margin:0 0 18px}.page-lead h1{margin:0 0 8px;font-size:26px;line-height:1.15}.page-lead .deck{margin:0 0 14px;font-size:15px;color:#555;max-width:36em}@media screen and (max-width:560px){.hero .brand-mark{font-size:34px}.site-header-inner,.site-brand,.site-nav{display:block;width:auto;text-align:left}.site-nav{margin-top:8px}.site-nav a{margin:0 12px 0 0}}
+.doc-shell{max-width:920px;margin:0 auto;padding:16px 16px 48px}.doc-layout{display:table;width:100%;table-layout:fixed}.doc-side,.doc-main{display:table-cell;vertical-align:top}.doc-side{width:190px;padding-right:20px}.doc-side nav{background:#fff;border:1px solid #c8c8c8;-webkit-border-radius:6px;border-radius:6px;padding:10px 12px 12px}.doc-side h2{margin:12px 0 4px;font-size:11px;font-weight:700;color:#888}.doc-side h2:first-child{margin-top:0}.doc-side ul{list-style:none;margin:0;padding:0}.doc-side li{margin:0}.doc-side a{display:block;text-decoration:none;color:#1a6eb5;font-size:13px;line-height:1.35;padding:3px 0}.doc-side a:hover{text-decoration:underline}.doc-side a[aria-current=page]{color:#111;font-weight:700}.doc-main{background:#fff;border:1px solid #c8c8c8;-webkit-border-radius:6px;border-radius:6px;padding:18px 20px 28px}.doc-main>:first-child{margin-top:0}.doc-main h1{margin:0 0 .6em;font-size:24px;line-height:1.2;color:#111}.doc-main h2{margin:1.35em 0 .45em;font-size:17px;padding-top:.35em;border-top:1px solid #ddd;color:#111}.doc-main h2:first-of-type{border-top:0;padding-top:0}.doc-main h3{margin:1.1em 0 .35em;font-size:15px}.doc-main p,.doc-main li{max-width:42em}.doc-main p{margin:0 0 .8em;color:#222}.doc-main ul,.doc-main ol{margin:0 0 .9em;padding-left:1.25em}.doc-main pre,.doc-main code{font-family:Menlo,Monaco,Consolas,monospace;font-size:13px}.doc-main code{background:#f0f0f0;padding:.1em .3em;-webkit-border-radius:2px;border-radius:2px}.doc-main pre{background:#2a2a2a;color:#e8e8e8;border:0;-webkit-border-radius:4px;border-radius:4px;overflow:auto;padding:11px 12px}.doc-main pre code{background:transparent;padding:0;color:inherit}.doc-main table{border-collapse:collapse;width:100%;font-size:14px;margin:0 0 1em}.doc-main th,.doc-main td{border:1px solid #ccc;padding:6px 8px;text-align:left;vertical-align:top}.doc-main th{background:#f7f7f7}.doc-main blockquote{margin:0 0 1em;padding:0 0 0 10px;border-left:3px solid #ccc;color:#555}@media screen and (max-width:720px){.doc-layout,.doc-side,.doc-main{display:block;width:auto}.doc-side{padding:0 0 14px}}
+</style></head> <body> <header class="site-header"> <div class="site-header-inner"> <a class="site-brand" href="/surf/"> <img src="/surf/CydiaIcon.png" alt="" width="22" height="22">
+Surf
+</a> <nav class="site-nav"> <a href="/surf/install/ios/"> iOS </a><a href="/surf/install/host/"> Host </a><a href="/surf/docs/" aria-current="page"> Docs </a><a href="https://github.com/seg6/surf"> Source </a> </nav> </div> </header> <div class="site-main">  <div class="doc-shell"> <div class="doc-layout"> <aside class="doc-side"> <nav aria-label="Documentation"> <ul> <li> <a href="/surf/docs/">Docs home</a> </li> </ul> <div> <h2>Guide</h2> <ul> <li> <a href="/surf/docs/guide/overview/"> Overview </a> </li><li> <a href="/surf/docs/guide/install-host/"> Install the host </a> </li><li> <a href="/surf/docs/guide/install-ios/"> Install on iOS </a> </li><li> <a href="/surf/docs/guide/install-desktop/"> Install the desktop client </a> </li><li> <a href="/surf/docs/guide/pairing/"> Pairing </a> </li><li> <a href="/surf/docs/guide/daily-use/"> Daily use </a> </li><li> <a href="/surf/docs/guide/browser-setup/"> Browser setup </a> </li><li> <a href="/surf/docs/guide/remote-access/"> Remote access </a> </li><li> <a href="/surf/docs/guide/updates/"> Updates </a> </li><li> <a href="/surf/docs/guide/configuration/"> Configuration </a> </li> </ul> </div><div> <h2>Reference</h2> <ul> <li> <a href="/surf/docs/reference/capabilities/"> Capabilities </a> </li><li> <a href="/surf/docs/reference/api/"> HTTP API </a> </li><li> <a href="/surf/docs/reference/protocol/" aria-current="page"> Protocol </a> </li><li> <a href="/surf/docs/reference/security/"> Security </a> </li><li> <a href="/surf/docs/reference/troubleshooting/"> Troubleshooting </a> </li><li> <a href="/surf/docs/reference/versioning/"> Versioning </a> </li> </ul> </div><div> <h2>Internals</h2> <ul> <li> <a href="/surf/docs/concepts/architecture/"> Architecture </a> </li><li> <a href="/surf/docs/concepts/browser-lifetime/"> Browser lifetime </a> </li><li> <a href="/surf/docs/concepts/client-core/"> Client core </a> </li><li> <a href="/surf/docs/concepts/media/"> Media </a> </li> </ul> </div><div> <h2>Clients</h2> <ul> <li> <a href="/surf/docs/clients/desktop/"> Desktop client (Linux) </a> </li><li> <a href="/surf/docs/clients/ios/"> iOS client </a> </li><li> <a href="/surf/docs/clients/porting/"> Porting Surf clients </a> </li> </ul> </div><div> <h2>Build</h2> <ul> <li> <a href="/surf/docs/develop/build/"> Build </a> </li><li> <a href="/surf/docs/develop/ci/"> CI and build caches </a> </li><li> <a href="/surf/docs/develop/native-ios/"> Native build </a> </li><li> <a href="/surf/docs/develop/releasing/"> Releasing </a> </li><li> <a href="/surf/docs/develop/testing/"> Testing </a> </li> </ul> </div> </nav> </aside> <article class="doc-main">  <h1 id="protocol">Protocol</h1>
+<p>One pinned WebSocket: authenticated control JSON + binary media. Go defines
+events/commands/frames; C99 core implements the client side.</p>
+<p>Truth in code: <code>backend/internal/protocol/commands.go</code>, <code>events.go</code>,
+<code>protocol/fixtures/</code>. Both sides reject unknown commands/fields, wrong types,
+invalid UTF-8, trailing JSON, and out-of-range values. Browser/CDP maps do not
+pass through as untyped JSON.</p>
+<h2 id="versions">Versions</h2>
+<table>
+<thead>
+<tr>
+<th>Dimension</th>
+<th>Meaning</th>
+<th>Changes when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>App version</td>
+<td>Surf release</td>
+<td>A release is published</td>
+</tr>
+<tr>
+<td>Compatibility generation</td>
+<td>Gate between clients and backends</td>
+<td>Older peers cannot interoperate safely</td>
+</tr>
+<tr>
+<td>Wire range</td>
+<td>Control and media envelopes</td>
+<td>An envelope changes incompatibly</td>
+</tr>
+<tr>
+<td>Capabilities</td>
+<td>Optional protocol features</td>
+<td>An additive feature is introduced</td>
+</tr>
+<tr>
+<td>Core ABI</td>
+<td>C library &#x3C;-> host app</td>
+<td>The C ABI changes incompatibly</td>
+</tr>
+</tbody>
+</table>
+<p>App version differences alone do not make peers incompatible. See
+<a href="/surf/docs/reference/versioning/">Versioning</a> and <a href="/surf/docs/reference/capabilities/">Capabilities</a>.</p>
+<p>Generation 1 uses wire token <code>20260831-1</code>. Binary media uses the <code>RBR1</code>
+header.</p>
+<h2 id="client-commands">Client commands</h2>
+<p>Each command is a JSON object with required field <code>t</code>. Optional causal fields:
+<code>iid</code>, <code>clientNs</code>.</p>
+<table>
+<thead>
+<tr>
+<th><code>t</code></th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>browser-watch</code></td>
+<td>Subscribe to <code>browser-mode</code> events</td>
+</tr>
+<tr>
+<td><code>browser-resume</code></td>
+<td>Resume from setup (<code>revision</code>, optional <code>force</code>)</td>
+</tr>
+<tr>
+<td><code>size</code></td>
+<td>Report page surface (<code>w</code>, <code>h</code>)</td>
+</tr>
+<tr>
+<td><code>clock</code></td>
+<td>Clock sync sample (<code>c0</code>)</td>
+</tr>
+<tr>
+<td><code>tab</code></td>
+<td>Tab action (<code>action</code>, <code>id</code>)</td>
+</tr>
+<tr>
+<td><code>nav</code>, <code>opennew</code></td>
+<td>Navigate / open URL</td>
+</tr>
+<tr>
+<td><code>back</code>, <code>fwd</code>, <code>reload</code>, <code>stop</code></td>
+<td>Navigation chrome</td>
+</tr>
+<tr>
+<td><code>audio</code>, <code>mobile</code>, <code>dark</code>, <code>fullscreen</code></td>
+<td>Toggles (<code>on</code>)</td>
+</tr>
+<tr>
+<td><code>touch</code></td>
+<td>Touch snapshot / edges</td>
+</tr>
+<tr>
+<td><code>pointer</code>, <code>wheel</code></td>
+<td>Pointer input (<code>pointer-input</code> cap)</td>
+</tr>
+<tr>
+<td><code>key</code>, <code>paste</code>, <code>compose</code></td>
+<td>Keyboard / IME</td>
+</tr>
+<tr>
+<td><code>find</code></td>
+<td>Find in page</td>
+</tr>
+<tr>
+<td><code>suggest</code>, <code>history</code></td>
+<td>Omnibox / history query</td>
+</tr>
+<tr>
+<td><code>hist</code>, <code>bookmark</code>, <code>downloads</code></td>
+<td>Library fetches</td>
+</tr>
+<tr>
+<td><code>histdel</code>, <code>bmdel</code>, <code>dldel</code></td>
+<td>Delete history / bookmark / download</td>
+</tr>
+<tr>
+<td><code>clear</code></td>
+<td>Clear scoped data (<code>what</code>)</td>
+</tr>
+<tr>
+<td><code>dialogreply</code>, <code>selectreply</code></td>
+<td>JS dialog / <code>&#x3C;select></code></td>
+</tr>
+<tr>
+<td><code>reader</code></td>
+<td>Reader mode</td>
+</tr>
+<tr>
+<td><code>reqkeyframe</code>, <code>video-retry</code></td>
+<td>Media recovery</td>
+</tr>
+<tr>
+<td><code>media-stats</code>, <code>media-volume</code></td>
+<td>Stats / volume</td>
+</tr>
+<tr>
+<td><code>media-playpause</code>, <code>media-mute</code>, <code>media-query</code></td>
+<td>In-page media chrome</td>
+</tr>
+<tr>
+<td><code>clipboard-result</code>, <code>clipboard-change</code></td>
+<td>Clipboard bridge</td>
+</tr>
+<tr>
+<td><code>log-record</code>, <code>log-cleared</code></td>
+<td>Live client logs</td>
+</tr>
+</tbody>
+</table>
+<h3 id="pointer-input">Pointer input</h3>
+<p><code>pointer-input</code> enables normalized pointer and wheel commands. Each includes a
+nonzero surface generation and an increasing sequence. Coordinates are relative
+to the rendered page surface. Moves and adjacent wheel samples may coalesce;
+button changes, keys, composition, and paste stay ordered. Clients without the
+capability use <code>touch</code> and omit key modifiers.</p>
+<h3 id="touch-input">Touch input</h3>
+<p><code>touch</code> carries UIKit-style contacts: lifecycle edges contain changed contacts;
+move contains the full active set with stable contact IDs. Coordinates are
+fractions of the presented video surface. The backend rejects stale
+generations/sequences, maps through Chromium’s CSS visual viewport, and
+dispatches Chromium touch events. Navigation, tab changes, viewport changes,
+website mode changes, and disconnects cancel active input.</p>
+<p><strong>Mobile Websites</strong> changes Chromium metrics and browser identity. It does not
+turn touch into mouse input. Focus events from Chromium control the native
+keyboard; plain text uses Chromium insertion and marked text uses IME
+composition.</p>
+<h2 id="backend-events">Backend events</h2>
+<table>
+<thead>
+<tr>
+<th><code>t</code> (typical)</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Hello / viewport</td>
+<td>Initial or updated view size</td>
+</tr>
+<tr>
+<td><code>browser-mode</code></td>
+<td>Setup / streaming state machine</td>
+</tr>
+<tr>
+<td>Tabs list</td>
+<td>Open tabs</td>
+</tr>
+<tr>
+<td>URL / history / security</td>
+<td>Address bar state</td>
+</tr>
+<tr>
+<td>Video / audio config</td>
+<td>Encoder readiness and parameters</td>
+</tr>
+<tr>
+<td>Library / suggest / history page / downloads</td>
+<td>Library payloads</td>
+</tr>
+<tr>
+<td>Dialog / file chooser / select / editable</td>
+<td>Page UI prompts</td>
+</tr>
+<tr>
+<td>Reader / media state</td>
+<td>Extracted reader HTML; HTML5 media chrome</td>
+</tr>
+<tr>
+<td>Clipboard / clipboard sync</td>
+<td>Host clipboard bridge</td>
+</tr>
+<tr>
+<td>Toast / text notices</td>
+<td>Human-readable notices</td>
+</tr>
+<tr>
+<td>Page frame / bool toggles</td>
+<td>Frame ack and feature flags</td>
+</tr>
+</tbody>
+</table>
+<p>Exact field sets live in <code>events.go</code> and the fixtures. Prefer fixtures over
+re-deriving shapes by hand.</p>
+<h2 id="browser-setup">Browser setup</h2>
+<p>Capability <code>browser-setup</code>. Clients send <code>{"t":"browser-watch"}</code> after opening
+the socket. Only subscribers receive <code>browser-mode</code>; older clients get a toast.</p>
+<p><code>browser-mode</code> fields: <code>state</code>, monotonic <code>revision</code>, <code>host</code>, <code>message</code>,
+<code>standalone</code>, <code>canForce</code>. States: <code>starting</code>, <code>streaming</code>, <code>opening</code>, <code>setup</code>,
+<code>resuming</code>, <code>failed</code>. Resume:</p>
+<pre><code class="language-json">{"t":"browser-resume","revision":7,"force":false}
+</code></pre>
+<p>Force is accepted only after a failed normal close, with a new revision and a
+second confirmation. Remote clients cannot open setup on the host.</p>
+<p>HTTP mirrors: authenticated <code>/api/v1/browser-mode</code>; admin
+<code>/api/v1/admin/browser</code>. See <a href="/surf/docs/reference/api/">API</a> and
+<a href="/surf/docs/guide/browser-setup/#lifetime">Browser setup</a>.</p>
+<h2 id="media-envelope">Media envelope</h2>
+<p>Binary messages start with an 84-byte <code>RBR1</code> header (network byte order).</p>
+<table>
+<thead>
+<tr>
+<th align="right">Offset</th>
+<th align="right">Bytes</th>
+<th>Field</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="right">0</td>
+<td align="right">4</td>
+<td>Magic <code>RBR1</code></td>
+</tr>
+<tr>
+<td align="right">4</td>
+<td align="right">1</td>
+<td>Type: 3 video, 4 audio</td>
+</tr>
+<tr>
+<td align="right">5</td>
+<td align="right">1</td>
+<td>Flags; video bit 0 = IDR</td>
+</tr>
+<tr>
+<td align="right">6</td>
+<td align="right">2</td>
+<td>Header length (84)</td>
+</tr>
+<tr>
+<td align="right">8</td>
+<td align="right">4</td>
+<td>Access unit or audio sequence</td>
+</tr>
+<tr>
+<td align="right">12</td>
+<td align="right">4</td>
+<td>Source frame sequence</td>
+</tr>
+<tr>
+<td align="right">16</td>
+<td align="right">2</td>
+<td>Video width or audio sample rate</td>
+</tr>
+<tr>
+<td align="right">18</td>
+<td align="right">2</td>
+<td>Video height or audio channel count</td>
+</tr>
+<tr>
+<td align="right">20</td>
+<td align="right">4</td>
+<td>Payload length</td>
+</tr>
+<tr>
+<td align="right">24</td>
+<td align="right">8</td>
+<td>Causal interaction ID</td>
+</tr>
+<tr>
+<td align="right">32</td>
+<td align="right">8</td>
+<td>Backend source receive time (monotonic ns)</td>
+</tr>
+<tr>
+<td align="right">40</td>
+<td align="right">8</td>
+<td>Encode completion time</td>
+</tr>
+<tr>
+<td align="right">48</td>
+<td align="right">8</td>
+<td>Socket write time</td>
+</tr>
+<tr>
+<td align="right">56</td>
+<td align="right">4</td>
+<td>Encoder generation</td>
+</tr>
+<tr>
+<td align="right">60</td>
+<td align="right">4</td>
+<td>Reserved</td>
+</tr>
+<tr>
+<td align="right">64</td>
+<td align="right">8</td>
+<td>Backend input receive time</td>
+</tr>
+<tr>
+<td align="right">72</td>
+<td align="right">8</td>
+<td>CDP dispatch completion time</td>
+</tr>
+<tr>
+<td align="right">80</td>
+<td align="right">1</td>
+<td>Adaptive profile</td>
+</tr>
+<tr>
+<td align="right">81</td>
+<td align="right">3</td>
+<td>Reserved</td>
+</tr>
+<tr>
+<td align="right">84</td>
+<td align="right">N</td>
+<td>Payload</td>
+</tr>
+</tbody>
+</table>
+<p>Video: complete H.264 Annex B access units. Audio: signed little-endian PCM.
+The parser validates header and exact payload length; the host retains the
+buffer while decoding.</p>
+<h2 id="changing-the-contract">Changing the contract</h2>
+<ol>
+<li>Classify additive vs breaking.</li>
+<li>Update the Go protocol type.</li>
+<li>Add valid and invalid fixtures.</li>
+<li>Update the C codec.</li>
+<li>Run contract tests both ways.</li>
+<li>Add a capability for optional behavior.</li>
+<li>Advance wire or compatibility generation only when older peers cannot continue safely.</li>
+</ol>  </article> </div> </div>  </div> <footer class="site-footer"> <div class="site-footer-inner">
+Surf | MIT  |
+<a href="/surf/install/ios/">iOS</a> |
+<a href="/surf/docs/">Docs</a> |
+<a href="https://github.com/seg6/surf">GitHub</a> </div> </footer> </body></html>
