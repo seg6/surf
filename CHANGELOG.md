@@ -5,17 +5,17 @@ version differences alone do not.
 
 ## Unreleased
 
-- Browser setup handoff tests keep a durable cookie across Chromium restarts
-  (session cookies were incorrectly expected to survive).
-- Actions split cleaned up: CI on PR/main (now includes the Astro site, all on
-  Ubuntu 24.04); Release is manual for a signed tag and queues Package
-  Repository; Package Repository stays separately dispatchable for site/apt
-  republish and no longer requires the dispatch commit itself to be signed.
+## 0.18.0 - 2026-11-10
+
 - Docs reorganized under guide / reference / concepts / clients / develop, with
   stubs at the old paths. README points at the new index and website.
 - New Astro site (`site/`) publishes at the apt root alongside Packages; Cydia
   and Sileo install links live on the iOS install page. CSS targets iOS 6
   WebKit; `packaging/repository/index.html.in` removed.
+- Actions: CI on PR/main (includes Astro site, Ubuntu 24.04); Release is manual
+  for a signed tag and queues Package Repository; Package Repository stays
+  separately dispatchable for site/apt republish.
+- Browser setup handoff tests keep a durable cookie across Chromium restarts.
 
 - Desktop fullscreen now hides Surf's browser bar and gives the page the whole
   window. Player controls, Escape and F11 restore normal browsing on exit.
