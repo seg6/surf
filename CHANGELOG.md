@@ -8,6 +8,11 @@ version differences alone do not.
 - Audio is now 48 kHz stereo by default. Set Audio quality to Standard in
   Browser setup (or `SURF_AUDIO_QUALITY=standard`) for 16 kHz mono on slow
   connections.
+- The stream is now rendered and encoded at the client's physical pixels, so it
+  is no longer blurry on Retina iPhones and iPads and on HiDPI desktop screens.
+  The encoder bitrate also grows with the surface area, and the H.264 level and
+  frame rate follow the new sizes. Needs a host and client that both support
+  the new `hidpi` capability; older combinations behave as before.
 
 ## 0.19.0 - 2026-11-19
 

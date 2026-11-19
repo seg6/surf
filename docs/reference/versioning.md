@@ -48,7 +48,7 @@ Generation 1 uses the published wire token `20260831-1`. Its supported range
 contains that marker only. Binary media uses the separate `RBR1` header.
 
 Optional behavior belongs in `caps` ([Capabilities](capabilities.md)).
-Current examples are `pointer-input`, `clock` and `media-stats`. Adding a
+Current examples are `pointer-input`, `hidpi`, `clock` and `media-stats`. Adding a
 capability is compatible. Removing one or changing its meaning is not.
 
 If a later release supports several wire generations, the config response must

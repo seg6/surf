@@ -35,7 +35,7 @@ fields are `iid` and `clientNs`.
 | --- | --- |
 | `browser-watch` | Subscribe to `browser-mode` events |
 | `browser-resume` | Resume from setup (`revision`, optional `force`) |
-| `size` | Report page surface (`w`, `h`) |
+| `size` | Report page surface (`w`, `h`, optional `scale`, `hidpi` cap) |
 | `clock` | Clock sync sample (`c0`) |
 | `tab` | Tab action (`action`, `id`) |
 | `nav`, `opennew` | Navigate, or open a URL in a new tab |

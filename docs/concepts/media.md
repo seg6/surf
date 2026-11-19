@@ -29,9 +29,42 @@ every two seconds.
 ## Client surface
 
 Clients report the even-sized page area that's left over after the native
-controls. Width and height must be between 64 and 1600. Rotation and fullscreen
-changes are coalesced before Chromium and the encoder resize, and the WebSocket
-stays open through those transitions.
+controls. Rotation and fullscreen changes are coalesced before Chromium and the
+encoder resize, and the WebSocket stays open through those transitions.
+
+### Resolution
+
+Hosts with the `hidpi` capability take the size in physical pixels, together
+with a `scale`: the device pixels per CSS pixel, from 1 to 4. Chromium lays the
+page out at the pixel size divided by the scale and renders with that device
+scale factor, so text and images are sharp on a Retina or HiDPI display
+instead of being drawn at point size and upscaled. The capture surface and the
+encoder use the pixel size.
+
+Clients lower the scale to keep the decoded surface within what they can
+decode: iOS aims for about 1920x1080 (a Retina iPhone gets 2x, a Retina iPad
+about 1.5x), and the desktop client allows up to 2560x1600. Scales are rounded
+down in quarter steps and never go below 1. Hosts without `hidpi`, and clients
+that send no `scale`, keep the old behavior: the size is in points and the
+scale is 1.
+
+`SURF_VIEWPORT_SCALE` still applies on top: it lays pages out wider at the
+same pixel size, so the device scale factor is the client scale divided by it.
+The host bounds a surface that sends a scale to 2560 pixels a side and 2560x1600
+in area, and lowers the scale with it so the page layout does not change.
+Sizes sent without a scale are bounded to between 64 and 1600 as before.
+
+### Bitrate and H.264 level
+
+`STREAM_BITRATE` is the rate for a 1024x768 surface. Larger surfaces get it
+multiplied by their area relative to that, up to 2.5 times, so a higher
+resolution is not just more compression. Smaller surfaces keep the configured
+rate.
+
+Surf declares the lowest constrained baseline level that covers the frame size
+and macroblock rate: 3.1, 4.1, 4.2, or 5.1 for surfaces beyond 1920x1088. The
+frame rate is lowered if it would exceed what the highest level for that size
+allows.
 
 ## Adaptive video
 

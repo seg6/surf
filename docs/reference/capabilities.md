@@ -26,6 +26,7 @@ They're defined in `backend/internal/config/config.go` (`Caps`).
 | `live-logs` | Authenticated native log records mirrored to the host |
 | `clipboard-sync` | Owner-controlled bidirectional clipboard bridge |
 | `pointer-input` | Desktop pointer, hover, buttons, and wheel |
+| `hidpi` | `size` may carry `scale`, with `w` and `h` in physical pixels |
 
 ## Client behavior
 
