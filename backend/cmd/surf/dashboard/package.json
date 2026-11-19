@@ -1,0 +1,25 @@
+{
+  "name": "surf-dashboard",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "preact": "11.2.0"
+  },
+  "devDependencies": {
+    "@fontsource/source-code-pro": "5.3.1",
+    "@fontsource/source-sans-3": "5.3.1",
+    "@preact/preset-vite": "2.10.6",
+    "@types/node": "22.20.5",
+    "typescript": "7.0.2",
+    "vite": "8.3.8",
+    "vitest": "5.1.1"
+  }
+}

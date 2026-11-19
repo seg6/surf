@@ -1,0 +1,180 @@
+/*
+ * Color tokens. Light follows the approved classic mockup; dark keeps the same
+ * glossy language with graphite panels in place of white ones.
+ */
+:root {
+  color-scheme: light;
+
+  --font: 'Source Sans 3', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --mono: 'Source Code Pro', ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  --page: #e4e7eb;
+  --main-top: #eef0f3;
+  --ink: #1e2329;
+  --muted: #5d6670;
+  --heading: #4a525c;
+  --heading-shadow: #ffffff;
+  --link: #2f5d9b;
+
+  --panel: #ffffff;
+  --panel-line: #c4c9d0;
+  --panel-shadow: rgba(0, 0, 0, 0.06);
+  --row-line: #e3e6ea;
+  --tile: linear-gradient(#ffffff, #f6f7f9);
+  --sunken: #f1f3f5;
+  --highlight: #f4f6f8;
+
+  --toolbar: linear-gradient(#5c6066, #45494f 50%, #3c4046 51%, #31353a);
+  --toolbar-line: #1b1d20;
+  --toolbar-sub: #c9ced4;
+
+  --sidebar: linear-gradient(90deg, #e9ecf0, #dfe3e8);
+  --sidebar-line: #b7bdc4;
+  --nav-ink: #2a3038;
+  --nav-shine: rgba(255, 255, 255, 0.7);
+  --nav-selected: linear-gradient(#6fa4e6, #3e78c8);
+  --nav-selected-top: #3a6fb8;
+  --nav-selected-bottom: #2d5c9e;
+  --nav-badge: #8e97a2;
+  --nav-badge-selected-ink: #2d5c9e;
+
+  --btn: linear-gradient(#ffffff, #e1e4e8);
+  --btn-hover: linear-gradient(#ffffff, #d3d8de);
+  --btn-line: #a6acb4;
+  --btn-ink: #2a3038;
+  --btn-shine: #ffffff;
+
+  --danger-btn: linear-gradient(#ffffff, #f1e3e5);
+  --danger-hover: linear-gradient(#ffffff, #ead2d5);
+  --danger-line: #c79aa0;
+  --danger-ink: #a3202c;
+
+  --primary: linear-gradient(#5aaef0, #2486dd 50%, #1678d3 51%, #0e68be);
+  --primary-hover: linear-gradient(#6bb8f4, #3492e6 50%, #2584dc 51%, #1a74c9);
+  --primary-line: #0b4a8f;
+
+  --field: #ffffff;
+  --field-line: #a6acb4;
+  --field-shadow: rgba(0, 0, 0, 0.12);
+  --focus: #1f6fd0;
+
+  --ok: #2f7a33;
+  --ok-dot: radial-gradient(circle at 35% 35%, #9be38a, #2f9a2c);
+  --warn: #8a5a00;
+  --bad: #a3202c;
+  --idle-dot: #9aa1a9;
+
+  --switch-off: linear-gradient(#d4d7db, #eef0f2);
+  --switch-off-line: #a6acb4;
+  --switch-on: linear-gradient(#2a6fc9, #4a90e2);
+  --switch-on-line: #21579c;
+
+  --seg-line: #8f97a1;
+  --seg-on: linear-gradient(#8a929c, #6c747e);
+
+  --notice: #f3f8fe;
+  --notice-line: #a9c4e4;
+
+  --log-bg: #ffffff;
+  --log-line: #9aa1a9;
+  --log-stripe: #f4f6f8;
+  --log-time: #6b737c;
+  --log-info: #2f5d9b;
+  --log-warn: #8a5a00;
+  --log-error: #a3202c;
+  --log-component: #1f6a72;
+
+  --modal-title: linear-gradient(#f4f5f7, #d9dde2);
+  --modal-line: #7e858e;
+  --modal-backdrop: rgba(20, 24, 30, 0.45);
+  --word: #f1f3f5;
+  --toast: #2a3038;
+  --toast-ink: #ffffff;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --page: #1b1e22;
+  --main-top: #22262b;
+  --ink: #e8ebee;
+  --muted: #a3abb5;
+  --heading: #b6bdc6;
+  --heading-shadow: rgba(0, 0, 0, 0.6);
+  --link: #8fb8ee;
+
+  --panel: #2a2e33;
+  --panel-line: #444a52;
+  --panel-shadow: rgba(0, 0, 0, 0.35);
+  --row-line: #383d43;
+  --tile: linear-gradient(#30353b, #2a2e33);
+  --sunken: #202327;
+  --highlight: #2f343a;
+
+  --toolbar: linear-gradient(#43474d, #34383d 50%, #2c3035 51%, #24272b);
+  --toolbar-line: #0e0f11;
+  --toolbar-sub: #aab1b9;
+
+  --sidebar: linear-gradient(90deg, #2d3136, #262a2e);
+  --sidebar-line: #14161a;
+  --nav-ink: #e1e5e9;
+  --nav-shine: rgba(0, 0, 0, 0.5);
+  --nav-selected: linear-gradient(#4a82d0, #2e62ae);
+  --nav-selected-top: #5b90da;
+  --nav-selected-bottom: #1f4a88;
+  --nav-badge: #5a626b;
+  --nav-badge-selected-ink: #1f4a88;
+
+  --btn: linear-gradient(#4b5058, #383c43);
+  --btn-hover: linear-gradient(#565c65, #42474f);
+  --btn-line: #14161a;
+  --btn-ink: #eef0f2;
+  --btn-shine: rgba(255, 255, 255, 0.14);
+
+  --danger-btn: linear-gradient(#4f3e41, #3d3033);
+  --danger-hover: linear-gradient(#5d4a4e, #483a3d);
+  --danger-line: #14161a;
+  --danger-ink: #f39aa3;
+
+  --primary: linear-gradient(#4e9fe0, #2a78c8 50%, #1f6cbc 51%, #17589f);
+  --primary-hover: linear-gradient(#5eaae8, #3786d4 50%, #2a78c8 51%, #1d66b0);
+  --primary-line: #0a2f5c;
+
+  --field: #1e2125;
+  --field-line: #565d66;
+  --field-shadow: rgba(0, 0, 0, 0.5);
+  --focus: #6fb0ff;
+
+  --ok: #7bc591;
+  --ok-dot: radial-gradient(circle at 35% 35%, #9be38a, #2f9a2c);
+  --warn: #e5bd7c;
+  --bad: #f39aa3;
+  --idle-dot: #6b737c;
+
+  --switch-off: linear-gradient(#202327, #2d3136);
+  --switch-off-line: #565d66;
+  --switch-on: linear-gradient(#2a6fc9, #4a90e2);
+  --switch-on-line: #123e75;
+
+  --seg-line: #14161a;
+  --seg-on: linear-gradient(#6b737d, #565d66);
+
+  --notice: #26313e;
+  --notice-line: #3d5876;
+
+  --log-bg: #1e2124;
+  --log-line: #444a52;
+  --log-stripe: #24282c;
+  --log-time: #8d959f;
+  --log-info: #8fb8ee;
+  --log-warn: #e5bd7c;
+  --log-error: #f39aa3;
+  --log-component: #8fd0d6;
+
+  --modal-title: linear-gradient(#4b5058, #353940);
+  --modal-line: #0e0f11;
+  --modal-backdrop: rgba(0, 0, 0, 0.6);
+  --word: #202327;
+  --toast: #e8ebee;
+  --toast-ink: #1e2329;
+}

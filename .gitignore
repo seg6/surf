@@ -22,3 +22,5 @@ site/node_modules/
 site/dist/
 site/src/content/docs/
 site/.astro/
+
+backend/cmd/surf/dashboard/node_modules/
