@@ -345,8 +345,8 @@ impl AudioPlayback {
             .chunks_exact(bytes_per_frame)
             .skip(skip_incoming)
         {
-            for sample in pcm_frame.chunks_exact(2) {
-                let sample = i16::from_le_bytes([sample[0], sample[1]]);
+            for sample in pcm_frame.as_chunks::<2>().0 {
+                let sample = i16::from_le_bytes(*sample);
                 state.samples.push_back(f32::from(sample) / 32_768.0);
             }
         }
@@ -962,9 +962,13 @@ fn render_audio<T>(
         }
         let fraction = render.phase.clamp(0.0, 1.0) as f32;
         let mut mixed = [0.0_f32; MAX_AUDIO_CHANNELS];
-        for channel in 0..input_channels {
-            mixed[channel] = render.previous[channel]
-                + (render.next[channel] - render.previous[channel]) * fraction;
+        for ((out, previous), next) in mixed
+            .iter_mut()
+            .zip(&render.previous)
+            .zip(&render.next)
+            .take(input_channels)
+        {
+            *out = previous + (next - previous) * fraction;
         }
         write_output_frame(output_frame, &mixed[..input_channels]);
         render.phase += step;
@@ -1257,8 +1261,16 @@ mod tests {
             let mut render = AudioRenderState::default();
             render_audio(&mut output, 2, 48_000, &shared, &mut render);
             for frame in output.as_chunks::<2>().0 {
-                assert!((frame[0] - 0.5).abs() < 0.01, "left {} at {rate} Hz", frame[0]);
-                assert!((frame[1] + 0.25).abs() < 0.01, "right {} at {rate} Hz", frame[1]);
+                assert!(
+                    (frame[0] - 0.5).abs() < 0.01,
+                    "left {} at {rate} Hz",
+                    frame[0]
+                );
+                assert!(
+                    (frame[1] + 0.25).abs() < 0.01,
+                    "right {} at {rate} Hz",
+                    frame[1]
+                );
             }
             assert_eq!(shared.counters.audio_underruns.load(Ordering::Relaxed), 0);
         }
@@ -1270,7 +1282,10 @@ mod tests {
         let payload = stereo_payload(3_000, 16_384, -8_192);
         shared
             .audio
-            .push(&audio_frame_format(&payload, 1, 48_000, 2), &shared.counters)
+            .push(
+                &audio_frame_format(&payload, 1, 48_000, 2),
+                &shared.counters,
+            )
             .expect("valid stereo PCM");
         let mut output = [0.0_f32; 480];
         let mut render = AudioRenderState::default();
