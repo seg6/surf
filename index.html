@@ -1,44 +1,50 @@
-<!DOCTYPE html><html lang="en"> <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="format-detection" content="telephone=no"><meta name="description" content="Surf runs Chromium on your computer and streams it to a native client over pinned TLS."><title>Surf</title><link rel="icon" href="/surf/CydiaIcon.png"><style>html,body{margin:0;padding:0}body{background:#ececec;color:#222;font-family:Helvetica Neue,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.45;-webkit-text-size-adjust:100%}a{color:#1a6eb5}a:hover{text-decoration:underline}a:focus{outline:1px dotted #1a6eb5}img{border:0;max-width:100%;height:auto;vertical-align:middle}code,pre{font-family:Menlo,Monaco,Consolas,Courier New,monospace;font-size:13px}.site-header{background:#fff;border-bottom:1px solid #c8c8c8}.site-header-inner{max-width:720px;margin:0 auto;padding:10px 16px;display:table;width:100%}.site-brand,.site-nav{display:table-cell;vertical-align:middle}.site-brand{width:100px;font-weight:700;font-size:17px;color:#222;text-decoration:none}.site-brand img{width:22px;height:22px;-webkit-border-radius:5px;border-radius:5px;margin-right:6px}.site-nav{text-align:right}.site-nav a{color:#555;text-decoration:none;margin-left:14px;font-size:14px}.site-nav a:hover,.site-nav a[aria-current=page]{color:#1a6eb5}.wrap{max-width:720px;margin:0 auto;padding:20px 16px 48px}.site-footer{border-top:1px solid #c8c8c8;padding:14px 16px 28px;color:#777;font-size:12px;background:#e4e4e4}.site-footer-inner{max-width:720px;margin:0 auto}.site-footer a{color:#555}.site-footer code{font-size:11px}.hero{margin:0 0 28px;padding:10px 0 22px;border-bottom:1px solid #c8c8c8}.hero .brand-mark{margin:0 0 8px;font-size:44px;line-height:1.05;font-weight:700;color:#111}.hero h1{margin:0 0 12px;font-size:22px;line-height:1.3;font-weight:400;color:#222}.hero .deck{margin:0 0 18px;font-size:16px;line-height:1.5;color:#444;max-width:36em}.cta-row{margin:0;padding:0;list-style:none}.cta-row li{display:inline-block;margin:0 8px 8px 0;vertical-align:top}.cta{display:inline-block;padding:8px 14px;-webkit-border-radius:4px;border-radius:4px;text-decoration:none;font-size:14px;font-weight:700}.cta-primary{background:#1a6eb5;color:#fff;border:1px solid #155a96}.cta-primary:hover{background:#155a96;color:#fff;text-decoration:none}.cta-secondary{background:#fff;color:#222;border:1px solid #bbb}.cta-secondary:hover{border-color:#1a6eb5;color:#1a6eb5;text-decoration:none}.apt{background:#fff;border:1px solid #c8c8c8;-webkit-border-radius:6px;border-radius:6px;padding:14px 16px 16px;margin:0 0 28px}.apt h2{margin:0 0 6px;font-size:15px;font-weight:700;color:#111}.apt .source{margin:0 0 12px;font-family:Menlo,Monaco,Consolas,monospace;font-size:14px;color:#111;word-break:break-all}.apt .meta{margin:10px 0 0;font-size:12px;color:#777}.section{margin:0 0 28px}.section h2{margin:0 0 10px;font-size:13px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:.04em}.section>p{margin:0 0 12px;color:#333;max-width:38em;font-size:15px;line-height:1.5}.point{margin:0 0 16px;padding:0 0 14px;border-bottom:1px solid #ddd;max-width:38em}.point:last-child{border-bottom:0;padding-bottom:0;margin-bottom:0}.point-title{margin:0 0 4px;font-size:16px;font-weight:700;color:#111}.point-title a{color:#1a6eb5;text-decoration:none}.point-title a:hover{text-decoration:underline}.point>p:last-child{margin:0;font-size:15px;line-height:1.5;color:#444}.doc-links{margin:0;padding:0;list-style:none;background:#fff;border:1px solid #c8c8c8}.doc-links li{margin:0;padding:10px 12px;border-bottom:1px solid #ddd}.doc-links li:last-child{border-bottom:0}.doc-links a{font-weight:700;text-decoration:none;color:#1a6eb5;font-size:15px}.doc-links a:hover{text-decoration:underline}.doc-links span{display:block;margin-top:2px;font-size:13px;color:#666;font-weight:400}.section .more{margin:10px 0 0;font-size:14px}.code{background:#2a2a2a;color:#e8e8e8;border:0;-webkit-border-radius:4px;border-radius:4px;padding:12px 14px;overflow:auto}.page-lead{margin:0 0 18px}.page-lead h1{margin:0 0 8px;font-size:26px;line-height:1.15}.page-lead .deck{margin:0 0 14px;font-size:15px;color:#555;max-width:36em}@media screen and (max-width:560px){.hero .brand-mark{font-size:34px}.site-header-inner,.site-brand,.site-nav{display:block;width:auto;text-align:left}.site-nav{margin-top:8px}.site-nav a{margin:0 12px 0 0}}
+<!DOCTYPE html><html lang="en"> <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="format-detection" content="telephone=no"><meta name="description" content="Surf runs Chromium on your computer and streams it to a native app on another device, so old hardware can browse the modern web."><title>Surf</title><link rel="icon" href="/surf/CydiaIcon.png"><style>html,body{margin:0;padding:0}body{background:#ececec;color:#222;font-family:Helvetica Neue,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.45;-webkit-text-size-adjust:100%}a{color:#1a6eb5}a:hover{text-decoration:underline}a:focus{outline:1px dotted #1a6eb5}img{border:0;max-width:100%;height:auto;vertical-align:middle}code,pre{font-family:Menlo,Monaco,Consolas,Courier New,monospace;font-size:13px}.site-header{background:#fff;border-bottom:1px solid #c8c8c8}.site-header-inner{max-width:720px;margin:0 auto;padding:10px 16px;display:table;width:100%}.site-brand,.site-nav{display:table-cell;vertical-align:middle}.site-brand{width:100px;font-weight:700;font-size:17px;color:#222;text-decoration:none}.site-brand img{width:22px;height:22px;-webkit-border-radius:5px;border-radius:5px;margin-right:6px}.site-nav{text-align:right}.site-nav a{color:#555;text-decoration:none;margin-left:14px;font-size:14px}.site-nav a:hover,.site-nav a[aria-current=page]{color:#1a6eb5}.wrap{max-width:720px;margin:0 auto;padding:20px 16px 48px}.site-footer{border-top:1px solid #c8c8c8;padding:14px 16px 28px;color:#777;font-size:12px;background:#e4e4e4}.site-footer-inner{max-width:720px;margin:0 auto}.site-footer a{color:#555}.site-footer code{font-size:11px}.hero{margin:0 0 28px;padding:10px 0 22px;border-bottom:1px solid #c8c8c8}.hero .brand-mark{margin:0 0 8px;font-size:44px;line-height:1.05;font-weight:700;color:#111}.hero h1{margin:0 0 12px;font-size:22px;line-height:1.3;font-weight:400;color:#222}.hero .deck{margin:0 0 18px;font-size:16px;line-height:1.5;color:#444;max-width:36em}.cta-row{margin:0;padding:0;list-style:none}.cta-row li{display:inline-block;margin:0 8px 8px 0;vertical-align:top}.cta{display:inline-block;padding:8px 14px;-webkit-border-radius:4px;border-radius:4px;text-decoration:none;font-size:14px;font-weight:700}.cta-primary{background:#1a6eb5;color:#fff;border:1px solid #155a96}.cta-primary:hover{background:#155a96;color:#fff;text-decoration:none}.cta-secondary{background:#fff;color:#222;border:1px solid #bbb}.cta-secondary:hover{border-color:#1a6eb5;color:#1a6eb5;text-decoration:none}.apt{background:#fff;border:1px solid #c8c8c8;-webkit-border-radius:6px;border-radius:6px;padding:14px 16px 16px;margin:0 0 28px}.apt h2{margin:0 0 6px;font-size:15px;font-weight:700;color:#111}.apt .source{margin:0 0 12px;font-family:Menlo,Monaco,Consolas,monospace;font-size:14px;color:#111;word-break:break-all}.apt .meta{margin:10px 0 0;font-size:12px;color:#777}.section{margin:0 0 28px}.section h2{margin:0 0 10px;font-size:13px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:.04em}.section>p{margin:0 0 12px;color:#333;max-width:38em;font-size:15px;line-height:1.5}.point{margin:0 0 16px;padding:0 0 14px;border-bottom:1px solid #ddd;max-width:38em}.point:last-child{border-bottom:0;padding-bottom:0;margin-bottom:0}.point-title{margin:0 0 4px;font-size:16px;font-weight:700;color:#111}.point-title a{color:#1a6eb5;text-decoration:none}.point-title a:hover{text-decoration:underline}.point>p:last-child{margin:0;font-size:15px;line-height:1.5;color:#444}.doc-links{margin:0;padding:0;list-style:none;background:#fff;border:1px solid #c8c8c8}.doc-links li{margin:0;padding:10px 12px;border-bottom:1px solid #ddd}.doc-links li:last-child{border-bottom:0}.doc-links a{font-weight:700;text-decoration:none;color:#1a6eb5;font-size:15px}.doc-links a:hover{text-decoration:underline}.doc-links span{display:block;margin-top:2px;font-size:13px;color:#666;font-weight:400}.section .more{margin:10px 0 0;font-size:14px}.code{background:#2a2a2a;color:#e8e8e8;border:0;-webkit-border-radius:4px;border-radius:4px;padding:12px 14px;overflow:auto}.page-lead{margin:0 0 18px}.page-lead h1{margin:0 0 8px;font-size:26px;line-height:1.15}.page-lead .deck{margin:0 0 14px;font-size:15px;color:#555;max-width:36em}@media screen and (max-width:560px){.hero .brand-mark{font-size:34px}.site-header-inner,.site-brand,.site-nav{display:block;width:auto;text-align:left}.site-nav{margin-top:8px}.site-nav a{margin:0 12px 0 0}}
 </style></head> <body> <header class="site-header"> <div class="site-header-inner"> <a class="site-brand" href="/surf/"> <img src="/surf/CydiaIcon.png" alt="" width="22" height="22">
 Surf
-</a> <nav class="site-nav"> <a href="/surf/install/ios/"> iOS </a><a href="/surf/install/host/"> Host </a><a href="/surf/docs/"> Docs </a><a href="https://github.com/seg6/surf"> Source </a> </nav> </div> </header> <div class="site-main">  <div class="wrap"> <section class="hero"> <p class="brand-mark">Surf</p> <h1>Remote browser on hardware you already have</h1> <p class="deck">
-Surf runs Chromium on a Windows, macOS, or Linux computer and streams
-        that page to a native app. The app draws the chrome (tabs, address bar,
-        library) and sends input back. Page content never goes through the
-        device's own web engine.
+</a> <nav class="site-nav"> <a href="/surf/install/ios/"> iOS </a><a href="/surf/install/host/"> Host </a><a href="/surf/docs/"> Docs </a><a href="https://github.com/seg6/surf"> Source </a> </nav> </div> </header> <div class="site-main">  <div class="wrap"> <section class="hero"> <p class="brand-mark">Surf</p> <h1>A modern browser for devices that can't run one anymore</h1> <p class="deck">
+Surf runs Chromium on a computer and streams it to a native app on
+        another device. The app works like a regular browser, with tabs, an
+        address bar, bookmarks and history, while pages load and run in
+        Chromium on the computer.
 </p> <ul class="cta-row"> <li><a class="cta cta-primary" href="/surf/install/host/">Install the host</a></li> <li><a class="cta cta-secondary" href="/surf/install/ios/">iOS client</a></li> <li><a class="cta cta-secondary" href="/surf/install/desktop/">Linux client</a></li> </ul> </section> <section class="section"> <h2>How it works</h2> <p>
-The host owns a Chromium profile: cookies, JavaScript, downloads, and
-        site sign-in all happen there. The client opens a pinned TLS connection,
-        shows the live stream, and forwards touch, keyboard, pointer, and files.
-        You pair once with a QR code or a short code, then confirm the six words
-        match on both ends.
+The host program on your computer keeps its own Chromium profile, so
+        cookies, JavaScript, downloads and site sign-ins all live there. The
+        app on your other device connects over TLS, shows the live stream, and
+        sends your touch, keyboard and pointer input back, along with any files
+        you upload. You pair the two once, with a QR code or a short code, and
+        check that the same six words show up on both screens.
 </p> <p>
-Surf is not a hosted service. There is no account and no shared password.
-        Run the host on your LAN, or on any address the client can reach. Each
-        device keeps its own key. Clients pin the host certificate and refuse a
-        different fingerprint.
-</p> </section> <section class="section"> <h2>In practice</h2> <div class="point"> <p class="point-title">Chromium does the browsing</p> <p>
-You get whatever that desktop Chromium can load. For awkward logins,
-          open Browser setup on the computer, finish there, then continue from
-          the client.
-</p> </div> <div class="point"> <p class="point-title">The client is a browser UI</p> <p>
-Tabs, suggestions, bookmarks, history, downloads, find, and reader
-          are built into the app. It is not a full-desktop remote-desktop
-          session.
-</p> </div> <div class="point"> <p class="point-title">Data stays on the host</p> <p>
-Identity, pairings, and the browser profile live under
-<code>SURF_HOME</code>. Revoke a device from the host when you want
-          it gone.
+There is no hosted service and no account. The host runs on your home
+        network, or at any address your device can reach. Each device
+        has its own key, and each client remembers the host's certificate and
+        refuses to connect if it changes.
+</p> </section> <section class="section"> <h2>Using Surf</h2> <div class="point"> <p class="point-title">Page compatibility</p> <p>
+Websites see an up-to-date desktop Chromium, so pages that no longer
+          load on an old device work again. If a site has trouble with signing
+          in through the stream, open Browser setup on the computer, sign in
+          there, and continue from your device.
+</p> </div> <div class="point"> <p class="point-title">Browser interface</p> <p>
+Tabs, suggestions, bookmarks, history, downloads, find and a reader
+          view are built into the app. It shows the browser only, not the whole
+          desktop.
+</p> </div> <div class="point"> <p class="point-title">Data storage</p> <p>
+Pairings and the browser profile are stored in
+<code>SURF_HOME</code> on the computer. To remove a device, revoke
+          it from the host.
 </p> </div> </section> <section class="section"> <h2>Clients</h2> <div class="point"> <p class="point-title"> <a href="/surf/install/ios/">iOS / iPadOS 6-14</a> </p> <p>
-Jailbreak package for iOS 6 through 14. Install steps (Cydia / Sileo)
-          are on the iOS page.
+The iOS client is a jailbreak package for iOS 6 through 14 and
+          installs from Cydia or Sileo. The steps are on the iOS page.
 </p> </div> <div class="point"> <p class="point-title"> <a href="/surf/install/desktop/">Linux</a> </p> <p>
-Desktop client for the same host and pairing flow.
-</p> </div> </section> <section class="section"> <h2>Docs</h2> <p> <a href="/surf/install/host/">Host install</a>,
-<a href="/surf/docs/guide/pairing/">pairing</a>,
-<a href="/surf/docs/guide/overview/">overview</a>,
-<a href="/surf/docs/reference/security/">security</a>,
-<a href="/surf/docs/">full index</a>.
+A desktop client that pairs with the host the same way the iOS app
+          does.
+</p> </div> <div class="point"> <p class="point-title"> <a href="https://github.com/jmverges/surf-vita">PS Vita (community port)</a> </p> <p>
+A port of the shared client core, maintained in its own repository.
+</p> </div> </section> <section class="section"> <h2>Docs</h2> <p>
+Start with the <a href="/surf/install/host/">host install</a>,
+<a href="/surf/docs/guide/pairing/">pairing</a>, the
+<a href="/surf/docs/guide/overview/">overview</a> and
+<a href="/surf/docs/reference/security/">security</a>. The
+<a href="/surf/docs/">full index</a> has the rest.
 </p> </section> </div>  </div> <footer class="site-footer"> <div class="site-footer-inner">
 Surf | MIT  |
 <a href="/surf/install/ios/">iOS</a> |
