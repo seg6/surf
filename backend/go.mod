@@ -3,7 +3,7 @@ module surf-backend
 go 1.26.5
 
 require (
-	github.com/gogpu/systray v0.2.8
+	github.com/gogpu/systray v0.3.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/miekg/dns v1.1.27

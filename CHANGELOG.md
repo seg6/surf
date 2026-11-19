@@ -5,6 +5,10 @@ version differences alone do not.
 
 ## Unreleased
 
+- macOS: fix Surf aborting at launch with a `CGSConnectionByID` assertion and no
+  menu bar icon (seen on Sequoia with OpenCore Legacy Patcher). Updates the
+  tray library; `surf serve` remains a workaround on older builds.
+
 ## 0.18.0 - 2026-11-10
 
 - Docs reorganized under guide / reference / concepts / clients / develop, with

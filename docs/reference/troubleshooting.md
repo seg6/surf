@@ -126,6 +126,16 @@ Deleting all of `SURF_HOME` also deletes the server identity and forces every
 client to pair again. Repair invalid TLS material under `identity/` only after
 preserving the old contents.
 
+## macOS Surf closes immediately at launch
+
+Surf 0.18.0 and earlier could abort at launch on macOS with
+`Assertion failed: (CGAtomicGet(&is_initialized)), function CGSConnectionByID`,
+with no window or menu bar icon. This was seen on Sequoia running through
+OpenCore Legacy Patcher. Update Surf to fix it.
+
+On those versions, run the backend without the tray: `surf serve` starts the same
+backend from a terminal and clients can pair with it as usual.
+
 ## Windows update does not reopen Surf
 
 Install Surf 0.10.3 or later. Those installers stop the existing process before
