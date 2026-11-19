@@ -86,6 +86,13 @@ Chromium profile aside while keeping server identity and pairings.</p>
 <p>Deleting all of <code>SURF_HOME</code> also deletes the server identity and forces every
 client to pair again. Repair invalid TLS material under <code>identity/</code> only after
 preserving the old contents.</p>
+<h2 id="macos-surf-closes-immediately-at-launch">macOS Surf closes immediately at launch</h2>
+<p>Surf 0.18.0 and earlier could abort at launch on macOS with
+<code>Assertion failed: (CGAtomicGet(&#x26;is_initialized)), function CGSConnectionByID</code>,
+with no window or menu bar icon. This was seen on Sequoia running through
+OpenCore Legacy Patcher. Update Surf to fix it.</p>
+<p>On those versions, run the backend without the tray: <code>surf serve</code> starts the same
+backend from a terminal and clients can pair with it as usual.</p>
 <h2 id="windows-update-does-not-reopen-surf">Windows update does not reopen Surf</h2>
 <p>Install Surf 0.10.3 or later. Those installers stop the existing process before
 replacement and start the new version afterward. <code>SURF_HOME</code> remains in place.</p>

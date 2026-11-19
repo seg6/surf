@@ -66,6 +66,21 @@ device keys replace shared secrets.</p>
 <td>Initial page</td>
 </tr>
 <tr>
+<td><code>SURF_SEARCH_URL</code></td>
+<td>empty</td>
+<td>Address-bar search template with <code>{searchTerms}</code> or <code>%s</code>; empty uses the search engine set in Chromium, then Google</td>
+</tr>
+<tr>
+<td><code>SURF_USER_AGENT</code></td>
+<td>empty</td>
+<td>Replace the browser user agent on every tab; empty keeps Surf’s own desktop and mobile identities</td>
+</tr>
+<tr>
+<td><code>SURF_VIEWPORT_SCALE</code></td>
+<td><code>1</code></td>
+<td>Lay pages out in a viewport this many times (1 to 3) the client’s size; the stream stays at the client’s resolution, so a small screen shows a wider page</td>
+</tr>
+<tr>
 <td><code>DOWNLOADS</code></td>
 <td><code>$SURF_HOME/downloads</code></td>
 <td>Downloads</td>
@@ -112,7 +127,7 @@ device keys replace shared secrets.</p>
 </tr>
 </tbody>
 </table>
-<p>The tray can change server name, port, and related settings and restart the
+<p>The Settings page also sets the search engine, user agent, and page width scale. The tray can change server name, port, and related settings and restart the
 backend. CLI tools must use the same <code>SURF_HOME</code> as the running owner
 (<code>daemon.json</code>).</p>
 <h2 id="files-under-surf_home">Files under <code>SURF_HOME</code></h2>
