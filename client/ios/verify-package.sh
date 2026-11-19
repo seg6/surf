@@ -148,6 +148,12 @@ if grep -q '<string>armv7</string>' <<< "$required_capabilities"; then
   exit 1
 fi
 
+background_modes="$(sed -n '/<key>UIBackgroundModes<\/key>/,/<\/array>/p' "$plist_xml")"
+if ! printf '%s\n' "$background_modes" | grep -q '<string>audio</string>'; then
+  echo "Info.plist does not declare the audio background mode" >&2
+  exit 1
+fi
+
 app_fonts="$(sed -n '/<key>UIAppFonts<\/key>/,/<\/array>/p' "$plist_xml")"
 if ! grep -q '<string>Lucide.ttf</string>' <<< "$app_fonts"; then
   echo "Info.plist does not register the bundled Lucide icon font" >&2
