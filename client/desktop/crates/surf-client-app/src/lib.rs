@@ -69,6 +69,8 @@ pub struct ClientController {
     icon_pending: usize,
     pub latest_diagnostics: Option<DiagnosticsReport>,
     pub native_pointer: bool,
+    /// The host takes physical-pixel sizes with a `scale` (`hidpi` capability).
+    pub hidpi: bool,
     connect_after_inspect: bool,
     startup_url: Option<String>,
     startup_navigation_sent: bool,
@@ -79,6 +81,7 @@ pub struct ClientController {
     pipeline_diagnostics: PipelineDiagnostics,
     render_diagnostics: RenderDiagnostics,
     requested_viewport: Option<(i32, i32)>,
+    requested_scale: f64,
     suggestions: suggestions::Suggestions,
 }
 
@@ -198,6 +201,7 @@ impl ClientController {
             icon_pending: 0,
             latest_diagnostics: None,
             native_pointer: false,
+            hidpi: false,
             connect_after_inspect: false,
             startup_url,
             startup_navigation_sent: false,
@@ -208,6 +212,7 @@ impl ClientController {
             pipeline_diagnostics: PipelineDiagnostics::new(),
             render_diagnostics: RenderDiagnostics::default(),
             requested_viewport: None,
+            requested_scale: 1.0,
             suggestions: suggestions::Suggestions::default(),
         };
         if options.auto_connect
@@ -350,7 +355,33 @@ impl ClientController {
         });
     }
 
-    pub fn set_viewport(&mut self, width: i32, height: i32) -> bool {
+    /// Pixel size and device scale to request for a page area of
+    /// `logical_width` x `logical_height` points on a display whose scale
+    /// factor is `device_scale`. Hosts without `hidpi` keep getting the
+    /// physical size they always have, with no scale attached.
+    pub fn viewport_for(
+        &self,
+        logical_width: f64,
+        logical_height: f64,
+        device_scale: f64,
+    ) -> (i32, i32, f64) {
+        if self.hidpi {
+            hidpi_viewport(logical_width, logical_height, device_scale)
+        } else {
+            let scale = if device_scale.is_finite() {
+                device_scale.max(0.0)
+            } else {
+                1.0
+            };
+            (
+                (((logical_width * scale).round().max(64.0)) as i32) & !1,
+                (((logical_height * scale).round().max(64.0)) as i32) & !1,
+                1.0,
+            )
+        }
+    }
+
+    pub fn set_viewport(&mut self, width: i32, height: i32, scale: f64) -> bool {
         // Native hosts may briefly report a zero-sized or tiny surface while a
         // window is mapped or its layout is being replaced. That is not a real
         // browser viewport change.
@@ -358,30 +389,32 @@ impl ClientController {
             return false;
         }
         let viewport = (width.max(2) & !1, height.max(2) & !1);
-        if self.requested_viewport == Some(viewport) {
+        if self.requested_viewport == Some(viewport) && self.requested_scale == scale {
             return false;
         }
-        self.send_viewport(viewport);
+        self.send_viewport(viewport, scale);
         true
     }
 
     /// Sends a viewport command even when the requested dimensions match the
     /// local deduplication cache. Device presets use this to make applying a
     /// native window size and changing Chromium one acknowledged transaction.
-    pub fn force_viewport(&mut self, width: i32, height: i32) -> Option<(i32, i32)> {
+    pub fn force_viewport(&mut self, width: i32, height: i32, scale: f64) -> Option<(i32, i32)> {
         if !self.connected || width < 64 || height < 64 {
             return None;
         }
         let viewport = (width.max(2) & !1, height.max(2) & !1);
-        self.send_viewport(viewport);
+        self.send_viewport(viewport, scale);
         Some(viewport)
     }
 
-    fn send_viewport(&mut self, viewport: (i32, i32)) {
+    fn send_viewport(&mut self, viewport: (i32, i32), scale: f64) {
         self.requested_viewport = Some(viewport);
+        self.requested_scale = scale;
         self.command(Command::Size {
             w: viewport.0,
             h: viewport.1,
+            scale: self.hidpi.then_some(scale),
             causal: Causal::default(),
         });
     }
@@ -660,6 +693,7 @@ impl ClientController {
                     .caps
                     .iter()
                     .any(|capability| capability == "pointer-input");
+                self.hidpi = config.caps.iter().any(|capability| capability == "hidpi");
                 self.status = format!("Connected securely to {}", info.name);
                 self.pairing = None;
                 self.remote_viewport = None;
@@ -1223,8 +1257,62 @@ fn bounded_i32(value: u64) -> i32 {
     i32::try_from(value).unwrap_or(i32::MAX)
 }
 
+/// Largest decoded surface a desktop client asks for: software H.264 decode on
+/// a modern machine copes with this comfortably, and it matches the host's own
+/// bound for clients that send a scale.
+pub const MAX_VIEWPORT_AREA: f64 = 2560.0 * 1600.0;
+pub const MAX_VIEWPORT_DIMENSION: f64 = 2560.0;
+
+/// Chooses the physical size and device scale for a page area of
+/// `logical_width` x `logical_height` points on a display with
+/// `device_scale`. The scale is lowered (in quarter steps, never below 1) when
+/// the full-resolution surface would exceed the decode budget; the CSS
+/// viewport the page sees stays the logical size.
+pub fn hidpi_viewport(
+    logical_width: f64,
+    logical_height: f64,
+    device_scale: f64,
+) -> (i32, i32, f64) {
+    let lw = logical_width.max(1.0);
+    let lh = logical_height.max(1.0);
+    let wanted = if device_scale.is_finite() {
+        device_scale.clamp(1.0, 4.0)
+    } else {
+        1.0
+    };
+    let limit = (MAX_VIEWPORT_AREA / (lw * lh))
+        .sqrt()
+        .min(MAX_VIEWPORT_DIMENSION / lw)
+        .min(MAX_VIEWPORT_DIMENSION / lh);
+    let scale = if wanted <= limit {
+        wanted
+    } else {
+        ((limit * 4.0).floor() / 4.0).max(1.0)
+    };
+    (
+        ((lw * scale).round().max(64.0) as i32) & !1,
+        ((lh * scale).round().max(64.0) as i32) & !1,
+        scale,
+    )
+}
+
 #[cfg(test)]
 mod tests {
+    use super::hidpi_viewport;
+
+    #[test]
+    fn hidpi_viewport_caps_decode_area_in_quarter_steps() {
+        // 1440x900 laptop at 2x: 2880x1800 is over budget, so 1.75x.
+        assert_eq!(hidpi_viewport(1440.0, 900.0, 2.0), (2520, 1574, 1.75));
+        // Plain 1x and small 2x windows pass through untouched.
+        assert_eq!(hidpi_viewport(1180.0, 680.0, 1.0), (1180, 680, 1.0));
+        assert_eq!(hidpi_viewport(1000.0, 700.0, 2.0), (2000, 1400, 2.0));
+        // Fractional display scales are honoured when they fit.
+        assert_eq!(hidpi_viewport(800.0, 600.0, 1.5), (1200, 900, 1.5));
+        // Huge windows never fall below 1x.
+        assert_eq!(hidpi_viewport(3000.0, 1800.0, 2.0).2, 1.0);
+    }
+
     use super::{compact_address, normalize_navigation};
 
     #[test]

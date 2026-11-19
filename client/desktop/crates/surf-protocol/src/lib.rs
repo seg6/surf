@@ -66,6 +66,10 @@ pub enum Command {
     Size {
         w: i32,
         h: i32,
+        /// Device pixels per CSS pixel. When present (hosts with the `hidpi`
+        /// capability), `w` and `h` are physical pixels; otherwise points.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scale: Option<f64>,
         #[serde(flatten)]
         causal: Causal,
     },
@@ -626,6 +630,11 @@ impl Command {
 
     fn validate(&self) -> Result<(), ProtocolError> {
         match self {
+            Self::Size {
+                scale: Some(scale), ..
+            } if !(1.0..=4.0).contains(scale) => {
+                return Err(ProtocolError::Invalid("size scale"));
+            }
             Self::Touch { phase, points, .. } => {
                 if !matches!(phase.as_str(), "start" | "move" | "end" | "cancel") {
                     return Err(ProtocolError::Invalid("touch phase"));
@@ -838,6 +847,25 @@ mod tests {
                 .unwrap_or_else(|error| panic!("event fixture {fixture} did not decode: {error}"));
             Event::decode(&decoded.encode().unwrap()).unwrap();
         }
+    }
+
+    #[test]
+    fn size_scale_is_optional_and_bounded() {
+        let plain = Command::decode(br#"{"t":"size","w":320,"h":480}"#).unwrap();
+        assert!(
+            !String::from_utf8(plain.encode().unwrap())
+                .unwrap()
+                .contains("scale")
+        );
+        let scaled = Command::decode(br#"{"t":"size","w":640,"h":960,"scale":2.0}"#).unwrap();
+        assert!(matches!(
+            scaled,
+            Command::Size {
+                scale: Some(s), ..
+            } if (s - 2.0).abs() < f64::EPSILON
+        ));
+        assert!(Command::decode(br#"{"t":"size","w":640,"h":960,"scale":0.5}"#).is_err());
+        assert!(Command::decode(br#"{"t":"size","w":640,"h":960,"scale":4.5}"#).is_err());
     }
 
     #[test]

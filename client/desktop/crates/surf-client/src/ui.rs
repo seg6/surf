@@ -715,10 +715,10 @@ impl DesktopApp {
     }
 
     fn update_viewport(&mut self, scale: f64) {
-        let candidate = (
-            ((self.page_rect.width * scale).round().max(64.0) as i32) & !1,
-            ((self.page_rect.height * scale).round().max(64.0) as i32) & !1,
-        );
+        let (candidate_w, candidate_h, request_scale) =
+            self.controller
+                .viewport_for(self.page_rect.width, self.page_rect.height, scale);
+        let candidate = (candidate_w, candidate_h);
         if self.viewport_candidate != Some(candidate) {
             self.viewport_candidate = Some(candidate);
             self.viewport_candidate_since = Instant::now();
@@ -727,7 +727,9 @@ impl DesktopApp {
         if self.viewport_committed != Some(candidate)
             && (initial || self.viewport_candidate_since.elapsed() >= VIEWPORT_SETTLE)
         {
-            let _ = self.controller.set_viewport(candidate.0, candidate.1);
+            let _ = self
+                .controller
+                .set_viewport(candidate.0, candidate.1, request_scale);
             self.viewport_committed = Some(candidate);
         }
         let fullscreen_to_send = self.fullscreen_pending.as_ref().and_then(|pending| {
@@ -853,19 +855,18 @@ impl DesktopApp {
                 && window_size_matches(current, pending.request.size)
                 && self.controller.connected)
                 .then(|| {
-                    let mut viewport = viewport_for_window(current, window.scale_factor());
+                    let (width, mut height) = page_size_for_window(current);
                     if self.find_open {
-                        viewport.1 = (viewport.1
-                            - (f64::from(crate::layout::FIND_HEIGHT) * window.scale_factor())
-                                .round() as i32)
-                            .max(64)
-                            & !1;
+                        height -= f64::from(crate::layout::FIND_HEIGHT);
                     }
-                    viewport
+                    self.controller
+                        .viewport_for(width, height, window.scale_factor())
                 })
         });
         if let Some(candidate) = viewport_to_send
-            && let Some(viewport) = self.controller.force_viewport(candidate.0, candidate.1)
+            && let Some(viewport) =
+                self.controller
+                    .force_viewport(candidate.0, candidate.1, candidate.2)
         {
             self.viewport_candidate = Some(viewport);
             self.viewport_candidate_since = Instant::now();
@@ -969,12 +970,11 @@ fn logical_window_size(window: &Window) -> [u32; 2] {
     ]
 }
 
-fn viewport_for_window(window: [u32; 2], scale: f64) -> (i32, i32) {
+/// Logical size of the page area below the chrome for a logical window size.
+fn page_size_for_window(window: [u32; 2]) -> (f64, f64) {
     (
-        (f64::from(window[0]) * scale).round().max(64.0) as i32,
-        ((f64::from(window[1]) - f64::from(BAR_HEIGHT)) * scale)
-            .round()
-            .max(64.0) as i32,
+        f64::from(window[0]),
+        (f64::from(window[1]) - f64::from(BAR_HEIGHT)).max(1.0),
     )
 }
 
@@ -1190,8 +1190,8 @@ fn utf16_offset(text: &str, bytes: usize) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        DEVICE_PRESETS, Key, Modifiers, NamedKey, format_bytes, plain_key_text, truncate,
-        utf16_offset, viewport_for_window, window_size_matches,
+        DEVICE_PRESETS, Key, Modifiers, NamedKey, format_bytes, page_size_for_window,
+        plain_key_text, truncate, utf16_offset, window_size_matches,
     };
 
     #[test]
@@ -1235,7 +1235,7 @@ mod tests {
 
     #[test]
     fn preset_window_maps_to_the_page_below_chrome() {
-        assert_eq!(viewport_for_window([768, 1024], 1.0), (768, 982));
-        assert_eq!(viewport_for_window([375, 667], 2.0), (750, 1250));
+        assert_eq!(page_size_for_window([768, 1024]), (768.0, 982.0));
+        assert_eq!(page_size_for_window([375, 667]), (375.0, 625.0));
     }
 }

@@ -562,6 +562,7 @@ async fn run_socket(
         &Command::Size {
             w: config.vw & !1,
             h: config.vh & !1,
+            scale: None,
             causal: Causal::default(),
         },
     )
