@@ -13,6 +13,8 @@ version differences alone do not.
   The encoder bitrate also grows with the surface area, and the H.264 level and
   frame rate follow the new sizes. Needs a host and client that both support
   the new `hidpi` capability; older combinations behave as before.
+- Fixed audio playing through the host computer's speakers while streaming,
+  including after switching tabs or from tabs in the background.
 
 ## 0.19.0 - 2026-11-19
 

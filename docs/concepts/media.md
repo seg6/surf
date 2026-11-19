@@ -26,6 +26,19 @@ client reports, at 60 FPS. Clients that support `media-stats` report renderer
 health, throughput, queue depth, frame age, drops and memory pressure about
 every two seconds.
 
+## Host audio
+
+Tab capture silences only the tab it captures. The extension therefore mutes
+every tab on the host, including new ones, so page audio never plays through
+the host's speakers, whichever tab is active or in the background. Muting a tab
+does not change what tab capture delivers: the active tab's audio still reaches
+the client. Audio from a background tab is not streamed, because only the
+active tab is captured. Browser setup mode loads a different extension and
+plays audio normally on the host.
+
+The extension lives in a directory named after its contents, because Chromium
+keeps the first service worker script it installed for an extension path.
+
 ## Client surface
 
 Clients report the even-sized page area that's left over after the native

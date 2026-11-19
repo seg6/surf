@@ -5,6 +5,7 @@ package media
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -88,7 +89,8 @@ func NewCapture(home string, audio AudioFormat) (*Capture, error) {
 		return nil, fmt.Errorf("tab capture listener: %w", err)
 	}
 	s := &Capture{listener: listener, audio: audio}
-	extensionPath := filepath.Join(home, "runtime", "tab-capture-extension")
+	extensionPath := filepath.Join(home, "runtime", extensionDirectory())
+	removeStaleExtensions(filepath.Dir(extensionPath), filepath.Base(extensionPath))
 	if err := extractExtension(extensionPath, listener.Addr().String(), token, audio); err != nil {
 		_ = listener.Close()
 		return nil, err
@@ -105,6 +107,41 @@ func NewCapture(home string, audio AudioFormat) (*Capture, error) {
 		}
 	}()
 	return s, nil
+}
+
+// extensionDirectory names the unpacked extension after its content. Chromium
+// keeps the service worker script it first installed for an extension, so a
+// profile that has run an earlier Surf would keep running the old
+// background.js from the same path. A new path is a new extension that loads
+// the current script.
+func extensionDirectory() string {
+	hash := sha256.New()
+	_ = fs.WalkDir(extensionFiles, "extension", func(name string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		data, readErr := extensionFiles.ReadFile(name)
+		if readErr != nil {
+			return readErr
+		}
+		hash.Write([]byte(name))
+		hash.Write(data)
+		return nil
+	})
+	return "tab-capture-extension-" + hex.EncodeToString(hash.Sum(nil))[:12]
+}
+
+func removeStaleExtensions(runtimeDir, keep string) {
+	entries, err := os.ReadDir(runtimeDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if name != keep && strings.HasPrefix(name, "tab-capture-extension") {
+			_ = os.RemoveAll(filepath.Join(runtimeDir, name))
+		}
+	}
 }
 
 func extractExtension(dst, address, token string, audio AudioFormat) error {
