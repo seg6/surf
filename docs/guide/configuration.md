@@ -1,7 +1,7 @@
 # Configuration
 
-Host tunables are environment variables. No password variable. Pairing and
-device keys replace shared secrets.
+You configure the host with environment variables. There's no password
+variable, because pairing and device keys take the place of shared secrets.
 
 ## Variables
 
@@ -30,9 +30,10 @@ device keys replace shared secrets.
 | `SURF_ADAPTIVE_VIDEO` | `0` | Enable adaptive frame-rate profiles with `1` |
 | `CHROME_NO_SANDBOX` | automatic for root | Disable the Chromium sandbox when required |
 
-The Settings page also sets the search engine, user agent, and page width scale. The tray can change server name, port, and related settings and restart the
-backend. CLI tools must use the same `SURF_HOME` as the running owner
-(`daemon.json`).
+The Settings page can also set the search engine, user agent and page width
+scale. From the tray you can change the server name, port and related settings,
+and restart the backend. Command line tools have to use the same `SURF_HOME` as
+the running owner (see `daemon.json`).
 
 ## Files under `SURF_HOME`
 
@@ -55,21 +56,22 @@ $SURF_HOME/browser-session.json
 | `downloads/`, `uploads/` | File transfer areas |
 | `logs/` | Server, desktop, and per-device logs |
 
-`daemon.json` tells local CLI commands how to reach the running owner and
-contains its control token. CLI commands control that owner; `surf browser`
-starts standalone setup only when there is no running owner.
+`daemon.json` tells local CLI commands how to reach the running owner, and it
+contains that owner's control token. CLI commands control the running owner,
+and `surf browser` only starts a standalone setup when there isn't one.
 
-The desktop app uses a parent pipe to supervise the server. Closing the app
-closes the backend and Chromium tree. `desktop.lock` and `server.lock` use
-kernel locks; empty lock files after exit do not hold the lock.
+The desktop app supervises the server through a parent pipe, so closing the app
+also closes the backend and the Chromium tree. `desktop.lock` and `server.lock`
+use kernel locks, so an empty lock file left behind after exit doesn't hold
+the lock.
 
-The rest of `SURF_HOME` holds the browser profile, downloads, uploads, managed
-browser, updates, logs, and desktop settings. Backing up the whole directory
-preserves the server identity and pairings. Replacing identity alone makes saved
-clients report **Server Identity Changed**.
+The rest of `SURF_HOME` holds the browser profile, downloads, uploads, the
+managed browser, updates, logs and desktop settings. If you back up the whole
+directory, you keep the server identity and your pairings. If you replace only
+the identity, saved clients will report Server Identity Changed.
 
-Browser ownership, profile recovery, and download staging:
-[Browser lifetime](../concepts/browser-lifetime.md).
+Browser ownership, profile recovery and download staging are covered in
+[browser lifetime](../concepts/browser-lifetime.md).
 
-Related: [Remote access](remote-access.md), [Updates](updates.md),
-[Browser setup](browser-setup.md), [Architecture](../concepts/architecture.md).
+Related pages: [remote access](remote-access.md), [updates](updates.md),
+[browser setup](browser-setup.md) and [architecture](../concepts/architecture.md).

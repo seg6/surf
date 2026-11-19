@@ -1,11 +1,13 @@
 # Browser lifetime
 
-The host owns one browser manager for the server's lifetime. Chromium is not a
-loose dependency the tray restarts independently of Surf's mode machine.
+The host owns one browser manager for the server's lifetime. Chromium isn't a
+loose dependency that the tray can restart independently of Surf's mode
+machine.
 
 ## Modes
 
-States published on `browser-mode` (capability `browser-setup`):
+The manager publishes its state on `browser-mode`, which comes with the
+`browser-setup` capability.
 
 | State | Meaning |
 | --- | --- |
@@ -16,51 +18,57 @@ States published on `browser-mode` (capability `browser-setup`):
 | `resuming` | Closing setup and restoring streaming |
 | `failed` | Handoff or launch failure |
 
-Only `streaming` accepts page input. Clients clear prompts, focus, keyboard,
-fullscreen, and buffered media while paused, then re-send viewport and site
-preferences when streaming returns.
+Only `streaming` accepts page input. While paused, clients clear prompts,
+focus, the keyboard, fullscreen and any buffered media. When streaming returns
+they send the viewport and site preferences again.
 
 ## Locks and ownership
 
-- `server.lock`: one Surf backend per `SURF_HOME`
-- Profile lock beside the profile directory: streaming and standalone setup
-- Chromium's own singleton files are left intact; a live or uncertain owner
-  blocks startup and profile recovery
+There are three things that guard ownership:
 
-Unexpected Chromium exit during streaming ends the server so the supervisor can
-restart both. Setup is an intentional paused state, not a crash.
+- `server.lock` allows one Surf backend per `SURF_HOME`.
+- A profile lock beside the profile directory covers both streaming and
+  standalone setup.
+- Chromium's own singleton files are left intact, and a live or uncertain owner
+  blocks startup and profile recovery.
+
+If Chromium exits unexpectedly while streaming, the server ends too, so the
+supervisor can restart both. Setup is an intentional paused state and doesn't
+count as a crash.
 
 ## Tab and profile restore
 
-Tabs, active tab, website mode, appearance, cookies, and site storage restore
-after restart. Tab state is written after changes and again on clean shutdown.
+Tabs, the active tab, website mode, appearance, cookies and site storage all
+come back after a restart. Tab state is written after changes and again on a
+clean shutdown.
 
 Malformed replaceable state is moved aside with an `.invalid-<timestamp>`
-suffix. After two Chromium startup failures within ten minutes, Surf preserves
-the old profile as `profile.startup-failed-<timestamp>` and starts a clean
-profile with Surf bookmarks and history. **TLS identity files are never
-replaced by this recovery.**
+suffix. If Chromium fails to start twice within ten minutes, Surf keeps the old
+profile as `profile.startup-failed-<timestamp>` and starts a clean profile with
+Surf bookmarks and history. This recovery never replaces the TLS identity
+files.
 
 ## Setup handoff
 
-Documented for operators in [Browser setup](../guide/browser-setup.md). The
-manager serializes ownership transitions; stale revisions and concurrent
-requests fail without changing the current browser.
+Operators can read about this in [Browser setup](../guide/browser-setup.md).
+The manager serializes ownership transitions, so stale revisions and
+concurrent requests fail without changing the current browser.
 
 ## Downloads while running
 
 Chromium writes unfinished downloads into a private session directory under
 `DOWNLOADS/.incomplete/`. When a download finishes, Surf publishes it into
-`DOWNLOADS` without overwriting an existing file. Concurrent downloads with the
-same filename receive different names. Only completed, non-hidden regular files
-appear in Library or can be fetched through the downloads API.
+`DOWNLOADS` without overwriting an existing file, and concurrent downloads with
+the same filename get different names. Only completed, non-hidden regular files
+show up in Library or can be fetched through the downloads API.
 
-Setup and filesystem failures are reported instead of announcing success. Files
-left behind by a crash or failed publication remain in `.incomplete` for manual
-recovery; Surf does not automatically resume them. A completed file kept there
-after a publication error is named with Chromium's download ID; the server log
-identifies its path.
+Setup and filesystem failures are reported rather than announced as success.
+Files left behind by a crash or a failed publication stay in `.incomplete` for
+manual recovery, and Surf doesn't resume them automatically. If a completed
+file is kept there after a publication error, it's named with Chromium's
+download ID, and the server log identifies its path.
 
-The file endpoint supports authenticated GET, HEAD, byte ranges, and ETags.
-Desktop saves use unique temporary files and never overwrite local copies. The
-iOS client uses bounded ranges and a unique local directory for each copy.
+The file endpoint supports authenticated GET, HEAD, byte ranges and ETags. The
+desktop client saves to unique temporary files and never overwrites local
+copies. The iOS client uses bounded ranges and a unique local directory for
+each copy.

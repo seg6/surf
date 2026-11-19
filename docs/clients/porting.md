@@ -1,8 +1,9 @@
 # Porting Surf clients
 
-Pair, authenticate, decode media, send input, draw native chrome. Shared
-behavior is in `client/core` (no platform, transport, codec, storage, or
-threading. The host supplies those).
+A client has to pair, authenticate, decode media, send input and draw native
+chrome. The shared behavior lives in `client/core`, which has no platform,
+transport, codec, storage or threading code. The host application supplies
+those.
 
 ```text
 client/ios --------+
@@ -14,7 +15,7 @@ backend <-> pinned HTTPS / WebSocket / typed protocol <-> client host
 
 ## Control path
 
-A host must:
+A host has to do the following:
 
 1. Create `surf_core_t` with the current ABI and suitable limits.
 2. Increment the connection generation for each authenticated session.
@@ -25,19 +26,19 @@ A host must:
 7. Return operation results as events.
 8. Drop transient UI when its connection or page is no longer current.
 
-The core tracks the identity and lifetime of dialogs, selects, collections, and
-other remote state. Platform code stores the content needed to draw them.
+The core tracks the identity and lifetime of dialogs, selects, collections and
+other remote state. Platform code stores the content it needs to draw them.
 
 ## Media path
 
 1. Validate each `RBR1` header before reading the payload.
-2. Pass generation, sequence, and IDR metadata to the admission policy.
+2. Pass generation, sequence and IDR metadata to the admission policy.
 3. Keep only current encoded and decoded work.
 4. Decode outside the control path.
 5. Report presentation after the renderer shows the matching frame.
 6. Keep audio on a separate bounded callback path.
 
-UI work and file dialogs must not stop socket reads or decoding.
+UI work and file dialogs must never stop socket reads or decoding.
 
 ## Platform adapters
 
@@ -53,24 +54,26 @@ UI work and file dialogs must not stop socket reads or decoding.
 | Services | Clipboard, files, downloads, sharing, lifecycle, and notifications |
 | UI | Native layout, focus, input methods, and theme |
 
-A host must keep certificate pinning, separate keys for unrelated servers, and
-bounded media paths. Blocking platform calls stay outside media ingress.
+A host has to keep certificate pinning, use separate keys for unrelated
+servers, and keep its media paths bounded. Blocking platform calls should stay
+out of media ingress.
 
 ## Bring up
 
-1. Build and link the C99 core. Verify shared structure layouts.
+1. Build and link the C99 core, and verify the shared structure layouts.
 2. Decode every event fixture and encode every command fixture.
-3. Pair with a real backend, save the identity, authenticate, and reconnect.
+3. Pair with a real backend, save the identity, authenticate and reconnect.
 4. Present live video with bounded queues and IDR recovery.
-5. Verify pointer or touch, wheel, key, paste, and composition ordering.
+5. Verify the ordering of pointer or touch, wheel, key, paste and composition
+   input.
 6. Implement tabs, address entry, dialogs, selects, clipboard, files, search,
-   settings, and diagnostics.
-7. Run a stream while resizing, typing, pausing the UI, and restarting the
+   settings and diagnostics.
+7. Run a stream while resizing, typing, pausing the UI and restarting the
    backend.
 8. Test the packaged program and its runtime dependencies.
 
-Core contract tests run without a UI. Decoder, graphics, lifecycle, and package
-acceptance remain platform tests.
+The core contract tests run without a UI. Decoder, graphics, lifecycle and
+package acceptance are still platform tests.
 
 ## Support levels
 
@@ -81,22 +84,23 @@ acceptance remain platform tests.
 | Build supported | Builds without full runtime acceptance | Linux Wayland and other iOS package targets |
 | Candidate | Design only | Android and old Windows |
 
-The Linux client supports X11, Wayland, clipboard, scaled coordinates, and IME.
-The full session test currently runs on X11.
+Community ports live outside this repo for now, such as the
+[PS Vita client](https://github.com/jmverges/surf-vita).
 
 ## Android notes
 
-A narrow JNI layer can expose the C ABI. Platform work includes RSA keys,
-pinned TLS, H.264 through `MediaCodec`, audio, and a `Surface` or OpenGL ES
-renderer. Compose or Views can handle UI. Old Android releases may need a
-bundled TLS implementation.
+A narrow JNI layer can expose the C ABI. The platform work is RSA keys, pinned
+TLS, H.264 through `MediaCodec`, audio, and a `Surface` or OpenGL ES renderer.
+Compose or Views can handle the UI. Old Android releases may need a bundled TLS
+implementation.
 
 ## Old Windows notes
 
-An initial port can reuse the Rust desktop host. The oldest intended target
-must be tested against OpenGL, FFmpeg, and package dependencies before a
-minimum version is stated.
+A first port could reuse the Rust desktop host. Before stating a minimum
+version, test the oldest intended target against OpenGL, FFmpeg and the package
+dependencies.
 
 A later Win32 host could use Schannel or WinHTTP, Media Foundation or a bundled
-decoder, WASAPI, and native accessibility. Platform limits should be handled in
-the adapter or through a negotiated capability, not by forking the protocol.
+decoder, WASAPI, and native accessibility. If a platform has limits, handle
+them in the adapter or through a negotiated capability instead of forking the
+protocol.

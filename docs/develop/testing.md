@@ -1,19 +1,21 @@
 # Testing
 
-## Default suite
+## The default suite
 
 ```sh
 make test
 ```
 
-`client/core` CMake tests, `go test ./...` under `backend/`, desktop Rust
-workspace tests.
+This runs the `client/core` CMake tests, `go test ./...` under `backend/`, and
+the desktop Rust workspace tests.
 
-## Backend / Chromium
+## Backend and Chromium
 
-Download/browser tests can do a real Chromium round trip (temp profile, local
-HTTP fixtures). They pick an installed Chrome/Chromium; override with
-`SURF_TEST_BROWSER`. Without Chromium they skip locally and **fail in CI**.
+Some of the download and browser tests do a real round trip through Chromium,
+using a temporary profile and local HTTP fixtures. They use whichever Chrome or
+Chromium is installed, and you can point them at a specific one with
+`SURF_TEST_BROWSER`. If there's no Chromium, they skip when you run them
+locally, but they fail in CI.
 
 ## Client core
 
@@ -30,16 +32,18 @@ client/desktop/test-secure-session.sh
 bash client/desktop/test-ui-input.sh
 ```
 
-Session tests need a working display (Xvfb in CI), GL, and audio output (CI
-uses a PulseAudio null sink). See `client/desktop/README.md`.
+The session tests need a working display, GL and audio output. CI gets those
+from Xvfb and a PulseAudio null sink. `client/desktop/README.md` has the
+details.
 
 ## Protocol fixtures
 
-Cross-language fixtures under `protocol/fixtures/` exercise valid and invalid
-commands/events. Keep Go and C codecs in sync when changing the contract.
+The fixtures in `protocol/fixtures/` run valid and invalid commands and events
+through both languages. If you change the protocol, keep the Go and C codecs in
+sync.
 
 ## Hardware
 
-iOS release checks on device are listed in [Clients: iOS](../clients/ios.md)
-(phone/tablet layouts, media, pairing, appearance). Automated CI does not
-replace that pass.
+The checks to run on a real iOS device before a release are listed in
+[Clients: iOS](../clients/ios.md), covering phone and tablet layouts, media,
+pairing and appearance. CI can't stand in for that pass.

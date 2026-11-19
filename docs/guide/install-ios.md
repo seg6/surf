@@ -1,12 +1,14 @@
 # Install on iOS
 
-Rootful jailbreak package for iPhone / iPod touch / iPad, iOS 6.0-14.8.1.
-Device matrix: [Clients: iOS](../clients/ios.md).
+Surf for iOS is a package for rootful jailbreaks, and it supports iPhone, iPod
+touch and iPad on iOS 6.0 to 14.8.1. The [iOS client notes](../clients/ios.md)
+list the devices.
 
-**Cydia / Sileo**: add source `https://seg6.space/surf/`, install Surf, respring
-if the icon is missing. The site also has the current `.deb`.
+The simplest way is through Cydia or Sileo. Add `https://seg6.space/surf/` as a
+source, install Surf, and respring if the icon doesn't show up. The site also
+has the current `.deb` for installing it manually.
 
-**SSH:**
+To install over SSH:
 
 ```sh
 scp space.seg6.surf_*.deb root@DEVICE_IP:/tmp/surf.deb
@@ -14,11 +16,13 @@ ssh root@DEVICE_IP 'dpkg -i /tmp/surf.deb'
 ssh root@DEVICE_IP 'su mobile -c uicache || uicache || true'
 ```
 
-Run `uicache` as `mobile` on older jailbreaks if root fails.
+On older jailbreaks, run `uicache` as `mobile` if running it as root fails.
 
-Then start the [host](install-host.md), [pair](pairing.md), and allow TCP
-`18080` (or your `PORT`) to the computer. Use the host LAN address.
+Next, start the [host](install-host.md) and [pair](pairing.md). The device
+needs to reach the computer on TCP port `18080` (or whatever you set `PORT` to),
+so allow that through the firewall and use the host's LAN address.
 
-**Updates:** Cydia/Sileo refresh, manual `.deb`, or the host's embedded package
-when compatibility requires it (pinned download and hash checks;
-[Security](../reference/security.md#host-data-and-updates)).
+You can update through Cydia or Sileo, by installing a new `.deb` yourself, or
+through the host's embedded package when the client and host versions no
+longer match. That download is pinned and its hash is checked, which
+[security](../reference/security.md#updates) explains.

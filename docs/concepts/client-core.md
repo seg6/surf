@@ -1,7 +1,7 @@
 # Client core
 
 `client/core` is a C99 library (`surf_client_core`) shared by Surf clients. It
-has no UI, network, TLS, decoder, renderer, audio, filesystem, thread, or Rust
+has no UI, network, TLS, decoder, renderer, audio, filesystem, thread or Rust
 dependency.
 
 ## What it owns
@@ -14,9 +14,9 @@ dependency.
 6. Media admission and recovery policy
 7. Diagnostics calculations
 
-Platform code handles operating system APIs and presentation. Hosts dispatch
-typed events, read snapshots and effects, perform platform work, and return
-results as later events.
+Everything that touches the operating system or draws something is the
+platform's job. Hosts dispatch typed events, read snapshots and effects, do the
+platform work, and return the results as later events.
 
 ## Responsibilities
 
@@ -48,13 +48,14 @@ surf_core_result_t surf_core_snapshot(const surf_core_t *core,
                                       surf_snapshot_t *out_snapshot);
 ```
 
-Public headers live under `client/core/include/surf`. Structures carry size or
-version fields where extension needs them. Strings are pointer/length views.
-Collections have configured limits. Snapshot and effect lifetimes are explicit.
-Media parsers return borrowed views; the host keeps the WebSocket buffer. Tests
-can replace the allocator. `SURF_CORE_ABI_VERSION` is currently `1`.
+The public headers are under `client/core/include/surf`. Structures carry size
+or version fields where they might need to be extended. Strings are
+pointer-and-length views, collections have configured limits, and the
+lifetimes of snapshots and effects are explicit. Media parsers return borrowed
+views, so the host keeps the WebSocket buffer alive. Tests can replace the
+allocator. `SURF_CORE_ABI_VERSION` is currently `1`.
 
-## Control vs media
+## Control and media
 
 ```text
 platform action -> control core -> snapshot + effects -> platform adapters
@@ -62,15 +63,15 @@ platform action -> control core -> snapshot + effects -> platform adapters
 WebSocket bytes -> frame parser -> media policy -> decoder -> renderer
 ```
 
-The control core has one owner. It accepts typed events, updates state, and
-queues effects. Platform operations run after dispatch and return their results
-as later events.
+The control core has a single owner. It accepts typed events, updates its
+state and queues effects. Platform operations run after dispatch and return
+their results as later events.
 
-Media does not pass through the UI reducer. The media path tracks connection
-and encoder generations, sequences, gaps, frame age, and recovery. Decoders use
-the original payload buffer. Small metrics are sent to the control path at
-intervals. Separating these paths prevents UI work from blocking stream ingress
-and decode.
+Media doesn't pass through the UI reducer. The media path tracks connection and
+encoder generations, sequences, gaps, frame age and recovery, and decoders work
+straight from the original payload buffer. Small metrics are sent to the
+control path at intervals. Keeping the two paths apart means UI work can't
+block stream ingress or decoding.
 
 ## Build and test
 
@@ -91,13 +92,13 @@ ctest --test-dir .local/build/client-core --output-on-failure
 | Host | Binding |
 | --- | --- |
 | iOS | Objective-C via `RBCoreBridge` |
-| Linux desktop | Rust `surf-core` / `surf-core-sys` |
+| Linux desktop | Rust `surf-core` and `surf-core-sys` |
 
 The portable core now handles framing, H.264 helpers, protocol codecs, browser
-state, connection epochs, input sequencing, rich state cleanup, media policy,
+state, connection epochs, input sequencing, rich state cleanup, media policy
 and diagnostics. Both the UIKit and Linux clients use it. The UIKit source
-moved from `native/client` to `client/ios` after the core boundary was
+moved from `native/client` to `client/ios` once the core boundary was
 established.
 
-Porting contract: [Porting](../clients/porting.md).
-Network and ABI versions: [Versioning](../reference/versioning.md).
+For the porting contract, see [Porting](../clients/porting.md). Network and ABI
+versions are covered in [Versioning](../reference/versioning.md).

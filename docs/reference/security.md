@@ -23,7 +23,7 @@ volume, but cannot read the Surf connection.
 
 ## Pairing
 
-Pairing is closed until **Pair device** or `surf pair` creates an invitation.
+Pairing is closed until Pair device or `surf pair` creates an invitation.
 An invitation closes after one device uses it, after cancellation, after a
 server restart, or after five wrong manual codes.
 
@@ -32,8 +32,8 @@ expected certificate fingerprint. The client checks the presented certificate
 before saving its full fingerprint.
 
 Manual pairing uses an address and six digit code. The host and client then
-show six words derived from the certificate and client public key. Pairing must
-be cancelled when the words differ. The numeric code authorizes the request.
+show six words derived from the certificate and client public key. If the words differ, the
+pairing must be cancelled. The numeric code authorizes the request.
 The words confirm that both ends saw the same server identity.
 
 ## Devices and sessions
@@ -64,8 +64,8 @@ system clipboard.
 
 `SURF_HOME` contains the TLS private key, session key, paired public keys,
 browser profile, and browsing data. A copy of the directory is a copy of the
-server identity. Replacing it causes saved clients to report **Server Identity
-Changed**.
+server identity. Replacing it causes saved clients to report Server Identity
+Changed.
 
 ## Updates
 
@@ -74,13 +74,13 @@ connection. The client checks its length and SHA 256 hash. The privileged
 helper checks the hash, package ID, version, architecture, and input path before
 installation.
 
-This blocks network substitution. It does not protect against a compromised
-host or stolen server identity, since either can replace the package and its
+This blocks network substitution. It doesn't protect against a compromised
+host or a stolen server identity, since either can replace the package and its
 advertised hash.
 
 ## Boundary
 
-Surf encryption ends at the backend. Chromium handles website TLS and holds
+Surf's encryption ends at the backend. Chromium handles website TLS and holds
 decoded pages, media, credentials, cookies, and downloads. Control of the host,
 browser profile, or `SURF_HOME` grants access to that data.
 

@@ -1,7 +1,7 @@
 # Versioning
 
-App release, network compatibility, optional features, and core ABI are tracked
-separately.
+Surf tracks the app release, network compatibility, optional features and the
+core ABI separately.
 
 ## Version dimensions
 
@@ -13,7 +13,8 @@ separately.
 | Capabilities | `backend/internal/config/config.go` | Negotiates optional features |
 | Core ABI | `SURF_CORE_ABI_VERSION` | Identifies the C interface used by native hosts |
 
-A future trace format needs its own schema number. Logs are not protocol traces.
+A future trace format would need its own schema number. Logs aren't protocol
+traces.
 
 ## App version
 
@@ -46,8 +47,8 @@ capabilities do not change the generation.
 Generation 1 uses the published wire token `20260831-1`. Its supported range
 contains that marker only. Binary media uses the separate `RBR1` header.
 
-Optional behavior belongs in `caps` ([Protocol](protocol.md#capabilities)).
-Current examples include `pointer-input`, `clock`, and `media-stats`. Adding a
+Optional behavior belongs in `caps` ([Capabilities](capabilities.md)).
+Current examples are `pointer-input`, `clock` and `media-stats`. Adding a
 capability is compatible. Removing one or changing its meaning is not.
 
 If a later release supports several wire generations, the config response must
@@ -56,7 +57,7 @@ state an explicit minimum and maximum. App versions do not define that range.
 ## Core ABI
 
 The C99 core ABI starts at 1. Rust verifies shared structure sizes against the
-C build. Objective C uses the same headers.
+C build. Objective-C uses the same headers.
 
 Internal and additive changes leave the ABI unchanged. An incompatible layout
 or calling convention change increments `SURF_CORE_ABI_VERSION` and updates
@@ -75,9 +76,12 @@ between:
 3. Embedded metadata, package length, and SHA 256
 4. The version and generation compiled into the backend
 
-The update offer and downloaded package therefore refer to the same artifact.
+This way the update offer and the downloaded package refer to the same
+artifact.
 
 ## Release
+
+A release goes through these steps:
 
 1. Set the app version.
 2. Change compatibility only when older peers cannot continue safely.
@@ -88,7 +92,7 @@ The update offer and downloaded package therefore refer to the same artifact.
    verification, and hardware checks.
 7. Tag the tested revision.
 
-A previous release can be built in another worktree.
+A previous release can be built in a separate worktree:
 
 ```sh
 git worktree add ../surf-v0.15.5 v0.15.5

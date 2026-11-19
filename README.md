@@ -5,84 +5,85 @@
 <h1 align="center">Surf</h1>
 
 <p align="center">
-  Chromium on your computer. A native client on the device. Pinned TLS between them.
+  A modern browser for devices that can't run one anymore.
 </p>
 
 <p align="center">
-  <a href="https://github.com/seg6/surf/releases/latest">Download the host</a> | 
+  <a href="https://github.com/seg6/surf/releases/latest">Download</a> | 
   <a href="https://seg6.space/surf/">Website</a> | 
   <a href="docs/index.md">Docs</a>
 </p>
 
-Surf runs the page in Chromium on Windows, macOS, or Linux and streams video and
-audio to a client. The client draws a normal browser chrome (tabs, address bar,
-library) and sends touch, pointer, keyboard, and files back. The device's own
-web engine is not used for page content.
+Surf runs Chromium on a computer and streams it to a native app on another
+device. The app works like a regular browser, with tabs, an address bar,
+bookmarks and history, while pages load and run in Chromium on the computer.
+Sites see an up-to-date desktop browser, so they work on devices whose own
+browser is long out of date.
 
-The repo is a Go host, a typed WebSocket protocol, a shared C99 client library,
-and native clients. Today that means a jailbroken iOS app (tested on an iPad
-mini 1 / iOS 6.1.3; packages cover iOS 6-14) and a Linux Dear ImGui client
-(X11 session tests). [Porting](docs/clients/porting.md) covers building another.
+Clients:
+
+- iOS 6 through 14 (jailbroken), the original client
+- Linux desktop
+- PS Vita, a [community port](https://github.com/jmverges/surf-vita)
+
+The [porting guide](docs/clients/porting.md) covers building a client for
+another platform.
 
 ## Demo
 
 https://github.com/user-attachments/assets/5e684036-9bbf-4fce-a088-0d95dcc1a890
 
-50 seconds. Unmute for audio. [Video file](docs/media/surf-demo.mp4?raw=true) | 
-[Credits](docs/media/README.md)
+The demo is 50 seconds long and has sound. It's also available as a
+[video file](docs/media/surf-demo.mp4?raw=true), and the
+[credits](docs/media/README.md) list the content shown in it.
 
-## Layout
+## Getting started
 
-| | |
-| --- | --- |
-| Host (`surf`) | Chromium, pairing, TLS API, tab capture, tray or `surf serve` |
-| Clients | [iOS](docs/clients/ios.md), [Linux desktop](docs/clients/desktop.md) |
-| `client/core` | Shared session, browser state, media policy (C99) |
-| Protocol | JSON control + binary `RBR1` media on one WebSocket |
+1. Download the [latest release](https://github.com/seg6/surf/releases/latest)
+   for your computer and start it. It runs from the tray, or from a terminal
+   with `./surf serve`.
+2. Install a client. On iOS, add `https://seg6.space/surf/` as a source in
+   Cydia or Sileo and install Surf ([details](docs/guide/install-ios.md)). For
+   Linux, see the [desktop client guide](docs/guide/install-desktop.md).
+3. Pair them. Open Settings from the tray and choose Pair device under Paired
+   Devices, or run `surf pair`. Then scan the QR code with the app, or type in
+   the address and code. Confirm that the six words match on both screens.
 
-## Quick start
+For sites that are hard to sign in to through the stream, open Browser setup
+from the tray (or run `surf browser`) and sign in on the computer. Paired
+devices use the same browser profile afterwards. See the
+[browser setup guide](docs/guide/browser-setup.md) for details, and
+[remote access](docs/guide/remote-access.md) for connecting from outside your
+network.
 
-**Host** - grab a [release](https://github.com/seg6/surf/releases/latest):
+Surf keeps its data, including pairings and the browser profile, in
+`SURF_HOME`. Keep that folder when updating.
 
-```sh
-./surf serve
-surf pair
-```
+## Requirements
 
-Default port `18080`. Data lives in `SURF_HOME` (keep it across updates). Tray
-builds add settings, devices, logs, clipboard sync, and updates. Sign in on the
-computer with **Browser setup...** / `surf browser` ([guide](docs/guide/browser-setup.md)).
+The host runs on 64-bit Windows, macOS 12 or newer, and Linux (x86_64
+and ARM). It uses Chrome, Edge or Chromium if one is already installed,
+and downloads its own copy of Chromium otherwise. Surf doesn't bundle Widevine,
+so DRM video like Netflix only plays when the installed browser provides it.
 
-**Client** - iOS: add `https://seg6.space/surf/` in Cydia/Sileo
-([install](docs/guide/install-ios.md), [devices](docs/clients/ios.md)).
-Linux: [desktop client](docs/guide/install-desktop.md).
+## Building from source
 
-**Pair** - QR, or `host:port` + six-digit code, then match the six words on both
-ends. Off-LAN: [configuration](docs/guide/configuration.md#remote-access),
-[security](docs/reference/security.md).
-
-## Host notes
-
-64-bit Windows, macOS 12+, or Linux (x86_64 / ARM). Uses installed Chrome, Edge,
-or Chromium when suitable; otherwise a verified Chromium under `SURF_HOME`.
-Capture is Chromium tab capture. No Widevine bundle.
-
-## Docs and build
-
-[Docs index](docs/index.md) | [Overview](docs/guide/overview.md) | 
-[Architecture](docs/concepts/architecture.md) | [Protocol](docs/reference/protocol.md) | 
-[Changelog](CHANGELOG.md)
+Everything lives in this repo: the Go host, the shared C client core, the iOS
+app and the Linux client.
 
 ```sh
-make surf-binary
-make surf-dist
-make test
+make surf-binary   # build the host for this computer
+make test          # run the tests
 ```
 
-iOS `.deb`: [native build](docs/develop/native-ios.md). Releases:
-[build](docs/develop/build.md), [releasing](docs/develop/releasing.md).
+The iOS package has its own [build guide](docs/develop/native-ios.md). The
+[architecture](docs/concepts/architecture.md) and
+[protocol](docs/reference/protocol.md) docs describe how the pieces fit
+together, and the [changelog](CHANGELOG.md) lists changes by release.
 
-## Support / License
+## Support
 
-[Ko-fi](https://ko-fi.com/seg6_). Surf is AI-assisted; direction, device testing,
-and releases are human-owned. [MIT](LICENSE).
+Surf can be supported on [Ko-fi](https://ko-fi.com/seg6_).
+
+Surf is developed with AI assistance. Direction, device testing and releases
+are done by the maintainer. Licensed under [MIT](LICENSE).

@@ -1,7 +1,7 @@
 # Architecture
 
-Go host, native clients, shared C99 core. Chromium is a subprocess the host
-owns (except during [browser setup](../guide/browser-setup.md)).
+Surf is a Go host, native clients, and a shared C99 core. The host owns
+Chromium as a subprocess, except during [browser setup](../guide/browser-setup.md).
 
 ## Layout
 
@@ -21,31 +21,37 @@ docs/  site/      Documentation and Astro site
 ```text
 +----------------+   pinned TLS    +-------------------------------+
 | Native client  |<--------------->| Go host                       |
-| UI + decode   |  HTTPS /api/v1 | identity, auth, hub           |
-| C99 core      |  WebSocket JSON | browser.Manager               |
-|               |  WebSocket RBR1 | media capture + pipelines     |
-+----------------+                |        | CDP                 |
-                                  |   Chromium + extensions       |
+| UI + decode    |  HTTPS /api/v1  | identity, auth, hub           |
+| C99 core       |  WebSocket JSON | browser.Manager               |
+|                |  WebSocket RBR1 | media capture + pipelines     |
++----------------+                 |        | CDP                  |
+                                   |   Chromium + extensions       |
                                    +-------------------------------+
 ```
 
-**Host:** identity under `SURF_HOME`; auth and WebSocket tickets; Chromium
-lifetime (streaming vs setup) and profile lock; CDP / input / downloads; tab
-capture -> `RBR1`; loopback admin + optional Bonjour.
+The host keeps its identity under `SURF_HOME` and handles authentication and
+WebSocket tickets. It also manages Chromium's lifetime (streaming versus setup)
+and the profile lock, drives Chromium through CDP for input and downloads, and
+turns tab capture into `RBR1` frames. On the side it runs a loopback admin
+interface and, optionally, Bonjour.
 
-**Client:** discover/pair/pin; authenticate; dispatch into `client/core`;
-decode media off the UI thread; normalize input to protocol commands.
+The client discovers, pairs with and pins a server, then authenticates. It
+dispatches events into `client/core`, decodes media off the UI thread, and
+normalizes input into protocol commands.
 
-**Core:** codecs, browser/tab state, input order, media admission/recovery,
-diagnostics, with no platform calls. Details:
-[Client core](client-core.md). Porting: [Porting](../clients/porting.md).
+The core handles the codecs, browser and tab state, input ordering, media
+admission and recovery, and diagnostics, all without any platform calls. For
+more, see [Client core](client-core.md), and for writing a new client see
+[Porting](../clients/porting.md).
 
 ## Isolation
 
-- Do not hold browser tab locks across CDP round-trips.
-- Media frames do not enter the UI reducer.
-- Raw capture never crosses the transport hub unframed.
-- Admin routes are loopback-only; device routes need a session.
+These are the rules that keep the pieces from blocking each other:
 
-[Media](media.md) | [Browser lifetime](browser-lifetime.md) | 
-[Protocol](../reference/protocol.md)
+- Don't hold browser tab locks across CDP round-trips.
+- Media frames never enter the UI reducer.
+- Raw capture never crosses the transport hub unframed.
+- Admin routes are loopback-only, and device routes need a session.
+
+See also [Media](media.md), [Browser lifetime](browser-lifetime.md) and the
+[Protocol](../reference/protocol.md).

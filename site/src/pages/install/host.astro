@@ -7,8 +7,9 @@ const base = import.meta.env.BASE_URL;
     <section class="page-lead">
       <h1>Install the host</h1>
       <p class="deck">
-        The host runs Chromium and talks to clients. Download a release build
-        or compile from source.
+        The host is the part that runs Chromium on your computer and talks to
+        your devices. You can download a release build or compile it from
+        source.
       </p>
       <ul class="cta-row">
         <li><a class="cta cta-primary" href="https://github.com/seg6/surf/releases/latest">Downloads</a></li>
@@ -21,7 +22,7 @@ const base = import.meta.env.BASE_URL;
       <pre class="code">./surf serve
 surf status
 surf pair</pre>
-      <p>TLS on port <code>18080</code> by default. Keep <code>SURF_HOME</code> across updates.</p>
+      <p>It listens for TLS connections on port <code>18080</code> by default. Keep your <code>SURF_HOME</code> folder when you update.</p>
     </section>
 
     <section class="section">
@@ -29,15 +30,15 @@ surf pair</pre>
       <ul class="doc-links">
         <li>
           <a href={`${base}install/ios/`}>iOS client</a>
-          <span>Cydia / Sileo source on a jailbroken device.</span>
+          <span>Add the source in Cydia or Sileo on a jailbroken device.</span>
         </li>
         <li>
           <a href={`${base}install/desktop/`}>Linux client</a>
-          <span>Desktop client for Linux.</span>
+          <span>The desktop client for Linux.</span>
         </li>
         <li>
           <a href={`${base}docs/guide/pairing/`}>Pairing</a>
-          <span>Invite a device and match the six words.</span>
+          <span>Invite a device and check that the six words match.</span>
         </li>
       </ul>
     </section>

@@ -6,12 +6,12 @@ const base = import.meta.env.BASE_URL;
   <div class="wrap">
     <section class="hero">
       <p class="brand-mark">Surf</p>
-      <h1>Remote browser on hardware you already have</h1>
+      <h1>A modern browser for devices that can't run one anymore</h1>
       <p class="deck">
-        Surf runs Chromium on a Windows, macOS, or Linux computer and streams
-        that page to a native app. The app draws the chrome (tabs, address bar,
-        library) and sends input back. Page content never goes through the
-        device's own web engine.
+        Surf runs Chromium on a computer and streams it to a native app on
+        another device. The app works like a regular browser, with tabs, an
+        address bar, bookmarks and history, while pages load and run in
+        Chromium on the computer.
       </p>
       <ul class="cta-row">
         <li><a class="cta cta-primary" href={`${base}install/host/`}>Install the host</a></li>
@@ -23,44 +23,46 @@ const base = import.meta.env.BASE_URL;
     <section class="section">
       <h2>How it works</h2>
       <p>
-        The host owns a Chromium profile: cookies, JavaScript, downloads, and
-        site sign-in all happen there. The client opens a pinned TLS connection,
-        shows the live stream, and forwards touch, keyboard, pointer, and files.
-        You pair once with a QR code or a short code, then confirm the six words
-        match on both ends.
+        The host program on your computer keeps its own Chromium profile, so
+        cookies, JavaScript, downloads and site sign-ins all live there. The
+        app on your other device connects over TLS, shows the live stream, and
+        sends your touch, keyboard and pointer input back, along with any files
+        you upload. You pair the two once, with a QR code or a short code, and
+        check that the same six words show up on both screens.
       </p>
       <p>
-        Surf is not a hosted service. There is no account and no shared password.
-        Run the host on your LAN, or on any address the client can reach. Each
-        device keeps its own key. Clients pin the host certificate and refuse a
-        different fingerprint.
+        There is no hosted service and no account. The host runs on your home
+        network, or at any address your device can reach. Each device
+        has its own key, and each client remembers the host's certificate and
+        refuses to connect if it changes.
       </p>
     </section>
 
     <section class="section">
-      <h2>In practice</h2>
+      <h2>Using Surf</h2>
       <div class="point">
-        <p class="point-title">Chromium does the browsing</p>
+        <p class="point-title">Page compatibility</p>
         <p>
-          You get whatever that desktop Chromium can load. For awkward logins,
-          open Browser setup on the computer, finish there, then continue from
-          the client.
+          Websites see an up-to-date desktop Chromium, so pages that no longer
+          load on an old device work again. If a site has trouble with signing
+          in through the stream, open Browser setup on the computer, sign in
+          there, and continue from your device.
         </p>
       </div>
       <div class="point">
-        <p class="point-title">The client is a browser UI</p>
+        <p class="point-title">Browser interface</p>
         <p>
-          Tabs, suggestions, bookmarks, history, downloads, find, and reader
-          are built into the app. It is not a full-desktop remote-desktop
-          session.
+          Tabs, suggestions, bookmarks, history, downloads, find and a reader
+          view are built into the app. It shows the browser only, not the whole
+          desktop.
         </p>
       </div>
       <div class="point">
-        <p class="point-title">Data stays on the host</p>
+        <p class="point-title">Data storage</p>
         <p>
-          Identity, pairings, and the browser profile live under
-          <code>SURF_HOME</code>. Revoke a device from the host when you want
-          it gone.
+          Pairings and the browser profile are stored in
+          <code>SURF_HOME</code> on the computer. To remove a device, revoke
+          it from the host.
         </p>
       </div>
     </section>
@@ -72,8 +74,8 @@ const base = import.meta.env.BASE_URL;
           <a href={`${base}install/ios/`}>iOS / iPadOS 6-14</a>
         </p>
         <p>
-          Jailbreak package for iOS 6 through 14. Install steps (Cydia / Sileo)
-          are on the iOS page.
+          The iOS client is a jailbreak package for iOS 6 through 14 and
+          installs from Cydia or Sileo. The steps are on the iOS page.
         </p>
       </div>
       <div class="point">
@@ -81,7 +83,16 @@ const base = import.meta.env.BASE_URL;
           <a href={`${base}install/desktop/`}>Linux</a>
         </p>
         <p>
-          Desktop client for the same host and pairing flow.
+          A desktop client that pairs with the host the same way the iOS app
+          does.
+        </p>
+      </div>
+      <div class="point">
+        <p class="point-title">
+          <a href="https://github.com/jmverges/surf-vita">PS Vita (community port)</a>
+        </p>
+        <p>
+          A port of the shared client core, maintained in its own repository.
         </p>
       </div>
     </section>
@@ -89,11 +100,11 @@ const base = import.meta.env.BASE_URL;
     <section class="section">
       <h2>Docs</h2>
       <p>
-        <a href={`${base}install/host/`}>Host install</a>,
-        <a href={`${base}docs/guide/pairing/`}>pairing</a>,
-        <a href={`${base}docs/guide/overview/`}>overview</a>,
-        <a href={`${base}docs/reference/security/`}>security</a>,
-        <a href={`${base}docs/`}>full index</a>.
+        Start with the <a href={`${base}install/host/`}>host install</a>,
+        <a href={`${base}docs/guide/pairing/`}>pairing</a>, the
+        <a href={`${base}docs/guide/overview/`}>overview</a> and
+        <a href={`${base}docs/reference/security/`}>security</a>. The
+        <a href={`${base}docs/`}>full index</a> has the rest.
       </p>
     </section>
   </div>

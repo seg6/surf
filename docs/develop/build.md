@@ -1,31 +1,29 @@
 # Build
 
-From the repository root.
+Run everything here from the repository root.
 
-## Version injection
+## Versions
 
-| File | Role |
+Two files at the root control versioning. `VERSION` holds the app version
+(`MAJOR.MINOR.PATCH`), and `COMPATIBILITY_VERSION` holds the network
+compatibility generation. Release builds pass both into the Go binary through
+linker flags.
+
+## Make targets
+
+| Target | What it does |
 | --- | --- |
-| `VERSION` | App version (`MAJOR.MINOR.PATCH`) |
-| `COMPATIBILITY_VERSION` | Network compatibility generation |
+| `make test` | Runs the C core tests, the Go tests and the desktop Rust tests |
+| `make client-core-test` | Builds `client/core` with CMake and runs ctest |
+| `make client-core-sanitize` | Does the same build with ASan and UBSan on |
+| `make desktop-build`, `desktop-test`, `desktop-run` | Build, test and run the Linux client |
+| `make surf-binary` | Builds the host binary for the current `GOOS` and `GOARCH` |
+| `make surf-dist` | Packages the host archive for this machine |
+| `make surf-release-dist` | Builds the release desktop archives (needs extra tooling) |
+| `make native-package` | Builds the universal iOS `.deb` through the build environment |
 
-Release builds pass both into the Go binary via linker flags.
-
-## Common targets
-
-| Target | Result |
-| --- | --- |
-| `make test` | C core tests, Go tests, desktop Rust tests |
-| `make client-core-test` | CMake build + ctest for `client/core` |
-| `make client-core-sanitize` | ASan/UBSan core build + tests |
-| `make desktop-build` / `desktop-test` / `desktop-run` | Linux client |
-| `make surf-binary` | Host binary for current `GOOS`/`GOARCH` |
-| `make surf-dist` | Packaged host archive for this machine |
-| `make surf-release-dist` | Release desktop archives (needs tooling) |
-| `make native-package` | Universal iOS `.deb` via buildenv |
-
-`CLIENT_DEB` may point at a verified iOS package. When set, `surf-binary`
-embeds it for client updates (`-tags=client_bundle`).
+If you set `CLIENT_DEB` to a verified iOS package, `surf-binary` embeds it so
+the host can offer it as a client update (this uses `-tags=client_bundle`).
 
 ```sh
 make surf-binary
@@ -37,13 +35,13 @@ APPIMAGETOOL=/path/to/appimagetool make surf-release-dist \
   CLIENT_DEB=path/to/space.seg6.surf_VERSION_iphoneos-arm.deb
 ```
 
-Linux AppImage builds need `appimagetool`. Windows installer builds need
-`makensis`. macOS `.app` archives can be produced without Xcode or a Mac host.
+The Linux AppImage build needs `appimagetool`, and the Windows installer needs
+`makensis`. You can build the macOS `.app` archives without Xcode or a Mac.
 
-## Layout of outputs
+## Where things end up
 
-Build artifacts commonly land under `.local/build/` and `dist/`. Do not commit
-them.
+Build output usually lands in `.local/build/` and `dist/`. Don't commit either
+one.
 
 ## Next
 
