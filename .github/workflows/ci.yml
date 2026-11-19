@@ -246,21 +246,7 @@ jobs:
           npm run build
 
       - name: Check iOS 6 WebKit CSS profile
-        run: |
-          set -euo pipefail
-          # Match packaging/repository/verify.sh: scripts in HTML, layout features in CSS.
-          if grep -REqi '<script[[:space:]>]' site/dist --include='*.html'; then
-            echo "iOS 6 forbidden <script> found in site/dist" >&2
-            grep -REni '<script[[:space:]>]' site/dist --include='*.html' | head -20 >&2
-            exit 1
-          fi
-          if grep -REqi 'display:[[:space:]]*(flex|grid)|var\(|@font-face|linear-gradient\(' \
-              site/dist --include='*.css'; then
-            echo "iOS 6 forbidden CSS found in site/dist" >&2
-            grep -REni 'display:[[:space:]]*(flex|grid)|var\(|@font-face|linear-gradient\(' \
-              site/dist --include='*.css' | head -40 >&2
-            exit 1
-          fi
+        run: bash packaging/repository/check-ios6-site.sh site/dist
 
   dashboard:
     name: Management dashboard
