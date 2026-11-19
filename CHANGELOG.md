@@ -27,6 +27,8 @@ version differences alone do not.
   with the screen off or in another app; video pauses until you return.
   The server stops sending video while Surf is in the background, so it no
   longer uses bandwidth or encoder time for a picture nobody sees.
+- iOS: pairing no longer gets stuck when an earlier attempt left a half-saved
+  device key behind.
 
 ## 0.18.0 - 2026-11-10
 

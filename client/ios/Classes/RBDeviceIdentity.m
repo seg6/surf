@@ -55,8 +55,16 @@ static NSError *RBKeyError(OSStatus status, NSString *message) {
 }
 
 + (NSString *)ensurePublicKeyForServerID:(NSString *)serverID error:(NSError **)error {
-    NSData *publicData = [self publicKeyDataForServerID:serverID error:nil];
+    NSError *readError = nil;
+    NSData *publicData = [self publicKeyDataForServerID:serverID error:&readError];
     if (!publicData) {
+        // A missing public half with a leftover private half (an interrupted
+        // earlier generation) makes every new generation fail as a duplicate.
+        // Only clear it when the public key is genuinely absent; other read
+        // errors, such as a locked keychain, must not destroy a working key.
+        if ([readError code] == errSecItemNotFound) {
+            [self deleteKeyForServerID:serverID];
+        }
         NSData *tag = [self tagData:serverID];
         NSDictionary *publicAttrs = @{(__bridge id)kSecAttrIsPermanent: @YES,
                                       (__bridge id)kSecAttrApplicationTag: tag};
