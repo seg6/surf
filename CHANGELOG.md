@@ -5,30 +5,39 @@ version differences alone do not.
 
 ## Unreleased
 
-- macOS: fix Surf aborting at launch with a `CGSConnectionByID` assertion and no
-  menu bar icon (seen on Sequoia with OpenCore Legacy Patcher). Updates the
-  tray library; `surf serve` remains a workaround on older builds.
+## 0.19.0 - 2026-11-19
+
+### Browsing
+
 - Fixed touch scrolling on pages such as DuckDuckGo where one-finger swipes did
   nothing and only two-finger gestures moved the page.
 - Fixed taps and clicks landing on the wrong spot after pinch-zooming a page, so
   small buttons now respond while zoomed in.
 - The address bar now searches with the search engine set in Browser setup
-  (Chromium settings) instead of always using Google. A search engine can also
-  be chosen in Settings (Google, DuckDuckGo, Bing, Startpage, or a custom
-  address).
+  instead of always using Google. A search engine can also be chosen in
+  Settings (Google, DuckDuckGo, Bing, Startpage, or a custom address).
 - New Settings options for a custom user agent and a page width scale (1 to 3).
   A scale above 1 lays pages out wider than the client screen, which helps
-  small screens such as the iPhone 4S; the stream keeps the screen resolution.
-- iOS: links opened from other apps now load when Surf was not already running
+  small screens such as the iPhone 4S. The stream keeps the screen resolution.
+
+### iOS
+
+- New Play Audio in Background setting (off by default) keeps sound playing
+  with the screen off or in another app. Video pauses until you return, and
+  the server stops sending it in the meantime.
+- Links opened from other apps now load when Surf was not already running
   instead of being ignored.
-- iOS: keychain errors for the device key now include the error code so they can
-  be reported and diagnosed.
-- iOS: new Play Audio in Background setting (off by default) keeps sound playing
-  with the screen off or in another app; video pauses until you return.
-  The server stops sending video while Surf is in the background, so it no
-  longer uses bandwidth or encoder time for a picture nobody sees.
-- iOS: pairing no longer gets stuck when an earlier attempt left a half-saved
-  device key behind.
+- Pairing no longer gets stuck when an earlier attempt left a half-saved device
+  key behind. Device key errors now include an error code.
+
+### macOS
+
+- Fixed Surf aborting at launch with a `CGSConnectionByID` assertion and no menu
+  bar icon, seen on Sequoia with OpenCore Legacy Patcher.
+
+Upgrade normally; no uninstall or data reset is needed. Compatibility remains
+generation 1. Existing clients can still connect; update the iOS client to get
+background audio and the other iOS fixes.
 
 ## 0.18.0 - 2026-11-10
 
