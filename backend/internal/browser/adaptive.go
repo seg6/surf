@@ -304,11 +304,12 @@ func adaptiveScale(profile adaptiveProfile, w, h int) (int, int) {
 
 const (
 	// StreamBitrateK is tuned for a 1024x768 surface at 1x. Larger surfaces
-	// get proportionally more, up to maxBitrateScale times, which keeps
-	// Level 4.2 (50 Mbit/s) comfortably in reach; smaller ones keep the
-	// configured rate.
+	// get proportionally more, up to maxBitrateScale times. The cap stays
+	// modest because the devices that get larger surfaces (Retina iPads) are
+	// often on 2.4 GHz Wi-Fi, where congestion looks worse than softer frames;
+	// smaller surfaces keep the configured rate.
 	bitrateBaselinePixels = 1024 * 768
-	maxBitrateScale       = 2.5
+	maxBitrateScale       = 1.5
 )
 
 // scaledBitrateK scales a configured bitrate by coded pixel area relative to

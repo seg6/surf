@@ -57,7 +57,7 @@ Sizes sent without a scale are bounded to between 64 and 1600 as before.
 ### Bitrate and H.264 level
 
 `STREAM_BITRATE` is the rate for a 1024x768 surface. Larger surfaces get it
-multiplied by their area relative to that, up to 2.5 times, so a higher
+multiplied by their area relative to that, up to 1.5 times, so a higher
 resolution is not just more compression. Smaller surfaces keep the configured
 rate.
 

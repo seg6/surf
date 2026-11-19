@@ -227,9 +227,9 @@ func TestBitrateScalesWithPixelArea(t *testing.T) {
 		{320, 480, 16000},   // below the baseline keeps the configured rate
 		{640, 1136, 16000},  // iPhone 5s at 2x: 0.92 of baseline
 		{1024, 768, 16000},  // baseline
-		{1536, 1152, 36000}, // iPad 3 at 1.5x: 2.25x the pixels
-		{1920, 1080, 40000}, // capped at 2.5x
-		{2520, 1574, 40000}, // desktop cap
+		{1536, 1152, 24000}, // iPad 3 at 1.5x: 2.25x the pixels, capped at 1.5x
+		{1920, 1080, 24000}, // capped at 1.5x
+		{2520, 1574, 24000}, // desktop cap
 	} {
 		if got := scaledBitrateK(16000, test.w, test.h); got != test.want {
 			t.Errorf("scaledBitrateK(16000,%d,%d) = %d, want %d", test.w, test.h, got, test.want)
@@ -237,12 +237,12 @@ func TestBitrateScalesWithPixelArea(t *testing.T) {
 	}
 	cfg := &config.Config{StreamBitrateK: 16000, StreamQuantizer: 12}
 	_, _, bitrate, _, fps := adaptiveEncoderSettings(adaptiveProfiles[0], cfg, 1536, 1152)
-	if bitrate != 36000 || fps != 60 {
+	if bitrate != 24000 || fps != 60 {
 		t.Fatalf("crisp iPad 3 hidpi settings = %dk %dfps", bitrate, fps)
 	}
 	// The recovery profile's lower rate is applied on top of the area scale.
 	_, _, bitrate, _, fps = adaptiveEncoderSettings(adaptiveProfiles[3], cfg, 1536, 1152)
-	if bitrate != 36000 || fps != 30 {
+	if bitrate != 24000 || fps != 30 {
 		t.Fatalf("recovery settings = %dk %dfps", bitrate, fps)
 	}
 }

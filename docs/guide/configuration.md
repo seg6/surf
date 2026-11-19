@@ -24,7 +24,7 @@ variable, because pairing and device keys take the place of shared secrets.
 | `DOWNLOADS` | `$SURF_HOME/downloads` | Downloads |
 | `UPLOADS` | `$SURF_HOME/uploads` | Temporary uploads |
 | `VW`, `VH` | `768`, `934` | Initial viewport before the client reports size |
-| `STREAM_BITRATE` | `16000` | H.264 variable rate target in kbit/s for a 1024x768 surface; larger surfaces scale it by area, up to 2.5 times |
+| `STREAM_BITRATE` | `16000` | H.264 variable rate target in kbit/s for a 1024x768 surface; larger surfaces scale it by area, up to 1.5 times |
 | `STREAM_QUANTIZER` | `12` | H.264 constant quality fallback (0-51) |
 | `STREAM_SCALE` | empty | Optional maximum stream size |
 | `SURF_CONTENT_BLOCKER` | `1` | Manage uBlock Origin Lite |
