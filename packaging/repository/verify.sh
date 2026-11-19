@@ -48,21 +48,22 @@ for algorithm in md5sum sha1sum sha256sum; do
 done
 
 # Whole site must stay inside the iOS 6 WebKit profile and resolve package fields.
-# HTML may document forbidden features in prose; only reject real <script> tags
-# and unresolved placeholders there. Layout/CSS feature checks run on .css files.
+# Pages may carry small inline scripts but never load external ones. Flex, grid
+# and gradients are allowed in CSS because site.css layers them over a table and
+# float baseline. Custom properties and @font-face are still rejected.
 while IFS= read -r -d '' page; do
   if grep -Eq '@[A-Z0-9_]+@|__SURF_[A-Z0-9_]+__' "$page"; then
     echo "unresolved template value in ${page#"$repository_dir"/}" >&2
     exit 1
   fi
-  if grep -Eqi '<script[[:space:]>]' "$page"; then
+  if grep -Eqi '<script[^>]*[[:space:]]src=' "$page"; then
     echo "${page#"$repository_dir"/} uses a feature outside the iOS 6 compatibility profile" >&2
     exit 1
   fi
 done < <(find "$repository_dir" -type f -name '*.html' -print0)
 
 while IFS= read -r -d '' css; do
-  if grep -Eqi 'display:[[:space:]]*(flex|grid)|var\(|@font-face|linear-gradient\(' "$css"; then
+  if grep -Eqi 'var\(|@font-face' "$css"; then
     echo "${css#"$repository_dir"/} uses a feature outside the iOS 6 compatibility profile" >&2
     exit 1
   fi

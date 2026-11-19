@@ -1,111 +1,269 @@
 ---
 import Base from '../layouts/Base.astro';
 const base = import.meta.env.BASE_URL;
+const shot = `background-image:url(${base}surf-browser.jpg)`;
+const words = ['harbor', 'maple', 'tide', 'finch', 'quartz', 'luna'];
+const docs = [
+  ['guide/install-host', 'Installing the host'],
+  ['guide/pairing', 'Pairing a device'],
+  ['guide/remote-access', 'Using Surf away from home'],
+  ['guide/browser-setup', 'Signing in with Browser setup'],
+  ['guide/configuration', 'Configuration'],
+  ['reference/troubleshooting', 'Troubleshooting'],
+  ['concepts/architecture', 'How Surf is built'],
+  ['clients/porting', 'Building a client for another device'],
+];
+const specs = [
+  ['Host computer', '64-bit Windows, macOS 12 or later, or Linux on x86_64 or ARM.'],
+  ['Browser on the host', 'Surf uses Chrome, Edge or Chromium if one is installed, and downloads Chromium otherwise.'],
+  ['Clients', 'iOS 6 through 14 with a rootful jailbreak, Linux with X11 or Wayland, and the PS Vita through a community port.'],
+  ['Network', "Works on your home network, or from any address the device can reach. The connection uses TLS pinned to the host's certificate."],
+  ['Protected video', "DRM video plays only when the installed browser provides Widevine. Surf doesn't bundle it."],
+  ['License', 'Open source under the MIT license.'],
+];
+const source = 'https://seg6.space/surf/';
 ---
 <Base title="Surf">
-  <div class="wrap">
-    <section class="hero">
-      <p class="brand-mark">Surf</p>
-      <h1>A modern browser for devices that can't run one anymore</h1>
-      <p class="deck">
-        Surf runs Chromium on a computer and streams it to a native app on
-        another device. The app works like a regular browser, with tabs, an
-        address bar, bookmarks and history, while pages load and run in
-        Chromium on the computer.
-      </p>
-      <ul class="cta-row">
-        <li><a class="cta cta-primary" href={`${base}install/host/`}>Install the host</a></li>
-        <li><a class="cta cta-secondary" href={`${base}install/ios/`}>iOS client</a></li>
-        <li><a class="cta cta-secondary" href={`${base}install/desktop/`}>Linux client</a></li>
-      </ul>
-    </section>
+  <section class="hero">
+    <h1 class="hero-title">Surf</h1>
+    <p class="hero-lead">A current Chromium browser for devices that can no longer run one.</p>
+    <p class="hero-text">Chromium runs on your computer. Surf streams each page to an app on your phone, tablet, PC or handheld, and the app sends your taps and typing back.</p>
+    <p class="hero-actions">
+      <a class="btn-blue" href="#download">Download Surf</a>
+      <a class="hero-more" href="#clients">See the clients ›</a>
+    </p>
 
-    <section class="section">
-      <h2>How it works</h2>
-      <p>
-        The host program on your computer keeps its own Chromium profile, so
-        cookies, JavaScript, downloads and site sign-ins all live there. The
-        app on your other device connects over TLS, shows the live stream, and
-        sends your touch, keyboard and pointer input back, along with any files
-        you upload. You pair the two once, with a QR code or a short code, and
-        check that the same six words show up on both screens.
-      </p>
-      <p>
-        There is no hosted service and no account. The host runs on your home
-        network, or at any address your device can reach. Each device
-        has its own key, and each client remembers the host's certificate and
-        refuses to connect if it changes.
-      </p>
-    </section>
+    <figure class="lineup-fig">
+      <div class="lineup">
+        <div class="dev-laptop" aria-hidden="true">
+          <div class="laptop-bezel">
+            <div class="laptop-screen">
+              <div class="laptop-bar"><span class="laptop-tab"></span><span class="laptop-url"></span></div>
+              <div class="laptop-shot" style={shot}></div>
+            </div>
+          </div>
+          <div class="laptop-base"></div>
+        </div>
 
-    <section class="section">
-      <h2>Using Surf</h2>
-      <div class="point">
-        <p class="point-title">Page compatibility</p>
-        <p>
-          Websites see an up-to-date desktop Chromium, so pages that no longer
-          load on an old device work again. If a site has trouble with signing
-          in through the stream, open Browser setup on the computer, sign in
-          there, and continue from your device.
-        </p>
-      </div>
-      <div class="point">
-        <p class="point-title">Browser interface</p>
-        <p>
-          Tabs, suggestions, bookmarks, history, downloads, find and a reader
-          view are built into the app. It shows the browser only, not the whole
-          desktop.
-        </p>
-      </div>
-      <div class="point">
-        <p class="point-title">Data storage</p>
-        <p>
-          Pairings and the browser profile are stored in
-          <code>SURF_HOME</code> on the computer. To remove a device, revoke
-          it from the host.
-        </p>
-      </div>
-    </section>
+        <div class="dev-tablet" aria-hidden="true">
+          <img src={`${base}surf-browser.jpg`} alt="" width="166" height="221" />
+          <span class="tablet-home"></span>
+        </div>
 
-    <section class="section">
-      <h2>Clients</h2>
-      <div class="point">
-        <p class="point-title">
-          <a href={`${base}install/ios/`}>iOS / iPadOS 6-14</a>
-        </p>
-        <p>
-          The iOS client is a jailbreak package for iOS 6 through 14 and
-          installs from Cydia or Sileo. The steps are on the iOS page.
-        </p>
-      </div>
-      <div class="point">
-        <p class="point-title">
-          <a href={`${base}install/desktop/`}>Linux</a>
-        </p>
-        <p>
-          A desktop client that pairs with the host the same way the iOS app
-          does.
-        </p>
-      </div>
-      <div class="point">
-        <p class="point-title">
-          <a href="https://github.com/jmverges/surf-vita">PS Vita (community port)</a>
-        </p>
-        <p>
-          A port of the shared client core, maintained in its own repository.
-        </p>
-      </div>
-    </section>
+        <div class="dev-phone" aria-hidden="true">
+          <div class="phone-shot" style={shot}></div>
+          <span class="phone-home"></span>
+        </div>
 
-    <section class="section">
-      <h2>Docs</h2>
-      <p>
-        Start with the <a href={`${base}install/host/`}>host install</a>,
-        <a href={`${base}docs/guide/pairing/`}>pairing</a>, the
-        <a href={`${base}docs/guide/overview/`}>overview</a> and
-        <a href={`${base}docs/reference/security/`}>security</a>. The
-        <a href={`${base}docs/`}>full index</a> has the rest.
+        <div class="dev-handheld" aria-hidden="true">
+          <div class="hh-dpad"><span class="hh-dpad-bar"></span><span class="hh-dpad-bar hh-dpad-bar-v"></span></div>
+          <span class="hh-btn hh-btn-left"></span>
+          <div class="hh-screen" style={shot}></div>
+          <div class="hh-face"><span class="hh-dot hh-dot-t"></span><span class="hh-dot hh-dot-l"></span><span class="hh-dot hh-dot-r"></span><span class="hh-dot hh-dot-b"></span></div>
+          <span class="hh-btn hh-btn-right"></span>
+        </div>
+      </div>
+      <figcaption class="lineup-cap">Surf has clients for Linux, for iPhone, iPad and iPod touch, and through a community port, for the PS Vita.</figcaption>
+    </figure>
+  </section>
+
+  <section class="band" aria-label="Overview">
+    <div class="band-rule">
+      <div class="trio">
+        <div class="trio-item">
+          <span class="icon icon-blue" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path><path d="M12 3a14 14 0 0 1 0 18"></path><path d="M12 3a14 14 0 0 0 0 18"></path></svg></span>
+          <h2>Pages load on your computer</h2>
+          <p>Sites see a recent desktop version of Chromium, so pages that no longer open on an old device work normally.</p>
+        </div>
+        <div class="trio-item">
+          <span class="icon icon-green" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 9h18"></path><path d="M8 4v5"></path></svg></span>
+          <h2>Each client is a native app</h2>
+          <p>Tabs, the address bar, bookmarks, history and downloads are drawn by the app, using the controls of the device it runs on.</p>
+        </div>
+        <div class="trio-item">
+          <span class="icon icon-gray" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg></span>
+          <h2>Only your devices connect</h2>
+          <p>Each device is paired with your computer and keeps its own key. There is no account and no hosted service.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="how" id="how" aria-labelledby="how-title">
+    <div class="how-inner">
+      <h2 class="h-big" id="how-title">How Surf works</h2>
+      <p class="lede">The Surf host runs on Windows, macOS or Linux and keeps a Chromium profile with your cookies, sign-ins and downloads. A client connects to it over TLS, shows the page as video with sound, and sends touch, keyboard and pointer input back. Every client talks to the host the same way, so they all share the same tabs, bookmarks and history.</p>
+
+      <div class="flow">
+        <figure class="flow-computer">
+          <div class="mini-monitor">
+            <div class="mini-window">
+              <div class="mini-window-bar" aria-hidden="true"></div>
+              <div class="mini-window-text">
+                <p class="mini-title">Surf host and Chromium</p>
+                <p>Runs the page, keeps the profile and handles downloads.</p>
+              </div>
+            </div>
+          </div>
+          <div class="mini-neck" aria-hidden="true"></div>
+          <div class="mini-foot" aria-hidden="true"></div>
+          <figcaption>Your computer</figcaption>
+        </figure>
+
+        <div class="flow-arrows">
+          <div><svg width="200" height="12" viewBox="0 0 200 12" fill="none" stroke="#9A9A9A" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M2 6h194"></path><path d="m190 1 6 5-6 5"></path></svg><p>The page, as video with sound</p></div>
+          <div><svg width="200" height="12" viewBox="0 0 200 12" fill="none" stroke="#9A9A9A" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M198 6H4"></path><path d="m10 1-6 5 6 5"></path></svg><p>Taps, typing and uploaded files</p></div>
+        </div>
+
+        <figure class="flow-devices">
+          <div class="mini-row" aria-hidden="true">
+            <div class="mini-phone"><div class="mini-screen"></div></div>
+            <div class="mini-tablet"><div class="mini-screen"></div></div>
+            <div class="mini-handheld"><div class="mini-screen"></div></div>
+          </div>
+          <figcaption>Your devices</figcaption>
+        </figure>
+      </div>
+
+      <p class="lede lede-after">If a site is hard to sign in to from a device, open the same browser on the computer with Browser setup, sign in there, and continue on the device.</p>
+    </div>
+  </section>
+
+  <section class="sec" id="clients" aria-labelledby="clients-title">
+    <h2 class="h-big h-center" id="clients-title">Clients</h2>
+    <p class="lede lede-narrow">Each client pairs with the same host. The client core is shared, so new platforms can be added without changing the host.</p>
+    <div class="cards-wrap">
+      <div class="cards">
+        <div class="card">
+          <h3>iPhone, iPad and iPod touch</h3>
+          <p>iOS 6 through 14 with a rootful jailbreak. Installs from Cydia or Sileo.</p>
+          <details class="models">
+            <summary><span class="models-show">Show supported models ›</span><span class="models-hide">Hide supported models</span></summary>
+            <ul>
+              <li>iPhone 3GS through iPhone 6</li>
+              <li>iPad 2, 3rd and 4th generation, and iPad Air</li>
+              <li>iPad mini, mini 2 and mini 3</li>
+              <li>iPod touch, 4th to 6th generation</li>
+              <li class="muted">Not the original iPad, iPhone 3G or older iPod touch models</li>
+            </ul>
+          </details>
+        </div>
+        <div class="card">
+          <h3>Linux</h3>
+          <p>A desktop client for X11 and Wayland, with keyboard and mouse input, clipboard sync and sound. Available as an AppImage or archive.</p>
+          <a class="card-link" href="#download">Download ›</a>
+        </div>
+        <div class="card">
+          <h3>PS Vita</h3>
+          <p>A community port built on the shared client core, with hardware video decoding. It is maintained in its own repository.</p>
+          <a class="card-link" href="https://github.com/jmverges/surf-vita">jmverges/surf-vita ›</a>
+        </div>
+        <div class="card card-dashed">
+          <h3>Another device</h3>
+          <p>The client core is portable C99 with no platform code. A new client adds the interface, video decoding and input for its device.</p>
+          <a class="card-link" href={`${base}docs/clients/porting/`}>Porting guide ›</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="pair-title">
+   <div class="pair">
+    <div class="pair-text">
+      <h2 class="h-mid" id="pair-title">Pairing a device</h2>
+      <p>Open an invitation on the computer, then scan its QR code with the app or type in the address and six-digit code.</p>
+      <p>Both screens then show the same six words. If they match, nothing is sitting between the device and your computer. You can revoke a device from the computer at any time.</p>
+    </div>
+    <div class="pair-panels">
+      <div class="panels-wrap">
+        <div class="panels">
+          {['On the computer', 'On the device'].map((label) => (
+            <div class="panel">
+              <p class="panel-head">{label}</p>
+              <ol class="words">
+                {words.map((w) => <li>{w}</li>)}
+              </ol>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+   </div>
+  </section>
+
+  <section class="sec" id="specs" aria-labelledby="specs-title">
+    <h2 class="h-mid h-left" id="specs-title">Requirements</h2>
+    <dl class="specs">
+      {specs.map(([term, text]) => (
+        <div class="spec-row"><dt>{term}</dt><dd>{text}</dd></div>
+      ))}
+    </dl>
+  </section>
+
+  <section class="sec" id="download" aria-labelledby="download-title">
+    <div class="dl-box">
+      <h2 class="h-mid" id="download-title">Download Surf</h2>
+      <p class="dl-lead">Install the host on your computer first, then a client on your device. Version __SURF_APP_VERSION__.</p>
+      <p class="dl-buttons">
+        <a class="btn-blue" href="https://github.com/seg6/surf/releases/latest">Host for Windows</a>
+        <a class="btn-blue" href="https://github.com/seg6/surf/releases/latest">Host for macOS</a>
+        <a class="btn-blue" href="https://github.com/seg6/surf/releases/latest">Host for Linux</a>
       </p>
-    </section>
-  </div>
+      <dl class="dl-list">
+        <div class="dl-row">
+          <dt>iOS client</dt>
+          <dd>
+            <div class="copy-row">
+              <div class="copy-field"><input class="copy-input" id="source-url" readonly aria-label="Cydia and Sileo source" value={source} /></div>
+              <div class="copy-cell"><button class="btn-light copy-btn" id="copy-source" type="button">Copy</button></div>
+            </div>
+          </dd>
+        </div>
+        <div class="dl-row">
+          <dt>Linux client</dt>
+          <dd>AppImage or archive on the <a href="https://github.com/seg6/surf/releases/latest">releases page</a>.</dd>
+        </div>
+        <div class="dl-row">
+          <dt>PS Vita client</dt>
+          <dd>Builds and instructions in <a href="https://github.com/jmverges/surf-vita">jmverges/surf-vita</a>.</dd>
+        </div>
+      </dl>
+    </div>
+  </section>
+
+  <section class="sec sec-docs" id="docs" aria-labelledby="docs-title">
+    <h2 class="h-small" id="docs-title">Documentation</h2>
+    <div class="docs-grid">
+      {docs.map(([path, label]) => <a href={`${base}docs/${path}/`}>{label} ›</a>)}
+    </div>
+  </section>
+
+  <script is:inline>
+    (function () {
+      var btn = document.getElementById('copy-source');
+      var input = document.getElementById('source-url');
+      if (!btn || !input) return;
+      var canExec = false;
+      try { canExec = !!(document.queryCommandSupported && document.queryCommandSupported('copy')); } catch (e) {}
+      var canClip = !!(navigator.clipboard && navigator.clipboard.writeText);
+      if (!canExec && !canClip) return;
+      btn.className += ' is-ready';
+      function pick() { input.focus(); input.select(); try { input.setSelectionRange(0, 999); } catch (e) {} }
+      function done() {
+        var old = btn.getAttribute('data-label') || btn.innerHTML;
+        btn.setAttribute('data-label', old);
+        btn.innerHTML = 'Copied';
+        setTimeout(function () { btn.innerHTML = old; }, 1500);
+      }
+      btn.onclick = function () {
+        if (canClip) {
+          navigator.clipboard.writeText(input.value).then(done, function () { pick(); });
+          return;
+        }
+        pick();
+        try { if (document.execCommand('copy')) done(); } catch (e) {}
+      };
+      input.onfocus = pick;
+    })();
+  </script>
 </Base>

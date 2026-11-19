@@ -1,125 +1,151 @@
-/* Docs - same iOS 6-safe profile as site.css */
+/*
+ * Documentation pages. Same iOS 6 profile as site.css: a table-cell sidebar
+ * and content panel, -webkit- gradients, and no flex or grid at all.
+ */
 
 .doc-shell {
-  max-width: 920px;
+  max-width: 980px;
   margin: 0 auto;
-  padding: 16px 16px 48px;
+  padding: 40px 20px 0;
 }
 .doc-layout {
   display: table;
   width: 100%;
   table-layout: fixed;
 }
-.doc-side,
-.doc-main {
+.doc-side, .doc-main {
   display: table-cell;
   vertical-align: top;
 }
 .doc-side {
-  width: 190px;
-  padding-right: 20px;
+  width: 244px;
+  padding-right: 24px;
 }
 .doc-side nav {
-  background: #fff;
-  border: 1px solid #c8c8c8;
-  -webkit-border-radius: 6px;
-  border-radius: 6px;
-  padding: 10px 12px 12px;
+  padding: 14px 16px 16px;
+  border: 1px solid #DADADA;
+  border-radius: 8px;
+  background: #F6F6F6;
+  background: -webkit-linear-gradient(#FFF, #F6F6F6);
+  background: linear-gradient(#FFF, #F6F6F6);
+  -webkit-box-shadow: inset 0 1px 0 #FFF, 0 1px 2px rgba(0,0,0,0.06);
+  box-shadow: inset 0 1px 0 #FFF, 0 1px 2px rgba(0,0,0,0.06);
 }
 .doc-side h2 {
-  margin: 12px 0 4px;
-  font-size: 11px;
-  font-weight: bold;
-  color: #888;
+  margin: 16px 0 4px;
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 600;
+  color: #767676;
 }
-.doc-side h2:first-child { margin-top: 0; }
 .doc-side ul { list-style: none; margin: 0; padding: 0; }
 .doc-side li { margin: 0; }
 .doc-side a {
   display: block;
-  text-decoration: none;
-  color: #1a6eb5;
-  font-size: 13px;
-  line-height: 1.35;
   padding: 3px 0;
+  font-size: 15px;
+  line-height: 1.35;
 }
-.doc-side a:hover { text-decoration: underline; }
-.doc-side a[aria-current="page"] {
-  color: #111;
-  font-weight: bold;
-}
+.doc-side a[aria-current="page"] { color: #111; font-weight: 600; }
 
 .doc-main {
-  background: #fff;
-  border: 1px solid #c8c8c8;
-  -webkit-border-radius: 6px;
-  border-radius: 6px;
-  padding: 18px 20px 28px;
+  padding: 28px 32px 36px;
+  border: 1px solid #DADADA;
+  border-radius: 8px;
+  background: #FFF;
+  -webkit-box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+  word-wrap: break-word;
 }
 .doc-main > :first-child { margin-top: 0; }
 .doc-main h1 {
-  margin: 0 0 0.6em;
-  font-size: 24px;
-  line-height: 1.2;
+  margin: 0 0 18px;
+  font-size: 36px;
+  line-height: 1.15;
+  font-weight: 300;
+  letter-spacing: -0.01em;
   color: #111;
 }
 .doc-main h2 {
-  margin: 1.35em 0 0.45em;
-  font-size: 17px;
-  padding-top: 0.35em;
-  border-top: 1px solid #ddd;
+  margin: 36px 0 12px;
+  padding-top: 24px;
+  border-top: 1px solid #E3E3E3;
+  font-size: 24px;
+  line-height: 1.3;
+  font-weight: 600;
   color: #111;
 }
-.doc-main h2:first-of-type { border-top: 0; padding-top: 0; }
-.doc-main h3 { margin: 1.1em 0 0.35em; font-size: 15px; }
-.doc-main p, .doc-main li { max-width: 42em; }
-.doc-main p { margin: 0 0 0.8em; color: #222; }
-.doc-main ul, .doc-main ol { margin: 0 0 0.9em; padding-left: 1.25em; }
-.doc-main pre, .doc-main code {
-  font-family: Menlo, Monaco, Consolas, monospace;
-  font-size: 13px;
+.doc-main h2:first-of-type { margin-top: 28px; }
+.doc-main h3 {
+  margin: 28px 0 8px;
+  font-size: 19px;
+  line-height: 1.3;
+  font-weight: 600;
+  color: #111;
 }
+.doc-main h4 { margin: 22px 0 6px; font-size: 17px; font-weight: 600; color: #111; }
+.doc-main p, .doc-main li { max-width: 44em; }
+.doc-main p { margin: 0 0 14px; }
+.doc-main ul, .doc-main ol { margin: 0 0 16px; padding-left: 1.4em; }
+.doc-main li { margin-bottom: 4px; }
+.doc-main hr { margin: 28px 0; border: 0; border-top: 1px solid #E3E3E3; }
+.doc-main img { max-width: 100%; height: auto; }
 .doc-main code {
-  background: #f0f0f0;
-  padding: 0.1em 0.3em;
-  -webkit-border-radius: 2px;
-  border-radius: 2px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: #F1F3F5;
+  font-size: 14px;
 }
 .doc-main pre {
-  background: #2a2a2a;
-  color: #e8e8e8;
-  border: 0;
-  -webkit-border-radius: 4px;
-  border-radius: 4px;
+  margin: 0 0 16px;
+  padding: 12px 14px;
   overflow: auto;
-  padding: 11px 12px;
-}
-.doc-main pre code {
-  background: transparent;
-  padding: 0;
-  color: inherit;
-}
-.doc-main table {
-  border-collapse: collapse;
-  width: 100%;
+  border: 1px solid #DADADA;
+  border-radius: 5px;
+  background: #F6F7F8;
+  -webkit-box-shadow: inset 0 1px 2px rgba(0,0,0,0.08);
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.08);
   font-size: 14px;
-  margin: 0 0 1em;
+  line-height: 1.6;
+  color: #222;
+  word-wrap: normal;
+}
+.doc-main pre code { padding: 0; background: transparent; color: inherit; }
+.doc-main table {
+  width: 100%;
+  margin: 0 0 18px;
+  border-collapse: collapse;
+  border: 1px solid #CFCFCF;
+  font-size: 15px;
+  line-height: 1.45;
 }
 .doc-main th, .doc-main td {
-  border: 1px solid #ccc;
-  padding: 6px 8px;
+  padding: 7px 12px;
+  border: 1px solid #DADADA;
   text-align: left;
   vertical-align: top;
 }
-.doc-main th { background: #f7f7f7; }
+.doc-main th {
+  border-bottom-color: #C4C4C4;
+  background: #DEDEDE;
+  background: -webkit-linear-gradient(#F4F4F4, #DEDEDE);
+  background: linear-gradient(#F4F4F4, #DEDEDE);
+  font-weight: 600;
+  color: #444;
+  text-shadow: 0 1px 0 #FFF;
+}
 .doc-main blockquote {
-  margin: 0 0 1em;
-  padding: 0 0 0 10px;
-  border-left: 3px solid #ccc;
-  color: #555;
+  margin: 0 0 16px;
+  padding: 2px 0 2px 16px;
+  border-left: 3px solid #D9D9D9;
+  color: #666;
 }
 
-@media screen and (max-width: 720px) {
+@media screen and (max-width: 760px) {
+  .doc-shell { padding-top: 24px; }
   .doc-layout, .doc-side, .doc-main { display: block; width: auto; }
-  .doc-side { padding: 0 0 14px; }
+  .doc-side { padding: 0 0 20px; }
+  .doc-main { padding: 20px 18px 28px; }
+  .doc-main h1 { font-size: 30px; }
+  .doc-main table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 }

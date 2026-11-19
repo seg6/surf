@@ -10,12 +10,13 @@ const {
   description = 'Surf runs Chromium on your computer and streams it to a native app on another device, so old hardware can browse the modern web.',
 } = Astro.props;
 const base = import.meta.env.BASE_URL;
-const path = Astro.url.pathname;
 const nav = [
-  { href: `${base}install/ios/`, label: 'iOS', match: '/install/ios' },
-  { href: `${base}install/host/`, label: 'Host', match: '/install/host' },
-  { href: `${base}docs/`, label: 'Docs', match: '/docs' },
-  { href: 'https://github.com/seg6/surf', label: 'Source', external: true },
+  { href: `${base}#how`, label: 'How it works' },
+  { href: `${base}#clients`, label: 'Clients' },
+  { href: `${base}#specs`, label: 'Requirements' },
+  { href: `${base}#download`, label: 'Download' },
+  { href: `${base}docs/`, label: 'Documentation' },
+  { href: 'https://github.com/seg6/surf', label: 'GitHub' },
 ];
 ---
 <!DOCTYPE html>
@@ -26,36 +27,33 @@ const nav = [
     <meta name="format-detection" content="telephone=no" />
     <meta name="description" content={description} />
     <title>{title}</title>
-    <link rel="icon" href={`${base}CydiaIcon.png`} />
+    <link rel="icon" href={`${base}surf-icon-64.png`} />
+    <link rel="apple-touch-icon" href={`${base}surf-icon-128.png`} />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300;400;600;700&family=Source+Code+Pro:wght@400;500&display=swap"
+    />
   </head>
   <body>
-    <header class="site-header">
-      <div class="site-header-inner">
-        <a class="site-brand" href={base}>
-          <img src={`${base}CydiaIcon.png`} alt="" width="22" height="22" />
-          Surf
-        </a>
-        <nav class="site-nav">
-          {nav.map((item) => (
-            <a
-              href={item.href}
-              aria-current={!item.external && path.indexOf(item.match) !== -1 ? 'page' : undefined}
-            >
-              {item.label}
-            </a>
-          ))}
-        </nav>
-      </div>
-    </header>
-    <div class="site-main">
-      <slot />
+    <div class="topbar">
+      <nav class="nav" aria-label="Main">
+        <div class="nav-row">
+          <a class="nav-home" href={base} aria-label="Surf home"><img src={`${base}surf-icon-64.png`} alt="" width="22" height="22" /></a>
+          {nav.map((item) => <a class="nav-link" href={item.href}>{item.label}</a>)}
+        </div>
+      </nav>
     </div>
-    <footer class="site-footer">
-      <div class="site-footer-inner">
-        Surf | MIT  | 
-        <a href={`${base}install/ios/`}>iOS</a>  | 
-        <a href={`${base}docs/`}>Docs</a>  | 
-        <a href="https://github.com/seg6/surf">GitHub</a>
+    <slot />
+    <footer class="foot">
+      <div class="foot-inner">
+        <span class="foot-note">Surf is open source under the MIT license.</span>
+        <nav class="foot-nav" aria-label="Footer">
+          <a href="https://github.com/seg6/surf/blob/main/CHANGELOG.md">Changelog</a>
+          <a href="https://github.com/seg6/surf/issues">Report a problem</a>
+          <a href="https://ko-fi.com/seg6_">Support on Ko-fi</a>
+          <a href="https://github.com/seg6/surf">Source code</a>
+        </nav>
       </div>
     </footer>
   </body>
