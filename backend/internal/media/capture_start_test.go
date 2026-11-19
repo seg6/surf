@@ -81,7 +81,7 @@ func TestVideoStartReportsCaptureFailureAndRecovers(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			config := EncoderConfig{Codec: "avc1.42E01F", Width: 768, Height: 974, FrameRate: 60}
-			source := &Capture{mediaActive: previouslyActive, videoConfig: config}
+			source := &Capture{audio: StandardAudio, mediaActive: previouslyActive, videoConfig: config}
 			var recoverCapture atomic.Bool
 			attempts := captureTestPeer(t, source, func(int) {
 				if !recoverCapture.Load() {
@@ -115,7 +115,7 @@ func TestVideoStartReportsCaptureFailureAndRecovers(t *testing.T) {
 func TestVideoStartReportsFailureAfterCaptureReady(t *testing.T) {
 	t.Parallel()
 	config := EncoderConfig{Codec: "avc1.42E01F", Width: 800, Height: 600, FrameRate: 60}
-	source := &Capture{mediaActive: true, videoConfig: config}
+	source := &Capture{audio: StandardAudio, mediaActive: true, videoConfig: config}
 	captureTestPeer(t, source, func(attempt int) {
 		if attempt == 1 {
 			source.handleBridgeMessage([]byte(`{"type":"active","sampleRate":16000}`))
@@ -130,7 +130,7 @@ func TestVideoStartReportsFailureAfterCaptureReady(t *testing.T) {
 
 func TestVideoStartPreservesColdCaptureRetry(t *testing.T) {
 	t.Parallel()
-	source := &Capture{}
+	source := &Capture{audio: StandardAudio}
 	attempts := captureTestPeer(t, source, func(attempt int) {
 		if attempt == 1 {
 			source.handleBridgeMessage([]byte(`{"type":"error","error":"temporary capture failure"}`))
@@ -150,7 +150,7 @@ func TestVideoStartPreservesColdCaptureRetry(t *testing.T) {
 func TestVideoStartReportsFailureAfterAudioReconnect(t *testing.T) {
 	t.Parallel()
 	config := EncoderConfig{Codec: "avc1.42E01F", Width: 800, Height: 600, FrameRate: 60}
-	source := &Capture{mediaActive: true, videoConfig: config}
+	source := &Capture{audio: StandardAudio, mediaActive: true, videoConfig: config}
 	captureTestPeer(t, source, func(int) {
 		// Reusing and closing the parked audio source replaces and clears its
 		// readiness channel while video startup is still pending.
@@ -169,7 +169,7 @@ func TestVideoStartReportsFailureAfterAudioReconnect(t *testing.T) {
 
 func TestVideoStartReportsFailureAfterUnreadCaptureReady(t *testing.T) {
 	t.Parallel()
-	source := &Capture{}
+	source := &Capture{audio: StandardAudio}
 	captureTestPeer(t, source, func(int) {
 		// Both notifications arrive before triggerAction returns. The later
 		// failure must win over the queued success.

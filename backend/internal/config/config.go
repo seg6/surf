@@ -104,6 +104,9 @@ type Config struct {
 	// ViewportScale (SURF_VIEWPORT_SCALE) makes pages lay out in a CSS viewport
 	// this many times the client's size; the stream still matches the client.
 	ViewportScale float64
+	// AudioQuality (SURF_AUDIO_QUALITY) is "high" (48 kHz stereo, the
+	// default) or "standard" (16 kHz mono) for slow connections.
+	AudioQuality string
 
 	ChromeNoSandbox    bool
 	ContentBlocker     bool
@@ -156,6 +159,21 @@ func envViewportScale(key string) float64 {
 	return min(v, MaxViewportScale)
 }
 
+// Audio quality names for SURF_AUDIO_QUALITY.
+const (
+	AudioQualityHigh     = "high"
+	AudioQualityStandard = "standard"
+)
+
+// envAudioQuality returns AudioQualityStandard for "standard" and
+// AudioQualityHigh for anything else.
+func envAudioQuality(key string) string {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv(key)), AudioQualityStandard) {
+		return AudioQualityStandard
+	}
+	return AudioQualityHigh
+}
+
 func surfHome() string {
 	if v := os.Getenv("SURF_HOME"); v != "" {
 		return v
@@ -195,6 +213,7 @@ func load() (*Config, error) {
 		SearchURL:       strings.TrimSpace(os.Getenv("SURF_SEARCH_URL")),
 		UserAgent:       strings.TrimSpace(os.Getenv("SURF_USER_AGENT")),
 		ViewportScale:   envViewportScale("SURF_VIEWPORT_SCALE"),
+		AudioQuality:    envAudioQuality("SURF_AUDIO_QUALITY"),
 		ChromeNoSandbox: envBool("CHROME_NO_SANDBOX", os.Geteuid() == 0),
 		ContentBlocker:  envBool("SURF_CONTENT_BLOCKER", true),
 		AdaptiveVideo:   envBool("SURF_ADAPTIVE_VIDEO", false),

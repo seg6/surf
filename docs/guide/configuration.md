@@ -20,6 +20,7 @@ variable, because pairing and device keys take the place of shared secrets.
 | `SURF_SEARCH_URL` | empty | Address-bar search template with `{searchTerms}` or `%s`; empty uses the search engine set in Chromium, then Google |
 | `SURF_USER_AGENT` | empty | Replace the browser user agent on every tab; empty keeps Surf's own desktop and mobile identities |
 | `SURF_VIEWPORT_SCALE` | `1` | Lay pages out in a viewport this many times (1 to 3) the client's size; the stream stays at the client's resolution, so a small screen shows a wider page |
+| `SURF_AUDIO_QUALITY` | `high` | `high` streams 48 kHz stereo audio; `standard` streams 16 kHz mono, which uses less bandwidth on slow or remote connections |
 | `DOWNLOADS` | `$SURF_HOME/downloads` | Downloads |
 | `UPLOADS` | `$SURF_HOME/uploads` | Temporary uploads |
 | `VW`, `VH` | `768`, `934` | Initial viewport before the client reports size |

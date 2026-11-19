@@ -5,6 +5,10 @@ version differences alone do not.
 
 ## Unreleased
 
+- Audio is now 48 kHz stereo by default. Set Audio quality to Standard in
+  Browser setup (or `SURF_AUDIO_QUALITY=standard`) for 16 kHz mono on slow
+  connections.
+
 ## 0.19.0 - 2026-11-19
 
 ### Browsing

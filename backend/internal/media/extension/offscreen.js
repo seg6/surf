@@ -526,7 +526,7 @@ async function startCapture(streamId) {
       } : false,
     });
     nextContext = new AudioContext({
-      sampleRate: 16000,
+      sampleRate: globalThis.SURF_CAPTURE_CONFIG.sampleRate,
       latencyHint: "interactive",
     });
     await nextContext.audioWorklet.addModule("pcm-worklet.js");
@@ -540,7 +540,12 @@ async function startCapture(streamId) {
     stream = nextStream;
     context = nextContext;
     const source = context.createMediaStreamSource(stream);
-    worklet = new AudioWorkletNode(context, "surf-pcm");
+    worklet = new AudioWorkletNode(context, "surf-pcm", {
+      processorOptions: {
+        sampleRate: context.sampleRate,
+        channels: globalThis.SURF_CAPTURE_CONFIG.channels,
+      },
+    });
     worklet.port.onmessage = (event) => {
       if (activeSocket.readyState === WebSocket.OPEN) {
         activeSocket.send(event.data);

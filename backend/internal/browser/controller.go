@@ -174,11 +174,15 @@ type controllerCommand struct {
 }
 
 func New(cfg *config.Config, hub *transport.Hub) (*Controller, error) {
-	capture, err := media.NewCapture(cfg.SurfHome)
+	audioFormat := media.HighQualityAudio
+	if cfg.AudioQuality == config.AudioQualityStandard {
+		audioFormat = media.StandardAudio
+	}
+	capture, err := media.NewCapture(cfg.SurfHome, audioFormat)
 	if err != nil {
 		return nil, fmt.Errorf("initialize tab capture: %w", err)
 	}
-	audioCfg := media.AudioConfig{Capture: capture.OpenAudio}
+	audioCfg := media.AudioConfig{Capture: capture.OpenAudio, Format: audioFormat}
 	videoCfg := videoPipelineConfig(cfg)
 	var b *Controller
 	videoCfg.Start = func(settings media.VideoStartConfig) error {

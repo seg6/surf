@@ -165,7 +165,7 @@ static void RBAudioQueueCallback(void *userData, AudioQueueRef queue, AudioQueue
         return;
     }
     for (int i = 0; i < RBAudioBufferCount; i++) {
-        st = AudioQueueAllocateBuffer(self.queue, 4096, &_buffers[i]);
+        st = AudioQueueAllocateBuffer(self.queue, (UInt32)MAX((NSUInteger)4096, _chunkBytes), &_buffers[i]);
         _bufferFree[i] = st == noErr;
         if (st != noErr) RBLogEvent(@"audio", @"error", @{@"operation": @"allocate_buffer", @"buffer_index": @(i), @"status": @(st)}, @"Audio buffer allocation failed");
     }

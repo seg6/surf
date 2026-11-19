@@ -11,20 +11,44 @@ import (
 )
 
 const (
-	sampleRate = 16000
-	channels   = 1
-	chunkMS    = 20
-	chunkBytes = sampleRate * channels * 2 * chunkMS / 1000
+	chunkMS = 20
 	// Fan-out is only a handoff to the client transport, not another jitter
 	// buffer. Keeping one newest packet prevents two independent 250ms
 	// reservoirs from accumulating audible lag.
-	queueCap       = 1 // one 20ms packet; overflow drops the oldest below
+	queueCap       = 1 // one 20 ms packet; overflow drops the oldest below
 	audioIdleDelay = 5 * time.Second
 	// At 20ms per chunk this emits one content-free signal summary every five
 	// seconds. It is frequent enough for issue diagnostics without turning
 	// packet-rate activity into packet-rate logs.
 	pcmSignalLogChunks = 250
 )
+
+// AudioFormat is the PCM format streamed to clients: signed 16-bit
+// little-endian, interleaved when Channels is 2.
+type AudioFormat struct {
+	SampleRate int
+	Channels   int
+}
+
+var (
+	// HighQualityAudio is the default.
+	HighQualityAudio = AudioFormat{SampleRate: 48000, Channels: 2}
+	// StandardAudio uses a third of the bandwidth for slow connections.
+	StandardAudio = AudioFormat{SampleRate: 16000, Channels: 1}
+)
+
+// orDefault treats the zero value as HighQualityAudio.
+func (f AudioFormat) orDefault() AudioFormat {
+	if f.SampleRate <= 0 || f.Channels <= 0 {
+		return HighQualityAudio
+	}
+	return f
+}
+
+// chunkBytes is the size of one 20 ms chunk.
+func (f AudioFormat) chunkBytes() int {
+	return f.SampleRate * f.Channels * 2 * chunkMS / 1000
+}
 
 type pcmSignalWindow struct {
 	chunks         uint64
@@ -92,9 +116,12 @@ func (w *pcmSignalWindow) reset() {
 }
 
 type AudioConfig struct {
-	// Capture opens a PCM source that produces signed little-endian 16 kHz
-	// mono samples. Chromium tab capture supplies it on every platform.
+	// Capture opens a PCM source that produces signed little-endian samples
+	// in Format. Chromium tab capture supplies it on every platform.
 	Capture func() (io.ReadCloser, error)
+	// Format is the PCM format Capture produces; the zero value means
+	// HighQualityAudio.
+	Format AudioFormat
 }
 
 type AudioChunk struct {
@@ -129,8 +156,12 @@ func (s *AudioPipeline) Stats() map[string]uint64 {
 }
 
 func NewAudioPipeline(cfg AudioConfig) *AudioPipeline {
+	cfg.Format = cfg.Format.orDefault()
 	return &AudioPipeline{cfg: cfg, subs: map[*AudioSubscription]struct{}{}}
 }
+
+// Format is the PCM format of the chunks this pipeline delivers.
+func (s *AudioPipeline) Format() AudioFormat { return s.cfg.Format }
 
 func (s *AudioPipeline) Subscribe() *AudioSubscription {
 	sub := &AudioSubscription{C: make(chan AudioChunk, queueCap), s: s}
@@ -184,12 +215,13 @@ func (s *AudioPipeline) startLocked() {
 	runID := s.runID
 	s.capture = capture
 	s.running = true
-	log.Printf("audio: tab capture started %dHz mono", sampleRate)
+	log.Printf("audio: tab capture started %dHz %d channels", s.cfg.Format.SampleRate, s.cfg.Format.Channels)
 	go s.readLoop(capture, runID)
 }
 
 func (s *AudioPipeline) readLoop(r io.Reader, runID uint64) {
-	buf := make([]byte, chunkBytes)
+	format := s.cfg.Format
+	buf := make([]byte, format.chunkBytes())
 	var signal pcmSignalWindow
 	for {
 		if _, err := io.ReadFull(r, buf); err != nil {
@@ -198,7 +230,10 @@ func (s *AudioPipeline) readLoop(r io.Reader, runID uint64) {
 		data := append([]byte(nil), buf...)
 		signal.observe(data)
 		if signal.chunks >= pcmSignalLogChunks {
-			logs.Info("audio", "Chromium tab-capture PCM signal sample", signal.fields())
+			fields := signal.fields()
+			fields["pcm_sample_rate"] = format.SampleRate
+			fields["pcm_channels"] = format.Channels
+			logs.Info("audio", "Chromium tab-capture PCM signal sample", fields)
 			signal.reset()
 		}
 		s.mu.Lock()
@@ -207,7 +242,7 @@ func (s *AudioPipeline) readLoop(r io.Reader, runID uint64) {
 			return
 		}
 		s.seq++
-		chunk := AudioChunk{Seq: s.seq, SampleRate: sampleRate, Channels: channels, Data: data, T: time.Now()}
+		chunk := AudioChunk{Seq: s.seq, SampleRate: format.SampleRate, Channels: format.Channels, Data: data, T: time.Now()}
 		for sub := range s.subs {
 			select {
 			case sub.C <- chunk:

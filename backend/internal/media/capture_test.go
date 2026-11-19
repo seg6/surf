@@ -14,7 +14,7 @@ import (
 )
 
 func TestNewExtractsLoopbackOnlyExtension(t *testing.T) {
-	source, err := NewCapture(t.TempDir())
+	source, err := NewCapture(t.TempDir(), StandardAudio)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestNewExtractsLoopbackOnlyExtension(t *testing.T) {
 }
 
 func TestOpenBeforeAttachFails(t *testing.T) {
-	source, err := NewCapture(t.TempDir())
+	source, err := NewCapture(t.TempDir(), StandardAudio)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestStoppingVideoParksSharedCapture(t *testing.T) {
 }
 
 func TestNewEnablesLoopbackVideoBridge(t *testing.T) {
-	source, err := NewCapture(t.TempDir())
+	source, err := NewCapture(t.TempDir(), StandardAudio)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestBrowserTabCaptureIntegration(t *testing.T) {
 	if path == "" {
 		t.Skip("set SURF_TEST_BROWSER to run the browser integration test")
 	}
-	source, err := NewCapture(t.TempDir())
+	source, err := NewCapture(t.TempDir(), StandardAudio)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestBrowserTabCaptureIntegration(t *testing.T) {
 }
 
 func TestVideoCaptureUsesSourceClockWithoutQueuesOrTimers(t *testing.T) {
-	source, err := NewCapture(t.TempDir())
+	source, err := NewCapture(t.TempDir(), StandardAudio)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

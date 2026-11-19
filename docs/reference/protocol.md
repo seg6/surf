@@ -148,7 +148,10 @@ Binary messages start with an 84-byte `RBR1` header (network byte order).
 | 84 | N | Payload |
 
 Video payloads are complete H.264 Annex B access units, and audio payloads are
-signed little-endian PCM. The parser validates the header and the exact payload
+signed 16-bit little-endian PCM, interleaved when there are two channels, in
+20 ms chunks. The sample rate and channel count are in the header and in the
+`audio-config` event: 48 kHz stereo by default, or 16 kHz mono when the host
+sets `SURF_AUDIO_QUALITY=standard`. The parser validates the header and the exact payload
 length, and the host keeps the buffer while decoding.
 
 ## Changing the contract

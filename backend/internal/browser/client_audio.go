@@ -19,11 +19,12 @@ func (b *Controller) handleAudio(c *transport.Client, on bool) {
 		b.mediaMu.Unlock()
 		return
 	}
+	format := b.audio.Format()
 	sub := b.audio.Subscribe()
 	b.audioSubs[c] = sub
 	b.mediaMu.Unlock()
 	log.Printf("audio: client subscribed")
-	b.send(c, protocol.AudioConfigEvent{Type: "audio-config", OK: true, Rate: 16000, Channels: 1})
+	b.send(c, protocol.AudioConfigEvent{Type: "audio-config", OK: true, Rate: format.SampleRate, Channels: format.Channels})
 	go b.pumpAudio(c, sub)
 }
 

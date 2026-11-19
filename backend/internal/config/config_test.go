@@ -40,7 +40,7 @@ func clearConfigEnv(t *testing.T) {
 		"CHROME_NO_SANDBOX",
 		"SURF_ADAPTIVE_VIDEO",
 		"STREAM_SCALE", "STREAM_BITRATE", "STREAM_QUANTIZER",
-		"SURF_SEARCH_URL", "SURF_USER_AGENT", "SURF_VIEWPORT_SCALE",
+		"SURF_SEARCH_URL", "SURF_USER_AGENT", "SURF_VIEWPORT_SCALE", "SURF_AUDIO_QUALITY",
 	} {
 		t.Setenv(key, "")
 	}
@@ -73,6 +73,20 @@ func TestLoadBrowserSettings(t *testing.T) {
 	}
 	if cfg.SearchURL != "https://duckduckgo.com/?q=%s" || cfg.UserAgent != "Custom/1.0" {
 		t.Fatalf("trimmed: %q %q", cfg.SearchURL, cfg.UserAgent)
+	}
+}
+
+func TestLoadAudioQuality(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("SURF_HOME", t.TempDir())
+	for value, want := range map[string]string{
+		"": AudioQualityHigh, "high": AudioQualityHigh, "standard": AudioQualityStandard,
+		" Standard ": AudioQualityStandard, "x": AudioQualityHigh,
+	} {
+		t.Setenv("SURF_AUDIO_QUALITY", value)
+		if got := loadConfig(t).AudioQuality; got != want {
+			t.Errorf("SURF_AUDIO_QUALITY=%q -> %q, want %q", value, got, want)
+		}
 	}
 }
 

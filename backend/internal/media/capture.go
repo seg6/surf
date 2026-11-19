@@ -1,5 +1,5 @@
 // Package media captures and distributes Chromium tab audio and video.
-// A built-in extension sends H.264 video and 16 kHz mono PCM to Surf over
+// A built-in extension sends H.264 video and PCM audio to Surf over
 // loopback-only WebSockets without rendering the audio locally.
 package media
 
@@ -33,6 +33,7 @@ const extensionName = "Surf Tab Capture"
 var extensionFiles embed.FS
 
 type Capture struct {
+	audio         AudioFormat
 	extensionPath string
 	listener      net.Listener
 	server        *http.Server
@@ -73,7 +74,10 @@ type bridgeMessage struct {
 	SampleRate int    `json:"sampleRate"`
 }
 
-func NewCapture(home string) (*Capture, error) {
+// NewCapture starts the tab-capture bridge. The extension is configured to
+// produce audio in the given format (the zero value means HighQualityAudio).
+func NewCapture(home string, audio AudioFormat) (*Capture, error) {
+	audio = audio.orDefault()
 	var tokenBytes [32]byte
 	if _, err := rand.Read(tokenBytes[:]); err != nil {
 		return nil, fmt.Errorf("tab capture token: %w", err)
@@ -83,9 +87,9 @@ func NewCapture(home string) (*Capture, error) {
 	if err != nil {
 		return nil, fmt.Errorf("tab capture listener: %w", err)
 	}
-	s := &Capture{listener: listener}
+	s := &Capture{listener: listener, audio: audio}
 	extensionPath := filepath.Join(home, "runtime", "tab-capture-extension")
-	if err := extractExtension(extensionPath, listener.Addr().String(), token); err != nil {
+	if err := extractExtension(extensionPath, listener.Addr().String(), token, audio); err != nil {
 		_ = listener.Close()
 		return nil, err
 	}
@@ -103,7 +107,7 @@ func NewCapture(home string) (*Capture, error) {
 	return s, nil
 }
 
-func extractExtension(dst, address, token string) error {
+func extractExtension(dst, address, token string, audio AudioFormat) error {
 	if err := os.MkdirAll(dst, 0o700); err != nil {
 		return fmt.Errorf("tab capture extension directory: %w", err)
 	}
@@ -126,7 +130,8 @@ func extractExtension(dst, address, token string) error {
 	url := "ws://" + address + "/audio/" + token
 	videoURL := "ws://" + address + "/video/" + token
 	config := "globalThis.SURF_CAPTURE_CONFIG = {audioUrl: " + strconv.Quote(url) +
-		", videoUrl: " + strconv.Quote(videoURL) + "};\n"
+		", videoUrl: " + strconv.Quote(videoURL) +
+		", sampleRate: " + strconv.Itoa(audio.SampleRate) + ", channels: " + strconv.Itoa(audio.Channels) + "};\n"
 	if err := os.WriteFile(filepath.Join(dst, "config.js"), []byte(config), 0o600); err != nil {
 		return fmt.Errorf("tab capture extension config: %w", err)
 	}
@@ -208,7 +213,7 @@ func (s *Capture) Start() error {
 }
 
 // OpenAudio starts capture of the active Chromium tab and returns signed
-// little-endian 16 kHz mono PCM.
+// little-endian PCM in the configured audio format.
 func (s *Capture) OpenAudio() (io.ReadCloser, error) {
 	reader, writer := io.Pipe()
 	next := &capture{source: s, reader: reader, writer: writer}
@@ -445,8 +450,8 @@ func (s *Capture) handleBridgeMessage(data []byte) {
 		s.mu.Lock()
 		s.mediaActive = true
 		s.mu.Unlock()
-		if message.SampleRate != 16000 {
-			s.signalReady(fmt.Errorf("tab capture sample rate is %d, want 16000", message.SampleRate))
+		if message.SampleRate != s.audio.SampleRate {
+			s.signalReady(fmt.Errorf("tab capture sample rate is %d, want %d", message.SampleRate, s.audio.SampleRate))
 		} else {
 			s.signalReady(nil)
 		}

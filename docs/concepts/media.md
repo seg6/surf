@@ -13,7 +13,8 @@ verified managed Chromium build if it can't find one. Extensions, including
 1. The host loads the built-in capture extension into Chromium.
 2. The extension opens loopback WebSockets to the Go process, using tokenized
    URLs.
-3. Tab capture produces H.264 video and 16 kHz mono PCM audio.
+3. Tab capture produces H.264 video and PCM audio. Audio is 48 kHz stereo by default, or 16 kHz
+   mono with `SURF_AUDIO_QUALITY=standard`.
 4. Go wraps the payloads in an 84-byte `RBR1` header and fans them out on the
    authenticated client WebSocket.
 5. Clients validate the headers, apply admission policy, decode and present.
