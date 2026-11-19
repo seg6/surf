@@ -264,6 +264,56 @@ func TestManagementSettingsPersistAndUpdateRuntime(t *testing.T) {
 	}
 }
 
+func postSettings(t *testing.T, app *desktopApp, fields map[string]string) int {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	_ = writer.WriteField("serverName", "Surf")
+	_ = writer.WriteField("port", "18080")
+	for key, value := range fields {
+		_ = writer.WriteField(key, value)
+	}
+	_ = writer.Close()
+	request := httptest.NewRequest(http.MethodPost, "/settings", &body)
+	request.RemoteAddr = "127.0.0.1:12345"
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	request.Header.Set("X-Surf-Desktop", "1")
+	response := httptest.NewRecorder()
+	app.managementHandler().ServeHTTP(response, request)
+	return response.Code
+}
+
+func TestManagementBrowserSettings(t *testing.T) {
+	home := t.TempDir()
+	app := &desktopApp{home: home, serverName: "Surf", baseURL: "https://127.0.0.1:18080"}
+	code := postSettings(t, app, map[string]string{"searchURL": "https://duckduckgo.com/?q={searchTerms}"})
+	if code != http.StatusNoContent {
+		t.Fatalf("code=%d", code)
+	}
+	cfg, err := loadDesktopConfig(home)
+	if err != nil || cfg.SearchURL != "https://duckduckgo.com/?q={searchTerms}" {
+		t.Fatalf("saved config=%+v err=%v", cfg, err)
+	}
+	keys, env := cfg.browserEnv()
+	if len(keys) != 1 || len(env) != 1 || env[0] != "SURF_SEARCH_URL=https://duckduckgo.com/?q={searchTerms}" {
+		t.Fatalf("keys=%v env=%v", keys, env)
+	}
+	if code := postSettings(t, app, nil); code != http.StatusNoContent {
+		t.Fatalf("reset code=%d", code)
+	}
+	if cfg, _ = loadDesktopConfig(home); cfg.SearchURL != "" {
+		t.Fatalf("settings not cleared: %+v", cfg)
+	}
+	for name, fields := range map[string]map[string]string{
+		"search without placeholder": {"searchURL": "https://example.com/"},
+		"search scheme":              {"searchURL": "ftp://example.com/?q=%s"},
+	} {
+		if code := postSettings(t, app, fields); code != http.StatusBadRequest {
+			t.Errorf("%s: code=%d, want 400", name, code)
+		}
+	}
+}
+
 func TestManagementRejectsNonLoopback(t *testing.T) {
 	app := &desktopApp{}
 	request := httptest.NewRequest(http.MethodGet, "/", nil)

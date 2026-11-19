@@ -43,6 +43,21 @@ type desktopConfig struct {
 	Port              int    `json:"port"`
 	StartAtLogin      bool   `json:"startAtLogin"`
 	StartupChoiceMade bool   `json:"startupChoiceMade"`
+	SearchURL         string `json:"searchURL,omitempty"`
+}
+
+// browserEnv turns the dashboard's browser settings into backend environment
+// variables. Empty settings are omitted so an inherited environment still applies.
+func (c desktopConfig) browserEnv() (keys, env []string) {
+	for _, setting := range []struct{ key, value string }{
+		{"SURF_SEARCH_URL", c.SearchURL},
+	} {
+		if setting.value != "" {
+			keys = append(keys, setting.key)
+			env = append(env, setting.key+"="+setting.value)
+		}
+	}
+	return keys, env
 }
 
 type desktopApp struct {
@@ -421,7 +436,9 @@ func (a *desktopApp) startBackend() error {
 		a.mu.Unlock()
 		return err
 	}
-	env := append(filteredEnv(os.Environ(), "SURF_HOME", "SURF_SERVER_NAME", "SURF_PUBLIC_ADDRESS", "BIND_ADDR", "PORT", "SURF_PARENT_GUARD"),
+	saved, _ := loadDesktopConfig(a.home)
+	browserKeys, browserEnv := saved.browserEnv()
+	env := append(filteredEnv(os.Environ(), append([]string{"SURF_HOME", "SURF_SERVER_NAME", "SURF_PUBLIC_ADDRESS", "BIND_ADDR", "PORT", "SURF_PARENT_GUARD"}, browserKeys...)...),
 		"SURF_HOME="+a.home,
 		"SURF_SERVER_NAME="+serverName,
 		"SURF_PUBLIC_ADDRESS="+publicAddress,
@@ -429,6 +446,7 @@ func (a *desktopApp) startBackend() error {
 		"PORT="+strings.TrimPrefix(baseURL, "https://127.0.0.1:"),
 		"SURF_PARENT_GUARD=1",
 	)
+	env = append(env, browserEnv...)
 	done := make(chan struct{})
 	cmd, err := process.Start(self, []string{"serve"}, process.Options{
 		Env: env, Stdin: true, StdoutWriter: a.logFile, StderrWriter: a.logFile,
@@ -1012,6 +1030,7 @@ func (a *desktopApp) managementConfig(w http.ResponseWriter, _ *http.Request) {
 		"serverName": serverName, "publicAddress": publicAddress, "baseURL": baseURL, "lanURL": lanURL, "lanURLs": lanURLs,
 		"port": port, "running": running, "startAtLogin": cfg.StartAtLogin,
 		"startupChoiceMade": cfg.StartupChoiceMade,
+		"searchURL":         cfg.SearchURL,
 	})
 }
 
@@ -1100,10 +1119,16 @@ func (a *desktopApp) managementSettings(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Port must be between 1 and 65535.", http.StatusBadRequest)
 		return
 	}
+	searchURL := strings.TrimSpace(r.FormValue("searchURL"))
+	if searchURL != "" && !validSearchTemplate(searchURL) {
+		http.Error(w, "Search address must be an http(s) URL containing {searchTerms} or %s.", http.StatusBadRequest)
+		return
+	}
 	startAtLogin := r.FormValue("startAtLogin") == "on"
 	cfg := desktopConfig{
 		ServerName: serverName, PublicAddress: publicAddress, Port: port,
 		StartAtLogin: startAtLogin, StartupChoiceMade: true,
+		SearchURL: searchURL,
 	}
 	if a.manageChild {
 		if err := setStartAtLogin(startAtLogin); err != nil {
@@ -1134,6 +1159,15 @@ func (a *desktopApp) managementSettings(w http.ResponseWriter, r *http.Request) 
 			a.logf("restart after settings: %v", err)
 		}
 	}()
+}
+
+func validSearchTemplate(value string) bool {
+	if strings.Count(value, "{searchTerms}")+strings.Count(value, "%s") != 1 {
+		return false
+	}
+	value = strings.NewReplacer("{searchTerms}", "x", "%s", "x").Replace(value)
+	u, err := url.Parse(value)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 func (a *desktopApp) backendTransport() http.RoundTripper {

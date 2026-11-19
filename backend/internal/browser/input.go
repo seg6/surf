@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -26,8 +25,9 @@ const (
 )
 
 // NormalizeNavURL turns address-bar input into a URL: scheme kept as-is,
-// bare hosts get https://, everything else becomes a search.
-func NormalizeNavURL(input string) string {
+// bare hosts get https://, everything else becomes a search using the
+// {searchTerms} template.
+func NormalizeNavURL(input, searchTemplate string) string {
 	u := strings.TrimSpace(input)
 	if u == "" {
 		return ""
@@ -38,7 +38,7 @@ func NormalizeNavURL(input string) string {
 	if strings.Index(u, ".") > 0 && !strings.Contains(u, " ") {
 		return "https://" + u
 	}
-	return "https://www.google.com/search?q=" + url.QueryEscape(u)
+	return searchURL(searchTemplate, u)
 }
 
 // ClientConnected implements transport.Handler: greet, sync state, and automatically
@@ -199,7 +199,7 @@ func (b *Controller) handleCommand(c *transport.Client, command protocol.Command
 		}
 		// Fire-and-forget: Page.navigate doesn't answer until the navigation
 		// commits, and the WS reader must stay responsive meanwhile.
-		if u := NormalizeNavURL(m.URL); u != "" {
+		if u := NormalizeNavURL(m.URL, b.searchTemplate()); u != "" {
 			log.Printf("nav -> %s", u)
 			b.setTabLoading(t, true)
 			if err := b.cdp.Dispatch(s, "Page.navigate", map[string]any{"url": u}); err != nil {

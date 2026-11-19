@@ -12,6 +12,10 @@ version differences alone do not.
   nothing and only two-finger gestures moved the page.
 - Fixed taps and clicks landing on the wrong spot after pinch-zooming a page, so
   small buttons now respond while zoomed in.
+- The address bar now searches with the search engine set in Browser setup
+  (Chromium settings) instead of always using Google. A search engine can also
+  be chosen in Settings (Google, DuckDuckGo, Bing, Startpage, or a custom
+  address).
 
 ## 0.18.0 - 2026-11-10
 

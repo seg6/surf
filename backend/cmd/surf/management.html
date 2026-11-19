@@ -349,6 +349,15 @@
               <label>Server name<input id="server-name" name="serverName" maxlength="80" required></label>
               <label>Port<input id="port" name="port" type="number" min="1" max="65535" required></label>
               <label class="full">Public address (optional)<input id="public-address" name="publicAddress" placeholder="surf.example.net:18080"></label>
+              <label>Address-bar search<select id="search-preset" aria-label="Address-bar search engine">
+                <option value="">Chromium's default</option>
+                <option value="https://www.google.com/search?q={searchTerms}">Google</option>
+                <option value="https://duckduckgo.com/?q={searchTerms}">DuckDuckGo</option>
+                <option value="https://www.bing.com/search?q={searchTerms}">Bing</option>
+                <option value="https://www.startpage.com/do/search?q={searchTerms}">Startpage</option>
+                <option value="custom">Custom…</option>
+              </select></label>
+              <label id="search-url-row" hidden>Search address<input id="search-url" name="searchURL" placeholder="https://example.com/search?q={searchTerms}"></label>
             </div>
             <label class="check-row"><input id="start-at-login" name="startAtLogin" type="checkbox">Start Surf when I sign in</label>
             <div class="form-actions"><button class="button primary" type="submit">Save &amp; restart</button></div>
@@ -543,6 +552,11 @@
       $('public-address').value = config.publicAddress || '';
       $('port').value = config.port;
       $('start-at-login').checked = Boolean(config.startAtLogin);
+      $('search-url').value = config.searchURL || '';
+      const preset = $('search-preset');
+      preset.value = config.searchURL || '';
+      if (preset.value !== (config.searchURL || '')) preset.value = 'custom';
+      $('search-url-row').hidden = preset.value !== 'custom';
       $('first-run').classList.toggle('show', !config.startupChoiceMade);
     }
     function setOnline(online) {
@@ -598,6 +612,11 @@
         await request(`/api/update/${action}`, {method:'POST', headers:action === 'apply' ? await interruptionHeaders() : {'X-Surf-Desktop':'1'}});
         await updateStatus();
       } catch (error) { toast(error.message); }
+    });
+    $('search-preset').addEventListener('change', event => {
+      const value = event.target.value, custom = value === 'custom';
+      $('search-url-row').hidden = !custom;
+      if (!custom) $('search-url').value = value;
     });
     $('settings-form').addEventListener('submit', async event => {
       event.preventDefault();

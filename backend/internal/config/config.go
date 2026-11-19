@@ -93,6 +93,11 @@ type Config struct {
 	DownloadsDir  string
 	UploadsDir    string
 
+	// SearchURL is the address-bar search template (SURF_SEARCH_URL) with a
+	// {searchTerms} or %s placeholder. Empty follows Chromium's own default
+	// search engine and falls back to Google.
+	SearchURL string
+
 	ChromeNoSandbox    bool
 	ContentBlocker     bool
 	ContentBlockerPath string
@@ -169,6 +174,7 @@ func load() (*Config, error) {
 		TunnelHost:      strings.ToLower(strings.TrimSpace(os.Getenv("SURF_TUNNEL_HOST"))),
 		DownloadsDir:    envStr("DOWNLOADS", filepath.Join(home, "downloads")),
 		UploadsDir:      envStr("UPLOADS", filepath.Join(home, "uploads")),
+		SearchURL:       strings.TrimSpace(os.Getenv("SURF_SEARCH_URL")),
 		ChromeNoSandbox: envBool("CHROME_NO_SANDBOX", os.Geteuid() == 0),
 		ContentBlocker:  envBool("SURF_CONTENT_BLOCKER", true),
 		AdaptiveVideo:   envBool("SURF_ADAPTIVE_VIDEO", false),

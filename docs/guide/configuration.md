@@ -17,6 +17,7 @@ device keys replace shared secrets.
 | `CHROME` | automatic | Chrome, Chromium, or Edge executable |
 | `PROFILE` | `$SURF_HOME/profile` | Chromium profile |
 | `START_URL` | Google | Initial page |
+| `SURF_SEARCH_URL` | empty | Address-bar search template with `{searchTerms}` or `%s`; empty uses the search engine set in Chromium, then Google |
 | `DOWNLOADS` | `$SURF_HOME/downloads` | Downloads |
 | `UPLOADS` | `$SURF_HOME/uploads` | Temporary uploads |
 | `VW`, `VH` | `768`, `934` | Initial viewport before the client reports size |

@@ -1,8 +1,12 @@
 package browser
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"surf-backend/internal/config"
 )
 
 func TestNormalizeNavURL(t *testing.T) {
@@ -20,8 +24,74 @@ func TestNormalizeNavURL(t *testing.T) {
 		"":                       "",
 	}
 	for in, want := range cases {
-		if got := NormalizeNavURL(in); got != want {
+		if got := NormalizeNavURL(in, defaultSearchURL); got != want {
 			t.Errorf("NormalizeNavURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestNormalizeNavURLCustomSearch(t *testing.T) {
+	got := NormalizeNavURL("cats & dogs", "https://duckduckgo.com/?q={searchTerms}")
+	if want := "https://duckduckgo.com/?q=cats+%26+dogs"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	if got := NormalizeNavURL("example.com", "https://duckduckgo.com/?q={searchTerms}"); got != "https://example.com" {
+		t.Fatalf("host input searched: %q", got)
+	}
+}
+
+func TestParseSearchTemplate(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://duckduckgo.com/?q={searchTerms}":                      "https://duckduckgo.com/?q={searchTerms}",
+		"https://example.com/s?q=%s":                                   "https://example.com/s?q={searchTerms}",
+		"https://www.bing.com/search?q={searchTerms}&{inputEncoding?}": "https://www.bing.com/search?q={searchTerms}&",
+		" http://localhost:8080/?q={searchTerms} ":                     "http://localhost:8080/?q={searchTerms}",
+		"https://google.com/{google:baseURL}search?q={searchTerms}":    "",
+		"https://example.com/":                                         "",
+		"ftp://example.com/?q={searchTerms}":                           "",
+		"javascript:{searchTerms}":                                     "",
+		"https://example.com/{searchTerms}{searchTerms}":               "",
+		"": "",
+	} {
+		got, ok := parseSearchTemplate(in)
+		if got != want || ok != (want != "") {
+			t.Errorf("parseSearchTemplate(%q) = %q, %t; want %q", in, got, ok, want)
+		}
+	}
+}
+
+func TestSearchTemplateOrder(t *testing.T) {
+	profile := t.TempDir()
+	b := &Controller{cfg: &config.Config{Profile: profile}}
+	if got := b.searchTemplate(); got != defaultSearchURL {
+		t.Fatalf("no profile: %q", got)
+	}
+	if err := os.MkdirAll(filepath.Join(profile, "Default"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	prefs := filepath.Join(profile, "Default", "Preferences")
+	chromium := `{"default_search_provider_data":{"template_url_data":{"url":"https://duckduckgo.com/?q={searchTerms}"}}}`
+	if err := os.WriteFile(prefs, []byte(chromium), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := b.searchTemplate(); got != "https://duckduckgo.com/?q={searchTerms}" {
+		t.Fatalf("chromium choice: %q", got)
+	}
+	b.cfg.SearchURL = "https://www.startpage.com/do/search?q=%s"
+	if got := b.searchTemplate(); got != "https://www.startpage.com/do/search?q={searchTerms}" {
+		t.Fatalf("host setting: %q", got)
+	}
+	b.cfg.SearchURL = "not a template"
+	if got := b.searchTemplate(); got != "https://duckduckgo.com/?q={searchTerms}" {
+		t.Fatalf("invalid host setting: %q", got)
+	}
+	for _, bad := range []string{"{", `{"default_search_provider_data":{"template_url_data":{"url":"https://x.test/?q={searchTerms}","post_params":"q={searchTerms}"}}}`} {
+		if err := os.WriteFile(prefs, []byte(bad), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		b.cfg.SearchURL = ""
+		if got := b.searchTemplate(); got != defaultSearchURL {
+			t.Fatalf("bad prefs %q: %q", bad, got)
 		}
 	}
 }
