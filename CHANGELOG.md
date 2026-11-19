@@ -19,6 +19,8 @@ version differences alone do not.
 - New Settings options for a custom user agent and a page width scale (1 to 3).
   A scale above 1 lays pages out wider than the client screen, which helps
   small screens such as the iPhone 4S; the stream keeps the screen resolution.
+- iOS: links opened from other apps now load when Surf was not already running
+  instead of being ignored.
 
 ## 0.18.0 - 2026-11-10
 

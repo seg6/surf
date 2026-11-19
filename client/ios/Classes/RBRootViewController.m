@@ -208,6 +208,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
 // Pasteboard banner (M4.2)
 @property(nonatomic, strong) UIAlertView *pasteboardAlert;
 @property(nonatomic, copy) NSString *pasteboardURL;
+@property(nonatomic, copy) NSString *pendingOpenURL;
 // Host-controlled clipboard synchronization. Clipboard text stays in memory
 // and on the two system pasteboards; it is never written to Surf's settings.
 @property(nonatomic, assign) BOOL clipboardSyncEnabled;
@@ -1417,6 +1418,13 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
             [self cacheThumbnailForTabKey:oldActiveKey];
         }
         self.lastTabs = nextTabs;
+        // A URL handed to a cold launch waits for the first tab state so it
+        // navigates the active tab instead of being dropped or clobbered.
+        if (self.pendingOpenURL && nextActiveKey && self.session.state == RBSessionStateOpen) {
+            NSString *pending = self.pendingOpenURL;
+            self.pendingOpenURL = nil;
+            [self.session sendMessage:@{@"t": @"nav", @"url": pending}];
+        }
         [self.tabStrip setTabs:self.lastTabs baseURL:self.session.baseURL
                     fingerprint:[self.currentServer objectForKey:@"fingerprint"]];
         [self.phoneToolbar setTabCount:[self.lastTabs count]];
@@ -2988,6 +2996,10 @@ didFinishPickingMediaWithInfo:(NSDictionary *)info {
 
 - (void)openURLString:(NSString *)url {
     if (![url length]) return;
+    if (self.session.state != RBSessionStateOpen) {
+        self.pendingOpenURL = url;
+        return;
+    }
     [self.session sendMessage:@{@"t": @"nav", @"url": url}];
 }
 
