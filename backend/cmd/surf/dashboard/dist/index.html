@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Surf</title>
+  <link rel="icon" type="image/png" sizes="1024x1024" href="/icon.png">
+  <link rel="apple-touch-icon" href="/icon.png">
+  <script>
+    // Apply the saved appearance before first paint so a dark dashboard never
+    // flashes light. Storage can be unavailable in private browsing modes.
+    (function () {
+      var preference = 'system';
+      try {
+        var saved = localStorage.getItem('surf-dashboard-appearance');
+        if (saved === 'light' || saved === 'dark') preference = saved;
+      } catch (error) {}
+      var dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.dataset.theme = preference === 'system' ? (dark ? 'dark' : 'light') : preference;
+    })();
+  </script>
+  <script type="module" crossorigin src="/assets/app.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/style.css">
+</head>
+<body>
+  <div id="app"></div>
+</body>
+</html>

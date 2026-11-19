@@ -1,1 +1,2 @@
 * text=auto eol=lf
+backend/cmd/surf/dashboard/dist/** linguist-generated=true

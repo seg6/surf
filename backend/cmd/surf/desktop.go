@@ -4,19 +4,22 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
-	_ "embed"
+	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
+	"mime"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -1005,16 +1008,72 @@ func localOnly(next http.Handler) http.Handler {
 	})
 }
 
-//go:embed management.html
-var managementHTML []byte
+// The dashboard is a Preact app built from dashboard/ and committed as
+// dashboard/dist so that plain `go build` needs no Node toolchain. CI rebuilds
+// it and fails if the committed output is stale.
+//
+//go:embed dashboard/dist
+var dashboardDist embed.FS
 
+var dashboardFS = func() fs.FS {
+	root, err := fs.Sub(dashboardDist, "dashboard/dist")
+	if err != nil {
+		panic(err)
+	}
+	return root
+}()
+
+// managementHome serves the dashboard page at "/" and its bundled files under
+// "/assets/". Everything else is not found. The localOnly middleware adds
+// Cache-Control: no-store and nosniff to every response, so the content type
+// set here is the one browsers honor.
 func (a *desktopApp) managementHome(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	name := "index.html"
 	if r.URL.Path != "/" {
+		name = strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if !strings.HasPrefix(name, "assets/") {
+			http.NotFound(w, r)
+			return
+		}
+	}
+	data, err := fs.ReadFile(dashboardFS, name)
+	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(managementHTML)
+	w.Header().Set("Content-Type", dashboardContentType(name))
+	_, _ = w.Write(data)
+}
+
+// dashboardContentType avoids mime.TypeByExtension for the types the bundle
+// uses, because on Windows that consults the registry and can return a wrong
+// type for scripts.
+func dashboardContentType(name string) string {
+	switch path.Ext(name) {
+	case ".html":
+		return "text/html; charset=utf-8"
+	case ".js", ".mjs":
+		return "text/javascript; charset=utf-8"
+	case ".css":
+		return "text/css; charset=utf-8"
+	case ".woff2":
+		return "font/woff2"
+	case ".json":
+		return "application/json"
+	case ".svg":
+		return "image/svg+xml"
+	case ".png":
+		return "image/png"
+	}
+	if kind := mime.TypeByExtension(path.Ext(name)); kind != "" {
+		return kind
+	}
+	return "application/octet-stream"
 }
 
 func (a *desktopApp) managementConfig(w http.ResponseWriter, _ *http.Request) {
