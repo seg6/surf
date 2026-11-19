@@ -24,6 +24,11 @@ typedef enum {
           message:(NSDictionary *)message;
 @end
 
+// Device scale to request for a stream surface of the given size in points:
+// the screen scale, lowered to keep the decoded area near 1920x1080, in
+// quarter steps and never below one.
+FOUNDATION_EXPORT double RBStreamScaleForViewport(double pointWidth, double pointHeight, double screenScale);
+
 @interface RBSession : NSObject
 @property(nonatomic, strong, readonly) RBInteractionTracker *interactionTracker;
 @property(nonatomic, weak) id<RBSessionDelegate> delegate;

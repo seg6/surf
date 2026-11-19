@@ -1,4 +1,6 @@
 #import "RBSession.h"
+#import <UIKit/UIKit.h>
+#include <math.h>
 #import "RBConfig.h"
 #import "RBLog.h"
 #import "RBInteractionTracker.h"
@@ -20,6 +22,7 @@ static NSString *RBURLEscape(NSString *s);
 @property(nonatomic, assign) BOOL socketOpen;
 @property(nonatomic, assign) BOOL browserSetupAvailable;
 @property(nonatomic, assign) BOOL videoPauseAvailable;
+@property(nonatomic, assign) BOOL hidpiAvailable;
 @property(nonatomic, assign) BOOL active;
 @property(nonatomic, assign) NSTimeInterval reconnectDelay;
 @property(nonatomic, assign) NSUInteger generation;
@@ -247,6 +250,7 @@ static NSString *RBURLEscape(NSString *s);
     if (!json) return NO;
     self.browserSetupAvailable = [[json objectForKey:@"caps"] containsObject:@"browser-setup"];
     self.videoPauseAvailable = [[json objectForKey:@"caps"] containsObject:@"video-pause"];
+    self.hidpiAvailable = [[json objectForKey:@"caps"] containsObject:@"hidpi"];
     self.wsTicket = [json objectForKey:@"ticket"];
     NSInteger serverWidth = [[json objectForKey:@"vw"] integerValue] ?: 1024;
     NSInteger serverHeight = [[json objectForKey:@"vh"] integerValue] ?: 768;
@@ -322,6 +326,34 @@ static NSString *RBURLEscape(NSString *s) {
     [self.socket sendJSON:[self.interactionTracker decorateMessage:message]];
 }
 
+// Largest decoded surface asked of the host. Older iOS hardware decodes H.264
+// up to about 1920x1080, so a Retina iPad (1024x768 points) gets 1.5x rather
+// than 2x, while iPhones keep their full 2x.
+static const double kRBStreamMaxArea = 1920.0 * 1080.0;
+
+// The device scale to request for a surface of the given size in points:
+// the screen scale, lowered to fit the decode budget, in quarter steps and
+// never below one.
+double RBStreamScaleForViewport(double pointWidth, double pointHeight, double screenScale) {
+    double scale = screenScale;
+    if (!(scale >= 1.0)) scale = 1.0;
+    if (pointWidth >= 1.0 && pointHeight >= 1.0) {
+        double limit = sqrt(kRBStreamMaxArea / (pointWidth * pointHeight));
+        if (limit < scale) scale = limit;
+    }
+    scale = floor(scale * 4.0) / 4.0;
+    if (scale < 1.0) scale = 1.0;
+    if (scale > 4.0) scale = 4.0;
+    return scale;
+}
+
+static double RBMainScreenScale(void) {
+    UIScreen *screen = [UIScreen mainScreen];
+    // -scale exists on iOS 4 and later; earlier systems are always 1x.
+    if ([screen respondsToSelector:@selector(scale)]) return screen.scale;
+    return 1.0;
+}
+
 - (void)updateViewportWidth:(NSInteger)width height:(NSInteger)height {
     [self updateViewportWidth:width height:height force:NO];
 }
@@ -337,6 +369,20 @@ static NSString *RBURLEscape(NSString *s) {
     self.viewWidth = width;
     self.viewHeight = height;
     if (self.socketOpen) {
+        if (self.hidpiAvailable) {
+            // The host takes physical pixels with the scale they were made
+            // with; it lays the page out at width x height points again.
+            double scale = RBStreamScaleForViewport(width, height, RBMainScreenScale());
+            NSInteger pixelWidth = (NSInteger)floor(width * scale + 0.5) & ~1;
+            NSInteger pixelHeight = (NSInteger)floor(height * scale + 0.5) & ~1;
+            RBLogEvent(@"session", @"info", @{@"viewport_width": @(width), @"viewport_height": @(height),
+                       @"pixel_width": @(pixelWidth), @"pixel_height": @(pixelHeight),
+                       @"scale": @(scale), @"forced": @(force)}, @"Viewport updated");
+            [self sendMessage:@{@"t": @"size", @"w": [NSNumber numberWithInteger:pixelWidth],
+                                @"h": [NSNumber numberWithInteger:pixelHeight],
+                                @"scale": [NSNumber numberWithDouble:scale]}];
+            return;
+        }
         RBLogEvent(@"session", @"info", @{@"viewport_width": @(width), @"viewport_height": @(height), @"forced": @(force)}, @"Viewport updated");
         [self sendMessage:@{@"t": @"size", @"w": [NSNumber numberWithInteger:width], @"h": [NSNumber numberWithInteger:height]}];
     }
