@@ -21,6 +21,8 @@ version differences alone do not.
   small screens such as the iPhone 4S; the stream keeps the screen resolution.
 - iOS: links opened from other apps now load when Surf was not already running
   instead of being ignored.
+- iOS: keychain errors for the device key now include the error code so they can
+  be reported and diagnosed.
 
 ## 0.18.0 - 2026-11-10
 

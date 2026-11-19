@@ -20,7 +20,8 @@ static NSString *RBBase64URL(NSData *data) {
 }
 
 static NSError *RBKeyError(OSStatus status, NSString *message) {
-    return [NSError errorWithDomain:@"SurfKeychain" code:status userInfo:@{NSLocalizedDescriptionKey: message ?: @"Keychain error"}];
+    NSString *text = [NSString stringWithFormat:@"%@ (error %d)", message ?: @"Keychain error", (int)status];
+    return [NSError errorWithDomain:@"SurfKeychain" code:status userInfo:@{NSLocalizedDescriptionKey: text}];
 }
 
 @implementation RBDeviceIdentity
@@ -46,6 +47,7 @@ static NSError *RBKeyError(OSStatus status, NSString *message) {
     CFTypeRef copied = NULL;
     OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &copied);
     if (status != errSecSuccess) {
+        RBLogEvent(@"identity", @"error", @{@"status": @(status)}, @"Device key read failed");
         if (error) *error = RBKeyError(status, @"Could not read this device's Surf key");
         return nil;
     }
