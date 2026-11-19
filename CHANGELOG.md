@@ -5,16 +5,34 @@ version differences alone do not.
 
 ## Unreleased
 
+## 0.20.0 - 2026-11-20
+
+### Dashboard
+
+- The host dashboard is rebuilt with sections for Overview, Devices, Browser,
+  Connection, Clipboard and Logs. Pairing requests appear in a dialog that
+  shows the six words, and connected devices are marked in the device list.
+  It also has a dark appearance.
+
+### Picture and sound
+
+- The stream is now rendered at the device's physical pixels, so it is no
+  longer blurry on Retina iPhones and iPads or on HiDPI desktop screens. The
+  bitrate grows with the picture size, up to 1.5 times the configured rate.
+  Both the host and the client need this version.
 - Audio is now 48 kHz stereo by default. Set Audio quality to Standard on the
   dashboard's Browser page (or `SURF_AUDIO_QUALITY=standard`) for 16 kHz mono
-  on slow connections.
-- The stream is now rendered and encoded at the client's physical pixels, so it
-  is no longer blurry on Retina iPhones and iPads and on HiDPI desktop screens.
-  The encoder bitrate also grows with the surface area, and the H.264 level and
-  frame rate follow the new sizes. Needs a host and client that both support
-  the new `hidpi` capability; older combinations behave as before.
+  on slow connections. The Linux client now plays stereo.
 - Fixed audio playing through the host computer's speakers while streaming,
   including after switching tabs or from tabs in the background.
+
+### Website
+
+- The website and documentation have a new design and work on iOS 6 Safari.
+
+Upgrade normally; no uninstall or data reset is needed. Compatibility remains
+generation 1. Older clients can still connect; update them to get the sharper
+picture and stereo sound.
 
 ## 0.19.0 - 2026-11-19
 
