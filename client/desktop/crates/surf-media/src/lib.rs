@@ -257,7 +257,9 @@ struct IngressState {
 
 #[derive(Default)]
 struct AudioQueueState {
+    /// Interleaved samples, `channels` per frame.
     samples: VecDeque<f32>,
+    channels: usize,
     last_sequence: Option<u32>,
 }
 
@@ -320,21 +322,18 @@ impl AudioPlayback {
             self.primed.store(false, Ordering::Release);
         }
         state.last_sequence = Some(frame.sequence);
+        state.channels = channels;
 
+        // Capacity, overflow and the drop counter are in frames.
         let capacity = usize::try_from(sample_rate)
             .unwrap_or(usize::MAX)
             .saturating_mul(AUDIO_BUFFER_MS)
             / 1_000;
         let incoming = frame.payload.len() / bytes_per_frame;
-        let overflow = state
-            .samples
-            .len()
-            .saturating_add(incoming)
-            .saturating_sub(capacity);
-        let drop_existing = overflow.min(state.samples.len());
-        for _ in 0..drop_existing {
-            state.samples.pop_front();
-        }
+        let queued = state.samples.len() / channels;
+        let overflow = queued.saturating_add(incoming).saturating_sub(capacity);
+        let drop_existing = overflow.min(queued);
+        state.samples.drain(..drop_existing * channels);
         counters.audio_queue_dropped_samples.fetch_add(
             u64::try_from(overflow).unwrap_or(u64::MAX),
             Ordering::Relaxed,
@@ -346,23 +345,23 @@ impl AudioPlayback {
             .chunks_exact(bytes_per_frame)
             .skip(skip_incoming)
         {
-            let mut mixed = 0.0_f32;
-            for channel in 0..channels {
-                let offset = channel * 2;
-                let sample = i16::from_le_bytes([pcm_frame[offset], pcm_frame[offset + 1]]);
-                mixed += f32::from(sample) / 32_768.0;
+            for sample in pcm_frame.chunks_exact(2) {
+                let sample = i16::from_le_bytes([sample[0], sample[1]]);
+                state.samples.push_back(f32::from(sample) / 32_768.0);
             }
-            state.samples.push_back(mixed / channels as f32);
         }
         Ok(())
     }
 }
 
+const MAX_AUDIO_CHANNELS: usize = 8;
+
 #[derive(Default)]
 struct AudioRenderState {
     input_rate: u32,
-    previous: f32,
-    next: f32,
+    input_channels: usize,
+    previous: [f32; MAX_AUDIO_CHANNELS],
+    next: [f32; MAX_AUDIO_CHANNELS],
     phase: f64,
     initialized: bool,
 }
@@ -862,6 +861,36 @@ where
     Ok(stream)
 }
 
+/// Moves one interleaved frame out of `samples`; false when it is incomplete.
+fn pop_audio_frame(samples: &mut VecDeque<f32>, frame: &mut [f32]) -> bool {
+    if samples.len() < frame.len() {
+        return false;
+    }
+    for sample in frame {
+        *sample = samples.pop_front().unwrap_or(0.0);
+    }
+    true
+}
+
+/// Maps a source frame onto an output frame: matching channels pass through,
+/// several to one are averaged, one to several is duplicated, and output
+/// channels beyond the source stay silent.
+fn write_output_frame<T>(output: &mut [T], input: &[f32])
+where
+    T: SizedSample + cpal::FromSample<f32>,
+{
+    if output.len() == 1 {
+        let mean = input.iter().sum::<f32>() / input.len() as f32;
+        output[0] = T::from_sample(mean);
+    } else if input.len() == 1 {
+        output.fill(T::from_sample(input[0]));
+    } else {
+        for (index, sample) in output.iter_mut().enumerate() {
+            *sample = T::from_sample(input.get(index).copied().unwrap_or(0.0));
+        }
+    }
+}
+
 fn render_audio<T>(
     output: &mut [T],
     output_channels: usize,
@@ -894,25 +923,29 @@ fn render_audio<T>(
             .unwrap_or(usize::MAX)
             .saturating_mul(AUDIO_PRIME_MS)
             / 1_000;
-        if queue.samples.len() < prime_samples.max(2) {
+        if queue.samples.len() < prime_samples.max(2) * queue.channels.max(1) {
             write_silence(output);
             return;
         }
         shared.audio.primed.store(true, Ordering::Release);
         render.initialized = false;
     }
-    if render.input_rate != input_rate {
+    let input_channels = queue.channels.clamp(1, MAX_AUDIO_CHANNELS);
+    if render.input_rate != input_rate || render.input_channels != input_channels {
         render.input_rate = input_rate;
+        render.input_channels = input_channels;
         render.phase = 0.0;
         render.initialized = false;
     }
     if !render.initialized {
-        let Some(previous) = queue.samples.pop_front() else {
+        let mut previous = [0.0; MAX_AUDIO_CHANNELS];
+        if !pop_audio_frame(&mut queue.samples, &mut previous[..input_channels]) {
             write_silence(output);
             return;
-        };
+        }
         render.previous = previous;
-        render.next = queue.samples.pop_front().unwrap_or(previous);
+        render.next = previous;
+        pop_audio_frame(&mut queue.samples, &mut render.next[..input_channels]);
         render.initialized = true;
     }
 
@@ -921,21 +954,19 @@ fn render_audio<T>(
     for output_frame in output.chunks_mut(output_channels) {
         while render.phase >= 1.0 {
             render.previous = render.next;
-            match queue.samples.pop_front() {
-                Some(next) => render.next = next,
-                None => {
-                    render.next = 0.0;
-                    underflow = true;
-                }
+            if !pop_audio_frame(&mut queue.samples, &mut render.next[..input_channels]) {
+                render.next = [0.0; MAX_AUDIO_CHANNELS];
+                underflow = true;
             }
             render.phase -= 1.0;
         }
-        let value =
-            render.previous + (render.next - render.previous) * render.phase.clamp(0.0, 1.0) as f32;
-        let value = T::from_sample(value);
-        for sample in output_frame {
-            *sample = value;
+        let fraction = render.phase.clamp(0.0, 1.0) as f32;
+        let mut mixed = [0.0_f32; MAX_AUDIO_CHANNELS];
+        for channel in 0..input_channels {
+            mixed[channel] = render.previous[channel]
+                + (render.next[channel] - render.previous[channel]) * fraction;
         }
+        write_output_frame(output_frame, &mixed[..input_channels]);
         render.phase += step;
     }
     if underflow {
@@ -1108,13 +1139,17 @@ mod tests {
     };
 
     fn audio_frame(payload: &[u8], sequence: u32) -> Frame<'_> {
+        audio_frame_format(payload, sequence, 16_000, 1)
+    }
+
+    fn audio_frame_format(payload: &[u8], sequence: u32, rate: u16, channels: u16) -> Frame<'_> {
         Frame {
             kind: FrameKind::Audio,
             idr: false,
             sequence,
             source_sequence: 0,
-            width: 16_000,
-            height: 1,
+            width: rate,
+            height: channels,
             interaction_id: 0,
             source_receive_ns: 0,
             encode_complete_ns: 0,
@@ -1197,5 +1232,67 @@ mod tests {
                 .all(|frame| frame[0] == frame[1])
         );
         assert_eq!(shared.counters.audio_underruns.load(Ordering::Relaxed), 0);
+    }
+
+    /// Interleaved stereo with distinct, constant left and right levels.
+    fn stereo_payload(frames: usize, left: i16, right: i16) -> Vec<u8> {
+        let mut payload = Vec::with_capacity(frames * 4);
+        for _ in 0..frames {
+            payload.extend_from_slice(&left.to_le_bytes());
+            payload.extend_from_slice(&right.to_le_bytes());
+        }
+        payload
+    }
+
+    #[test]
+    fn stereo_keeps_left_and_right_through_resampling() {
+        for (rate, source_frames) in [(48_000_u16, 3_000), (16_000, 1_000)] {
+            let shared = Shared::new();
+            let payload = stereo_payload(source_frames, 16_384, -8_192);
+            shared
+                .audio
+                .push(&audio_frame_format(&payload, 1, rate, 2), &shared.counters)
+                .expect("valid stereo PCM");
+            let mut output = [0.0_f32; 960];
+            let mut render = AudioRenderState::default();
+            render_audio(&mut output, 2, 48_000, &shared, &mut render);
+            for frame in output.as_chunks::<2>().0 {
+                assert!((frame[0] - 0.5).abs() < 0.01, "left {} at {rate} Hz", frame[0]);
+                assert!((frame[1] + 0.25).abs() < 0.01, "right {} at {rate} Hz", frame[1]);
+            }
+            assert_eq!(shared.counters.audio_underruns.load(Ordering::Relaxed), 0);
+        }
+    }
+
+    #[test]
+    fn stereo_is_averaged_for_a_mono_device() {
+        let shared = Shared::new();
+        let payload = stereo_payload(3_000, 16_384, -8_192);
+        shared
+            .audio
+            .push(&audio_frame_format(&payload, 1, 48_000, 2), &shared.counters)
+            .expect("valid stereo PCM");
+        let mut output = [0.0_f32; 480];
+        let mut render = AudioRenderState::default();
+        render_audio(&mut output, 1, 48_000, &shared, &mut render);
+        assert!(output.iter().all(|sample| (sample - 0.125).abs() < 0.01));
+    }
+
+    #[test]
+    fn stereo_queue_is_bounded_in_frames() {
+        let audio = AudioPlayback::new();
+        let counters = Counters::default();
+        let payload = stereo_payload(4_000, 1, 2);
+        audio
+            .push(&audio_frame_format(&payload, 1, 16_000, 2), &counters)
+            .expect("valid stereo PCM");
+        let state = audio.state.lock().expect("audio lock");
+        assert_eq!(state.samples.len(), 1_920 * 2);
+        assert_eq!(
+            counters.audio_queue_dropped_samples.load(Ordering::Relaxed),
+            2_080
+        );
+        // Dropping whole frames keeps left and right in phase.
+        assert_eq!(state.samples.front(), Some(&(1.0 / 32_768.0)));
     }
 }
