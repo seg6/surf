@@ -61,6 +61,7 @@ type Controller struct {
 	activeGen           uint64
 	viewW               int
 	viewH               int
+	viewScale           float64 // client device pixels per CSS pixel (1 without hidpi)
 	mobile              bool
 	dark                bool
 	resizeMu            sync.Mutex
@@ -202,6 +203,7 @@ func New(cfg *config.Config, hub *transport.Hub) (*Controller, error) {
 		bySession:      map[string]*Tab{},
 		viewW:          cfg.ViewW,
 		viewH:          cfg.ViewH,
+		viewScale:      1,
 		store:          NewStore(cfg.Profile),
 		icons:          map[string]*favicon{},
 		iconFetching:   map[string]bool{},

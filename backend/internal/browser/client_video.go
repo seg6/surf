@@ -28,9 +28,6 @@ func (b *Controller) subscribeVideo(c *transport.Client) {
 	if b.inputSuspended() || b.videoIsPaused(c) {
 		return
 	}
-	b.mu.Lock()
-	viewW, viewH := b.viewW, b.viewH
-	b.mu.Unlock()
 	b.mediaMu.Lock()
 	if _, exists := b.videoSubs[c]; exists {
 		b.mediaMu.Unlock()
@@ -40,7 +37,7 @@ func (b *Controller) subscribeVideo(c *transport.Client) {
 	// The client viewport is known before automatic subscription. Configure
 	// the dormant encoder first so it never starts at the backend default and
 	// immediately restarts at the iPad size.
-	b.video.SetSize(viewW, viewH)
+	b.syncVideoStream()
 	b.send(c, protocol.VideoConfigEvent{Type: "video-config", State: "starting", Generation: b.video.Generation(), Profile: b.profileName()})
 	sub := b.video.Subscribe()
 	if b.inputSuspended() {
@@ -109,17 +106,57 @@ func (b *Controller) onVideoFrame(frame media.VideoFrame) {
 	}
 }
 
+// h264Level is one constrained-baseline level and its decoder limits.
+type h264Level struct {
+	codec   string
+	maxMBPS int // macroblocks per second
+	maxFS   int // macroblocks per frame
+}
+
+// Levels Surf declares, lowest first. Level 4.1 is what older hardware
+// decoders (iPad 2 and 3 era) implement; 4.2 doubles the macroblock rate for
+// 1080p-class video at 60 fps; 5.1 is for desktop surfaces above 1920x1088.
+var h264Levels = [...]h264Level{
+	{"avc1.42E01F", 108000, 3600},  // 3.1
+	{"avc1.42E029", 245760, 8192},  // 4.1
+	{"avc1.42E02A", 522240, 8704},  // 4.2
+	{"avc1.42E033", 983040, 36864}, // 5.1
+}
+
+func macroblocks(width, height int) int {
+	return ((width + 15) / 16) * ((height + 15) / 16)
+}
+
+// encoderCodec picks the lowest level whose frame size and macroblock rate
+// cover the coded size at the frame-rate target. Level selection is decoder
+// compatibility metadata; the frame rate itself is bounded by
+// levelFrameRate, so the declared level is never exceeded.
 func encoderCodec(width, height, frameRate int) string {
-	// Level selection is decoder compatibility metadata, not a frame-rate
-	// limit. Prefer Level 3.1 whenever the coded size at the active FPS target
-	// fits its macroblock rate.
 	if frameRate <= 0 {
 		frameRate = 60
 	}
-	if ((width+15)/16)*((height+15)/16)*frameRate > 108000 {
-		return "avc1.42E029" // constrained baseline, level 4.1
+	mbs := macroblocks(width, height)
+	for _, level := range h264Levels {
+		if mbs <= level.maxFS && mbs*frameRate <= level.maxMBPS {
+			return level.codec
+		}
 	}
-	return "avc1.42E01F" // constrained baseline, level 3.1
+	return h264Levels[len(h264Levels)-1].codec
+}
+
+// levelFrameRate lowers a frame-rate target so the coded size stays within the
+// highest level Surf declares for it: 4.2 up to 8704 macroblocks per frame
+// (1920x1088), 5.1 beyond that.
+func levelFrameRate(width, height, frameRate int) int {
+	mbs := macroblocks(width, height)
+	if mbs <= 0 {
+		return frameRate
+	}
+	limit := h264Levels[3].maxMBPS
+	if mbs <= h264Levels[2].maxFS {
+		limit = h264Levels[2].maxMBPS
+	}
+	return max(1, min(frameRate, limit/mbs))
 }
 
 // pumpVideo gates on encoder health, then relays AUs until the sub dies or

@@ -169,25 +169,33 @@ func TestCustomUserAgentOverridesSurfIdentity(t *testing.T) {
 func TestScaledViewport(t *testing.T) {
 	for _, test := range []struct {
 		w, h        int
-		scale       float64
+		client      float64
+		page        float64
 		cssW, cssH  int
 		deviceScale float64
 	}{
-		{640, 960, 0, 640, 960, 1},
-		{640, 960, 1, 640, 960, 1},
-		{640, 960, 0.5, 640, 960, 1},
-		{640, 960, 1.5, 960, 1440, 2.0 / 3},
-		{640, 960, 2, 1280, 1920, 0.5},
-		{1024, 768, 1.25, 1280, 960, 0.8},
+		{640, 960, 0, 0, 640, 960, 1},
+		{640, 960, 1, 1, 640, 960, 1},
+		{640, 960, 1, 0.5, 640, 960, 1},
+		{640, 960, 1, 1.5, 960, 1440, 2.0 / 3},
+		{640, 960, 1, 2, 1280, 1920, 0.5},
+		{1024, 768, 1, 1.25, 1280, 960, 0.8},
+		// A 2x client: the same pixels, half the CSS viewport.
+		{640, 960, 2, 0, 320, 480, 2},
+		{640, 960, 2, 1, 320, 480, 2},
+		{1536, 1152, 1.5, 1, 1024, 768, 1.5},
+		// Composed with the page-width scale: 1.5x wider layout than 2x gives.
+		{640, 960, 2, 1.5, 480, 720, 4.0 / 3},
+		{640, 960, 2, 2, 640, 960, 1},
 	} {
-		w, h, ds := scaledViewport(test.w, test.h, test.scale)
+		w, h, ds := scaledViewport(test.w, test.h, test.client, test.page)
 		if w != test.cssW || h != test.cssH || math.Abs(ds-test.deviceScale) > 1e-9 {
-			t.Errorf("scaledViewport(%d,%d,%v) = %d,%d,%v; want %d,%d,%v",
-				test.w, test.h, test.scale, w, h, ds, test.cssW, test.cssH, test.deviceScale)
+			t.Errorf("scaledViewport(%d,%d,%v,%v) = %d,%d,%v; want %d,%d,%v",
+				test.w, test.h, test.client, test.page, w, h, ds, test.cssW, test.cssH, test.deviceScale)
 		}
 		// The device pixels rendered must equal the client's surface.
 		if math.Abs(float64(w)*ds-float64(test.w)) > 1e-9 {
-			t.Errorf("scale %v: %d css px * %v != %d device px", test.scale, w, ds, test.w)
+			t.Errorf("scale %v/%v: %d css px * %v != %d device px", test.client, test.page, w, ds, test.w)
 		}
 	}
 }

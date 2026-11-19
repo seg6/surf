@@ -22,6 +22,12 @@ const (
 	viewportResizeSettle = 120 * time.Millisecond
 	minViewportDimension = 64
 	maxViewportDimension = 1600
+
+	// Clients that send a size scale report physical pixels, so they get a
+	// larger surface bound than point-sized clients: enough for a 2560x1600
+	// desktop panel, with an area cap so one axis cannot take the whole budget.
+	maxHiDPIViewportDimension = 2560
+	maxHiDPIViewportArea      = 2560 * 1600
 )
 
 // NormalizeNavURL turns address-bar input into a URL: scheme kept as-is,
@@ -688,18 +694,14 @@ func otherInputCount(counts map[string]int) int {
 
 func (b *Controller) handleSize(m *protocol.SizeCommand) {
 	b.mu.Lock()
-	w, h := normalizeViewportSize(m.W, m.H, b.viewW, b.viewH)
-	// Chromium's H.264 WebCodecs implementation rejects odd dimensions.
-	// Normalize the viewport itself so the page, compositor surface, raw
-	// tab frame, encoder, and wire header all describe the same pixels.
-	w &^= 1
-	h &^= 1
-	changed := w != b.viewW || h != b.viewH
+	w, h, scale := resolveClientSize(m, b.viewW, b.viewH)
+	changed := w != b.viewW || h != b.viewH || scale != b.viewScale
 	if changed {
-		b.viewW, b.viewH = w, h
+		b.viewW, b.viewH, b.viewScale = w, h, scale
 	}
 	b.mu.Unlock()
-	log.Printf("size: client asked %dx%d -> view %dx%d (changed=%t)", m.W, m.H, w, h, changed)
+	log.Printf("size: client asked %dx%d scale=%v -> view %dx%d scale=%v (changed=%t)",
+		m.W, m.H, m.Scale, w, h, scale, changed)
 	if !changed {
 		return
 	}
@@ -708,7 +710,39 @@ func (b *Controller) handleSize(m *protocol.SizeCommand) {
 	b.scheduleViewportApply()
 }
 
+// resolveClientSize turns a size command into the surface in physical pixels
+// and the device scale to render it with. Commands without a scale are
+// logical points from older clients: the surface is that size at scale 1.
+// With a scale the surface is physical; if it must be clamped, the scale
+// shrinks with it so the CSS viewport the page sees stays the same.
+func resolveClientSize(m *protocol.SizeCommand, defaultW, defaultH int) (int, int, float64) {
+	if m.Scale == 0 {
+		w, h := normalizeViewportSize(m.W, m.H, defaultW, defaultH)
+		// Chromium's H.264 WebCodecs implementation rejects odd dimensions.
+		// Normalize the viewport itself so the page, compositor surface, raw
+		// tab frame, encoder, and wire header all describe the same pixels.
+		return w &^ 1, h &^ 1, 1
+	}
+	w, h := normalizeViewportBounds(m.W, m.H, defaultW, defaultH,
+		maxHiDPIViewportDimension, maxHiDPIViewportArea)
+	w &^= 1
+	h &^= 1
+	scale := min(max(m.Scale, protocol.MinSizeScale), protocol.MaxSizeScale)
+	if m.W > 0 && m.H > 0 {
+		if shrink := min(float64(w)/float64(m.W), float64(h)/float64(m.H)); shrink < 1 {
+			scale = max(1, scale*shrink)
+		}
+	}
+	return w, h, scale
+}
+
 func normalizeViewportSize(width, height, defaultWidth, defaultHeight int) (int, int) {
+	return normalizeViewportBounds(width, height, defaultWidth, defaultHeight, maxViewportDimension, 0)
+}
+
+// normalizeViewportBounds clamps a surface to maxDimension per axis and,
+// when maxArea is positive, to that many pixels, preserving aspect ratio.
+func normalizeViewportBounds(width, height, defaultWidth, defaultHeight, maxDimension, maxArea int) (int, int) {
 	if width == 0 {
 		width = defaultWidth
 	}
@@ -720,11 +754,14 @@ func normalizeViewportSize(width, height, defaultWidth, defaultHeight int) (int,
 	// independently clamping width and height can create an unsupported AVC
 	// surface (for example 2560x1408 becoming 1600x1408) and freeze video.
 	scale := 1.0
-	if width > maxViewportDimension {
-		scale = min(scale, float64(maxViewportDimension)/float64(width))
+	if width > maxDimension {
+		scale = min(scale, float64(maxDimension)/float64(width))
 	}
-	if height > maxViewportDimension {
-		scale = min(scale, float64(maxViewportDimension)/float64(height))
+	if height > maxDimension {
+		scale = min(scale, float64(maxDimension)/float64(height))
+	}
+	if maxArea > 0 && width*height > maxArea {
+		scale = min(scale, math.Sqrt(float64(maxArea)/(float64(width)*float64(height))))
 	}
 	if scale < 1 {
 		width = int(math.Floor(float64(width) * scale))
@@ -738,7 +775,7 @@ func normalizeViewportSize(width, height, defaultWidth, defaultHeight int) (int,
 		// every client-derived size inside them exactly (modulo H.264's even
 		// dimensions); a 320-point minimum once broke real phone landscape
 		// surfaces by inventing pixels that were not in the native stream view.
-		return min(maxViewportDimension, max(minViewportDimension, value)) &^ 1
+		return min(maxDimension, max(minViewportDimension, value)) &^ 1
 	}
 	return clampDim(width, defaultWidth), clampDim(height, defaultHeight)
 }
@@ -773,15 +810,21 @@ func (b *Controller) applySettledViewport(generation uint64) {
 	b.resizeTimer = nil
 	b.resizeMu.Unlock()
 
+	if tab := b.active(); tab != nil {
+		b.applyView(tab)
+	}
+	b.syncVideoStream()
+}
+
+// syncVideoStream points the encoder at the current surface with the bitrate
+// and frame rate that suit its size, as one encoder generation.
+func (b *Controller) syncVideoStream() {
 	b.mu.Lock()
 	w, h := b.viewW, b.viewH
 	profile := adaptiveProfiles[b.governor.profile]
 	b.mu.Unlock()
-	if tab := b.active(); tab != nil {
-		b.applyView(tab)
-	}
-	maxW, maxH := adaptiveScale(profile, w, h)
-	b.video.SetViewport(w, h, maxW, maxH)
+	maxW, maxH, bitrateK, _, frameRate := adaptiveEncoderSettings(profile, b.cfg, w, h)
+	b.video.SetStream(w, h, maxW, maxH, bitrateK, frameRate)
 }
 
 func (b *Controller) handleTab(m *protocol.TabCommand) {

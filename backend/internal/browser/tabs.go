@@ -608,14 +608,24 @@ func (b *Controller) isActiveGeneration(id int, generation uint64) bool {
 }
 
 // scaledViewport returns the CSS viewport and device scale factor that render
-// a width x height pixel surface with scale times as much page width. Scales
-// below one (or unset) leave the viewport untouched.
-func scaledViewport(width, height int, scale float64) (int, int, float64) {
-	if scale <= 1 || scale != scale {
+// a width x height pixel surface. clientScale is the client's device pixels
+// per CSS pixel (below one or unset means one); pageScale lays the page out
+// with that many times as much width at the same pixels (below one or unset
+// leaves it alone). The two compose: deviceScaleFactor = clientScale /
+// pageScale and the CSS viewport is the pixel size divided by it.
+func scaledViewport(width, height int, clientScale, pageScale float64) (int, int, float64) {
+	if !(clientScale >= 1) {
+		clientScale = 1
+	}
+	if !(pageScale >= 1) {
+		pageScale = 1
+	}
+	deviceScale := clientScale / pageScale
+	if deviceScale == 1 {
 		return width, height, 1
 	}
-	cssW := int(math.Round(float64(width) * scale))
-	cssH := int(math.Round(float64(height) * scale))
+	cssW := int(math.Round(float64(width) / deviceScale))
+	cssH := int(math.Round(float64(height) / deviceScale))
 	return cssW, cssH, float64(width) / float64(cssW)
 }
 
@@ -626,14 +636,17 @@ func (b *Controller) applyView(t *Tab) {
 	w := b.viewW
 	h := b.viewH
 	pixelW, pixelH := b.viewW, b.viewH
+	clientScale := b.viewScale
 	mobile := b.mobile
 	s := t.Session
 	b.mu.Unlock()
-	// A viewport scale above one lays the page out in a larger CSS viewport
-	// and shrinks the device scale factor to match, so the surface, encoder and
-	// stream keep the client's pixel size. Input is normalized against the CSS
-	// visual viewport, so it needs no adjustment.
-	w, h, deviceScale := scaledViewport(w, h, b.cfg.ViewportScale)
+	// The surface, encoder and stream are always the client's physical pixel
+	// size. A client scale above one shrinks the CSS viewport and raises the
+	// device scale factor to match, so the page is crisp on a HiDPI display; a
+	// viewport scale above one lays the page out wider at the same pixels.
+	// Input is normalized against the CSS visual viewport, so it needs no
+	// adjustment.
+	w, h, deviceScale := scaledViewport(w, h, clientScale, b.cfg.ViewportScale)
 	orientation, angle := "portraitPrimary", 0
 	if w > h {
 		orientation, angle = "landscapePrimary", 90

@@ -302,14 +302,36 @@ func adaptiveScale(profile adaptiveProfile, w, h int) (int, int) {
 	return w * profile.scaleNum / profile.scaleDen, h * profile.scaleNum / profile.scaleDen
 }
 
+const (
+	// StreamBitrateK is tuned for a 1024x768 surface at 1x. Larger surfaces
+	// get proportionally more, up to maxBitrateScale times, which keeps
+	// Level 4.2 (50 Mbit/s) comfortably in reach; smaller ones keep the
+	// configured rate.
+	bitrateBaselinePixels = 1024 * 768
+	maxBitrateScale       = 2.5
+)
+
+// scaledBitrateK scales a configured bitrate by coded pixel area relative to
+// the baseline surface, so higher resolutions are not just more compression.
+func scaledBitrateK(baseK, width, height int) int {
+	factor := float64(width) * float64(height) / bitrateBaselinePixels
+	factor = min(maxBitrateScale, max(1, factor))
+	return int(math.Round(float64(baseK) * factor))
+}
+
 func adaptiveEncoderSettings(profile adaptiveProfile, cfg *config.Config, w, h int) (maxW, maxH, bitrateK, quantizer, frameRate int) {
 	maxW, maxH = adaptiveScale(profile, w, h)
-	bitrateK = cfg.StreamBitrateK * profile.bitrateNum / profile.bitrateDen
+	codedW, codedH := w, h
+	if maxW > 0 && maxH > 0 {
+		codedW, codedH = maxW, maxH
+	}
+	bitrateK = scaledBitrateK(cfg.StreamBitrateK, codedW, codedH) * profile.bitrateNum / profile.bitrateDen
 	if bitrateK < 1000 {
 		bitrateK = 1000
 	}
 	quantizer = max(0, min(51, cfg.StreamQuantizer+profile.quantizerDelta))
-	return maxW, maxH, bitrateK, quantizer, profile.frameRate
+	frameRate = levelFrameRate(codedW, codedH, profile.frameRate)
+	return maxW, maxH, bitrateK, quantizer, frameRate
 }
 
 func governorClientID(c *transport.Client) string {

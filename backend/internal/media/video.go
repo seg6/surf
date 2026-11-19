@@ -295,25 +295,42 @@ func (s *VideoPipeline) SetSize(width, height int) {
 // encoder generation. Calling SetScaleLimit and SetSize separately can tear
 // down WebCodecs twice for a single rotation when both values change.
 func (s *VideoPipeline) SetViewport(width, height, maxWidth, maxHeight int) {
+	s.SetStream(width, height, maxWidth, maxHeight, 0, 0)
+}
+
+// SetStream is SetViewport plus the bitrate and frame rate that belong to the
+// new size: bitrate scales with pixel area and the frame rate is limited by
+// the H.264 level the size needs, so all of them must change in one encoder
+// generation. A bitrateK or frameRate of zero keeps the current value.
+func (s *VideoPipeline) SetStream(width, height, maxWidth, maxHeight, bitrateK, frameRate int) {
 	if width < 64 || height < 64 {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if bitrateK <= 0 {
+		bitrateK = s.cfg.BitrateK
+	}
+	if frameRate <= 0 {
+		frameRate = s.cfg.FrameRate
+	}
 	codedW, codedH := VideoPipelineConfig{
 		ScaleMaxW: maxWidth,
 		ScaleMaxH: maxHeight,
 	}.codedSize(width, height)
 	if width == s.cfg.CaptureW && height == s.cfg.CaptureH &&
 		maxWidth == s.cfg.ScaleMaxW && maxHeight == s.cfg.ScaleMaxH &&
+		bitrateK == s.cfg.BitrateK && frameRate == s.cfg.FrameRate &&
 		codedW == s.cfg.W && codedH == s.cfg.H {
 		return
 	}
 	s.cfg.CaptureW, s.cfg.CaptureH = width, height
 	s.cfg.ScaleMaxW, s.cfg.ScaleMaxH = maxWidth, maxHeight
+	s.cfg.BitrateK, s.cfg.FrameRate = bitrateK, frameRate
 	s.cfg.W, s.cfg.H = codedW, codedH
 	if s.running {
-		log.Printf("stream: settling tab encoder capture=%dx%d coded=%dx%d", width, height, codedW, codedH)
+		log.Printf("stream: settling tab encoder capture=%dx%d coded=%dx%d %dfps %dkbit/s",
+			width, height, codedW, codedH, frameRate, bitrateK)
 		s.stopLocked()
 		s.startLocked()
 	}

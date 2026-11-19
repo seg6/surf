@@ -1,12 +1,14 @@
 package browser
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"surf-backend/internal/config"
+	"surf-backend/internal/protocol"
 )
 
 func TestNormalizeNavURL(t *testing.T) {
@@ -180,5 +182,41 @@ func TestPageOrigin(t *testing.T) {
 		if got := pageOrigin(in); got != want {
 			t.Errorf("pageOrigin(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestResolveClientSizeWithoutScaleKeepsPointBehaviour(t *testing.T) {
+	w, h, scale := resolveClientSize(&protocol.SizeCommand{W: 2560, H: 1408}, 768, 950)
+	if w != 1600 || h != 880 || scale != 1 {
+		t.Fatalf("legacy size = %dx%d@%v, want 1600x880@1", w, h, scale)
+	}
+	w, h, scale = resolveClientSize(&protocol.SizeCommand{W: 321, H: 481}, 768, 950)
+	if w != 320 || h != 480 || scale != 1 {
+		t.Fatalf("legacy odd size = %dx%d@%v", w, h, scale)
+	}
+}
+
+func TestResolveClientSizeWithScaleIsPhysical(t *testing.T) {
+	w, h, scale := resolveClientSize(&protocol.SizeCommand{W: 640, H: 960, Scale: 2}, 768, 950)
+	if w != 640 || h != 960 || scale != 2 {
+		t.Fatalf("2x size = %dx%d@%v", w, h, scale)
+	}
+	// A 1x client that sends a scale may use the larger hidpi bound.
+	w, h, scale = resolveClientSize(&protocol.SizeCommand{W: 2560, H: 1408, Scale: 1}, 768, 950)
+	if w != 2560 || h != 1408 || scale != 1 {
+		t.Fatalf("1x wide size = %dx%d@%v", w, h, scale)
+	}
+	// Oversized surfaces shrink together with the scale: same CSS viewport.
+	w, h, scale = resolveClientSize(&protocol.SizeCommand{W: 2880, H: 1800, Scale: 2}, 768, 950)
+	if w > maxHiDPIViewportDimension || w*h > maxHiDPIViewportArea {
+		t.Fatalf("oversized surface not clamped: %dx%d", w, h)
+	}
+	if cssW := float64(w) / scale; math.Abs(cssW-1440) > 2 {
+		t.Fatalf("css width %v after clamp (%dx%d@%v), want about 1440", cssW, w, h, scale)
+	}
+	// Clamping never pushes the scale below one.
+	_, _, scale = resolveClientSize(&protocol.SizeCommand{W: 4000, H: 2400, Scale: 1}, 768, 950)
+	if scale != 1 {
+		t.Fatalf("scale after clamp = %v, want 1", scale)
 	}
 }
