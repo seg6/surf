@@ -24,6 +24,7 @@ const world = {
     searchURL: 'https://duckduckgo.com/?q={searchTerms}',
     userAgent: '',
     viewportScale: '1.5',
+    audioQuality: '',
   } as Json,
   update: { state: 'idle', version: '', message: '', current: '0.19.0' } as Json,
   browser: { state: 'streaming', revision: 4, host: 'living-room-pc', message: '', standalone: false, canForce: false } as Json,

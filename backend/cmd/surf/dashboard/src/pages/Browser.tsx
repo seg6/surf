@@ -93,6 +93,20 @@ export function Browser() {
                 onInput={(event) => updateDraft({ viewportScale: event.currentTarget.value })}
               />
             </label>
+            <label class="row">
+              <span class="row-text">
+                <span class="row-title">Audio quality</span>
+                <span class="row-note">Standard uses less bandwidth, for slow or remote connections.</span>
+              </span>
+              <select
+                class="control"
+                value={draft.audioQuality}
+                onChange={(event) => updateDraft({ audioQuality: event.currentTarget.value })}
+              >
+                <option value="high">High (48 kHz stereo)</option>
+                <option value="standard">Standard (16 kHz mono)</option>
+              </select>
+            </label>
             <label class="row row-stack">
               <span class="row-title">Custom user agent</span>
               <input

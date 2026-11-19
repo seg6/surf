@@ -288,22 +288,23 @@ func TestManagementBrowserSettings(t *testing.T) {
 	app := &desktopApp{home: home, serverName: "Surf", baseURL: "https://127.0.0.1:18080"}
 	code := postSettings(t, app, map[string]string{
 		"searchURL": "https://duckduckgo.com/?q={searchTerms}", "userAgent": " Custom/1.0 ", "viewportScale": "1.5",
+		"audioQuality": "standard",
 	})
 	if code != http.StatusNoContent {
 		t.Fatalf("code=%d", code)
 	}
 	cfg, err := loadDesktopConfig(home)
-	if err != nil || cfg.SearchURL != "https://duckduckgo.com/?q={searchTerms}" || cfg.UserAgent != "Custom/1.0" || cfg.ViewportScale != "1.5" {
+	if err != nil || cfg.SearchURL != "https://duckduckgo.com/?q={searchTerms}" || cfg.UserAgent != "Custom/1.0" || cfg.ViewportScale != "1.5" || cfg.AudioQuality != "standard" {
 		t.Fatalf("saved config=%+v err=%v", cfg, err)
 	}
 	keys, env := cfg.browserEnv()
-	if len(keys) != 3 || len(env) != 3 || env[2] != "SURF_VIEWPORT_SCALE=1.5" {
+	if len(keys) != 4 || len(env) != 4 || env[2] != "SURF_VIEWPORT_SCALE=1.5" || env[3] != "SURF_AUDIO_QUALITY=standard" {
 		t.Fatalf("keys=%v env=%v", keys, env)
 	}
-	if code := postSettings(t, app, map[string]string{"viewportScale": "1"}); code != http.StatusNoContent {
+	if code := postSettings(t, app, map[string]string{"viewportScale": "1", "audioQuality": "high"}); code != http.StatusNoContent {
 		t.Fatalf("reset code=%d", code)
 	}
-	if cfg, _ = loadDesktopConfig(home); cfg.SearchURL != "" || cfg.UserAgent != "" || cfg.ViewportScale != "" {
+	if cfg, _ = loadDesktopConfig(home); cfg.SearchURL != "" || cfg.UserAgent != "" || cfg.ViewportScale != "" || cfg.AudioQuality != "" {
 		t.Fatalf("settings not cleared: %+v", cfg)
 	}
 	for name, fields := range map[string]map[string]string{
@@ -312,6 +313,7 @@ func TestManagementBrowserSettings(t *testing.T) {
 		"scale too large":            {"viewportScale": "4"},
 		"scale below one":            {"viewportScale": "0.5"},
 		"scale text":                 {"viewportScale": "big"},
+		"audio quality unknown":      {"audioQuality": "ultra"},
 		"multi-line user agent":      {"userAgent": "a\nb"},
 	} {
 		if code := postSettings(t, app, fields); code != http.StatusBadRequest {

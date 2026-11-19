@@ -10,6 +10,7 @@ export interface SettingsDraft {
   searchURL: string;
   viewportScale: string;
   userAgent: string;
+  audioQuality: string;
   startAtLogin: boolean;
 }
 
@@ -23,6 +24,7 @@ export function draftFromConfig(config: Config): SettingsDraft {
     searchURL,
     viewportScale: config.viewportScale ? String(config.viewportScale) : '',
     userAgent: config.userAgent || '',
+    audioQuality: config.audioQuality === 'standard' ? 'standard' : 'high',
     startAtLogin: Boolean(config.startAtLogin),
   };
 }
@@ -36,6 +38,7 @@ export function settingsFormData(draft: SettingsDraft): FormData {
   form.set('searchURL', draft.searchURL);
   form.set('viewportScale', draft.viewportScale);
   form.set('userAgent', draft.userAgent);
+  form.set('audioQuality', draft.audioQuality);
   if (draft.startAtLogin) form.set('startAtLogin', 'on');
   return form;
 }

@@ -49,6 +49,8 @@ type desktopConfig struct {
 	SearchURL         string `json:"searchURL,omitempty"`
 	UserAgent         string `json:"userAgent,omitempty"`
 	ViewportScale     string `json:"viewportScale,omitempty"`
+	// AudioQuality is "standard" or empty for the default, high quality.
+	AudioQuality string `json:"audioQuality,omitempty"`
 }
 
 // browserEnv turns the dashboard's browser settings into backend environment
@@ -58,6 +60,7 @@ func (c desktopConfig) browserEnv() (keys, env []string) {
 		{"SURF_SEARCH_URL", c.SearchURL},
 		{"SURF_USER_AGENT", c.UserAgent},
 		{"SURF_VIEWPORT_SCALE", c.ViewportScale},
+		{"SURF_AUDIO_QUALITY", c.AudioQuality},
 	} {
 		if setting.value != "" {
 			keys = append(keys, setting.key)
@@ -1094,6 +1097,7 @@ func (a *desktopApp) managementConfig(w http.ResponseWriter, _ *http.Request) {
 		"port": port, "running": running, "startAtLogin": cfg.StartAtLogin,
 		"startupChoiceMade": cfg.StartupChoiceMade,
 		"searchURL":         cfg.SearchURL, "userAgent": cfg.UserAgent, "viewportScale": cfg.ViewportScale,
+		"audioQuality": cfg.AudioQuality,
 	})
 }
 
@@ -1203,11 +1207,21 @@ func (a *desktopApp) managementSettings(w http.ResponseWriter, r *http.Request) 
 			viewportScale = ""
 		}
 	}
+	audioQuality := strings.TrimSpace(r.FormValue("audioQuality"))
+	switch audioQuality {
+	case config.AudioQualityHigh:
+		audioQuality = ""
+	case "", config.AudioQualityStandard:
+	default:
+		http.Error(w, "Audio quality must be high or standard.", http.StatusBadRequest)
+		return
+	}
 	startAtLogin := r.FormValue("startAtLogin") == "on"
 	cfg := desktopConfig{
 		ServerName: serverName, PublicAddress: publicAddress, Port: port,
 		StartAtLogin: startAtLogin, StartupChoiceMade: true,
 		SearchURL: searchURL, UserAgent: userAgent, ViewportScale: viewportScale,
+		AudioQuality: audioQuality,
 	}
 	if a.manageChild {
 		if err := setStartAtLogin(startAtLogin); err != nil {

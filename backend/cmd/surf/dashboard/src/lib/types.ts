@@ -14,6 +14,7 @@ export interface Config {
   searchURL?: string;
   userAgent?: string;
   viewportScale?: string | number;
+  audioQuality?: string;
 }
 
 export type BrowserState =

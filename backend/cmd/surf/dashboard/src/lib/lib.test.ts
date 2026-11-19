@@ -95,6 +95,8 @@ describe('settings draft', () => {
     const draft = draftFromConfig(config);
     expect(draft).toMatchObject({ serverName: 'desk', port: '18080', searchPreset: CUSTOM_SEARCH, viewportScale: '1.5' });
     expect(draftFromConfig({ ...config, serverName: '' }).serverName).toBe('Surf');
+    expect(draft.audioQuality).toBe('high');
+    expect(draftFromConfig({ ...config, audioQuality: 'standard' }).audioQuality).toBe('standard');
     expect(draftsEqual(draft, draftFromConfig(config))).toBe(true);
     expect(draftsEqual(draft, { ...draft, port: '1' })).toBe(false);
   });
@@ -103,6 +105,7 @@ describe('settings draft', () => {
     const form = settingsFormData(draftFromConfig(config));
     expect(form.get('serverName')).toBe('desk');
     expect(form.get('startAtLogin')).toBe('on');
+    expect(form.get('audioQuality')).toBe('high');
     expect(settingsFormData({ ...draftFromConfig(config), startAtLogin: false }).has('startAtLogin')).toBe(false);
   });
 });
