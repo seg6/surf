@@ -25,6 +25,8 @@ version differences alone do not.
   be reported and diagnosed.
 - iOS: new Play Audio in Background setting (off by default) keeps sound playing
   with the screen off or in another app; video pauses until you return.
+  The server stops sending video while Surf is in the background, so it no
+  longer uses bandwidth or encoder time for a picture nobody sees.
 
 ## 0.18.0 - 2026-11-10
 

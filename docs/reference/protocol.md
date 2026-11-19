@@ -39,6 +39,7 @@ Each command is a JSON object with required field `t`. Optional causal fields:
 | `nav`, `opennew` | Navigate / open URL |
 | `back`, `fwd`, `reload`, `stop` | Navigation chrome |
 | `audio`, `mobile`, `dark`, `fullscreen` | Toggles (`on`) |
+| `video` | Pause or resume only this client's video lane (`on`, `video-pause` cap) |
 | `touch` | Touch snapshot / edges |
 | `pointer`, `wheel` | Pointer input (`pointer-input` cap) |
 | `key`, `paste`, `compose` | Keyboard / IME |

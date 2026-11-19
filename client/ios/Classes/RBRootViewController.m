@@ -154,6 +154,8 @@ static CGFloat RBEvenExtent(CGFloat value) {
 @property(nonatomic, assign) BOOL audioRequested;
 @property(nonatomic, assign) BOOL applicationInBackground;
 @property(nonatomic, assign) BOOL backgroundAudioKeepAlive; // audio and socket stay up while backgrounded
+@property(nonatomic, assign) BOOL videoPausedOnServer; // host stopped sending video for background audio
+@property(nonatomic, assign) BOOL videoResumingQuietly; // keep the last frame up while video restarts
 @property(nonatomic, assign) BOOL disconnectedForBackground;
 @property(nonatomic, strong) NSTimer *backgroundDisconnectTimer;
 @property(nonatomic, assign) UIBackgroundTaskIdentifier backgroundTaskIdentifier;
@@ -482,6 +484,13 @@ static CGFloat RBEvenExtent(CGFloat value) {
         self.backgroundAudioKeepAlive = YES;
         self.mediaPipeline.videoSuspended = YES;
         self.streamView.videoActive = NO;
+        // Newer hosts can stop the video lane entirely, which saves bandwidth
+        // and lets the encoder park. Older hosts keep sending and the
+        // pipeline discards it.
+        if (self.session.videoPauseAvailable) {
+            self.videoPausedOnServer = YES;
+            [self.session sendMessage:@{@"t": @"video", @"on": @NO}];
+        }
         [self.clipboardSyncTimer invalidate];
         self.clipboardSyncTimer = nil;
         RBLogEvent(@"application", @"info", @{}, @"Application backgrounded; audio kept alive");
@@ -539,6 +548,22 @@ static CGFloat RBEvenExtent(CGFloat value) {
         NSDictionary *server = self.currentServer ?: [RBServerStore lastSelectedServer];
         if (server) [self connectToServer:server];
         return;
+    }
+    if (self.videoPausedOnServer) {
+        self.videoPausedOnServer = NO;
+        if (self.session.state == RBSessionStateOpen) {
+            // Subscribing again starts the lane at an IDR with a fresh
+            // video-config. If the socket reconnected while backgrounded the
+            // new connection was never paused and is already subscribed, so
+            // also ask for a keyframe and show the stream again directly.
+            [self.mediaPipeline recoverVideo];
+            self.videoResumingQuietly = YES;
+            [self.session sendMessage:@{@"t": @"video", @"on": @YES}];
+            if (self.videoActive) self.streamView.videoActive = YES;
+            [self.session sendMessage:@{@"t": @"reqkeyframe"}];
+            RBLogEvent(@"application", @"info", @{}, @"Application resumed; video resumed on host");
+            return;
+        }
     }
     if (self.session.state == RBSessionStateOpen && self.videoActive) {
         // Frames are intentionally discarded while backgrounded. Re-enter at
@@ -1186,10 +1211,12 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
         self.videoProfile = profile;
     if ([state isEqualToString:@"starting"]) {
         self.videoStarting = YES;
+        if (self.videoResumingQuietly) return;
         if (!self.currentURL || ![self.currentURL hasPrefix:@"about:blank#surf-new"])
             [self.browserStateView showState:RBBrowserStateStartingVideo detail:nil];
         return;
     }
+    self.videoResumingQuietly = NO;
     if ([state isEqualToString:@"unavailable"]) {
         [self leaveVideoMode];
         [self showVideoUnavailable:[[message objectForKey:@"reason"] description]];
@@ -1214,6 +1241,7 @@ static NSString *RBPairQueryValue(NSURL *url, NSString *key) {
 - (void)mediaPipeline:(RBMediaPipeline *)pipeline didDecodePixelBuffer:(CVPixelBufferRef)pixelBuffer
              metadata:(RBFrameMetadata *)metadata {
     if (!self.videoActive) return;
+    self.videoResumingQuietly = NO;
     [self.streamView displayVideoPixelBuffer:pixelBuffer metadata:metadata];
 }
 

@@ -243,7 +243,8 @@ typedef enum surf_protocol_command_kind {
     SURF_PROTOCOL_COMMAND_MEDIA_MUTE,
     SURF_PROTOCOL_COMMAND_MEDIA_QUERY,
     SURF_PROTOCOL_COMMAND_BROWSER_WATCH,
-    SURF_PROTOCOL_COMMAND_BROWSER_RESUME
+    SURF_PROTOCOL_COMMAND_BROWSER_RESUME,
+    SURF_PROTOCOL_COMMAND_VIDEO
 } surf_protocol_command_kind_t;
 
 typedef struct surf_protocol_command {

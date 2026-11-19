@@ -113,6 +113,12 @@ pub enum Command {
         #[serde(flatten)]
         causal: Causal,
     },
+    #[serde(rename = "video")]
+    Video {
+        on: bool,
+        #[serde(flatten)]
+        causal: Causal,
+    },
     #[serde(rename = "mobile")]
     Mobile {
         on: bool,

@@ -7,6 +7,7 @@
   {"t":"histdel","url":"https://example.com/old","ts":42},
   {"t":"bmdel","url":"https://example.com/bookmark"},
   {"t":"audio","on":true},
+  {"t":"video","on":false},
   {"t":"mobile","on":false},
   {"t":"dark","on":true},
   {"t":"fullscreen","on":false},

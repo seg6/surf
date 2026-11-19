@@ -1505,6 +1505,7 @@ static const char *surf_command_name(surf_protocol_command_kind_t kind) {
     case SURF_PROTOCOL_COMMAND_HISTORY_DELETE: return "histdel";
     case SURF_PROTOCOL_COMMAND_BOOKMARK_DELETE: return "bmdel";
     case SURF_PROTOCOL_COMMAND_AUDIO: return "audio";
+    case SURF_PROTOCOL_COMMAND_VIDEO: return "video";
     case SURF_PROTOCOL_COMMAND_MOBILE: return "mobile";
     case SURF_PROTOCOL_COMMAND_DARK: return "dark";
     case SURF_PROTOCOL_COMMAND_FULLSCREEN: return "fullscreen";
@@ -1546,6 +1547,7 @@ static const char *surf_command_name(surf_protocol_command_kind_t kind) {
 
 static int surf_command_is_toggle(surf_protocol_command_kind_t kind) {
     return kind == SURF_PROTOCOL_COMMAND_AUDIO ||
+           kind == SURF_PROTOCOL_COMMAND_VIDEO ||
            kind == SURF_PROTOCOL_COMMAND_MOBILE ||
            kind == SURF_PROTOCOL_COMMAND_DARK ||
            kind == SURF_PROTOCOL_COMMAND_FULLSCREEN;

@@ -97,6 +97,9 @@ type Controller struct {
 	shutdown    sync.Once
 	videoSubs   map[*transport.Client]*media.VideoSubscription
 	audioSubs   map[*transport.Client]*media.AudioSubscription
+	// videoPaused holds clients that asked to stop video while keeping the
+	// session and audio, for example an iOS app playing audio in the background.
+	videoPaused map[*transport.Client]bool
 
 	startedAt time.Time
 	governor  streamGovernor
@@ -204,6 +207,7 @@ func New(cfg *config.Config, hub *transport.Hub) (*Controller, error) {
 		capture:        capture,
 		videoSubs:      map[*transport.Client]*media.VideoSubscription{},
 		audioSubs:      map[*transport.Client]*media.AudioSubscription{},
+		videoPaused:    map[*transport.Client]bool{},
 		perfCounts:     map[string]int{},
 		commands:       make(chan controllerCommand, 256),
 		events:         make(chan cdp.Event, 512),

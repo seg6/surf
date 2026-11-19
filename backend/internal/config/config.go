@@ -72,6 +72,7 @@ var Caps = []string{
 	"dldel",          // delete a download from the server
 	"reqkeyframe",    // on-demand IDR request (decode error / resync)
 	"video-retry",    // explicit retry after an unavailable encoder state
+	"video-pause",    // video on/off toggle that keeps the session and audio
 	"media-stats",    // client decode/presentation health for adaptive profiles
 	"live-logs",      // authenticated native log records mirrored live to the host
 	"clipboard-sync", // owner-controlled bidirectional system clipboard bridge

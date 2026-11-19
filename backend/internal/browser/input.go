@@ -136,6 +136,8 @@ func (b *Controller) handleCommand(c *transport.Client, command protocol.Command
 	case *protocol.ToggleCommand:
 		if kind == "audio" {
 			b.handleAudio(c, m.On)
+		} else if kind == "video" {
+			b.handleVideo(c, m.On)
 		} else if kind == "mobile" {
 			b.handleMobileLayout(m.On)
 		} else if kind == "dark" {

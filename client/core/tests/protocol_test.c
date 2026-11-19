@@ -244,6 +244,7 @@ static void initialize_command(surf_protocol_command_t *command,
         command->data.history_delete.timestamp = 42;
         break;
     case SURF_PROTOCOL_COMMAND_AUDIO:
+    case SURF_PROTOCOL_COMMAND_VIDEO:
     case SURF_PROTOCOL_COMMAND_MOBILE:
     case SURF_PROTOCOL_COMMAND_DARK:
     case SURF_PROTOCOL_COMMAND_FULLSCREEN:
@@ -351,7 +352,7 @@ static void initialize_command(surf_protocol_command_t *command,
 static void emit_commands(void) {
     surf_protocol_command_kind_t kind;
     for (kind = SURF_PROTOCOL_COMMAND_SIZE;
-         kind <= SURF_PROTOCOL_COMMAND_BROWSER_RESUME;
+         kind <= SURF_PROTOCOL_COMMAND_VIDEO;
          kind = (surf_protocol_command_kind_t)(kind + 1)) {
         surf_protocol_command_t command;
         char buffer[8192];

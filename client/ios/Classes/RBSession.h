@@ -37,6 +37,8 @@ typedef enum {
 // it only needs a fresh pairing approval.
 @property(nonatomic, readonly) BOOL requiresPairing;
 @property(nonatomic, readonly) NSDictionary *availableClientUpdate;
+// The host accepts {"t":"video","on":bool} to pause only the video lane.
+@property(nonatomic, readonly) BOOL videoPauseAvailable;
 
 - (id)initWithServer:(NSDictionary *)server;
 - (void)start;

@@ -25,7 +25,7 @@ func (b *Controller) hasVideoSubscribers() bool {
 }
 
 func (b *Controller) subscribeVideo(c *transport.Client) {
-	if b.inputSuspended() {
+	if b.inputSuspended() || b.videoIsPaused(c) {
 		return
 	}
 	b.mu.Lock()
@@ -151,9 +151,44 @@ func (b *Controller) pumpVideo(c *transport.Client, sub *media.VideoSubscription
 		}
 		b.deliverAU(c, sub, au)
 	}
-	// Channel closed: encoder gave up (or we unsubscribed).
-	b.send(c, protocol.VideoConfigEvent{Type: "video-config", State: "unavailable", Reason: "encoder-stopped"})
+	// Channel closed: encoder gave up (or we unsubscribed). A client that
+	// paused video asked for this and must not be shown an encoder failure.
+	if !b.videoIsPaused(c) {
+		b.send(c, protocol.VideoConfigEvent{Type: "video-config", State: "unavailable", Reason: "encoder-stopped"})
+	}
 	b.stopVideo(c)
+}
+
+// handleVideo pauses or resumes one client's video lane without touching its
+// session or audio. While paused the client receives no access units; when no
+// other client watches, the encoder parks as it does after a disconnect.
+// Resuming subscribes again, so the client gets a fresh video-config and IDR.
+func (b *Controller) handleVideo(c *transport.Client, on bool) {
+	b.mediaMu.Lock()
+	paused := b.videoPaused[c]
+	if on {
+		delete(b.videoPaused, c)
+	} else {
+		b.videoPaused[c] = true
+	}
+	b.mediaMu.Unlock()
+	if !on {
+		if !paused {
+			log.Printf("video: client paused video")
+		}
+		b.stopVideo(c)
+		return
+	}
+	if paused {
+		log.Printf("video: client resumed video")
+	}
+	b.subscribeVideo(c)
+}
+
+func (b *Controller) videoIsPaused(c *transport.Client) bool {
+	b.mediaMu.Lock()
+	defer b.mediaMu.Unlock()
+	return b.videoPaused[c]
 }
 
 func (b *Controller) deliverAU(c *transport.Client, sub *media.VideoSubscription, au media.AccessUnit) {
@@ -181,6 +216,10 @@ func (b *Controller) deliverAU(c *transport.Client, sub *media.VideoSubscription
 }
 
 func (b *Controller) videoFailed(c *transport.Client) {
+	if b.videoIsPaused(c) {
+		b.stopVideo(c)
+		return
+	}
 	b.send(c, protocol.VideoConfigEvent{Type: "video-config", State: "unavailable", Reason: "encoder-start-timeout"})
 	b.stopVideo(c)
 }
@@ -211,6 +250,7 @@ func (b *Controller) ClientDisconnected(c *transport.Client) {
 	delete(b.videoSubs, c)
 	audioSub := b.audioSubs[c]
 	delete(b.audioSubs, c)
+	delete(b.videoPaused, c)
 	b.mediaMu.Unlock()
 	if sub != nil {
 		sub.Close()
