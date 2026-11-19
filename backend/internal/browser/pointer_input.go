@@ -304,8 +304,8 @@ func (in *pointerInput) processCommand(work pointerWork) {
 
 func (in *pointerInput) dispatchPointer(command *protocol.PointerCommand) bool {
 	typ := map[string]string{"move": "mouseMoved", "down": "mousePressed", "up": "mouseReleased", "leave": "mouseMoved"}[command.Phase]
-	x := in.viewport.OffsetX + clampUnit(command.X)*in.viewport.ClientWidth
-	y := in.viewport.OffsetY + clampUnit(command.Y)*in.viewport.ClientHeight
+	x := clampUnit(command.X) * in.viewport.ClientWidth
+	y := clampUnit(command.Y) * in.viewport.ClientHeight
 	if command.Phase == "leave" {
 		x, y = -1, -1
 	}
@@ -338,8 +338,8 @@ func (in *pointerInput) dispatchPointer(command *protocol.PointerCommand) bool {
 func (in *pointerInput) dispatchWheel(command *protocol.WheelCommand) bool {
 	params := map[string]any{
 		"type":   "mouseWheel",
-		"x":      in.viewport.OffsetX + clampUnit(command.X)*in.viewport.ClientWidth,
-		"y":      in.viewport.OffsetY + clampUnit(command.Y)*in.viewport.ClientHeight,
+		"x":      clampUnit(command.X) * in.viewport.ClientWidth,
+		"y":      clampUnit(command.Y) * in.viewport.ClientHeight,
 		"deltaX": command.DeltaX * in.viewport.ClientWidth,
 		"deltaY": command.DeltaY * in.viewport.ClientHeight,
 		"button": "none", "buttons": command.Buttons,

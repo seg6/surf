@@ -48,15 +48,25 @@ const webauthnShim = `
 
 // Keep the remote page pinned at its scroll limits. Chromium owns touch
 // gestures, but root-page rubber-banding still looks like the streamed texture
-// itself is being dragged beyond the viewport.
+// itself is being dragged beyond the viewport. The value only belongs on the
+// element that defines the viewport scroller: <body> when <html> is visible
+// (its overflow propagates), otherwise <html>. A <body> that is its own scroll
+// container (for example overflow:hidden under a scrolling <html>) with
+// overscroll-behavior:none swallows touch scrolling instead of chaining it.
 const overscrollShim = `
 (function () {
   function pinRootScroller() {
-    if (document.documentElement) document.documentElement.style.overscrollBehavior = 'none';
-    if (document.body) document.body.style.overscrollBehavior = 'none';
+    var root = document.documentElement;
+    if (!root) return;
+    root.style.overscrollBehavior = 'none';
+    var style = window.getComputedStyle(root);
+    if (document.body && style.overflowX === 'visible' && style.overflowY === 'visible') {
+      document.body.style.overscrollBehavior = 'none';
+    }
   }
   pinRootScroller();
   document.addEventListener('DOMContentLoaded', pinRootScroller, false);
+  window.addEventListener('load', pinRootScroller, false);
 })();
 `
 

@@ -8,6 +8,10 @@ version differences alone do not.
 - macOS: fix Surf aborting at launch with a `CGSConnectionByID` assertion and no
   menu bar icon (seen on Sequoia with OpenCore Legacy Patcher). Updates the
   tray library; `surf serve` remains a workaround on older builds.
+- Fixed touch scrolling on pages such as DuckDuckGo where one-finger swipes did
+  nothing and only two-finger gestures moved the page.
+- Fixed taps and clicks landing on the wrong spot after pinch-zooming a page, so
+  small buttons now respond while zoomed in.
 
 ## 0.18.0 - 2026-11-10
 

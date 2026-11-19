@@ -64,8 +64,8 @@ func mapTouchPoint(point protocol.TouchPoint, viewport cssVisualViewport) (map[s
 	force = clampUnit(force)
 	return map[string]any{
 		"id":      point.ID,
-		"x":       viewport.OffsetX + clampUnit(point.X)*viewport.ClientWidth,
-		"y":       viewport.OffsetY + clampUnit(point.Y)*viewport.ClientHeight,
+		"x":       clampUnit(point.X) * viewport.ClientWidth,
+		"y":       clampUnit(point.Y) * viewport.ClientHeight,
 		"radiusX": radiusX, "radiusY": radiusY, "force": force,
 	}, nil
 }

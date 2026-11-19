@@ -7,7 +7,7 @@ import (
 	"surf-backend/internal/protocol"
 )
 
-func TestMapTouchPointUsesCSSVisualViewport(t *testing.T) {
+func TestMapTouchPointIsRelativeToCSSVisualViewport(t *testing.T) {
 	viewport := cssVisualViewport{
 		OffsetX: 12, OffsetY: 7, ClientWidth: 850, ClientHeight: 1033.724, Scale: 0.903529,
 	}
@@ -17,8 +17,8 @@ func TestMapTouchPointUsesCSSVisualViewport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mapped["id"] != 3 || math.Abs(mapped["x"].(float64)-437) > 0.001 ||
-		math.Abs(mapped["y"].(float64)-523.862) > 0.001 {
+	if mapped["id"] != 3 || math.Abs(mapped["x"].(float64)-425) > 0.001 ||
+		math.Abs(mapped["y"].(float64)-516.862) > 0.001 {
 		t.Fatalf("mapped point = %#v", mapped)
 	}
 	if math.Abs(mapped["radiusX"].(float64)-8.5) > 0.001 ||
