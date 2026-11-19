@@ -48,16 +48,21 @@ for algorithm in md5sum sha1sum sha256sum; do
 done
 
 # Whole site must stay inside the iOS 6 WebKit profile and resolve package fields.
-# Pages may carry small inline scripts but never load external ones. Flex, grid
-# and gradients are allowed in CSS because site.css layers them over a table and
-# float baseline. Custom properties and @font-face are still rejected.
+# Pages may carry small inline ES5 scripts but never load external ones. CSS may
+# use flex, grid and gap only inside @supports blocks, which iOS 6 skips, so the
+# table and float baseline is what old devices get. Custom properties and
+# @font-face are rejected outright.
 while IFS= read -r -d '' page; do
   if grep -Eq '@[A-Z0-9_]+@|__SURF_[A-Z0-9_]+__' "$page"; then
     echo "unresolved template value in ${page#"$repository_dir"/}" >&2
     exit 1
   fi
   if grep -Eqi '<script[^>]*[[:space:]]src=' "$page"; then
-    echo "${page#"$repository_dir"/} uses a feature outside the iOS 6 compatibility profile" >&2
+    echo "${page#"$repository_dir"/} loads an external script" >&2
+    exit 1
+  fi
+  if awk 'tolower($0) ~ /<script/ {inside=1} inside && /=>|`|(^|[^A-Za-z0-9_$.])(let|const|class)[[:space:]]/ {bad=1} tolower($0) ~ /<\/script>/ {inside=0} END {exit bad ? 0 : 1}' "$page"; then
+    echo "${page#"$repository_dir"/} has an inline script that is not ES5" >&2
     exit 1
   fi
 done < <(find "$repository_dir" -type f -name '*.html' -print0)
@@ -65,6 +70,48 @@ done < <(find "$repository_dir" -type f -name '*.html' -print0)
 while IFS= read -r -d '' css; do
   if grep -Eqi 'var\(|@font-face' "$css"; then
     echo "${css#"$repository_dir"/} uses a feature outside the iOS 6 compatibility profile" >&2
+    exit 1
+  fi
+  # Scan declarations (minified or not) and track brace depth, so flex, grid
+  # and gap are only accepted inside @supports blocks.
+  if ! awk '
+    function supported(   k) { for (k = 1; k <= depth; k++) if (sup[k]) return 1; return 0 }
+    function check(decl) {
+      decl = tolower(decl)
+      gsub(/[ \t\r\n]+/, "", decl)
+      if (!supported() && decl ~ /^(display:(-webkit-)?(inline-)?(flex|grid)|(row-|column-|grid-)?gap:)/) {
+        print FILENAME ": " decl > "/dev/stderr"
+        bad = 1
+      }
+    }
+    BEGIN { RS = "\001" }
+    {
+      text = $0
+      gsub(/\/\*([^*]|\*+[^*\/])*\*+\//, "", text)
+      n = length(text)
+      buf = ""
+      for (i = 1; i <= n; i++) {
+        c = substr(text, i, 1)
+        if (c == "{") {
+          depth++
+          sup[depth] = (tolower(buf) ~ /@supports/) ? 1 : 0
+          buf = ""
+        } else if (c == "}") {
+          check(buf)
+          sup[depth] = 0
+          depth--
+          buf = ""
+        } else if (c == ";") {
+          check(buf)
+          buf = ""
+        } else {
+          buf = buf c
+        }
+      }
+    }
+    END { exit bad }
+  ' "$css"; then
+    echo "${css#"$repository_dir"/} uses flex, grid or gap outside @supports" >&2
     exit 1
   fi
 done < <(find "$repository_dir" -type f -name '*.css' -print0)
