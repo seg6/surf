@@ -44,6 +44,8 @@ type desktopConfig struct {
 	StartAtLogin      bool   `json:"startAtLogin"`
 	StartupChoiceMade bool   `json:"startupChoiceMade"`
 	SearchURL         string `json:"searchURL,omitempty"`
+	UserAgent         string `json:"userAgent,omitempty"`
+	ViewportScale     string `json:"viewportScale,omitempty"`
 }
 
 // browserEnv turns the dashboard's browser settings into backend environment
@@ -51,6 +53,8 @@ type desktopConfig struct {
 func (c desktopConfig) browserEnv() (keys, env []string) {
 	for _, setting := range []struct{ key, value string }{
 		{"SURF_SEARCH_URL", c.SearchURL},
+		{"SURF_USER_AGENT", c.UserAgent},
+		{"SURF_VIEWPORT_SCALE", c.ViewportScale},
 	} {
 		if setting.value != "" {
 			keys = append(keys, setting.key)
@@ -1030,7 +1034,7 @@ func (a *desktopApp) managementConfig(w http.ResponseWriter, _ *http.Request) {
 		"serverName": serverName, "publicAddress": publicAddress, "baseURL": baseURL, "lanURL": lanURL, "lanURLs": lanURLs,
 		"port": port, "running": running, "startAtLogin": cfg.StartAtLogin,
 		"startupChoiceMade": cfg.StartupChoiceMade,
-		"searchURL":         cfg.SearchURL,
+		"searchURL":         cfg.SearchURL, "userAgent": cfg.UserAgent, "viewportScale": cfg.ViewportScale,
 	})
 }
 
@@ -1124,11 +1128,27 @@ func (a *desktopApp) managementSettings(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Search address must be an http(s) URL containing {searchTerms} or %s.", http.StatusBadRequest)
 		return
 	}
+	userAgent := strings.TrimSpace(r.FormValue("userAgent"))
+	if len(userAgent) > 512 || strings.ContainsAny(userAgent, "\r\n") {
+		http.Error(w, "User agent must be one line of at most 512 characters.", http.StatusBadRequest)
+		return
+	}
+	viewportScale := strings.TrimSpace(r.FormValue("viewportScale"))
+	if viewportScale != "" {
+		scale, err := strconv.ParseFloat(viewportScale, 64)
+		if err != nil || scale < 1 || scale > config.MaxViewportScale {
+			http.Error(w, "Page width scale must be between 1 and 3.", http.StatusBadRequest)
+			return
+		}
+		if scale == 1 {
+			viewportScale = ""
+		}
+	}
 	startAtLogin := r.FormValue("startAtLogin") == "on"
 	cfg := desktopConfig{
 		ServerName: serverName, PublicAddress: publicAddress, Port: port,
 		StartAtLogin: startAtLogin, StartupChoiceMade: true,
-		SearchURL: searchURL,
+		SearchURL: searchURL, UserAgent: userAgent, ViewportScale: viewportScale,
 	}
 	if a.manageChild {
 		if err := setStartAtLogin(startAtLogin); err != nil {

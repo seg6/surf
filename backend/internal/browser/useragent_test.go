@@ -2,9 +2,12 @@ package browser
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 	"time"
+
+	"surf-backend/internal/config"
 )
 
 func TestNormalizeHeadlessUserAgent(t *testing.T) {
@@ -138,4 +141,53 @@ func metadataHasBrand(metadata map[string]any, wantName, wantVersion string) boo
 		}
 	}
 	return false
+}
+
+func TestCustomUserAgentOverridesSurfIdentity(t *testing.T) {
+	b := &Controller{
+		cfg:               &config.Config{},
+		userAgent:         "Mozilla/5.0 Chrome/150.0.0.0 Safari/537.36",
+		userAgentMetadata: map[string]any{"platform": "Linux", "mobile": false, "brands": []any{"x"}},
+	}
+	if params := b.userAgentParams(true); params["userAgent"] == "Custom/1.0" || params["userAgentMetadata"] == nil {
+		t.Fatalf("default identity changed: %v", params)
+	}
+	b.cfg.UserAgent = "Custom/1.0"
+	for _, mobile := range []bool{false, true} {
+		params := b.userAgentParams(mobile)
+		if params["userAgent"] != "Custom/1.0" || len(params) != 1 {
+			t.Fatalf("mobile=%t params=%v", mobile, params)
+		}
+	}
+	// Without native metadata Surf applies no override, but a custom agent still does.
+	b.userAgentMetadata = nil
+	if params := b.userAgentParams(false); params["userAgent"] != "Custom/1.0" {
+		t.Fatalf("params=%v", params)
+	}
+}
+
+func TestScaledViewport(t *testing.T) {
+	for _, test := range []struct {
+		w, h        int
+		scale       float64
+		cssW, cssH  int
+		deviceScale float64
+	}{
+		{640, 960, 0, 640, 960, 1},
+		{640, 960, 1, 640, 960, 1},
+		{640, 960, 0.5, 640, 960, 1},
+		{640, 960, 1.5, 960, 1440, 2.0 / 3},
+		{640, 960, 2, 1280, 1920, 0.5},
+		{1024, 768, 1.25, 1280, 960, 0.8},
+	} {
+		w, h, ds := scaledViewport(test.w, test.h, test.scale)
+		if w != test.cssW || h != test.cssH || math.Abs(ds-test.deviceScale) > 1e-9 {
+			t.Errorf("scaledViewport(%d,%d,%v) = %d,%d,%v; want %d,%d,%v",
+				test.w, test.h, test.scale, w, h, ds, test.cssW, test.cssH, test.deviceScale)
+		}
+		// The device pixels rendered must equal the client's surface.
+		if math.Abs(float64(w)*ds-float64(test.w)) > 1e-9 {
+			t.Errorf("scale %v: %d css px * %v != %d device px", test.scale, w, ds, test.w)
+		}
+	}
 }

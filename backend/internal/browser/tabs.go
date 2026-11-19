@@ -3,6 +3,7 @@ package browser
 import (
 	"encoding/json"
 	"log"
+	"math"
 	"net/url"
 	"sort"
 	"strings"
@@ -250,7 +251,7 @@ func (b *Controller) attachTarget(info targetInfo) {
 	b.captureMainFrame(t)
 	_ = b.cdp.Dispatch(s, "Runtime.enable", nil)
 	b.mu.Lock()
-	userAgentParams := userAgentOverrideParams(b.userAgent, b.userAgentMetadata, b.mobile)
+	userAgentParams := b.userAgentParams(b.mobile)
 	dark := b.dark
 	b.mu.Unlock()
 	if userAgentParams != nil {
@@ -606,6 +607,18 @@ func (b *Controller) isActiveGeneration(id int, generation uint64) bool {
 	return b.activeID == id && b.activeGen == generation && b.tabs[id] != nil
 }
 
+// scaledViewport returns the CSS viewport and device scale factor that render
+// a width x height pixel surface with scale times as much page width. Scales
+// below one (or unset) leave the viewport untouched.
+func scaledViewport(width, height int, scale float64) (int, int, float64) {
+	if scale <= 1 || scale != scale {
+		return width, height, 1
+	}
+	cssW := int(math.Round(float64(width) * scale))
+	cssH := int(math.Round(float64(height) * scale))
+	return cssW, cssH, float64(width) / float64(cssW)
+}
+
 // applyView makes Chrome's viewport exactly the client's screen. Emulation is
 // independent of Chrome's hidden platform window, so any dimensions work.
 func (b *Controller) applyView(t *Tab) {
@@ -616,6 +629,11 @@ func (b *Controller) applyView(t *Tab) {
 	mobile := b.mobile
 	s := t.Session
 	b.mu.Unlock()
+	// A viewport scale above one lays the page out in a larger CSS viewport
+	// and shrinks the device scale factor to match, so the surface, encoder and
+	// stream keep the client's pixel size. Input is normalized against the CSS
+	// visual viewport, so it needs no adjustment.
+	w, h, deviceScale := scaledViewport(w, h, b.cfg.ViewportScale)
 	orientation, angle := "portraitPrimary", 0
 	if w > h {
 		orientation, angle = "landscapePrimary", 90
@@ -625,8 +643,8 @@ func (b *Controller) applyView(t *Tab) {
 	// surface into the requested encoder dimensions and text becomes soft.
 	b.resizeCaptureSurface(t.TargetID, pixelW, pixelH)
 	metrics := map[string]any{
-		"width": w, "height": h, "deviceScaleFactor": 1, "mobile": mobile,
-		"screenWidth": pixelW, "screenHeight": pixelH,
+		"width": w, "height": h, "deviceScaleFactor": deviceScale, "mobile": mobile,
+		"screenWidth": w, "screenHeight": h,
 		"screenOrientation": map[string]any{
 			"type": orientation, "angle": angle,
 		},

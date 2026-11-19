@@ -194,6 +194,18 @@ func cloneUserAgentMetadata(source map[string]any) map[string]any {
 	return clone
 }
 
+// userAgentParams returns the Network.setUserAgentOverride parameters for new
+// and existing tabs, or nil when the browser's own identity applies. A custom
+// SURF_USER_AGENT wins over both Surf identities and is sent without client
+// hints, which would otherwise describe a different browser. The caller holds
+// b.mu.
+func (b *Controller) userAgentParams(mobile bool) map[string]any {
+	if b.cfg != nil && b.cfg.UserAgent != "" {
+		return map[string]any{"userAgent": b.cfg.UserAgent}
+	}
+	return userAgentOverrideParams(b.userAgent, b.userAgentMetadata, mobile)
+}
+
 func userAgentOverrideParams(desktopUserAgent string, nativeMetadata map[string]any, mobile bool) map[string]any {
 	if desktopUserAgent == "" || nativeMetadata == nil {
 		return nil

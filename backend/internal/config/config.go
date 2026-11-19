@@ -97,6 +97,12 @@ type Config struct {
 	// {searchTerms} or %s placeholder. Empty follows Chromium's own default
 	// search engine and falls back to Google.
 	SearchURL string
+	// UserAgent (SURF_USER_AGENT) replaces the browser's user agent. Empty
+	// keeps Surf's normal desktop/mobile identity.
+	UserAgent string
+	// ViewportScale (SURF_VIEWPORT_SCALE) makes pages lay out in a CSS viewport
+	// this many times the client's size; the stream still matches the client.
+	ViewportScale float64
 
 	ChromeNoSandbox    bool
 	ContentBlocker     bool
@@ -138,6 +144,17 @@ func envBool(key string, def bool) bool {
 	}
 }
 
+// MaxViewportScale bounds SURF_VIEWPORT_SCALE; beyond it text is unreadable.
+const MaxViewportScale = 3.0
+
+func envViewportScale(key string) float64 {
+	v, err := strconv.ParseFloat(strings.TrimSpace(os.Getenv(key)), 64)
+	if err != nil || v != v || v < 1 {
+		return 1
+	}
+	return min(v, MaxViewportScale)
+}
+
 func surfHome() string {
 	if v := os.Getenv("SURF_HOME"); v != "" {
 		return v
@@ -175,6 +192,8 @@ func load() (*Config, error) {
 		DownloadsDir:    envStr("DOWNLOADS", filepath.Join(home, "downloads")),
 		UploadsDir:      envStr("UPLOADS", filepath.Join(home, "uploads")),
 		SearchURL:       strings.TrimSpace(os.Getenv("SURF_SEARCH_URL")),
+		UserAgent:       strings.TrimSpace(os.Getenv("SURF_USER_AGENT")),
+		ViewportScale:   envViewportScale("SURF_VIEWPORT_SCALE"),
 		ChromeNoSandbox: envBool("CHROME_NO_SANDBOX", os.Geteuid() == 0),
 		ContentBlocker:  envBool("SURF_CONTENT_BLOCKER", true),
 		AdaptiveVideo:   envBool("SURF_ADAPTIVE_VIDEO", false),

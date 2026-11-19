@@ -18,6 +18,8 @@ device keys replace shared secrets.
 | `PROFILE` | `$SURF_HOME/profile` | Chromium profile |
 | `START_URL` | Google | Initial page |
 | `SURF_SEARCH_URL` | empty | Address-bar search template with `{searchTerms}` or `%s`; empty uses the search engine set in Chromium, then Google |
+| `SURF_USER_AGENT` | empty | Replace the browser user agent on every tab; empty keeps Surf's own desktop and mobile identities |
+| `SURF_VIEWPORT_SCALE` | `1` | Lay pages out in a viewport this many times (1 to 3) the client's size; the stream stays at the client's resolution, so a small screen shows a wider page |
 | `DOWNLOADS` | `$SURF_HOME/downloads` | Downloads |
 | `UPLOADS` | `$SURF_HOME/uploads` | Temporary uploads |
 | `VW`, `VH` | `768`, `934` | Initial viewport before the client reports size |
@@ -28,7 +30,7 @@ device keys replace shared secrets.
 | `SURF_ADAPTIVE_VIDEO` | `0` | Enable adaptive frame-rate profiles with `1` |
 | `CHROME_NO_SANDBOX` | automatic for root | Disable the Chromium sandbox when required |
 
-The tray can change server name, port, and related settings and restart the
+The Settings page also sets the search engine, user agent, and page width scale. The tray can change server name, port, and related settings and restart the
 backend. CLI tools must use the same `SURF_HOME` as the running owner
 (`daemon.json`).
 

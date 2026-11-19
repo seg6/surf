@@ -16,6 +16,9 @@ version differences alone do not.
   (Chromium settings) instead of always using Google. A search engine can also
   be chosen in Settings (Google, DuckDuckGo, Bing, Startpage, or a custom
   address).
+- New Settings options for a custom user agent and a page width scale (1 to 3).
+  A scale above 1 lays pages out wider than the client screen, which helps
+  small screens such as the iPhone 4S; the stream keeps the screen resolution.
 
 ## 0.18.0 - 2026-11-10
 

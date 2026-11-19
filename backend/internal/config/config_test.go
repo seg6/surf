@@ -40,6 +40,7 @@ func clearConfigEnv(t *testing.T) {
 		"CHROME_NO_SANDBOX",
 		"SURF_ADAPTIVE_VIDEO",
 		"STREAM_SCALE", "STREAM_BITRATE", "STREAM_QUANTIZER",
+		"SURF_SEARCH_URL", "SURF_USER_AGENT", "SURF_VIEWPORT_SCALE",
 	} {
 		t.Setenv(key, "")
 	}
@@ -52,6 +53,27 @@ func loadConfig(t *testing.T) *Config {
 		t.Fatal(err)
 	}
 	return cfg
+}
+
+func TestLoadBrowserSettings(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("SURF_HOME", t.TempDir())
+	cfg := loadConfig(t)
+	if cfg.SearchURL != "" || cfg.UserAgent != "" || cfg.ViewportScale != 1 {
+		t.Fatalf("defaults: %q %q %v", cfg.SearchURL, cfg.UserAgent, cfg.ViewportScale)
+	}
+	t.Setenv("SURF_SEARCH_URL", " https://duckduckgo.com/?q=%s ")
+	t.Setenv("SURF_USER_AGENT", " Custom/1.0 ")
+	for value, want := range map[string]float64{"1.5": 1.5, "9": MaxViewportScale, "0.5": 1, "x": 1, "NaN": 1, "": 1} {
+		t.Setenv("SURF_VIEWPORT_SCALE", value)
+		cfg = loadConfig(t)
+		if cfg.ViewportScale != want {
+			t.Errorf("SURF_VIEWPORT_SCALE=%q -> %v, want %v", value, cfg.ViewportScale, want)
+		}
+	}
+	if cfg.SearchURL != "https://duckduckgo.com/?q=%s" || cfg.UserAgent != "Custom/1.0" {
+		t.Fatalf("trimmed: %q %q", cfg.SearchURL, cfg.UserAgent)
+	}
 }
 
 func TestLoadDefaults(t *testing.T) {

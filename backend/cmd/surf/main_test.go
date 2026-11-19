@@ -286,27 +286,33 @@ func postSettings(t *testing.T, app *desktopApp, fields map[string]string) int {
 func TestManagementBrowserSettings(t *testing.T) {
 	home := t.TempDir()
 	app := &desktopApp{home: home, serverName: "Surf", baseURL: "https://127.0.0.1:18080"}
-	code := postSettings(t, app, map[string]string{"searchURL": "https://duckduckgo.com/?q={searchTerms}"})
+	code := postSettings(t, app, map[string]string{
+		"searchURL": "https://duckduckgo.com/?q={searchTerms}", "userAgent": " Custom/1.0 ", "viewportScale": "1.5",
+	})
 	if code != http.StatusNoContent {
 		t.Fatalf("code=%d", code)
 	}
 	cfg, err := loadDesktopConfig(home)
-	if err != nil || cfg.SearchURL != "https://duckduckgo.com/?q={searchTerms}" {
+	if err != nil || cfg.SearchURL != "https://duckduckgo.com/?q={searchTerms}" || cfg.UserAgent != "Custom/1.0" || cfg.ViewportScale != "1.5" {
 		t.Fatalf("saved config=%+v err=%v", cfg, err)
 	}
 	keys, env := cfg.browserEnv()
-	if len(keys) != 1 || len(env) != 1 || env[0] != "SURF_SEARCH_URL=https://duckduckgo.com/?q={searchTerms}" {
+	if len(keys) != 3 || len(env) != 3 || env[2] != "SURF_VIEWPORT_SCALE=1.5" {
 		t.Fatalf("keys=%v env=%v", keys, env)
 	}
-	if code := postSettings(t, app, nil); code != http.StatusNoContent {
+	if code := postSettings(t, app, map[string]string{"viewportScale": "1"}); code != http.StatusNoContent {
 		t.Fatalf("reset code=%d", code)
 	}
-	if cfg, _ = loadDesktopConfig(home); cfg.SearchURL != "" {
+	if cfg, _ = loadDesktopConfig(home); cfg.SearchURL != "" || cfg.UserAgent != "" || cfg.ViewportScale != "" {
 		t.Fatalf("settings not cleared: %+v", cfg)
 	}
 	for name, fields := range map[string]map[string]string{
 		"search without placeholder": {"searchURL": "https://example.com/"},
 		"search scheme":              {"searchURL": "ftp://example.com/?q=%s"},
+		"scale too large":            {"viewportScale": "4"},
+		"scale below one":            {"viewportScale": "0.5"},
+		"scale text":                 {"viewportScale": "big"},
+		"multi-line user agent":      {"userAgent": "a\nb"},
 	} {
 		if code := postSettings(t, app, fields); code != http.StatusBadRequest {
 			t.Errorf("%s: code=%d, want 400", name, code)
