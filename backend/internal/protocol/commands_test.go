@@ -70,3 +70,29 @@ func TestDecodeEveryNativeCommand(t *testing.T) {
 		}
 	}
 }
+
+func TestSizeCommandScale(t *testing.T) {
+	command, err := DecodeCommand([]byte(`{"t":"size","w":640,"h":960,"scale":2}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	size := command.(*SizeCommand)
+	if size.W != 640 || size.H != 960 || size.Scale != 2 {
+		t.Fatalf("size = %+v", size)
+	}
+	command, err = DecodeCommand([]byte(`{"t":"size","w":320,"h":480}`))
+	if err != nil || command.(*SizeCommand).Scale != 0 {
+		t.Fatalf("size without scale: %v %v", command, err)
+	}
+	for _, bad := range []string{
+		`{"t":"size","w":640,"h":960,"scale":0.5}`,
+		`{"t":"size","w":640,"h":960,"scale":4.5}`,
+		`{"t":"size","w":640,"h":960,"scale":-2}`,
+		`{"t":"size","w":640,"h":960,"scale":"2"}`,
+		`{"t":"size","w":640,"h":960,"dpr":2}`,
+	} {
+		if _, err := DecodeCommand([]byte(bad)); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+}

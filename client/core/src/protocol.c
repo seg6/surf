@@ -1593,6 +1593,14 @@ surf_protocol_result_t surf_protocol_encode_command(
     } else if (command->kind == SURF_PROTOCOL_COMMAND_SIZE) {
         surf_write_field_i64(&writer, "w", command->data.size.width);
         surf_write_field_i64(&writer, "h", command->data.size.height);
+        /* scale 0 means "points, scale 1"; the host only accepts 1..4. */
+        if (command->data.size.scale != 0) {
+            if (!(command->data.size.scale >= 1.0 &&
+                  command->data.size.scale <= 4.0)) {
+                return SURF_PROTOCOL_ERROR_FIELD;
+            }
+            surf_write_field_double(&writer, "scale", command->data.size.scale);
+        }
     } else if (command->kind == SURF_PROTOCOL_COMMAND_CLOCK) {
         surf_write_field_u64(&writer, "c0", command->data.clock.client_send_ns);
     } else if (command->kind == SURF_PROTOCOL_COMMAND_TAB) {

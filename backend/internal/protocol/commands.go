@@ -27,11 +27,23 @@ type BrowserResumeCommand struct {
 	Revision uint64 `json:"revision"`
 	Force    bool   `json:"force"`
 }
+
+// SizeCommand reports the client's presentation surface. Without Scale, W and
+// H are logical points and the host treats the device scale as 1. With Scale
+// (the hidpi capability), W and H are physical pixels and Scale is the number
+// of device pixels per CSS pixel, between MinSizeScale and MaxSizeScale.
 type SizeCommand struct {
 	CommandBase
-	W int `json:"w"`
-	H int `json:"h"`
+	W     int     `json:"w"`
+	H     int     `json:"h"`
+	Scale float64 `json:"scale,omitempty"`
 }
+
+const (
+	MinSizeScale = 1.0
+	MaxSizeScale = 4.0
+)
+
 type ClockCommand struct {
 	CommandBase
 	ClientSendNS uint64 `json:"c0"`
@@ -270,6 +282,10 @@ func DecodeCommand(data []byte) (Command, error) {
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return nil, fmt.Errorf("decode %s: trailing JSON", header.T)
+	}
+	if size, ok := dst.(*SizeCommand); ok && size.Scale != 0 &&
+		!(size.Scale >= MinSizeScale && size.Scale <= MaxSizeScale) {
+		return nil, fmt.Errorf("decode size: scale %v outside %v..%v", size.Scale, MinSizeScale, MaxSizeScale)
 	}
 	return dst, nil
 }

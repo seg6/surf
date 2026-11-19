@@ -252,7 +252,7 @@ typedef struct surf_protocol_command {
     surf_protocol_causal_t causal;
     union {
         struct { uint64_t revision; int force; } browser_resume;
-        struct { int32_t width, height; } size;
+        struct { int32_t width, height; double scale; } size;
         struct { uint64_t client_send_ns; } clock;
         struct { surf_string_view_t action; int32_t id; } tab;
         struct { surf_string_view_t url; } url;

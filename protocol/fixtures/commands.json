@@ -1,5 +1,6 @@
 [
   {"t":"size","w":1180,"h":680},
+  {"t":"size","w":2360,"h":1360,"scale":2.0},
   {"t":"clock","c0":123},
   {"t":"tab","action":"select","id":7},
   {"t":"nav","url":"https://example.com","iid":1,"clientNs":2},

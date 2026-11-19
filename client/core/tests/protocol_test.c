@@ -363,6 +363,14 @@ static void emit_commands(void) {
                    SURF_PROTOCOL_OK);
         SURF_CHECK(length < sizeof(buffer));
         puts(buffer);
+        if (kind == SURF_PROTOCOL_COMMAND_SIZE) {
+            /* The hidpi form: physical pixels plus a device scale. */
+            command.data.size.scale = 2.0;
+            SURF_CHECK(surf_protocol_encode_command(&command, buffer,
+                                                    sizeof(buffer), &length) ==
+                       SURF_PROTOCOL_OK);
+            puts(buffer);
+        }
     }
 }
 
@@ -378,6 +386,20 @@ static void test_command_encoding(void) {
     SURF_CHECK(surf_protocol_encode_command(&command, buffer, 8, &length) ==
                SURF_PROTOCOL_ERROR_BUFFER);
     SURF_CHECK(length > 8);
+    initialize_command(&command, SURF_PROTOCOL_COMMAND_SIZE);
+    SURF_CHECK(surf_protocol_encode_command(&command, buffer, sizeof(buffer),
+                                            &length) == SURF_PROTOCOL_OK);
+    SURF_CHECK(strstr(buffer, "scale") == NULL);
+    command.data.size.scale = 1.5;
+    SURF_CHECK(surf_protocol_encode_command(&command, buffer, sizeof(buffer),
+                                            &length) == SURF_PROTOCOL_OK);
+    SURF_CHECK(strstr(buffer, "\"scale\":1.5") != NULL);
+    command.data.size.scale = 0.5;
+    SURF_CHECK(surf_protocol_encode_command(&command, buffer, sizeof(buffer),
+                                            &length) == SURF_PROTOCOL_ERROR_FIELD);
+    command.data.size.scale = 4.5;
+    SURF_CHECK(surf_protocol_encode_command(&command, buffer, sizeof(buffer),
+                                            &length) == SURF_PROTOCOL_ERROR_FIELD);
     initialize_command(&command, SURF_PROTOCOL_COMMAND_BROWSER_RESUME);
     command.data.browser_resume.revision = 0;
     SURF_CHECK(surf_protocol_encode_command(&command, buffer, sizeof(buffer),

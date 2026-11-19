@@ -77,6 +77,7 @@ var Caps = []string{
 	"live-logs",      // authenticated native log records mirrored live to the host
 	"clipboard-sync", // owner-controlled bidirectional system clipboard bridge
 	"pointer-input",  // native desktop pointer, hover, buttons, and wheel input
+	"hidpi",          // size command may carry scale, with w/h in physical pixels
 }
 
 type Config struct {
