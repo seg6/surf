@@ -1,4 +1,4 @@
-.PHONY: test client-core-build client-core-test client-core-sanitize desktop-build desktop-test desktop-run desktop-package surf-binary surf-dist surf-release-dist native-sdk native-package site-build
+.PHONY: test client-core-build client-core-test client-core-sanitize desktop-build desktop-test desktop-run desktop-package surf-binary surf-dist surf-release-dist native-sdk native-package site-build dashboard-build
 
 VERSION := $(shell tr -d '[:space:]' < VERSION)
 COMPATIBILITY_VERSION := $(shell tr -d '[:space:]' < COMPATIBILITY_VERSION)
@@ -134,3 +134,6 @@ native-package: native-sdk
 
 site-build:
 	cd site && npm ci && npm run build
+
+dashboard-build:
+	cd backend/cmd/surf/dashboard && npm ci && npm run build

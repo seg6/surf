@@ -261,3 +261,43 @@ jobs:
               site/dist --include='*.css' | head -40 >&2
             exit 1
           fi
+
+  dashboard:
+    name: Management dashboard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/cmd/surf/dashboard/package-lock.json
+
+      - name: Build dashboard
+        run: make dashboard-build
+
+      - name: Type-check and test
+        working-directory: backend/cmd/surf/dashboard
+        run: |
+          set -euo pipefail
+          npm run typecheck
+          npm test
+
+      - name: Verify the committed dashboard build is current
+        run: |
+          set -euo pipefail
+          # The Go host embeds dashboard/dist, so a stale build would ship an old UI.
+          if ! git diff --exit-code -- backend/cmd/surf/dashboard/dist; then
+            echo "dashboard/dist is stale. Run 'make dashboard-build' and commit the result." >&2
+            exit 1
+          fi
+          untracked="$(git ls-files --others --exclude-standard backend/cmd/surf/dashboard/dist)"
+          if [ -n "$untracked" ]; then
+            echo "The dashboard build produced files that are not committed:" >&2
+            echo "$untracked" >&2
+            exit 1
+          fi
