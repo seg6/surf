@@ -153,6 +153,7 @@ static CGFloat RBEvenExtent(CGFloat value) {
 @property(nonatomic, strong) UIAlertView *updateInstalledAlert;
 @property(nonatomic, assign) BOOL audioRequested;
 @property(nonatomic, assign) BOOL applicationInBackground;
+@property(nonatomic, assign) BOOL backgroundAudioKeepAlive; // audio and socket stay up while backgrounded
 @property(nonatomic, assign) BOOL disconnectedForBackground;
 @property(nonatomic, strong) NSTimer *backgroundDisconnectTimer;
 @property(nonatomic, assign) UIBackgroundTaskIdentifier backgroundTaskIdentifier;
@@ -472,6 +473,21 @@ static CGFloat RBEvenExtent(CGFloat value) {
     if (self.applicationInBackground) return;
     self.applicationInBackground = YES;
 
+    // Opt-in background audio: keep the socket and audio pipeline running (the
+    // audio background mode keeps the process alive) and only drop video.
+    // Without a live audio stream there is nothing to keep alive, so fall
+    // through to the normal quiesce path.
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:RBDefaultsBackgroundAudioKey] &&
+        self.session.state == RBSessionStateOpen && self.audioRequested) {
+        self.backgroundAudioKeepAlive = YES;
+        self.mediaPipeline.videoSuspended = YES;
+        self.streamView.videoActive = NO;
+        [self.clipboardSyncTimer invalidate];
+        self.clipboardSyncTimer = nil;
+        RBLogEvent(@"application", @"info", @{}, @"Application backgrounded; audio kept alive");
+        return;
+    }
+
     // AudioQueue otherwise keeps asking for silent buffers forever. Stop and
     // deactivate it immediately, before the one-minute reconnect grace period.
     if (self.session.state == RBSessionStateOpen) {
@@ -510,6 +526,8 @@ static CGFloat RBEvenExtent(CGFloat value) {
 - (void)applicationDidBecomeActive {
     BOOL wasBackgrounded = self.applicationInBackground;
     self.applicationInBackground = NO;
+    self.backgroundAudioKeepAlive = NO;
+    self.mediaPipeline.videoSuspended = NO;
     [self finishBackgroundTask];
     if (!wasBackgrounded) return;
 
@@ -1255,7 +1273,7 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
 
 - (void)session:(RBSession *)session didReceiveFrameData:(NSData *)data {
     if (self.browserMode && ![[self.browserMode objectForKey:@"state"] isEqualToString:@"streaming"]) return;
-    if (self.applicationInBackground) return;
+    if (self.applicationInBackground && !self.backgroundAudioKeepAlive) return;
     [self.mediaPipeline consumeFrameData:data];
 }
 
@@ -1388,7 +1406,8 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer {
         BOOL fullscreen = coreValid ? self.clientCore.fullscreen : [[message objectForKey:@"on"] boolValue];
         [self setFullscreen:fullscreen notifyPage:NO];
     } else if ([t isEqualToString:@"audio-config"]) {
-        if ([[message objectForKey:@"ok"] boolValue] && !self.applicationInBackground) {
+        if ([[message objectForKey:@"ok"] boolValue] &&
+            (!self.applicationInBackground || self.backgroundAudioKeepAlive)) {
             [self.mediaPipeline configureAudioSampleRate:[[message objectForKey:@"rate"] intValue]
                                                 channels:[[message objectForKey:@"channels"] intValue]];
             RBLogEvent(@"media", @"info", @{@"lane": @"audio", @"state": @"ready"}, @"Audio lane ready");

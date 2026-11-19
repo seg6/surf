@@ -23,6 +23,8 @@ version differences alone do not.
   instead of being ignored.
 - iOS: keychain errors for the device key now include the error code so they can
   be reported and diagnosed.
+- iOS: new Play Audio in Background setting (off by default) keeps sound playing
+  with the screen off or in another app; video pauses until you return.
 
 ## 0.18.0 - 2026-11-10
 

@@ -52,6 +52,9 @@ didReplaceSystemDisplayLayer:(CALayer *)displayLayer;
 - (void)stopVideo;
 - (void)configureAudioSampleRate:(int)sampleRate channels:(int)channels;
 - (void)stopAudio;
+// While YES, video access units are discarded (no decode or GPU work) but
+// audio keeps playing. Used for background audio.
+@property(nonatomic, assign) BOOL videoSuspended;
 - (void)stop;
 - (void)consumeFrameData:(NSData *)data;
 @end

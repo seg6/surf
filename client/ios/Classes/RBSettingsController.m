@@ -22,6 +22,7 @@ enum {
 enum {
     RBSettingsBrowsingMobileRow = 0,
     RBSettingsBrowsingCopiedLinksRow,
+    RBSettingsBrowsingBackgroundAudioRow,
     RBSettingsBrowsingMediaRow
 };
 
@@ -45,6 +46,7 @@ static const NSInteger kRBClearDataAlert = 4101;
 @property(nonatomic, copy) NSString *pendingClearData;
 - (void)mobileChanged:(UISwitch *)sender;
 - (void)copiedLinksChanged:(UISwitch *)sender;
+- (void)backgroundAudioChanged:(UISwitch *)sender;
 - (void)diagnosticsChanged:(UISwitch *)sender;
 - (void)darkModeChanged:(UISwitch *)sender;
 - (void)requestClearDataAtRow:(NSInteger)row;
@@ -119,6 +121,11 @@ static const NSInteger kRBClearDataAlert = 4101;
     }
 }
 
+- (void)backgroundAudioChanged:(UISwitch *)sender {
+    [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:RBDefaultsBackgroundAudioKey];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+}
+
 - (void)diagnosticsChanged:(UISwitch *)sender {
     self.diagnosticsVisible = sender.on;
     [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:RBDefaultsDiagnosticsKey];
@@ -158,6 +165,7 @@ static const NSInteger kRBClearDataAlert = 4101;
         return UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad ? 2 : 1;
     }
     if (section == RBSettingsAboutSection) return 4;
+    if (section == RBSettingsBrowsingSection) return 4;
     return 3;
 }
 
@@ -174,7 +182,7 @@ static const NSInteger kRBClearDataAlert = 4101;
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == RBSettingsAppearanceSection) return @"Dark Mode also requests dark colors from websites that support them.";
-    if (section == RBSettingsBrowsingSection) return @"Offer Copied Links asks before opening a web address from the clipboard.";
+    if (section == RBSettingsBrowsingSection) return @"Offer Copied Links asks before opening a web address from the clipboard. Play Audio in Background keeps sound going when Surf is not on screen; video pauses.";
     if (section == RBSettingsDataSection) {
         return self.connected ? @"Clearing cookies signs you out of websites on this server."
                               : @"Connect to a Surf server to manage its browsing data.";
@@ -257,6 +265,12 @@ static const NSInteger kRBClearDataAlert = 4101;
         if (row == RBSettingsBrowsingMediaRow) {
             cell = [self cellWithIdentifier:@"action" title:@"Page Media Controls" value:nil enabled:self.connected];
             if (self.connected) cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else if (row == RBSettingsBrowsingBackgroundAudioRow) {
+            cell = [self cellWithIdentifier:@"toggle" title:@"Play Audio in Background" value:nil enabled:YES];
+            cell.accessoryView = [self switchOn:[[NSUserDefaults standardUserDefaults] boolForKey:RBDefaultsBackgroundAudioKey]
+                                        target:@selector(backgroundAudioChanged:)
+                                         label:@"Play Audio in Background"];
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
         } else {
             BOOL mobile = row == RBSettingsBrowsingMobileRow;
             NSString *title = mobile ? @"Request Mobile Sites" : @"Offer Copied Links";

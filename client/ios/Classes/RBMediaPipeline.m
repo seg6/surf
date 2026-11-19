@@ -95,7 +95,7 @@
         return;
     }
     if (frame.type == 3) {
-        if (!self.videoActive) return;
+        if (!self.videoActive || self.videoSuspended) return;
         if (self.expectedAUSequence && frame.seq != self.expectedAUSequence) self.sequenceGaps++;
         self.expectedAUSequence = frame.seq + 1;
         if (frame.width > 0 && frame.height > 0 &&
