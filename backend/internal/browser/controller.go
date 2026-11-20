@@ -52,16 +52,17 @@ type Controller struct {
 	touch    *touchInput
 	pointer  *pointerInput
 
-	mu        sync.Mutex
-	tabs      map[int]*Tab
-	byTarget  map[string]*Tab
-	bySession map[string]*Tab
-	seq       int
-	activeID  int
-	activeGen uint64
-	viewW     int
-	viewH     int
-	viewScale float64 // client device pixels per CSS pixel (1 without hidpi)
+	mu          sync.Mutex
+	tabs        map[int]*Tab
+	byTarget    map[string]*Tab
+	bySession   map[string]*Tab
+	seq         int
+	activeID    int
+	activeGen   uint64
+	viewW       int
+	viewH       int
+	viewNatural string
+	viewScale   float64 // client device pixels per CSS pixel (1 without hidpi)
 	// Capture window sizing on Chromium builds without Browser.setContentsSize:
 	// the browser UI around the page, measured once per window.
 	contentsSizeUnsupported bool

@@ -220,3 +220,25 @@ func TestResolveClientSizeWithScaleIsPhysical(t *testing.T) {
 		t.Fatalf("scale after clamp = %v, want 1", scale)
 	}
 }
+
+func TestScreenOrientation(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		w, h                 int
+		natural, orientation string
+		angle                int
+	}{
+		{"legacy landscape", 960, 544, "", "landscapePrimary", 90},
+		{"portrait-native landscape", 960, 544, "portrait", "landscapePrimary", 90},
+		{"landscape-native landscape", 960, 544, "landscape", "landscapePrimary", 0},
+		{"landscape-native portrait", 544, 960, "landscape", "portraitPrimary", 90},
+		{"legacy portrait", 544, 960, "", "portraitPrimary", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, angle := screenOrientation(tc.w, tc.h, tc.natural)
+			if got != tc.orientation || angle != tc.angle {
+				t.Fatalf("orientation = %s/%d, want %s/%d", got, angle, tc.orientation, tc.angle)
+			}
+		})
+	}
+}

@@ -78,6 +78,8 @@ var Caps = []string{
 	"clipboard-sync", // owner-controlled bidirectional system clipboard bridge
 	"pointer-input",  // native desktop pointer, hover, buttons, and wheel input
 	"hidpi",          // size command may carry scale, with w/h in physical pixels
+
+	"natural-orientation", // size command may declare the client's unrotated orientation
 }
 
 type Config struct {

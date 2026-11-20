@@ -695,9 +695,11 @@ func otherInputCount(counts map[string]int) int {
 func (b *Controller) handleSize(m *protocol.SizeCommand) {
 	b.mu.Lock()
 	w, h, scale := resolveClientSize(m, b.viewW, b.viewH)
-	changed := w != b.viewW || h != b.viewH || scale != b.viewScale
+	changed := w != b.viewW || h != b.viewH || scale != b.viewScale ||
+		m.NaturalOrientation != b.viewNatural
 	if changed {
 		b.viewW, b.viewH, b.viewScale = w, h, scale
+		b.viewNatural = m.NaturalOrientation
 	}
 	b.mu.Unlock()
 	log.Printf("size: client asked %dx%d scale=%v -> view %dx%d scale=%v (changed=%t)",

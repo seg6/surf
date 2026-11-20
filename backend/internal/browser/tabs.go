@@ -629,6 +629,20 @@ func scaledViewport(width, height int, clientScale, pageScale float64) (int, int
 	return cssW, cssH, float64(width) / float64(cssW)
 }
 
+// screenOrientation reports the current viewport orientation and its angle
+// relative to the client's natural orientation. Older clients default to portrait.
+func screenOrientation(w, h int, natural string) (string, int) {
+	landscape := w > h
+	orientation := "portraitPrimary"
+	if landscape {
+		orientation = "landscapePrimary"
+	}
+	if landscape != (natural == "landscape") {
+		return orientation, 90
+	}
+	return orientation, 0
+}
+
 // applyView makes Chrome's viewport exactly the client's screen. Emulation is
 // independent of Chrome's hidden platform window, so any dimensions work.
 func (b *Controller) applyView(t *Tab) {
@@ -637,6 +651,7 @@ func (b *Controller) applyView(t *Tab) {
 	h := b.viewH
 	pixelW, pixelH := b.viewW, b.viewH
 	clientScale := b.viewScale
+	naturalOrientation := b.viewNatural
 	mobile := b.mobile
 	s := t.Session
 	b.mu.Unlock()
@@ -647,10 +662,7 @@ func (b *Controller) applyView(t *Tab) {
 	// Input is normalized against the CSS visual viewport, so it needs no
 	// adjustment.
 	w, h, deviceScale := scaledViewport(w, h, clientScale, b.cfg.ViewportScale)
-	orientation, angle := "portraitPrimary", 0
-	if w > h {
-		orientation, angle = "landscapePrimary", 90
-	}
+	orientation, angle := screenOrientation(w, h, naturalOrientation)
 	// tabCapture reads Chromium's compositor surface, so its real headless
 	// window must follow the client too; otherwise Chromium scales a stale
 	// surface into the requested encoder dimensions and text becomes soft.

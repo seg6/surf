@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"surf-backend/internal/cdp"
+	"surf-backend/internal/config"
 	"surf-backend/internal/protocol"
 	"surf-backend/internal/transport"
 )
@@ -659,5 +660,33 @@ func TestChromiumTouchSequenceCommitsFling(t *testing.T) {
 	}
 	if laterY-immediateY < 100 {
 		t.Fatalf("fling did not continue: scrollY immediate=%f later=%f", immediateY, laterY)
+	}
+}
+
+func TestLandscapeNativeElementFullscreen(t *testing.T) {
+	client, session := launchInputTestBrowser(t)
+	b := &Controller{cfg: &config.Config{}, cdp: client, viewW: 960, viewH: 544, viewScale: 1, viewNatural: "landscape"}
+	b.applyView(&Tab{Session: session})
+	raw, err := client.Call(session, "Runtime.evaluate", map[string]any{
+		"expression": `(async () => {
+			await document.documentElement.requestFullscreen();
+			await new Promise(resolve => requestAnimationFrame(resolve));
+			return [screen.orientation.angle, innerWidth, innerHeight];
+		})()`,
+		"awaitPromise": true, "returnByValue": true, "userGesture": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		Result struct {
+			Value []int `json:"value"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil || len(result.Result.Value) != 3 {
+		t.Fatalf("fullscreen result = %s, %v", raw, err)
+	}
+	if got := result.Result.Value; got[0] != 0 || got[1] != 960 || got[2] != 544 {
+		t.Fatalf("fullscreen angle and viewport = %v, want [0 960 544]", got)
 	}
 }
