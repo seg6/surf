@@ -35,7 +35,7 @@ fields are `iid` and `clientNs`.
 | --- | --- |
 | `browser-watch` | Subscribe to `browser-mode` events |
 | `browser-resume` | Resume from setup (`revision`, optional `force`) |
-| `size` | Report page surface (`w`, `h`, optional `scale`, `hidpi` cap) |
+| `size` | Report page surface (`w`, `h`, optional `scale` and `naturalOrientation`) |
 | `clock` | Clock sync sample (`c0`) |
 | `tab` | Tab action (`action`, `id`) |
 | `nav`, `opennew` | Navigate, or open a URL in a new tab |
@@ -166,3 +166,18 @@ A protocol change goes through these steps:
 6. Add a capability for optional behavior.
 7. Advance the wire or compatibility generation only when older peers cannot
    continue safely.
+
+### Client natural orientation
+
+When the host advertises `natural-orientation`, a client may add
+`"naturalOrientation":"landscape"` (or `"portrait"`) to its `size` command.
+For example, a landscape handheld can send:
+
+```json
+{"t":"size","w":960,"h":544,"naturalOrientation":"landscape"}
+```
+
+Include the field on each size update or reconnect when the host advertises
+the capability. Omitting it keeps the existing portrait-native behavior,
+including the 90° angle for an iPad in landscape. Older hosts reject unknown
+fields, so omit it when the capability is absent. Mobile layout is independent.

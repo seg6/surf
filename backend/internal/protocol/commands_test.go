@@ -96,3 +96,15 @@ func TestSizeCommandScale(t *testing.T) {
 		}
 	}
 }
+
+func TestSizeNaturalOrientation(t *testing.T) {
+	for _, orientation := range []string{"portrait", "landscape"} {
+		command, err := DecodeCommand([]byte(`{"t":"size","w":960,"h":544,"naturalOrientation":"` + orientation + `"}`))
+		if err != nil || command.(*SizeCommand).NaturalOrientation != orientation {
+			t.Fatalf("decode orientation %q: %v, %v", orientation, command, err)
+		}
+	}
+	if _, err := DecodeCommand([]byte(`{"t":"size","w":960,"h":544,"naturalOrientation":"square"}`)); err == nil {
+		t.Fatal("accepted invalid orientation")
+	}
+}
