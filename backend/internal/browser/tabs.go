@@ -654,7 +654,8 @@ func (b *Controller) applyView(t *Tab) {
 	// tabCapture reads Chromium's compositor surface, so its real headless
 	// window must follow the client too; otherwise Chromium scales a stale
 	// surface into the requested encoder dimensions and text becomes soft.
-	b.resizeCaptureSurface(t.TargetID, pixelW, pixelH)
+	// Include the space taken by Chromium chrome, even in headless mode.
+	b.resizeCaptureSurface(t.TargetID, s, pixelW, pixelH)
 	metrics := map[string]any{
 		"width": w, "height": h, "deviceScaleFactor": deviceScale, "mobile": mobile,
 		"screenWidth": w, "screenHeight": h,
