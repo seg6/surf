@@ -3,6 +3,7 @@ package browser
 import (
 	"encoding/json"
 	"log"
+	"strings"
 )
 
 func (b *Controller) resizeCaptureSurface(targetID, session string, width, height int) {
@@ -29,13 +30,26 @@ func (b *Controller) resizeCaptureSurface(targetID, session string, width, heigh
 	}
 	// Size the page directly when Chromium supports it. This does not
 	// inspect the website or briefly lift its device emulation.
-	if _, err := b.cdp.Call("", "Browser.setContentsSize", map[string]any{
-		"windowId": window.ID, "width": width, "height": height,
-	}); err == nil {
-		return
+	b.mu.Lock()
+	tryContents := !b.contentsSizeUnsupported
+	b.mu.Unlock()
+	if tryContents {
+		_, err := b.cdp.Call("", "Browser.setContentsSize", map[string]any{
+			"windowId": window.ID, "width": width, "height": height,
+		})
+		if err == nil {
+			return
+		}
+		if strings.Contains(err.Error(), "(-32601)") {
+			b.mu.Lock()
+			b.contentsSizeUnsupported = true
+			b.mu.Unlock()
+		}
 	}
-	// Older Chromium builds only expose outer-window sizing.
-	extraW, extraH := b.browserChrome(session)
+	// Older Chromium builds only expose outer-window sizing. The browser UI
+	// around the page doesn't change while streaming, so measure it once per
+	// window instead of lifting the page's emulation on every view update.
+	extraW, extraH := b.cachedBrowserChrome(window.ID, session)
 	width, height = width+extraW, height+extraH
 	if window.Bounds.Width == width && window.Bounds.Height == height {
 		return
@@ -79,16 +93,35 @@ func (b *Controller) captureWorld(session string) int {
 	return world.ID
 }
 
+func (b *Controller) cachedBrowserChrome(windowID int, session string) (int, int) {
+	b.mu.Lock()
+	extra, ok := b.windowChrome[windowID]
+	b.mu.Unlock()
+	if ok {
+		return extra[0], extra[1]
+	}
+	w, h, measured := b.browserChrome(session)
+	if measured {
+		b.mu.Lock()
+		if b.windowChrome == nil {
+			b.windowChrome = map[int][2]int{}
+		}
+		b.windowChrome[windowID] = [2]int{w, h}
+		b.mu.Unlock()
+	}
+	return w, h
+}
+
 // browserChrome is how much of the window Chromium's own UI takes: the
 // window's outer size minus the page's inner size, measured with the device
 // emulation lifted (applyView sets it again right after).
-func (b *Controller) browserChrome(session string) (int, int) {
+func (b *Controller) browserChrome(session string) (int, int, bool) {
 	contextID := b.captureWorld(session)
 	if contextID == 0 {
-		return 0, 0
+		return 0, 0, false
 	}
 	if _, err := b.cdp.Call(session, "Emulation.clearDeviceMetricsOverride", nil); err != nil {
-		return 0, 0
+		return 0, 0, false
 	}
 	raw, err := b.cdp.Call(session, "Runtime.evaluate", map[string]any{
 		"expression":    "[outerWidth - innerWidth, outerHeight - innerHeight]",
@@ -96,7 +129,7 @@ func (b *Controller) browserChrome(session string) (int, int) {
 		"contextId":     contextID,
 	})
 	if err != nil {
-		return 0, 0
+		return 0, 0, false
 	}
 	var res struct {
 		Result struct {
@@ -104,11 +137,11 @@ func (b *Controller) browserChrome(session string) (int, int) {
 		} `json:"result"`
 	}
 	if json.Unmarshal(raw, &res) != nil || len(res.Result.Value) != 2 {
-		return 0, 0
+		return 0, 0, false
 	}
 	w, h := res.Result.Value[0], res.Result.Value[1]
 	if w < 0 || w > 400 || h < 0 || h > 400 {
-		return 0, 0
+		return 0, 0, false
 	}
-	return w, h
+	return w, h, true
 }

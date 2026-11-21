@@ -5,6 +5,10 @@ version differences alone do not.
 
 ## Unreleased
 
+- The captured page area now matches the client's screen exactly, so landscape
+  clients such as the PS Vita no longer get a letterboxed stream when Chromium
+  draws its own interface inside the window.
+
 ## 0.20.0 - 2026-11-20
 
 ### Dashboard
