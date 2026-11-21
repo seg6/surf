@@ -9,6 +9,16 @@ import (
 )
 
 func TestCaptureWindowMatchesPageArea(t *testing.T) {
+	testCaptureWindowMatchesPageArea(t, false)
+}
+
+// Chromium builds without Browser.setContentsSize measure the browser UI
+// once and reuse it.
+func TestCaptureWindowMatchesPageAreaWithoutContentsSize(t *testing.T) {
+	testCaptureWindowMatchesPageArea(t, true)
+}
+
+func testCaptureWindowMatchesPageArea(t *testing.T, outerWindowOnly bool) {
 	client, session := launchInputTestBrowser(t)
 	raw, err := client.Call(session, "Target.getTargetInfo", nil)
 	if err != nil {
@@ -22,7 +32,8 @@ func TestCaptureWindowMatchesPageArea(t *testing.T) {
 	if err := json.Unmarshal(raw, &target); err != nil || target.TargetInfo.TargetID == "" {
 		t.Fatalf("Target.getTargetInfo = %s, %v", raw, err)
 	}
-	b := &Controller{cfg: &config.Config{}, cdp: client, viewW: 960, viewH: 544, viewScale: 1}
+	b := &Controller{cfg: &config.Config{}, cdp: client, viewW: 960, viewH: 544, viewScale: 1,
+		contentsSizeUnsupported: outerWindowOnly}
 	var overridden struct {
 		Result struct {
 			Value int `json:"value"`
@@ -60,6 +71,9 @@ func TestCaptureWindowMatchesPageArea(t *testing.T) {
 		}
 		got = page.Result.Value
 		if got[0] == 960 && got[1] == 544 {
+			if outerWindowOnly && len(b.windowChrome) != 1 {
+				t.Fatalf("browser UI measured for %d windows, want 1", len(b.windowChrome))
+			}
 			return
 		}
 	}

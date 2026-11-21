@@ -52,34 +52,38 @@ type Controller struct {
 	touch    *touchInput
 	pointer  *pointerInput
 
-	mu                  sync.Mutex
-	tabs                map[int]*Tab
-	byTarget            map[string]*Tab
-	bySession           map[string]*Tab
-	seq                 int
-	activeID            int
-	activeGen           uint64
-	viewW               int
-	viewH               int
-	viewScale           float64 // client device pixels per CSS pixel (1 without hidpi)
-	mobile              bool
-	dark                bool
-	resizeMu            sync.Mutex
-	resizeTimer         *time.Timer
-	resizeGen           uint64
-	resizeClosed        bool
-	adaptiveApplyMu     sync.Mutex
-	startupSession      browserSession
-	exactSession        bool
-	restorePending      map[string]struct{}
-	restoreOrder        map[string]int
-	restoreActiveTarget string
-	restoreActiveID     int
-	sessionWriteMu      sync.Mutex
-	sessionTimerMu      sync.Mutex
-	sessionTimer        *time.Timer
-	sessionTimerGen     uint64
-	sessionClosed       bool
+	mu        sync.Mutex
+	tabs      map[int]*Tab
+	byTarget  map[string]*Tab
+	bySession map[string]*Tab
+	seq       int
+	activeID  int
+	activeGen uint64
+	viewW     int
+	viewH     int
+	viewScale float64 // client device pixels per CSS pixel (1 without hidpi)
+	// Capture window sizing on Chromium builds without Browser.setContentsSize:
+	// the browser UI around the page, measured once per window.
+	contentsSizeUnsupported bool
+	windowChrome            map[int][2]int
+	mobile                  bool
+	dark                    bool
+	resizeMu                sync.Mutex
+	resizeTimer             *time.Timer
+	resizeGen               uint64
+	resizeClosed            bool
+	adaptiveApplyMu         sync.Mutex
+	startupSession          browserSession
+	exactSession            bool
+	restorePending          map[string]struct{}
+	restoreOrder            map[string]int
+	restoreActiveTarget     string
+	restoreActiveID         int
+	sessionWriteMu          sync.Mutex
+	sessionTimerMu          sync.Mutex
+	sessionTimer            *time.Timer
+	sessionTimerGen         uint64
+	sessionClosed           bool
 
 	store        *Store
 	icons        map[string]*favicon // origin -> icon, guarded by b.mu
