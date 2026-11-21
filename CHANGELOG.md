@@ -8,6 +8,9 @@ version differences alone do not.
 - The captured page area now matches the client's screen exactly, so landscape
   clients such as the PS Vita no longer get a letterboxed stream when Chromium
   draws its own interface inside the window.
+- Clients whose screen is landscape by nature, such as the PS Vita, can say so,
+  so element fullscreen (for example a maximized video) is no longer laid out
+  rotated and zoomed in.
 
 ## 0.20.0 - 2026-11-20
 

@@ -370,6 +370,19 @@ static void emit_commands(void) {
                                                     sizeof(buffer), &length) ==
                        SURF_PROTOCOL_OK);
             puts(buffer);
+            /* A landscape-native client declares its natural orientation. */
+            command.data.size.scale = 0;
+            command.data.size.natural_orientation =
+                surf_string_from_cstr("landscape");
+            SURF_CHECK(surf_protocol_encode_command(&command, buffer,
+                                                    sizeof(buffer), &length) ==
+                       SURF_PROTOCOL_OK);
+            puts(buffer);
+            command.data.size.natural_orientation =
+                surf_string_from_cstr("square");
+            SURF_CHECK(surf_protocol_encode_command(&command, buffer,
+                                                    sizeof(buffer), &length) ==
+                       SURF_PROTOCOL_ERROR_FIELD);
         }
     }
 }

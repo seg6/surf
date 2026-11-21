@@ -415,6 +415,7 @@ impl ClientController {
             w: viewport.0,
             h: viewport.1,
             scale: self.hidpi.then_some(scale),
+            natural_orientation: None,
             causal: Causal::default(),
         });
     }
