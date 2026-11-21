@@ -1601,6 +1601,14 @@ surf_protocol_result_t surf_protocol_encode_command(
             }
             surf_write_field_double(&writer, "scale", command->data.size.scale);
         }
+        if (command->data.size.natural_orientation.length != 0) {
+            if (!surf_view_equal_cstr(command->data.size.natural_orientation, "portrait") &&
+                !surf_view_equal_cstr(command->data.size.natural_orientation, "landscape")) {
+                return SURF_PROTOCOL_ERROR_FIELD;
+            }
+            surf_write_field_string(&writer, "naturalOrientation",
+                                    command->data.size.natural_orientation);
+        }
     } else if (command->kind == SURF_PROTOCOL_COMMAND_CLOCK) {
         surf_write_field_u64(&writer, "c0", command->data.clock.client_send_ns);
     } else if (command->kind == SURF_PROTOCOL_COMMAND_TAB) {

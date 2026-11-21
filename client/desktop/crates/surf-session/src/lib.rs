@@ -563,6 +563,7 @@ async fn run_socket(
             w: config.vw & !1,
             h: config.vh & !1,
             scale: None,
+            natural_orientation: None,
             causal: Causal::default(),
         },
     )

@@ -33,8 +33,8 @@ func TestPortableCCommandsDecode(t *testing.T) {
 	if err := scanner.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if count != 47 {
-		t.Fatalf("C command count = %d, want 47", count)
+	if count != 48 {
+		t.Fatalf("C command count = %d, want 48", count)
 	}
 }
 
@@ -58,8 +58,8 @@ func loadFixtures(t *testing.T, name string) []json.RawMessage {
 
 func TestCanonicalCommandFixturesDecode(t *testing.T) {
 	fixtures := loadFixtures(t, "commands.json")
-	if len(fixtures) != 47 {
-		t.Fatalf("command fixture count = %d, want 47", len(fixtures))
+	if len(fixtures) != 48 {
+		t.Fatalf("command fixture count = %d, want 48", len(fixtures))
 	}
 	for _, fixture := range fixtures {
 		if _, err := DecodeCommand(fixture); err != nil {

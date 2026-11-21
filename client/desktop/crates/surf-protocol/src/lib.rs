@@ -70,6 +70,14 @@ pub enum Command {
         /// capability), `w` and `h` are physical pixels; otherwise points.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         scale: Option<f64>,
+        /// `portrait` or `landscape`, for hosts with the `natural-orientation`
+        /// capability. Omitted means portrait-native.
+        #[serde(
+            default,
+            rename = "naturalOrientation",
+            skip_serializing_if = "Option::is_none"
+        )]
+        natural_orientation: Option<String>,
         #[serde(flatten)]
         causal: Causal,
     },
@@ -631,6 +639,12 @@ impl Command {
     fn validate(&self) -> Result<(), ProtocolError> {
         match self {
             Self::Size {
+                natural_orientation: Some(orientation),
+                ..
+            } if orientation != "portrait" && orientation != "landscape" => {
+                return Err(ProtocolError::Invalid("size natural orientation"));
+            }
+            Self::Size {
                 scale: Some(scale), ..
             } if !(1.0..=4.0).contains(scale) => {
                 return Err(ProtocolError::Invalid("size scale"));
@@ -866,6 +880,17 @@ mod tests {
         ));
         assert!(Command::decode(br#"{"t":"size","w":640,"h":960,"scale":0.5}"#).is_err());
         assert!(Command::decode(br#"{"t":"size","w":640,"h":960,"scale":4.5}"#).is_err());
+        let landscape =
+            Command::decode(br#"{"t":"size","w":960,"h":544,"naturalOrientation":"landscape"}"#)
+                .unwrap();
+        assert!(matches!(
+            landscape,
+            Command::Size { natural_orientation: Some(ref o), .. } if o == "landscape"
+        ));
+        assert!(
+            Command::decode(br#"{"t":"size","w":960,"h":544,"naturalOrientation":"square"}"#)
+                .is_err()
+        );
     }
 
     #[test]
