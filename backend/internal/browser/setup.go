@@ -3,6 +3,7 @@ package browser
 import (
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -143,9 +144,11 @@ func startSetup(cfg *config.Config) (result *setupBrowser, resultErr error) {
 	if setup.sessionID == "" {
 		return nil, fmt.Errorf("setup session observer did not start")
 	}
-	deadline = time.Now().Add(5 * time.Second)
+	// Chromium can take several seconds to answer while it restores the
+	// handed-off tabs, especially on Windows. A slow reply is not a failure.
+	deadline = time.Now().Add(20 * time.Second)
 	for {
-		if err := setup.poll(); err != nil {
+		if err := setup.poll(); err != nil && !errors.Is(err, cdp.ErrTimeout) {
 			return nil, err
 		}
 		if setup.ready {

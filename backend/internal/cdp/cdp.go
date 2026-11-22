@@ -76,6 +76,10 @@ var devtoolsRe = regexp.MustCompile(`DevTools listening on (ws://\S+)`)
 // a profile merely because another browser may already be using it.
 var ErrUnverifiedLaunch = errors.New("browser ownership could not be established")
 
+// ErrTimeout reports a call that got no reply in time. The browser may still
+// be working on it.
+var ErrTimeout = errors.New("timed out")
+
 const (
 	browserStartupTimeout = 30 * time.Second
 	stderrTailLines       = 12
@@ -587,7 +591,7 @@ func (c *Client) CallTimeout(sessionID, method string, params any, timeout time.
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
-		return nil, fmt.Errorf("cdp: %s timed out", method)
+		return nil, fmt.Errorf("cdp: %s %w", method, ErrTimeout)
 	case <-c.closed:
 		return nil, io.ErrClosedPipe
 	}
