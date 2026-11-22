@@ -71,7 +71,7 @@ fields are <code>iid</code> and <code>clientNs</code>.</p>
 </tr>
 <tr>
 <td><code>size</code></td>
-<td>Report page surface (<code>w</code>, <code>h</code>, optional <code>scale</code>, <code>hidpi</code> cap)</td>
+<td>Report page surface (<code>w</code>, <code>h</code>, optional <code>scale</code> and <code>naturalOrientation</code>)</td>
 </tr>
 <tr>
 <td><code>clock</code></td>
@@ -377,4 +377,14 @@ length, and the host keeps the buffer while decoding.</p>
 <li>Add a capability for optional behavior.</li>
 <li>Advance the wire or compatibility generation only when older peers cannot
 continue safely.</li>
-</ol>  </article> </div> </div>  <footer class="foot"> <div class="foot-inner"> <span class="foot-note">Surf is open source under the MIT license.</span> <nav class="foot-nav" aria-label="Footer"> <a href="https://github.com/seg6/surf/blob/main/CHANGELOG.md">Changelog</a> <a href="https://github.com/seg6/surf/issues">Report a problem</a> <a href="https://ko-fi.com/seg6_">Support on Ko-fi</a> <a href="https://github.com/seg6/surf">Source code</a> </nav> </div> </footer> </body></html>
+</ol>
+<h3 id="client-natural-orientation">Client natural orientation</h3>
+<p>When the host advertises <code>natural-orientation</code>, a client may add
+<code>"naturalOrientation":"landscape"</code> (or <code>"portrait"</code>) to its <code>size</code> command.
+For example, a landscape handheld can send:</p>
+<pre><code class="language-json">{"t":"size","w":960,"h":544,"naturalOrientation":"landscape"}
+</code></pre>
+<p>Include the field on each size update or reconnect when the host advertises
+the capability. Omitting it keeps the existing portrait-native behavior,
+including the 90° angle for an iPad in landscape. Older hosts reject unknown
+fields, so omit it when the capability is absent. Mobile layout is independent.</p>  </article> </div> </div>  <footer class="foot"> <div class="foot-inner"> <span class="foot-note">Surf is open source under the MIT license.</span> <nav class="foot-nav" aria-label="Footer"> <a href="https://github.com/seg6/surf/blob/main/CHANGELOG.md">Changelog</a> <a href="https://github.com/seg6/surf/issues">Report a problem</a> <a href="https://ko-fi.com/seg6_">Support on Ko-fi</a> <a href="https://github.com/seg6/surf">Source code</a> </nav> </div> </footer> </body></html>
