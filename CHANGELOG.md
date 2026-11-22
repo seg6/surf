@@ -3,8 +3,10 @@
 A compatibility change requires matching client and server generations. App
 version differences alone do not.
 
-## Unreleased
+## 0.20.1 - 2026-11-22
 
+- Opening the browser on the computer while a device is connected no longer
+  fails with "Runtime.evaluate timed out".
 - The captured page area now matches the client's screen exactly, so landscape
   clients such as the PS Vita no longer get a letterboxed stream when Chromium
   draws its own interface inside the window.
