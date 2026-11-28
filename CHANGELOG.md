@@ -3,6 +3,12 @@
 A compatibility change requires matching client and server generations. App
 version differences alone do not.
 
+## 0.20.2 - 2026-11-28
+
+- The Linux desktop client no longer fails to start with "[3009] arguments are
+  inconsistent" on Mesa with Wayland.
+- The desktop client README and install guide explain how to run a release.
+
 ## 0.20.1 - 2026-11-22
 
 - Opening the browser on the computer while a device is connected no longer
