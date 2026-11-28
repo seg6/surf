@@ -11,7 +11,7 @@ use std::error::Error;
 use std::num::NonZeroU32;
 use std::time::Instant;
 
-use glutin::config::{ConfigTemplateBuilder, GlConfig as _};
+use glutin::config::{ColorBufferType, ConfigTemplateBuilder, GlConfig as _};
 use glutin::context::{ContextApi, ContextAttributesBuilder, NotCurrentGlContext as _, Version};
 use glutin::display::{GetGlDisplay as _, GlDisplay as _};
 use glutin::prelude::GlSurface as _;
@@ -48,8 +48,16 @@ fn run() -> Result<(), Box<dyn Error>> {
     let (window, config) = glutin_winit::DisplayBuilder::new()
         .with_window_attributes(Some(attributes))
         .build(&event_loop, ConfigTemplateBuilder::new(), |configs| {
+            // Mesa's Wayland EGL lists 16-bit configs it cannot make a window
+            // surface from, so prefer 8-bit channels.
             configs
-                .max_by_key(|config| (config.srgb_capable(), config.num_samples()))
+                .max_by_key(|config| {
+                    (
+                        is_eight_bit(config),
+                        config.srgb_capable(),
+                        config.num_samples(),
+                    )
+                })
                 .expect("glutin supplied no framebuffer configuration")
         })?;
     let window = window.ok_or("glutin did not create a window")?;
@@ -324,6 +332,17 @@ fn resize_surface(
 fn sync_imgui_display_size(io: &mut imgui::Io, size: PhysicalSize<u32>, scale_factor: f64) {
     let logical = size.to_logical::<f64>(scale_factor);
     io.display_size = [logical.width as f32, logical.height as f32];
+}
+
+fn is_eight_bit(config: &glutin::config::Config) -> bool {
+    matches!(
+        config.color_buffer_type(),
+        Some(ColorBufferType::Rgb {
+            r_size: 8,
+            g_size: 8,
+            b_size: 8,
+        })
+    ) && config.alpha_size() <= 8
 }
 
 fn nonzero_size(size: PhysicalSize<u32>) -> (NonZeroU32, NonZeroU32) {
