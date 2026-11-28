@@ -12,6 +12,32 @@ by hand. Pairing creates a separate device identity for each server and pins
 that server's certificate. If only one server is saved, the client reconnects
 to it automatically.
 
+## Run
+
+Extract the release archive and start the client from the extracted folder:
+
+```sh
+tar xzf surf-desktop-<version>-linux-<arch>.tar.gz
+cd surf-desktop-<version>-linux-<arch>
+./bin/surf-client
+```
+
+The client opens a window and takes no command-line options. It needs a
+running [Surf host](https://github.com/seg6/surf/blob/main/docs/guide/install-host.md)
+on the same network. Pick the host from the list or enter `host:port`, then
+pair and check that the six words match on both screens.
+
+The client needs the FFmpeg, ALSA, OpenGL and xkbcommon runtime libraries. On
+Debian and Ubuntu, installing these covers them:
+
+```sh
+sudo apt-get install ffmpeg libgl1 libegl1 libxkbcommon-x11-0
+```
+
+To install it system wide, see the end of the Build section.
+
+## Details
+
 FFmpeg decodes H.264 into YUV420 planes for the OpenGL surface. PCM audio goes
 through a separate bounded queue, and network, decode, audio and UI work each
 run independently.

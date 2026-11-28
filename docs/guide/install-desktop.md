@@ -4,8 +4,18 @@ The Linux client connects to a Surf host with the same pairing and stream as
 the iOS one. It works on X11 and Wayland. The
 [desktop client notes](../clients/desktop.md) have more detail.
 
-If you downloaded a release, follow the README inside the archive. The client
-keeps its identity and preferences separate from the host's `SURF_HOME`.
+To run a release, extract the archive and start `bin/surf-client` from the
+extracted folder:
+
+```sh
+tar xzf surf-desktop-<version>-linux-<arch>.tar.gz
+cd surf-desktop-<version>-linux-<arch>
+./bin/surf-client
+```
+
+The client takes no command-line options. The README inside the archive lists
+the runtime libraries and how to install it system wide. The client keeps its
+identity and preferences separate from the host's `SURF_HOME`.
 
 To build from source on Debian or Ubuntu:
 
